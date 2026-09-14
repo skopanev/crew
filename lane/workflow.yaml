@@ -469,8 +469,14 @@ nodes:
       [ -f "$snap" ] || { echo "<signal:LAND_FAILED>нет зафиксированного снимка панели</signal:LAND_FAILED>"; exit 0; }
       want_tree="$(sed -n 1p "$snap")"
       git diff --quiet || { echo "<signal:LAND_FAILED>дерево изменилось после панели: есть неиндексированные правки</signal:LAND_FAILED>"; exit 0; }
+      # НЕОТСЛЕЖИВАЕМЫЕ ФАЙЛЫ НАЗЫВАЮТСЯ, НО НЕ ОСТАНАВЛИВАЮТ. Они физически не
+      # могут уехать в ствол: индекс заморожен в prepare_review, посадка коммитит
+      # ЕГО и ничего не добавляет, а сравнение have_tree с want_tree ниже уже
+      # гарантирует побайтовое совпадение с тем, что смотрела панель.
+      # Отказ здесь стоил готовой посадки при единогласном CLEAR - и не сказал
+      # даже, какие это файлы.
       new_files="$(git ls-files --others --exclude-standard | head -10 | tr '\n' ' ')"
-      [ -z "$new_files" ] || { echo "<signal:LAND_FAILED>дерево изменилось после панели, появились новые файлы: ${new_files}</signal:LAND_FAILED>"; exit 0; }
+      [ -z "$new_files" ] || echo "после панели появились неотслеживаемые файлы (в коммит не войдут): ${new_files}" >&2
       have_tree="$(git write-tree)"
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
 
