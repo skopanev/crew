@@ -326,7 +326,7 @@ nodes:
     - harness: codex
       model: gpt-6-astra
       effort: high
-      slug: codex
+      slug: architecture
       task: Review the diff for architectural consistency.
     - harness: agy
       model: Gemini 3.1 Pro (High)
@@ -336,12 +336,12 @@ nodes:
       # flaws" эта модель встала в отказ - "Sorry, I cannot fulfill your
       # request...", девять секунд, ноль сигналов, - и унесла с собой посадку
       # при двух CLEAR. Здесь формулировка отказ не задевает.
-      slug: agy
+      slug: codereview
       task: Review the diff for clean code.
     - harness: opencode
       model: zai-coding-plan/glm-5.3
       effort: high
-      slug: glm
+      slug: security
       task: Review how this change handles untrusted input, permissions and secrets.
     env:
       EQUILL_ROLE: medulla-qa
