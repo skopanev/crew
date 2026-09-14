@@ -327,9 +327,14 @@ nodes:
       model: gpt-6-astra
       effort: high
       task: Review the diff for architectural consistency.
-    - harness: opencode
-      model: zai-coding-plan/glm-5.3
-      effort: high
+    - harness: agy
+      model: Gemini 3.1 Pro (High)
+      effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
+                     # иначе {{input.effort}} не разрешится и МЕСТО УПАДЁТ — измерено.
+      # ЧИСТОТА КОДА, А НЕ БЕЗОПАСНОСТЬ. На задаче "review the diff for security
+      # flaws" эта модель встала в отказ - "Sorry, I cannot fulfill your
+      # request...", девять секунд, ноль сигналов, - и унесла с собой посадку
+      # при двух CLEAR. Здесь формулировка отказ не задевает.
       task: Review the diff for clean code.
     - harness: opencode
       model: zai-coding-plan/glm-5.3
