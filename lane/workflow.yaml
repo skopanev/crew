@@ -316,6 +316,12 @@ nodes:
   expert_review:
     timeout: 1800
     max_parallel: 3
+    # ВТОРАЯ ПОПЫТКА НА МЕСТО. Замер: agy вернулся за 9 секунд с отказом модели
+    # ("Sorry, I cannot fulfill your request...") и НУЛЁМ сигналов. Харнесс при
+    # этом отработал успешно, поэтому движок не считал это сбоем и не повторял.
+    # Место без вердикта ломает единогласие так же, как реджект: полоса ушла в
+    # TOO_MANY_ROUNDS на работе, которую два других места признали чистой.
+    max_attempts: 2
     inputs:
     - harness: codex
       model: gpt-6-astra
@@ -329,7 +335,13 @@ nodes:
       model: Gemini 3.1 Pro (High)
       effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
                      # иначе {{input.effort}} не разрешится и МЕСТО УПАДЁТ — измерено.
-      task: Review the diff for security flaws.
+      # ФОРМУЛИРОВКА ВАЖНА. "Review the diff for security flaws" модель прочитала
+      # как просьбу искать уязвимости и ОТКАЗАЛАСЬ: "Sorry, I cannot fulfill your
+      # request..." - 9 секунд, ноль сигналов. Место без вердикта ломает
+      # единогласие, и полоса ушла в TOO_MANY_ROUNDS на работе, которую два
+      # других места признали чистой. Говорим о том же через обращение с
+      # данными и правами, а не через "искать уязвимости".
+      task: Review how this change handles untrusted input, permissions and secrets.
     env:
       EQUILL_ROLE: medulla-qa
       EQUILL_RULES: tickets
