@@ -6,10 +6,10 @@ defaults:
 vars:
   REJECT_ROUNDS: '3'
   TOOLING_ROOT: /workspace
-  ESCALATION_ROOM: ''    # комната эскалации
-  ESCALATION_COURIER: '' # кому доложить о падении
-  TELEGRAM_ROOM: ''      # комната для доклада, задаётся при установке
-  TELEGRAM_TOPIC: '56'
+  ESCALATION_ROOM: ''   # комната эскалации; задаётся в lane/local.env
+  ESCALATION_COURIER: ''   # кому доложить о падении; задаётся в lane/local.env
+  TELEGRAM_ROOM: ''   # комната для доклада; задаётся в lane/local.env
+  TELEGRAM_TOPIC: ''   # тема внутри комнаты; задаётся в lane/local.env
   LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 nodes:
   ntk_claim:

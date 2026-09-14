@@ -23,6 +23,11 @@ USAGE
 }
 
 WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# МЕСТНЫЕ ЗНАЧЕНИЯ ОТДЕЛЬНО ОТ КОДА: куда докладывать и кому эскалировать - своё
+# у каждого, и в общий репозиторий им нельзя. Файла нет - полоса работает, просто
+# молча: пустая комната означает "никому не докладывать", а не ошибку.
+# Образец рядом: lane/local.env.example
+[ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
 # Outside the tooling tree: --cwd-ro requires it, and a run history written into
 # the repository it reviews is the repository reviewing its own record.
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
@@ -319,6 +324,10 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
     --var "LANE_WT_ROOT=$WT_ROOT"
+    --var "TELEGRAM_ROOM=${TELEGRAM_ROOM:-}"
+    --var "TELEGRAM_TOPIC=${TELEGRAM_TOPIC:-}"
+    --var "ESCALATION_ROOM=${ESCALATION_ROOM:-}"
+    --var "ESCALATION_COURIER=${ESCALATION_COURIER:-}"
     --var "EQUILL_PROJECT=$project"
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
