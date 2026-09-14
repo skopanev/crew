@@ -40,7 +40,7 @@ ENV MEDULLA_UPGRADE_ON_START=0
 # Каналом, а не версией: claude - stable, тот же, что объявлен в настройках
 # полосы ("autoUpdatesChannel": "stable"). У codex канала stable нет, есть
 # latest и alpha.
-RUN npm i -g --silent "@anthropic-ai/claude-code@stable" "@openai/codex@latest"
+RUN npm i -g --silent "@anthropic-ai/claude-code@stable" "@openai/codex@latest" "opencode-ai@latest"
 
 # ── ИНСТРУМЕНТЫ ──────────────────────────────────────────────────────────────
 # CBM: предполёт по графу кода. Работает НАТИВНО, а не через мост к хосту -
@@ -108,6 +108,12 @@ USER medulla
 RUN mkdir -p /home/medulla/.local/bin /home/medulla/.local/share \
              /home/medulla/.config /home/medulla/.cache /home/medulla/.medulla \
  && chown -R medulla:medulla /home/medulla
+
+# agy - третье место панели. Без него expert_review падал ЦЕЛИКОМ: два места
+# из трёх не стартовали ("binary not on PATH"), синтез не получал единогласия и
+# выдавал REJECT на каждом круге. Полоса сожгла три раунда работы кодера на
+# переделку того, что никто не смотрел, и ушла в TOO_MANY_ROUNDS.
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
 RUN curl -fsSL https://bun.sh/install | bash
