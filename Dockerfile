@@ -69,7 +69,13 @@ RUN a="$(cat /tmp/arch)"; set -eux; \
 # и параметр версии игнорирует - проверено, ?version=0.5.60 даёт тот же
 # редирект, что и без него. Две сборки в разные дни несут разный ntk; это
 # нормально, а не изъян.
+#
+# СВОЙ СЛОВАРЬ АРХИТЕКТУР. /tmp/arch хранит дебиановское имя - оно нужно cbm,
+# чей ассет называется linux-amd64. NTK публикует иначе: linux-x86_64 и
+# linux-arm64. На arm64 словари совпадают случайно, на x86_64 расходятся, и
+# запрос linux-amd64 отвечает 404 - замерено на сервисе.
 RUN a="$(cat /tmp/arch)"; \
+    case "$a" in amd64) a=x86_64 ;; esac; \
     curl -fsSL "https://ntk.otion.us/v1/download?platform=linux-${a}" -o /usr/local/bin/ntk \
  && chmod 755 /usr/local/bin/ntk
 
