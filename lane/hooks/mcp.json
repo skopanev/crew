@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "/usr/local/bin/codebase-memory-mcp"
+    },
+    "ntk": {
+      "command": "/usr/local/bin/ntk",
+      "args": ["mcp"]
+    }
+  }
+}

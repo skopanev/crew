@@ -1,0 +1,656 @@
+version: '2'
+start: ntk_claim
+timeout: 86400
+defaults:
+  timeout: 300
+vars:
+  REJECT_ROUNDS: '3'
+  TOOLING_ROOT: /workspace
+  ESCALATION_ROOM: ''    # комната эскалации
+  ESCALATION_COURIER: '' # кому доложить о падении
+  TELEGRAM_ROOM: ''      # комната для доклада, задаётся при установке
+  TELEGRAM_TOPIC: '56'
+  LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+nodes:
+  ntk_claim:
+    env:
+      LANE_PATH: '{{var:LANE_PATH}}'   # читает inject.sh, не тело узла
+      # Нужны ЗДЕСЬ, а не только у агентных узлов: codex-home.sh пишет их в
+      # config.toml дома кодекса. Кодекс запускает MCP-сервер сам и окружение
+      # узла ему не передаёт - в прогоне eead888a оба поиска вернули
+      # "project not found or not indexed" именно поэтому.
+      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
+      CBM_ALLOWED_ROOT: /workspace
+      TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
+      project_dir: '{{var:project_dir}}'
+      project_name: '{{var:project_name}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 120
+    on_signal:
+      NO_TICKET: notify_failure
+      CLAIM_REFUSED: notify_failure
+      __failed__: notify_failure
+      __default__: cbm_discovery
+    shell: |
+      set -euo pipefail
+      cd "${project_dir}"
+      bash "${TOOLING_ROOT}/workflows/lane/hooks/inject.sh" \
+        /tmp/lane-settings.json \
+        "${TOOLING_ROOT}/workflows/lane/hooks/claude-settings.json"
+      # Триаж - ЕДИНСТВЕННЫЙ узел, которому положено писать тикеты: резать,
+      # заводить части, выставлять статус. Его файл выводится ИЗ ТОГО ЖЕ,
+      # снятием ровно запретов mcp__ntk__ - чтобы две копии не разъехались по
+      # всему остальному, а разница была ровно в том, ради чего он отдельный.
+      # Запреты на push, сборки и прочее остаются в силе.
+      jq '.permissions.deny |= map(select(startswith("mcp__ntk__") | not))' \
+        /tmp/lane-settings.json > /tmp/lane-settings-triage.json
+      # Разведке отнимается ЗАПИСЬ В ДЕРЕВО. Два прогона подряд она создавала
+      # файлы (zz-probe2.mjs, repro-tmp.mjs) и убирала за собой - но права быть
+      # не должно: узел выносит вердикт, а не правит код. Через deny, а не
+      # через режим плана: план глушит MCP, а разведка без CBM бессмысленна.
+      jq '.permissions.deny += ["Write","Edit","NotebookEdit"]' \
+        /tmp/lane-settings.json > /tmp/lane-settings-scout.json
+      # Дом кодекса: хуки те же пять событий из того же файла, плюс MCP в
+      # config.toml - кодекс не принимает --settings и --mcp-config.
+      bash "${TOOLING_ROOT}/workflows/lane/hooks/codex-home.sh" \
+        /tmp/codex-home /tmp/lane-settings.json
+      if ! ntk show "${ticket_id}" -W "${project_name}" --json >/dev/null 2>&1; then
+        echo "<signal:NO_TICKET>no ticket ${ticket_id} in ${project_name}</signal:NO_TICKET>"
+        exit 0
+      fi
+      if ! ntk start "${ticket_id}" -W "${project_name}"; then
+        echo "<signal:CLAIM_REFUSED>ticket ${ticket_id} is held or blocked</signal:CLAIM_REFUSED>"
+        exit 0
+      fi
+  cbm_discovery:
+    timeout: 900
+    env:
+      EQUILL_ROLE: medulla-scout
+      CODEX_HOME: /tmp/codex-home
+      # ОБЩАЯ ГРУППА, как у флота. Координата называет ПРЕДМЕТ - comm или
+      # tickets, - а сужает её поле role внутри записи. Своей группы у полосы
+      # нет и не нужно: замерено, что в роли lane, pm и triage наши записи не
+      # попадают НИ ПРИ КАКИХ координатах, отсекает адресат.
+      # Значение medulla я завёл по ошибке, прочитав "назвать медулла" как
+      # заказ на координату, хотя речь была о ролях. Снято.
+      EQUILL_RULES: tickets
+      # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
+      # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
+      # не приехало ни одного урока: событие было ни при чём, выдачу просто
+      # никогда не включали. Флотский пусковик ставит его с самого начала.
+      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
+      EQUILL_RULE_MODULES: tickets # и снимает tools.rtk: в образе rtk НЕТ, проверено запуском
+      EQUILL_PROCESS: medulla-scout
+      EQUILL_TICKET: '{{var:ticket_id}}'
+      EQUILL_PROJECT: '{{var:project_name}}'
+      EQUILL_MODULE: '{{var:module_name}}'
+      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
+      CBM_ALLOWED_ROOT: /workspace
+    on_signal:
+      OK: create_worktree          # закрытый набор скаута: OK, DUPLICATE, OUT_OF_MODULE, PREMISE_BROKEN
+      DUPLICATE: notify_failure
+      # ТРИАЖ СНЯТ С ГРАФА НАМЕРЕННО, чтобы не усложнять, пока полоса не прошла
+      # до конца ни разу. Его записи в Equill опубликованы и остаются: процесс,
+      # шаги и ends_when никуда не делись, вернуть узел - это две строки здесь.
+      PREMISE_BROKEN: notify_failure
+      OUT_OF_MODULE: notify_failure
+      __failed__: notify_failure
+      __default__: notify_failure
+    agent:
+      harness: codex
+      model: gpt-6-astra
+      effort: high
+      # ЧИТАЕТ, НЕ ПИШЕТ — но НЕ через sandbox: read-only. Он включает режим
+      # плана, а тот блокирует MCP целиком: в прогоне 15:35 разведчик сказал
+      # дословно «the mandated CBM tools are hard-blocked by plan mode» и ушёл
+      # читать исходники руками. Запрет записи закрывал ровно тот инструмент,
+      # ради которого узел заведён.
+      # Запись отнимается списком deny: под skip-permissions он держит, это
+      # замерено, в отличие от allow, который там инертен.
+      # -s read-only ограничивает ТОЛЬКО shell и MCP не глушит - в отличие от
+      # режима плана у claude, который закрывал CBM целиком.
+      # --dangerously-bypass-hook-trust: кодекс МОЛЧА пропускает хуки, которые
+      # считает непросмотренными, а наш hooks.json создаётся заново каждый
+      # прогон и таким для него и выглядит. В прогоне eead888a журнал событий
+      # был ПУСТ: ни контракта, ни роли, ни тикета - разведчик работал вслепую.
+      # Флаг предназначен ровно для автоматики, которая сама отвечает за
+      # источник хуков; источник тут наш файл в нашем репозитории.
+      args: [-s, read-only, --dangerously-bypass-hook-trust]
+    prompt: |
+      Read the ticket.
+      Run the CBM preflight now: search_code and search_graph, once each, before
+      any Bash; check SIMILAR_TO before writing anything new. Cite both.
+      Do not survey unrelated code.
+
+  create_worktree:
+    env:
+      GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
+      project_dir: '{{var:project_dir}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 180   # the fetch cap inside is 120s, so its signal wins
+    on_signal:
+      READY: implement_code
+      NO_GIT_KEY: notify_failure
+      FETCH_FAILED: notify_failure
+      NO_TARGET_BRANCH: notify_failure
+      BRANCH_HAS_WORK: notify_failure
+      __failed__: notify_failure
+      __default__: notify_failure
+    shell: |
+      set -euo pipefail
+      cd "${project_dir}"
+      if [ -z "${GIT_SSH_COMMAND:-}" ] && git remote get-url origin | grep -q '^ssh://\|^git@'; then
+        echo "<signal:NO_GIT_KEY>origin is ssh and no key was mounted; launch with --ssh-dir</signal:NO_GIT_KEY>"
+        exit 0
+      fi
+      # Bounded INSIDE the node's 180s, so the run stops on this signal, which
+      # names the reason, rather than on a timeout, which names nothing.
+      out="$(timeout 120 git fetch origin 2>&1)" && rc=0 || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        [ "$rc" -ne 124 ] || out="did not finish in 120s - unreachable host, or a key waiting on a passphrase"
+        echo "<signal:FETCH_FAILED>git fetch origin exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:FETCH_FAILED>"
+        exit 0
+      fi
+      target=$(jq -r '.target_branch // "develop"' .ntkrc 2>/dev/null || echo develop)
+      # Before it is used twice below: otherwise a wrong target_branch surfaces
+      # as `worktree add` failing, which names the worktree, not the branch.
+      if ! git rev-parse --verify --quiet "refs/remotes/origin/${target}" >/dev/null; then
+        echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after a successful fetch. .ntkrc says target_branch=${target}</signal:NO_TARGET_BRANCH>"
+        exit 0
+      fi
+      # ТОЛЬКО СВОЯ ЗАПИСЬ, НИКОГДА `worktree prune`. Prune снимает регистрацию
+      # у ВСЕХ ворктри, чьих каталогов нет на месте, - а деревья чужих полос
+      # живут в /tmp ИХ контейнеров и из нашего невидимы. Для prune они
+      # "исчезли", и он их вычистил: полоса pCY получила `fatal: not a git
+      # repository: (null)` на git add, потому что её .git указывал на
+      # .git/worktrees/<чужого тикета>, которого prune больше не оставил.
+      # Работа чужой полосы уцелела только потому, что её коммит держал ref.
+      wt_meta="$(git rev-parse --git-common-dir)/worktrees/wt-${ticket_id}"
+      [ ! -d "$wt_meta" ] || rm -rf -- "$wt_meta"
+      if git rev-parse --verify --quiet "refs/heads/ticket-${ticket_id}" >/dev/null; then
+        n="$(git rev-list --count "origin/${target}..ticket-${ticket_id}" 2>/dev/null || echo 0)"
+        [ "${n:-0}" -eq 0 ] || {
+          last="$(git log -1 --format='%h %s' "ticket-${ticket_id}" 2>/dev/null || echo '?')"
+          echo "<signal:BRANCH_HAS_WORK>ticket-${ticket_id} carries ${n} commit(s) not on ${target}, last: ${last}. A previous run broke - crashed, rejected by the panel, or failed to land. Look before rerunning.</signal:BRANCH_HAS_WORK>"
+          exit 0; }
+      fi
+      # ДЕРЕВО ЖИВЁТ НА ХОСТЕ, А НЕ В /tmp КОНТЕЙНЕРА. Замер, ради которого
+      # переезд: кодер отработал 12 минут, 70 вызовов, нашёл причину и написал
+      # починку - узел упал, контейнер кончился, дерево ушло вместе с ним.
+      # Терялась не только работа: без дерева нельзя ни посмотреть руками, ни
+      # продолжить с упавшего шага через --resume или --node.
+      # Каталог прогонов смонтирован с хоста: дерево переживает контейнер и
+      # НЕ ВИДНО проверкам репозитория. Внутри репозитория ему не место -
+      # guard сканировал его как свой исходник и валил каждый коммит в чекауте.
+      mkdir -p "${LANE_WT_ROOT}"
+      git worktree add -B "ticket-${ticket_id}" "${LANE_WT_ROOT}/wt-${ticket_id}" "origin/${target}" >/dev/null
+      # Свежее дерево без зависимостей: ни один тест в нём не значит ничего, и
+      # кодер первым делом тратит контекст на то, чтобы это обнаружить и
+      # поставить. Ставим здесь. НЕ фатально: репозиторий может быть не
+      # bun-овым, а отсутствие зависимостей кодер увидит сам.
+      # PATH ЯВНО. Оболочечные узлы не видят bun: в прогоне 884d6f08 условие
+      # срубилось на `command -v bun`, весь блок тихо пропустился, кодер получил
+      # пустое дерево и пошёл ставить зависимости САМ - тратя контекст на то,
+      # ради чего этот блок и написан. Записки "install failed" тоже не было:
+      # не сработала вся ветка целиком.
+      # Та же причина роняла посадку - хук репозитория зовёт bun и не находил.
+      export PATH="/home/medulla/.bun/bin:${PATH}"
+      if [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
+        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile >/dev/null 2>&1); then
+          deps=" Dependencies are installed."
+        else
+          deps=" NOTE: bun install failed here - install before trusting any test."
+        fi
+      fi
+      # Своё сообщение, а не служебное. Без сигнала сюда приезжает текст движка
+      # про __default__, и на первом проходе он становится ВСЕМ промптом кодера.
+      # Находка разведчика — ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
+      # нельзя: одна кавычка внутри превращает сообщение в исполняемый код,
+      # и разведчик получает shell до панели. Пишем как ДАННЫЕ, через printf,
+      # и несём дальше СТАТИЧЕСКИЙ путь, а не содержимое.
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      printf '%s' "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
+      # "РАЗВЕДКА ПО КОДОВОЙ БАЗЕ, ЕЙ ДОВЕРЯЙ" - слова владельца, и за ними замер.
+      # Прогон d33de436: разведка нашла причину и передала её - LocaleLayout
+      # omits messages, i18n/request.ts loads the entire catalogue, - плюс 20
+      # совпадений search_code и готовый renderWithProviders для тестов.
+      # Кодер вместо этого поднял сервер и пошёл тянуть HTML: 31 вызов оболочки,
+      # семь минут, ноль правок в дереве. Он ВЫВОДИЛ ТУ ЖЕ ПРИЧИНУ ЗАНОВО.
+      # Виноват был мой текст: "What the scout found: <путь>" - справка, из
+      # которой не следует, что перепроверять не надо. Теперь следует.
+      echo "<signal:READY>Branch ticket-${ticket_id} is checked out at ${LANE_WT_ROOT}/wt-${ticket_id}, cut from origin/${target}.${deps:-}
+
+      CODEBASE RECONNAISSANCE, ALREADY DONE ON THIS EXACT WORKTREE - TRUST IT: ${MEDULLA_RUN_DIR}/artifacts/scout.txt
+      It was run against origin/${target}, the same commit your worktree is cut from: the same files, the same code.
+      Read it first. Its findings are evidence: do not re-derive them, do not re-run its searches, do not reproduce what it already established. Start from where it stopped.
+
+      Implement the ticket.</signal:READY>"
+  implement_code:
+    timeout: 7200   # writing the code
+    env:
+      EQUILL_ROLE: medulla-coder
+      EQUILL_RULES: tickets
+      # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
+      # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
+      # не приехало ни одного урока: событие было ни при чём, выдачу просто
+      # никогда не включали. Флотский пусковик ставит его с самого начала.
+      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
+      EQUILL_RULE_MODULES: tickets
+      EQUILL_PROCESS: medulla-coder
+      EQUILL_TICKET: '{{var:ticket_id}}'
+      EQUILL_PROJECT: '{{var:project_name}}'
+      EQUILL_MODULE: '{{var:module_name}}'
+      EQUILL_PHASE: unit
+      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
+      CBM_ALLOWED_ROOT: /workspace   # writing code: landing lessons do not apply
+      LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
+    on_signal:
+      OK: prepare_review
+      GATE_FAIL: notify_failure
+      __failed__: notify_failure
+      __default__: notify_failure
+    agent:
+      harness: claude-code
+      model: claude-sonnet-5
+      effort: high
+      args:
+      - --settings
+      - /tmp/lane-settings.json
+      - --mcp-config
+      - /workspace/workflows/lane/hooks/mcp.json
+      - --strict-mcp-config
+      - --setting-sources=
+    prompt: |
+      Task: {{last.message}}
+  prepare_review:
+    env:
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 120
+    on_signal:
+      SNAPSHOT: expert_review
+      NOTHING_DONE: notify_failure
+      __failed__: notify_failure
+      __default__: notify_failure
+    shell: |
+      set -euo pipefail
+      cd "${LANE_WT_ROOT}/wt-${ticket_id}"
+      git add -A
+      # Панель СМОТРИТ ИМЕННО ЭТОТ снимок, и посадка обязана закоммитить его же.
+      # Без фиксации `git add -A` после панели превратил бы любую правку
+      # ревьюера — а у них есть запись в дерево — в одобренный коммит.
+      tree="$(git write-tree)"
+      base="$(git rev-parse HEAD)"
+      if git diff --cached --quiet "$base" -- 2>/dev/null; then
+        echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
+        exit 0
+      fi
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
+      # ОТЧЁТ КОДЕРА О ТЕСТАХ СОХРАНЯЕТСЯ ДЛЯ ПАНЕЛИ. Он приходит в сигнале
+      # кодера, а между ним и панелью стоит этот узел - дальше сообщение не
+      # идёт, и панель о тестах не знала НИЧЕГО. Шаг 20 кодера обязывает его
+      # назвать команды и коды выхода; без этой строки обязательство пропадало
+      # по дороге.
+      printf '%s' "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/tests.txt"
+      echo "<signal:SNAPSHOT>снимок зафиксирован: $tree. Tests already ran and passed; commands and exit codes: ${MEDULLA_RUN_DIR}/artifacts/tests.txt</signal:SNAPSHOT>"
+  expert_review:
+    timeout: 1800
+    max_parallel: 3
+    inputs:
+    - harness: codex
+      model: gpt-6-astra
+      effort: high
+      task: Review the diff for architectural consistency.
+    - harness: opencode
+      model: zai-coding-plan/glm-5.3
+      effort: high
+      task: Review the diff for clean code.
+    - harness: agy
+      model: gemini-3.8-flash-high
+      effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
+                     # иначе {{input.effort}} не разрешится и МЕСТО УПАДЁТ — измерено.
+      task: Review the diff for security flaws.
+    env:
+      EQUILL_ROLE: medulla-qa
+      EQUILL_RULES: tickets
+      # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
+      # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
+      # не приехало ни одного урока: событие было ни при чём, выдачу просто
+      # никогда не включали. Флотский пусковик ставит его с самого начала.
+      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
+      EQUILL_RULE_MODULES: tickets
+      EQUILL_PROCESS: medulla-qa
+      EQUILL_TICKET: '{{var:ticket_id}}'
+      EQUILL_PROJECT: '{{var:project_name}}'
+      EQUILL_MODULE: '{{var:module_name}}'
+    on_signal:
+      __done__: expert_review_synthesis
+      __failed__: expert_review_synthesis
+    agent:
+      harness: '{{input.harness}}'
+      model: '{{input.model}}'
+      effort: '{{input.effort}}'
+    prompt: |
+      Ticket {{var:ticket_id}}, worktree {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}. {{input.task}}
+      Review `git diff --cached`. Do not change the tree.
+      {{last.message}}
+      Tests already ran and passed - do not run them again.
+      Name the subject; give file:line for every finding.
+      Print your verdict as a tag on its own line: <signal:CLEAR>what is clean</signal:CLEAR> or <signal:REJECT>what you found</signal:REJECT>.
+  expert_review_synthesis:
+    timeout: 60
+    on_signal:
+      CLEAR: git_landing
+      REJECT: reject_gate
+      __failed__: notify_failure
+      __default__: notify_failure
+    shell: |
+      python3 - <<'PY'
+      import json, os, pathlib, sys
+
+      VERDICTS = {"CLEAR", "REJECT"}
+      manifest = os.environ.get("MEDULLA_MANIFEST_EXPERT_REVIEW", "")
+      if not manifest or not os.path.isfile(manifest):
+          sys.exit("нет манифеста панели")
+
+      rows = [json.loads(l) for l in open(manifest) if l.strip()]
+
+      def verdict(row):
+          # Имя сигнала, а не разбор прозы. Два РАЗНЫХ вердикта в одной
+          # строке — не вердикт: панелист процитировал шаблон.
+          names = [s.get("name") for s in row.get("signals") or []]
+          found = {n for n in names if n in VERDICTS}
+          return found.pop() if len(found) == 1 else ""
+
+      go, findings = 0, []
+      for r in rows:
+          v = verdict(r)
+          who = r.get("harness") or "?"
+          if v == "CLEAR":
+              go += 1
+          else:
+              findings.append(f"- {who}: {v or 'нет вердикта'} {r.get('message') or ''}".strip())
+
+      art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
+      art.mkdir(parents=True, exist_ok=True)
+      # ДОПИСЫВАЕМ, а не перезаписываем: сигнал REJECT режется до 600 символов,
+      # и reject_gate собирал историю из этих обрезков. Всё, что длиннее, молча
+      # не доезжало до того, кто правит.
+      with (art / "panel-findings.txt").open("a") as fh:
+          fh.write("\n".join(findings) + "\n---\n")
+      print(f"панель: {go} из {len(rows)} сказали CLEAR", file=sys.stderr)
+
+      if rows and go == len(rows):
+          print(f"<signal:CLEAR>все {len(rows)} ревьюера сказали CLEAR</signal:CLEAR>")
+      else:
+          print("<signal:REJECT>" + " ".join(findings)[:600] + "</signal:REJECT>")
+      PY
+  git_landing:
+    env:
+      GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
+      project_name: '{{var:project_name}}'
+      TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
+      project_dir: '{{var:project_dir}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 600
+    on_signal:
+      LAND_FAILED: notify_failure
+      CONFLICT: git_fix
+      __failed__: notify_failure
+      __default__: cleanup
+    shell: |
+      set -euo pipefail
+      cd "${LANE_WT_ROOT}/wt-${ticket_id}" || {
+        echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
+      target=$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)
+
+      # КОММИТ ДЕЛАЕТСЯ ЗДЕСЬ. Кодеру контракт запрещает сажать, и он правильно
+      # не сажает — но и коммитить ему никто не велит, а land.sh отказывается
+      # пушить грязное дерево. В первом сквозном прогоне работа дошла до сюда
+      # с вердиктом CLEAR от всех троих и упёрлась ровно в это.
+      # Коммитит детерминированная стадия: панель уже посмотрела ровно этот дифф.
+      # КОММИТИТСЯ РОВНО ТО, ЧТО СМОТРЕЛА ПАНЕЛЬ. `git add -A` здесь означал бы,
+      # что правка ревьюера — а запись в дерево у них есть — уезжает в ствол
+      # как одобренная. Поэтому: снимок зафиксирован до панели, здесь сверяется.
+      snap="$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
+      [ -f "$snap" ] || { echo "<signal:LAND_FAILED>нет зафиксированного снимка панели</signal:LAND_FAILED>"; exit 0; }
+      want_tree="$(sed -n 1p "$snap")"
+      git diff --quiet || { echo "<signal:LAND_FAILED>дерево изменилось после панели: есть неиндексированные правки</signal:LAND_FAILED>"; exit 0; }
+      [ -z "$(git ls-files --others --exclude-standard)" ] || { echo "<signal:LAND_FAILED>дерево изменилось после панели: появились новые файлы</signal:LAND_FAILED>"; exit 0; }
+      have_tree="$(git write-tree)"
+      [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
+
+      if ! git diff --cached --quiet; then
+        # ХУК РЕПОЗИТОРИЯ ЗАПУСКАЕТ bun, И ЕГО НАДО НАЙТИ. Прогон ddbcae27 дошёл
+        # до посадки - панель дала CLEAR, - и встал на `nice: bun: No such file
+        # or directory`: .githooks/pre-commit зовёт `nice -n 15 bun run
+        # typecheck:unsafe`, а bun в окружении коммита не нашёлся. PATH образа
+        # его содержит, значит теряется он в том, чем запускается тело узла.
+        # Ставим явно: если он и так есть, ничего не меняется.
+        # --no-verify НЕ ВАРИАНТ: land.sh отказывается от него по построению, и
+        # архитектор сегодня снял разрешение на этот флаг из шага 270.
+        export PATH="/home/medulla/.bun/bin:${PATH}"
+        cmsg="$(git -c user.name="lane" -c user.email="lane@local" \
+            commit -m "${ticket_id}: $(ntk show "${ticket_id}" -W "${project_name}" --json 2>/dev/null | jq -r '.title // empty' | head -c 60)" 2>&1)" \
+          || { echo "<signal:LAND_FAILED>коммит отклонён: $(printf '%s' "$cmsg" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"; exit 0; }
+      fi
+      [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
+        echo "<signal:LAND_FAILED>nothing to land: no commit above origin/${target}</signal:LAND_FAILED>"; exit 0; }
+
+      land() { rc=0; out="$("${TOOLING_ROOT}/workflows/lane/bin/land.sh" "$target" 2>&1)" || rc=$?; printf '%s\n' "$out"; }
+
+      land
+      if [ "$rc" -eq 3 ]; then
+        # Ветка ушла вперёд, пока шло ревью: при параллельных полосах это норма.
+        echo "${target} moved while this was in review; rebasing" >&2
+        git fetch origin
+        if git rebase "origin/${target}"; then
+          land
+        else
+          git rebase --abort || true
+          tried="$(jq -r 'select(.node=="git_fix")|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
+          if [ "${tried:-0}" -ge 1 ]; then
+            echo "<signal:LAND_FAILED>rebase onto ${target} still conflicts after a fix attempt; a person has to resolve it</signal:LAND_FAILED>"
+          else
+            echo "<signal:CONFLICT>rebase onto ${target} conflicts: $(git status --short 2>/dev/null | head -5 | tr '\n' ' ')</signal:CONFLICT>"
+          fi
+          exit 0
+        fi
+      fi
+
+      [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"
+  cleanup:
+    env:
+      project_dir: '{{var:project_dir}}'
+      project_name: '{{var:project_name}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 180
+    on_signal:
+      LANDED_TICKET_STUCK: notify_success
+      __failed__: notify_failure
+      __default__: notify_success
+    shell: |
+      set -euo pipefail
+      head_sha="$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" rev-parse --short HEAD 2>/dev/null || echo '?')"
+      target="$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)"
+      cd "${project_dir}"
+      # Best-effort, но не молча: оставленное дерево следующий прогон поймает
+      # как BRANCH_HAS_WORK.
+      git worktree remove "${LANE_WT_ROOT}/wt-${ticket_id}" --force 2>/dev/null || left=" (дерево осталось: ${LANE_WT_ROOT}/wt-${ticket_id})"
+      # Код сел — это правда. Тикет, застрявший в работе, иначе никто не заметит.
+      if ! out="$(ntk update "${ticket_id}" -W "${project_name}" --force -s to_test 2>&1)"; then
+        printf '<signal:LANDED_TICKET_STUCK>сел %s на %s, НО тикет не переехал в to_test: %s%s</signal:LANDED_TICKET_STUCK>\n' \
+          "$head_sha" "$target" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" "${left:-}"
+        exit 0
+      fi
+      echo "landed ${head_sha} onto ${target}${left:-}"
+  notify_failure:
+    env:
+      ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
+      ESCALATION_ROOM: '{{var:ESCALATION_ROOM}}'
+      TELEGRAM_ROOM: '{{var:TELEGRAM_ROOM}}'
+      TELEGRAM_TOPIC: '{{var:TELEGRAM_TOPIC}}'
+      project_dir: '{{var:project_dir}}'
+      project_name: '{{var:project_name}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 120
+    on_signal:
+      __failed__: __exit_fail__
+      __default__: __exit_fail__
+    shell: |
+      msg="lane stopped on ${MEDULLA_LAST_NODE:-?} (${MEDULLA_LAST_SIGNAL:-none}) for ${ticket_id}. ${MEDULLA_LAST_MESSAGE:-}"
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      # РАБОТА СПАСАЕТСЯ ЗДЕСЬ ИЛИ НИГДЕ. Дерево живёт в контейнере, а он идёт
+      # с --rm: всё несохранённое исчезает вместе с ним. Первый сквозной прогон
+      # потерял двенадцать минут работы кодера ровно так — а эти две команды
+      # стояли под `|| true` и упали МОЛЧА, поэтому никто не узнал.
+      saved=""
+      if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WT_ROOT}/wt-${ticket_id}" ]; then
+        if [ -n "$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" status --porcelain 2>/dev/null)" ]; then
+          if git -C "${LANE_WT_ROOT}/wt-${ticket_id}" add -A 2>&1 \
+             && git -C "${LANE_WT_ROOT}/wt-${ticket_id}" -c user.name=lane -c user.email=lane@local \
+                    commit -q -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
+            saved=" Работа сохранена коммитом в ветке ticket-${ticket_id}."
+          else
+            saved=" РАБОТА НЕ СОХРАНЕНА: коммит не прошёл, дерево умрёт с контейнером."
+          fi
+        else
+          saved=" Сохранять нечего: дерево чистое."
+        fi
+      fi
+      msg="${msg}${saved}"
+      printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+      # CLAIM_REFUSED — тикет ЧУЖОЙ, не трогать вовсе.
+      # BRANCH_HAS_WORK — прошлый прогон сломался, нужен человек: blocked.
+      # Остальное — вернуть в очередь: open.
+      case "${MEDULLA_LAST_SIGNAL:-}" in
+        CLAIM_REFUSED)   echo "ticket belongs to someone else; not touching it" >&2 ;;
+        # Разведка нашла, что делать нечего или не то: возвращать в очередь
+        # нельзя, иначе следующая полоса возьмёт его снова и упрётся туда же.
+        # LAND_FAILED приходит ПОСЛЕ чистого вердикта панели: работа сделана и
+        # проверена, не прошла только механика посадки. В open её возвращать
+        # нельзя — следующая полоса переделает то же самое с нуля. Нужен человек.
+        BRANCH_HAS_WORK|DUPLICATE|PREMISE_BROKEN|OUT_OF_MODULE|LAND_FAILED|TOO_MANY_ROUNDS) want=blocked ;;
+        *)               want=open ;;
+      esac
+        # ТОЛЬКО СТАТУС, БЕЗ ПРИПИСКИ В ТЕЛО. Полоса дописывала отчёт в тело
+        # тикета, тело росло и упёрлось в предел 2000 символов — перевод отказал,
+        # а `|| true` это проглотил. Подробности идут владельцу в Телеграм и
+        # лежат в артефактах; тикету нужен статус, а не пересказ.
+        if [ -n "${want:-}" ] && ! upd="$(ntk update "${ticket_id}" -W "${project_name}" -s "$want" --force 2>&1)"; then
+          msg="${msg} ТИКЕТ НЕ ПЕРЕВЕДЁН в ${want}: $(printf '%s' "$upd" | tr '\n' ' ' | cut -c1-160)"
+        fi
+      case x in x)
+      esac
+      # Владельцу, а не в роли флота: полоса сейчас отлаживается, и её отказ —
+      # новость для того, кто её запустил, а не для PM или генерального.
+      agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
+        "Посыльный, в Телеграм ${TELEGRAM_ROOM} (топик ${TELEGRAM_TOPIC}): 🔴 $(printf '%.600s' "$msg") Ветка ticket-${ticket_id} в ${project_dir}." \
+        || { echo "bus refused - record is in $MEDULLA_RUN_DIR/artifacts/failure.txt" >&2; exit 1; }
+  notify_success:
+    env:
+      ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
+      ESCALATION_ROOM: '{{var:ESCALATION_ROOM}}'
+      TELEGRAM_ROOM: '{{var:TELEGRAM_ROOM}}'
+      TELEGRAM_TOPIC: '{{var:TELEGRAM_TOPIC}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 120
+    on_signal:
+      # Мост мог умереть после старта. Посадка, о которой никто не узнал, для
+      # оператора неотличима от несостоявшейся — прогон обязан упасть.
+      __failed__: __exit_fail__
+      __default__: __exit_ok__
+    shell: |
+      # Сюда ведут два пути, и они не равны: чистая посадка и посадка с
+      # застрявшим тикетом. Под одним значком второй читается как первый.
+      # Исход ТРИАЖА — не посадка. Он приходит сюда только потому, что это
+      # единственный путь, не трогающий тикет: статус уже выставил сам триаж.
+      # Клевер за тикет, который никто не чинил, читался бы как починка.
+      if case "${MEDULLA_LAST_SIGNAL:-}" in SPLIT|SCOPED|DUPLICATE|NOT_EXECUTABLE) true ;; *) false ;; esac; then
+        mark="📋"; msg="${ticket_id} — триаж: ${MEDULLA_LAST_SIGNAL}. Кода конвейер не сажал. ${MEDULLA_LAST_MESSAGE:-}"
+      elif [ "${MEDULLA_LAST_SIGNAL:-}" = "LANDED_TICKET_STUCK" ]; then
+        mark="⚠️"; msg="${ticket_id} СЕЛ, НО ТИКЕТ ЗАСТРЯЛ: ${MEDULLA_LAST_MESSAGE:-}"
+      else
+        mark="🍀"; msg="${ticket_id} заленделся: ${MEDULLA_LAST_MESSAGE:-}"
+      fi
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
+      agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
+        "Посыльный, в Телеграм ${TELEGRAM_ROOM} (топик ${TELEGRAM_TOPIC}): ${mark} ${msg}" \
+        || { echo "bus refused - record is in $MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2; exit 1; }
+  git_fix:
+    timeout: 900
+    env:
+      EQUILL_ROLE: medulla-coder
+      EQUILL_RULES: tickets
+      # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
+      # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
+      # не приехало ни одного урока: событие было ни при чём, выдачу просто
+      # никогда не включали. Флотский пусковик ставит его с самого начала.
+      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
+      EQUILL_RULE_MODULES: tickets
+      EQUILL_PROCESS: medulla-coder
+      EQUILL_TICKET: '{{var:ticket_id}}'
+      EQUILL_PROJECT: '{{var:project_name}}'
+      EQUILL_MODULE: '{{var:module_name}}'
+      EQUILL_PHASE: land
+      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
+      CBM_ALLOWED_ROOT: /workspace   # resolving a rebase IS landing work
+      LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
+    on_signal:
+      # Словарь берётся из контракта: medulla-coder знает OK и GATE_FAIL.
+      # FIXED и GIVE_UP были синонимами - вели туда же, - и жили ТОЛЬКО в
+      # промпте, то есть были вторым источником правды на ровном месте.
+      OK: prepare_review
+      GATE_FAIL: notify_failure
+      __failed__: notify_failure
+      __default__: notify_failure
+    agent:
+      harness: claude-code
+      model: claude-sonnet-5
+      effort: high
+      args:
+      - --settings
+      - /tmp/lane-settings.json
+      - --mcp-config
+      - /workspace/workflows/lane/hooks/mcp.json
+      - --strict-mcp-config
+      - --setting-sources=
+    prompt: |
+      {{last.message}}
+  reject_gate:
+    env:
+      REJECT_ROUNDS: '{{var:REJECT_ROUNDS}}'
+    timeout: 60
+    on_signal:
+      TOO_MANY_ROUNDS: notify_failure
+      PANEL_REJECTED: implement_code
+      __failed__: notify_failure
+      __default__: notify_failure
+    shell: |
+      set -euo pipefail
+      limit="${REJECT_ROUNDS:-3}"
+      # Счёт с последней починки конфликта: после неё панель смотрит сведённый
+      # код, и прежние отказы к нему не относятся.
+      since="$(jq -r 'select(.node=="git_fix")|.step' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
+      since="${since:-0}"
+      done_rounds="$(jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
+      done_rounds="${done_rounds:-0}"
+      finding="$(jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
+
+      # В last.message помещается только последняя находка; остальные здесь.
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      {
+        printf 'РАУНД %s ИЗ %s%s\n\nПОСЛЕДНЯЯ НАХОДКА:\n%s\n\nРАУНДЫ ПОСЛЕ ПОСЛЕДНЕЙ ПОЧИНКИ:\n' \
+          "$done_rounds" "$limit" "$([ "$since" -gt 0 ] && echo ' (счёт сброшен после сведения конфликта)')" "$finding"
+        jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|"- "+.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true
+      } > "$MEDULLA_RUN_DIR/artifacts/rejects.txt" 2>/dev/null || true
+
+      # Кап ДО первого сигнала: движок маршрутизирует по первому известному.
+      if [ "$done_rounds" -ge "$limit" ]; then
+        echo "<signal:TOO_MANY_ROUNDS>панель отклонила ${done_rounds} раз; четвёртая попытка это не починка</signal:TOO_MANY_ROUNDS>"
+        exit 0
+      fi
+
+      printf '<signal:PANEL_REJECTED>ROUND %s OF %s. The panel rejected the work. Finding: %s -- read %s/artifacts/panel-findings.txt before fixing - every round in full.</signal:PANEL_REJECTED>\n' \
+        "$done_rounds" "$limit" "$finding" "$MEDULLA_RUN_DIR"
