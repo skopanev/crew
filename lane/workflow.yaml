@@ -331,16 +331,9 @@ nodes:
       model: zai-coding-plan/glm-5.3
       effort: high
       task: Review the diff for clean code.
-    - harness: agy
-      model: Gemini 3.1 Pro (High)
-      effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
-                     # иначе {{input.effort}} не разрешится и МЕСТО УПАДЁТ — измерено.
-      # ФОРМУЛИРОВКА ВАЖНА. "Review the diff for security flaws" модель прочитала
-      # как просьбу искать уязвимости и ОТКАЗАЛАСЬ: "Sorry, I cannot fulfill your
-      # request..." - 9 секунд, ноль сигналов. Место без вердикта ломает
-      # единогласие, и полоса ушла в TOO_MANY_ROUNDS на работе, которую два
-      # других места признали чистой. Говорим о том же через обращение с
-      # данными и правами, а не через "искать уязвимости".
+    - harness: opencode
+      model: zai-coding-plan/glm-5.3
+      effort: high
       task: Review how this change handles untrusted input, permissions and secrets.
     env:
       EQUILL_ROLE: medulla-qa
