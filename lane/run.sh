@@ -24,29 +24,17 @@ USAGE
 }
 
 WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# МЕСТНЫЕ ЗНАЧЕНИЯ ОТДЕЛЬНО ОТ КОДА: куда докладывать и кому эскалировать - своё
-# у каждого, и в общий репозиторий им нельзя. Файла нет - полоса работает, просто
-# молча: пустая комната означает "никому не докладывать", а не ошибку.
-# Образец рядом: lane/local.env.example
+# Комнаты и курьер - у каждого свои, в общий репозиторий им нельзя.
+# Файла нет - полоса работает молча. Образец: lane/local.env.example
 [ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
-# Outside the tooling tree: --cwd-ro requires it, and a run history written into
-# the repository it reviews is the repository reviewing its own record.
+# Вне дерева инструментов: этого требует --cwd-ro.
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 mkdir -p "$RUNS_FOLDER"
-# РАБОЧИЕ ДЕРЕВЬЯ ЖИВУТ ЗДЕСЬ, А НЕ ВНУТРИ РЕПОЗИТОРИЯ. Я клал их в
-# <repo>/.worktrees - и проверки репозитория начали сканировать их как свой
-# исходник: check-legacy-ledger-identifiers нашёл в нашем дереве СВОЙ ЖЕ файл
-# со списком запрещённых образцов и завалил КАЖДЫЙ коммит в том чекауте, не
-# только наш. Флот держит деревья уровнем выше репозитория; у нас уровень выше
-# это смонтированный корень инструментов, тоже не место.
-# Каталог прогонов уже смонтирован с хоста: дерево переживает контейнер, видно
-# с хоста и невидимо для проверок репозитория.
+# ДЕРЕВЬЯ ВНЕ РЕПОЗИТОРИЯ: внутри его собственные проверки сканировали их как
+# свой исходник и валили КАЖДЫЙ коммит в том чекауте, не только наш.
 WT_ROOT="$RUNS_FOLDER/worktrees"
 mkdir -p "$WT_ROOT"
-# ОДИН уровень, а не два: воркфлоу лежит в <repo>/lane. Ошибка здесь стоит
-# дорого - корень монтируется в контейнер как /workspace, и лишний уровень
-# отдал бы туда ВЕСЬ каталог проектов: чужие репозитории, ключи, рабочие
-# деревья других полос.
+# ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}"
@@ -56,9 +44,7 @@ while (( $# )); do
   case "$1" in
     --ticket-id) ticket="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
-    # Запись ровно ОДНА, и второй --mount-rw отвергается: посадка проверяет, что
-    # садится ровно то дерево, которое смотрела панель, а разведка - что правка
-    # не выходит за модуль. Два пишущих репозитория отменяют обе проверки.
+    # Ровно ОДИН: на этом держатся и проверка посадки, и проверка модуля.
     --mount-rw)
       [ -z "$repo" ] || { echo "run.sh: --mount-rw задан дважды: $repo и ${2:-}" >&2
                           echo "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro" >&2
@@ -94,10 +80,7 @@ if ! ticket_json="$(cd "$repo" && ntk show "$ticket" -W "$project" --json 2>&1)"
   echo "run.sh: ticket $ticket does not exist in workspace $project - nothing to run" >&2
   exit 2
 fi
-# --module ASSERTS, it does not override. The ticket owns its module; a launcher
-# argument that silently replaced it could point a lane at a module the ticket
-# does not claim, and a ticket with NO module could be concealed by supplying one.
-# Checked here, before any mount, daemon or container exists.
+# --module СВЕРЯЕТ, а не подменяет: модуль принадлежит тикету.
 stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
 if [[ -n "$module" ]]; then
   if [[ -z "$stored" ]]; then
@@ -115,16 +98,8 @@ if [[ -n "$module" ]]; then
   echo "run.sh: module asserted: $stored" >&2
 fi
 module="$stored"
-# A ticket with no module does not go to a lane, and this refuses rather than
-# warns. Proceeding was the worst of the three options: the lane ran with
-# module_name empty, so cbm_discovery was asked whether the work stays inside a
-# module that does not exist - a coin toss whose OUT_OF_MODULE answer goes to
-# triage - AND memory stayed off, because the hook needs every EQUILL_* or none
-# and EQUILL_MODULE was one of them. So it ran without the contract while being
-# judged against a boundary nobody had drawn.
-#
-# This is the same rule the old launcher asserts, and for the same reason: the
-# ticket owns its module, and nothing downstream can supply what it lacks.
+# Без модуля охват судят по границе, которой нет, И память молчит: хуку нужны
+# все EQUILL_* или ни одного, а EQUILL_MODULE один из них.
 if [[ -z "$module" ]]; then
   echo "run.sh: ticket $ticket declares no module." >&2
   echo "        A lane judges scope against the module and loads its contract by it;" >&2
@@ -133,12 +108,9 @@ if [[ -z "$module" ]]; then
   exit 2
 fi
 
-# СОСЕДНИЕ РЕПОЗИТОРИИ ПОДКЛЮЧАЮТСЯ САМИ, а не по флагу, который надо вспомнить.
-# Замерено на этом же тикете: разведчик вынес OUT_OF_MODULE и был прав по факту -
-# значения жили в соседнем репозитории, которого в песочнице не было, - но полоса
-# встала не потому, что работа вне модуля, а потому что соседнюю репу ей не дали.
-# Модуль ограничивает, ГДЕ она пишет; читать она должна всё, что рядом.
-# Пишет по-прежнему ровно в одно место: соседи монтируются только на чтение.
+# Соседи подключаются сами, на чтение: модуль ограничивает, ГДЕ писать, а
+# читать надо всё рядом. Иначе полоса встаёт на OUT_OF_MODULE из-за того, что
+# ей просто не дали соседнюю репу.
 parent="$(dirname "$repo")"
 for sib in "$parent"/*/; do
   sib="${sib%/}"
@@ -151,9 +123,6 @@ done
 
 mounts=(--mount-rw "$repo")
 
-# Scope repositories, read-only. A lane that can read the app and the docs beside
-# its own backend answers questions it would otherwise have to guess at; it still
-# writes in exactly one place.
 scope=()
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { echo "run.sh: --mount-ro is not a directory: $extra" >&2; exit 2; }
@@ -164,10 +133,7 @@ for extra in ${also[@]+"${also[@]}"}; do
     echo "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside" >&2
     exit 2
   fi
-  # Fetched HERE, on the host: the mount is read-only, so the container cannot
-  # refresh it. fetch only - never pull. These are live working trees that other
-  # lanes may be sitting in, and moving one out from under them is not ours to do.
-  # The working tree can therefore be behind; origin/<branch> is the fresh view.
+  # fetch, НИКОГДА pull: в этих деревьях могут сидеть другие полосы.
   if git -C "$extra" rev-parse --git-dir >/dev/null 2>&1; then
     git -C "$extra" fetch --quiet --all --prune 2>/dev/null \
       && echo "run.sh: fetched $base" >&2 \
@@ -177,20 +143,11 @@ for extra in ${also[@]+"${also[@]}"}; do
   scope+=("/workspace/$base")
 done
 git_ssh=""
-# РЕШИТЬ ОБЯЗАТЕЛЬНО. Сюда монтируется ключ, которым можно ПИСАТЬ в репозиторий,
-# и он попадает в окружение КАЖДОГО тела узла, включая агентные: движок кладёт
-# туда все переменные прогона (engine_vars.py:36). То есть агент, работающий с
-# пропущенными разрешениями, физически способен запушить мимо панели — ровно так
-# и уехал в ствол коммит, который приёмка отклонила.
-#
-# Запрет Bash(*git push*) в настройках прикрывает СЛУЧАЙНОСТЬ и не является
-# границей: сопоставление идёт по строке команды, и смена инструмента его
-# обходит (измерено: python3 создал файл, которого не мог создать запрещённый
-# touch). Границей будет только разделение ключей — в контейнер read-only для
-# fetch, запись в процессе хостового моста, куда агент не дотянется. Дизайн
-# готов, исполнитель назначен, ждёт слова владельца.
-#
-# До тех пор это временное состояние, принятое сознательно ради первой посадки.
+# НЕ ЗАКРЫТО. Ключ с правом ЗАПИСИ попадает в окружение КАЖДОГО узла, включая
+# агентные (engine_vars.py:36), - агент способен запушить мимо панели. Запрет
+# Bash(*git push*) прикрывает случайность, границей не является: сверка идёт по
+# строке команды. Граница - разделение ключей; принято сознательно ради первой
+# посадки.
 if [[ -f "$ssh_dir/id_ed25519" ]]; then
   mounts+=(--mount "$ssh_dir")
   ssh_in="/workspace/$(basename "$ssh_dir")"
@@ -217,15 +174,10 @@ done
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 
-# CODEBASE MEMORY. The lane gets a CLONE of the host index, never the index.
-# `cp -c` on APFS is copy-on-write: measured at 7ms and 0 bytes for 138MB.
-# A clone is a different inode, so no SQLite lock crosses the macOS->Linux mount
-# boundary, and it freezes at run start - the daemon reindexes trunk while the
-# lane works, and a shared store would answer one question two ways.
-#
-# UNIQUE PER RUN, not per ticket: named by ticket alone, a second launch of the
-# same ticket would `rm -rf` the index of the lane already running, and only
-# afterwards learn from ntk that the ticket was taken. Found by qwen.
+# КЛОН индекса, не индекс: другой inode - блокировка SQLite не идёт через
+# границу монтирования, и снимок застывает на старте.
+# Имя УНИКАЛЬНО НА ПРОГОН: по одному тикету второй запуск снёс бы индекс уже
+# работающей полосы.
 cbm_src="${LANE_CBM_STORE:-$HOME/.cache/skk-cbm/store}"
 cbm_clone="$MEDULLA_BRIDGE/cbm-$ticket-$$-$(date +%s)"
 cbm_ok=0
@@ -237,21 +189,14 @@ for _e in ${also[@]+"${also[@]}"}; do
 done
 if [[ -d "$cbm_src" ]]; then
   rm -rf "$cbm_clone"
-  # NO fallback into an existing destination: a partial `cp -Rc` leaves one, and
-  # a plain `cp -R` would then nest the store one level deeper - a clone that
-  # looks right and answers nothing.
+  # Без отката в существующий каталог: cp -R вложил бы хранилище глубже.
   if cp -Rc "$cbm_src" "$cbm_clone" 2>/dev/null; then cbm_ok=1
   else rm -rf "$cbm_clone"; cp -R "$cbm_src" "$cbm_clone" 2>/dev/null && cbm_ok=1; fi
 fi
-# FAIL CLOSED before the claim. A ticket requires the codebase preflight,
-# and a lane that starts without the graph repeats exactly what stopped the last
-# run. The check is not "the directory exists" but "the copy opens and answers".
+# Закрыто ДО заявки: проверяем не "каталог есть", а "копия отвечает".
 if (( cbm_ok )); then
-  # ПУТИ ПЕРЕПИСЫВАЮТСЯ ПОД КОНТЕЙНЕР. search_code — это grep по projects.root_path
-  # из базы; в индексе записан путь ХОСТА, а внутри код смонтирован в
-  # /workspace/<имя>, поэтому grep честно возвращает ПУСТО. Именно поэтому в первом
-  # сквозном прогоне разведка и кодер сделали 84 вызова Bash и НИ ОДНОГО к графу.
-  # Нашёл qwen. Штатного ремапа у CBM нет — правим в КЛОНЕ, он живёт один прогон.
+  # ПУТИ ПОД КОНТЕЙНЕР: search_code это grep по projects.root_path, а там путь
+  # ХОСТА - внутри grep честно вернёт пусто. Правим в КЛОНЕ.
   for db in "$cbm_clone"/*.db; do
     [ -e "$db" ] || continue
     for pair in "$repo:$project_dir" ${also[@]+"${also[@]}"}; do
@@ -260,13 +205,9 @@ if (( cbm_ok )); then
     done
   done
 
-  # Не "каталог открылся", а "каждая база цела и по ней реально отвечают".
-  # cp каталога не атомарен для работающей SQLite: повреждённая база проекта
-  # проходит list_projects и падает на первом search_graph в середине прогона.
-  # Окружение проверки — ТО ЖЕ, что у узлов, иначе проверено другое.
-  # Репозитории монтируются и в ПРОВЕРОЧНЫЙ контейнер, по тем же путям: после
-  # ремапа индекс указывает на /workspace/<имя>, и без монтирования канарейка
-  # проверяла бы пустоту вместо индекса.
+  # cp каталога не атомарен для живой SQLite: битая база проходит list_projects
+  # и падает на первом search_graph в середине прогона. Окружение проверки - ТО
+  # ЖЕ, что у узлов, и репы монтируются сюда же, иначе проверяем пустоту.
   probe_mounts=(-v "$repo:/workspace/$(basename "$repo"):ro")
   for _e in ${also[@]+"${also[@]}"}; do
     [ -d "$_e" ] && probe_mounts+=(-v "$_e:/workspace/$(basename "$_e"):ro")
@@ -280,12 +221,8 @@ if (( cbm_ok )); then
            [ "$(sqlite3 "$db" "PRAGMA quick_check;" 2>/dev/null | head -1)" = ok ] || {
              echo "torn: $db" >&2; exit 1; }
          done
-         # КАНАРЕЙКА С НЕНУЛЕВЫМ ОТВЕТОМ. list_projects доказывал лишь, что
-         # каталог открылся, и спокойно подтверждал индекс, из которого grep не
-         # достаёт ничего — ровно то, что случилось в первом прогоне. Спрашиваем
-         # то, чего в исходниках НЕ МОЖЕТ не быть, и требуем совпадений.
-         # По КАЖДОМУ смонтированному репозиторию, а не только по главному:
-         # ремап мог не примениться к scope-репозиториям, и sqlite молчит.
+         # Спрашиваем то, чего в исходниках НЕ МОЖЕТ не быть, и требуем
+         # совпадений - по КАЖДОЙ репе: ремап мог не примениться, sqlite молчит.
          ok=1
          for pr in $CBM_PROBE_PROJECTS; do
            codebase-memory-mcp cli search_code --project "$pr" --pattern import \
@@ -322,16 +259,11 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
   equill_vars=(
     --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
     --var "EQUILL_ACTOR=lane"
-    # Роль КОНТРАКТА ставится на узле и разная: medulla-coder не сажает.
-    # Роль ПАМЯТИ одна на прогон, потому что урок про этот репозиторий верен
-    # независимо от того, какой узел его читает. Замер: под lane 29 уроков,
-    # под medulla-coder один.
+    # Роль контракта - на узле; роль ПАМЯТИ одна на прогон (29 уроков против
+    # одного под medulla-coder).
     --var "EQUILL_MEMORY_ROLE=lane"
-    # Узлу конвейера тикетные правила не адресованы: он не ведёт тикет, он
-    # выполняет четыре шага и печатает сигнал. Координата убирает девять из них.
-    # Семнадцать коммуникационных убрать отсюда НЕЛЬЗЯ: у них координаты rules
-    # нет вовсе, значит они подстановочные и приходят при любом значении.
-    # Чтобы ушли и они, правилам нужна координата — это к владельцу правил.
+    # Тикетные правила узлу не адресованы. Коммуникационные так не убрать: у
+    # них координаты rules нет вовсе, значит они подстановочные.
     --var "EQUILL_RULES=${EQUILL_RULES:-none}"
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
@@ -351,24 +283,14 @@ else
   echo "run.sh: memory off - equill bridge not running" >&2
 fi
 
-# The bus name is assigned HERE and never travels into the container as a var:
-# vars reach every body's environment, agent bodies included, so a name passed
-# inward is a name the agent can read and re-export. The bridge holds it instead.
+# Имя на шине назначается ЗДЕСЬ и внутрь не едет: vars попадают в окружение
+# агентных тел, а значит имя оттуда можно перечитать и переобъявить.
 bus_from="$(printf 'lane-%s' "$project" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')"
 
-# The bus bridge. Same shape as the equill one: the container writes a request,
-# nothing in it speaks NATS. Room, identity, intent and the recipient allowlist
-# all live on this side.
-# PER PROJECT, not one for everybody. A second lane used to find the first
-# lane's live pidfile, skip starting its own, and send every notification under
-# the FIRST lane's identity and room - so a GM reading "from lane-<project>" was
-# reading the wrong project's name on the wrong project's failure.
-#
-# What this does NOT do, and it should be said plainly: medulla mounts the whole
-# bridge root at one path, writable, so a lane can still reach another lane's
-# directory on purpose. This fixes the collision, which is an accident and
-# happens whenever two lanes run at once; it does not fence a body that goes
-# looking. That fence needs a per-run mount, which is medulla's to give.
+# Мост шины: комната, имя и список получателей живут на ЭТОЙ стороне.
+# ПО ПРОЕКТУ: на общем пидфайле вторая полоса слала уведомления под именем и в
+# комнату ПЕРВОЙ. От намеренного захода в чужой каталог это не ограждает -
+# нужен помонтажный монтаж, и это к медулле.
 bus_dir="$MEDULLA_BRIDGE/bus-$bus_from"
 mkdir -p "$bus_dir/req" "$bus_dir/resp"
 if [[ ! -f "$bus_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bus_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
@@ -385,27 +307,17 @@ fi
 if [[ -f "$bus_dir/bridge.pid" ]] && kill -0 "$(cat "$bus_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
   echo "run.sh: bus on (bridge pid $(cat "$bus_dir/bridge.pid"), as $bus_from)" >&2
 else
-  # Refusing rather than warning. The bus is the lane's only way out: every
-  # outcome, success and failure alike, leaves through notify_*. A run started
-  # without it claims a ticket and then cannot tell anyone what became of it -
-  # which is the silent outcome this whole graph is built to prevent. Better to
-  # not start than to start mute, and this is checked BEFORE the claim.
+  # Отказ, а не предупреждение: шина - единственный выход. Без неё полоса
+  # возьмёт тикет и не сможет сказать, чем кончила. Проверка ДО заявки.
   echo "run.sh: bus bridge did not start - refusing, because every outcome leaves through it." >&2
   echo "        log: $MEDULLA_BRIDGE/bus-bridge.log" >&2
   exit 2
 fi
 
 cd "$TOOLING_ROOT"
-# --cwd-ro, and the runs folder OUTSIDE cwd because that flag requires it.
-#
-# Without this the agent - which runs with permissions skipped - has write access
-# to the whole tooling tree mounted at /workspace: its own workflow.yaml, its
-# memory hook, the landing script. An agent that cannot get past a review panel
-# can edit the rules of the panel. Read-only cwd is what makes the prompt's
-# instructions something it obeys rather than something it can amend.
-#
-# The repository under work is a SEPARATE mount and stays writable, so this costs
-# the lane nothing: the worktree is container-local and .git is in that mount.
+# --cwd-ro: иначе агент правит свой же workflow.yaml, хук памяти и скрипт
+# посадки - не прошедший панель может отредактировать правила панели.
+# Рабочий репозиторий - отдельное монтирование, остаётся записываемым.
 medulla \
   --docker \
   --cwd-ro \
