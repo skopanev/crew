@@ -209,7 +209,21 @@ if (( cbm_ok )); then
   if docker run --rm --entrypoint bash -v "$cbm_clone:$cbm_clone" "${probe_mounts[@]}" \
        -e CBM_CACHE_DIR="$cbm_clone" -e CBM_ALLOWED_ROOT=/workspace \
        -e CBM_PROBE_PROJECTS="$cbm_probe_projects" \
+       -e CBM_MAIN_PROJECT="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')" \
+       -e CBM_MAIN_PATH="/workspace/$(basename "$repo")" \
        "$MEDULLA_IMAGE" -c '
+         # ИНДЕКС ДОГОНЯЕТСЯ ПЕРЕД ЗАЯВКОЙ. Замер: база finik-app не писалась
+         # СУТКИ при живом демоне, а index_status всё это время отвечал "ready" -
+         # свежесть он не показывает вовсе. Разведчик это чувствовал и тратил
+         # шесть обращений из восьми на проверку покрытия вместо поиска.
+         # Стоимость замерена на клоне: догнать сутки отставания 25 с, повтор без
+         # изменений 12 с. Против часового прогона - ничто.
+         # --name ОБЯЗАТЕЛЕН: имя проекта выводится из пути, а внутри репа лежит
+         # в /workspace/<имя>, и без него завёлся бы ВТОРОЙ проект вместо
+         # обновления существующего. Пишем в КЛОН, хостовое хранилище не трогаем.
+         codebase-memory-mcp cli index_repository --repo-path "$CBM_MAIN_PATH" \
+           --name "$CBM_MAIN_PROJECT" --mode fast >/dev/null 2>&1 \
+           || echo "index_repository не отработал - идём на том, что есть" >&2
          for db in "$CBM_CACHE_DIR"/*.db; do
            [ -e "$db" ] || continue
            [ "$(sqlite3 "$db" "PRAGMA quick_check;" 2>/dev/null | head -1)" = ok ] || {
