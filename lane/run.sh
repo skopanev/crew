@@ -33,6 +33,11 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Вне дерева инструментов: этого требует --cwd-ro.
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 mkdir -p "$RUNS_FOLDER"
+# ФИЗИЧЕСКИЙ ПУТЬ, А НЕ ЧЕРЕЗ СИМЛИНК. Медулла монтирует каталог прогонов по
+# разрешённому пути, и если ~/.medulla - симлинк, внутри контейнера он лежит
+# под другим именем. LANE_WT_ROOT уезжал со старым: узел получал
+# "mkdir: cannot create directory /Users: Permission denied".
+RUNS_FOLDER="$(cd "$RUNS_FOLDER" && pwd -P)"
 # ДЕРЕВЬЯ ВНЕ РЕПОЗИТОРИЯ: внутри его собственные проверки сканировали их как
 # свой исходник и валили КАЖДЫЙ коммит в том чекауте, не только наш.
 WT_ROOT="$RUNS_FOLDER/worktrees"
