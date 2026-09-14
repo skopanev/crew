@@ -181,6 +181,27 @@ for _e in ${also[@]+"${also[@]}"}; do
   [ -d "$_e" ] || continue
   cbm_probe_projects="$cbm_probe_projects $(cd "$_e" && pwd -P | sed 's|^/||; s|/|-|g')"
 done
+# СПИСОК НА ПЕРЕИНДЕКСАЦИЮ: только те репы, что сдвинулись с прошлого прогона.
+# Отпечаток - HEAD после fetch; метка лежит в каталоге прогонов, то есть у нас,
+# а не рядом с чужим хранилищем. Совпало - индекс свежий, тратить 20 секунд не
+# на что; разошлось - догоняем именно эту репу.
+cbm_index_list=""
+cbm_marks="$RUNS_FOLDER/.cbm-marks"; mkdir -p "$cbm_marks"
+for r in "$repo" ${also[@]+"${also[@]}"}; do
+  [ -d "$r/.git" ] || [ -f "$r/.git" ] || continue
+  pr="$(printf %s "$r" | sed 's|^/||; s|/|-|g')"
+  fp="$(git -C "$r" rev-parse HEAD 2>/dev/null || echo unknown)"
+  if [ "$fp" = "$(cat "$cbm_marks/$pr" 2>/dev/null)" ]; then
+    echo "run.sh: $(basename "$r") - индекс свежий ($fp)" >&2
+  else
+    cbm_index_list="$cbm_index_list $pr=/workspace/$(basename "$r")"
+    # Метка ставится ПОСЛЕ успеха, а не сейчас: проставь её здесь, и провалившаяся
+    # индексация навсегда объявила бы репу свежей.
+    cbm_pending_marks="${cbm_pending_marks:-} $pr=$fp"
+    echo "run.sh: $(basename "$r") сдвинулся - переиндексируем" >&2
+  fi
+done
+
 if [[ -d "$cbm_src" ]]; then
   rm -rf "$cbm_clone"
   # Без отката в существующий каталог: cp -R вложил бы хранилище глубже.
@@ -209,21 +230,22 @@ if (( cbm_ok )); then
   if docker run --rm --entrypoint bash -v "$cbm_clone:$cbm_clone" "${probe_mounts[@]}" \
        -e CBM_CACHE_DIR="$cbm_clone" -e CBM_ALLOWED_ROOT=/workspace \
        -e CBM_PROBE_PROJECTS="$cbm_probe_projects" \
-       -e CBM_MAIN_PROJECT="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')" \
-       -e CBM_MAIN_PATH="/workspace/$(basename "$repo")" \
+       -e CBM_INDEX_LIST="$cbm_index_list" \
        "$MEDULLA_IMAGE" -c '
-         # ИНДЕКС ДОГОНЯЕТСЯ ПЕРЕД ЗАЯВКОЙ. Замер: база finik-app не писалась
-         # СУТКИ при живом демоне, а index_status всё это время отвечал "ready" -
-         # свежесть он не показывает вовсе. Разведчик это чувствовал и тратил
-         # шесть обращений из восьми на проверку покрытия вместо поиска.
-         # Стоимость замерена на клоне: догнать сутки отставания 25 с, повтор без
-         # изменений 12 с. Против часового прогона - ничто.
+         # ДОГОНЯЕМ ТОЛЬКО ТО, ЧТО СДВИНУЛОСЬ. Список считает хост: он только
+         # что сделал fetch и знает отпечатки. Пусто - значит всё свежее.
+         # Замер: база finik-app не писалась СУТКИ при живом демоне, а
+         # index_status всё это время отвечал "ready" - свежесть он не
+         # показывает вовсе, и разведчик тратил шесть обращений из восьми на
+         # проверку покрытия вместо поиска.
          # --name ОБЯЗАТЕЛЕН: имя проекта выводится из пути, а внутри репа лежит
          # в /workspace/<имя>, и без него завёлся бы ВТОРОЙ проект вместо
          # обновления существующего. Пишем в КЛОН, хостовое хранилище не трогаем.
-         codebase-memory-mcp cli index_repository --repo-path "$CBM_MAIN_PATH" \
-           --name "$CBM_MAIN_PROJECT" --mode fast >/dev/null 2>&1 \
-           || echo "index_repository не отработал - идём на том, что есть" >&2
+         for pair in $CBM_INDEX_LIST; do
+           codebase-memory-mcp cli index_repository --repo-path "${pair#*=}" \
+             --name "${pair%%=*}" --mode fast >/dev/null 2>&1 \
+             || echo "index_repository: ${pair%%=*} не отработал - идём на том, что есть" >&2
+         done
          for db in "$CBM_CACHE_DIR"/*.db; do
            [ -e "$db" ] || continue
            [ "$(sqlite3 "$db" "PRAGMA quick_check;" 2>/dev/null | head -1)" = ok ] || {
@@ -238,6 +260,7 @@ if (( cbm_ok )); then
              || { echo "index unusable for $pr" >&2; ok=0; }
          done
          [ "$ok" = 1 ]' 2>/dev/null; then
+    for m in ${cbm_pending_marks:-}; do printf '%s' "${m#*=}" > "$cbm_marks/${m%%=*}"; done
     echo "run.sh: codebase memory on ($cbm_clone)" >&2
   else
     cbm_ok=0
