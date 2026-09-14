@@ -336,7 +336,7 @@ nodes:
       {{last.message}}
       Tests already ran and passed - do not run them again.
 
-      **REPORT EVERY DEFECT IN THIS ONE PASS, NOT THE WORST ONE.** The round costs
+      **REPORT EVERY DEFECT FOUND IN THIS ONE PASS.** The round costs
       the same whether you return one finding or nine, and whatever you hold back
       comes back as ANOTHER full round of this panel on the same code. **A second
       round is a failure of the first.** Measured on this lane: three rounds, and
