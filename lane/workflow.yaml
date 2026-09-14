@@ -363,6 +363,10 @@ nodes:
     prompt: |
       Ticket {{var:ticket_id}}, worktree {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}. {{input.task}}
       Review `git diff --cached`. Do not change the tree.
+      Need to write anything down - notes, scratch, command output? Write it
+      under $MEDULLA_RUN_DIR/artifacts/, never into the worktree. A file left
+      there is a file the landing has to reason about, and one of them already
+      cost a run that had your unanimous CLEAR.
       {{last.message}}
       Tests already ran and passed - do not run them again.
 
