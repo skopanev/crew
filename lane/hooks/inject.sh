@@ -20,7 +20,7 @@ trap 'rm -f "$tmp"' EXIT
 jq --arg title "$title" --arg root "$TOOLING_ROOT" '
   def retarget:
     if type == "object" and .type == "command" and (.command | type == "string")
-    then .command |= sub("^.*?/(?<tail>(?:company|workflows)/[^\\s]*\\.sh)"; "bash \($root)/\(.tail)")
+    then .command |= sub("^.*?(?<tail>lane/[^\\s]*\\.sh)"; "bash \($root)/\(.tail)")
     else . end;
   def retitle:
     if type == "object" and .type == "mcp_tool" then .input.query = $title else . end;

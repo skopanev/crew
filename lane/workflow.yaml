@@ -34,9 +34,9 @@ nodes:
     shell: |
       set -euo pipefail
       cd "${project_dir}"
-      bash "${TOOLING_ROOT}/workflows/lane/hooks/inject.sh" \
+      bash "${TOOLING_ROOT}/lane/hooks/inject.sh" \
         /tmp/lane-settings.json \
-        "${TOOLING_ROOT}/workflows/lane/hooks/claude-settings.json"
+        "${TOOLING_ROOT}/lane/hooks/claude-settings.json"
       # Триаж - ЕДИНСТВЕННЫЙ узел, которому положено писать тикеты: резать,
       # заводить части, выставлять статус. Его файл выводится ИЗ ТОГО ЖЕ,
       # снятием ровно запретов mcp__ntk__ - чтобы две копии не разъехались по
@@ -52,7 +52,7 @@ nodes:
         /tmp/lane-settings.json > /tmp/lane-settings-scout.json
       # Дом кодекса: хуки те же пять событий из того же файла, плюс MCP в
       # config.toml - кодекс не принимает --settings и --mcp-config.
-      bash "${TOOLING_ROOT}/workflows/lane/hooks/codex-home.sh" \
+      bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
       if ! ntk show "${ticket_id}" -W "${project_name}" --json >/dev/null 2>&1; then
         echo "<signal:NO_TICKET>no ticket ${ticket_id} in ${project_name}</signal:NO_TICKET>"
@@ -257,7 +257,7 @@ nodes:
       - --settings
       - /tmp/lane-settings.json
       - --mcp-config
-      - /workspace/workflows/lane/hooks/mcp.json
+      - /workspace/lane/hooks/mcp.json
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
@@ -437,7 +437,7 @@ nodes:
       [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
         echo "<signal:LAND_FAILED>nothing to land: no commit above origin/${target}</signal:LAND_FAILED>"; exit 0; }
 
-      land() { rc=0; out="$("${TOOLING_ROOT}/workflows/lane/bin/land.sh" "$target" 2>&1)" || rc=$?; printf '%s\n' "$out"; }
+      land() { rc=0; out="$("${TOOLING_ROOT}/lane/bin/land.sh" "$target" 2>&1)" || rc=$?; printf '%s\n' "$out"; }
 
       land
       if [ "$rc" -eq 3 ]; then
@@ -613,7 +613,7 @@ nodes:
       - --settings
       - /tmp/lane-settings.json
       - --mcp-config
-      - /workspace/workflows/lane/hooks/mcp.json
+      - /workspace/lane/hooks/mcp.json
       - --strict-mcp-config
       - --setting-sources=
     prompt: |

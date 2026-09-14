@@ -42,7 +42,11 @@ mkdir -p "$RUNS_FOLDER"
 # с хоста и невидимо для проверок репозитория.
 WT_ROOT="$RUNS_FOLDER/worktrees"
 mkdir -p "$WT_ROOT"
-TOOLING_ROOT="$(cd "$WORKFLOW_DIR/../.." && pwd)"
+# ОДИН уровень, а не два: воркфлоу лежит в <repo>/lane. Ошибка здесь стоит
+# дорого - корень монтируется в контейнер как /workspace, и лишний уровень
+# отдал бы туда ВЕСЬ каталог проектов: чужие репозитории, ключи, рабочие
+# деревья других полос.
+TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}"
 also=()

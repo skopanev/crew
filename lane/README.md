@@ -12,7 +12,7 @@ run.sh --ticket <id> --project <ntk workspace> --repo <путь> --ssh-dir <ка
 Смотреть командой, не по памяти — она рисует собранный файл:
 
 ```
-medulla -w workflows/lane --graph
+medulla -w lane --graph
 ```
 
 Прямой путь: взять тикет, сделать ворктри, реализовать, панель из трёх
