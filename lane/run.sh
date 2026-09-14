@@ -2,7 +2,7 @@
 set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
-usage: run.sh --ticket <id> --project <ntk workspace> --mount-rw <repo>
+usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [extra medulla args...]
 
@@ -54,7 +54,7 @@ also=()
 passthrough=()
 while (( $# )); do
   case "$1" in
-    --ticket) ticket="${2:-}"; shift 2 ;;
+    --ticket-id) ticket="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     # Запись ровно ОДНА, и второй --mount-rw отвергается: посадка проверяет, что
     # садится ровно то дерево, которое смотрела панель, а разведка - что правка
@@ -71,7 +71,7 @@ while (( $# )); do
     *) passthrough+=("$1"); shift ;;
   esac
 done
-[[ -n "$ticket"  ]] || { echo "run.sh: --ticket is required" >&2; usage; }
+[[ -n "$ticket"  ]] || { echo "run.sh: --ticket-id is required" >&2; usage; }
 [[ -n "$project" ]] || { echo "run.sh: --project is required" >&2; usage; }
 [[ -n "$repo"    ]] || { echo "run.sh: --mount-rw is required" >&2; usage; }
 
@@ -214,7 +214,7 @@ for m in "$repo" "$ssh_dir" ${also[@]+"${also[@]}"}; do
   [[ -e "$point" ]] || { mkdir -p "$point" && made+=("$point"); }
 done
 
-export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-lane:latest}"
+export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 
 # CODEBASE MEMORY. The lane gets a CLONE of the host index, never the index.

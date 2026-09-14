@@ -5,7 +5,7 @@ set -euo pipefail
 # cannot see the host.
 cd "$(dirname "${BASH_SOURCE[0]}")"
 v() { "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
-docker build -t "${MEDULLA_IMAGE:-medulla-lane:latest}" -f Dockerfile \
+docker build -t "${MEDULLA_IMAGE:-medulla-crew:latest}" -f Dockerfile \
   --build-arg "CLAUDE_HOST_VERSION=$(v claude)" \
   --build-arg "CODEX_HOST_VERSION=$(v codex)" \
   "$@" .

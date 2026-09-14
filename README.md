@@ -63,7 +63,7 @@ Dockerfile           образ
 ```sh
 ./build-image.sh                       # образ; версии харнессов берутся с хоста
 equill record --store <store> roles/medulla-records.jsonl
-./lane/run.sh --ticket <id> --project <workspace> --mount-rw <repo> --ssh-dir <dir>
+./lane/run.sh --ticket-id <id> --project <workspace> --mount-rw <repo> --ssh-dir <dir>
 ```
 
 Перед первым запуском задайте в `lane/workflow.yaml` пустые значения:
