@@ -4,7 +4,7 @@
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
 ```
-run.sh --ticket <id> --project <ntk workspace> --repo <путь> --ssh-dir <каталог ключа>
+run.sh --ticket <id> --project <ntk workspace> --mount-rw <репозиторий> --ssh-dir <каталог ключа>
 ```
 
 ## Граф
