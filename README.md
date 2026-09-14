@@ -61,9 +61,12 @@ Dockerfile           образ
 ## Установка
 
 ```sh
-docker build -t medulla-crew:latest .       # образ
+docker build --build-arg USER_UID=$(id -u) -t medulla-crew:latest .
 equill record --store <store> roles/medulla-records.jsonl
 ```
+
+`USER_UID` обязателен: репозитории монтируются с хоста, и git внутри откажется
+работать с деревом, принадлежащим другому пользователю — `dubious ownership`.
 
 Комнаты и курьер — в `lane/local.env`, образец рядом: `local.env.example`.
 Файла нет — полоса работает молча, это не ошибка.

@@ -84,8 +84,21 @@ COPY lane/bridge/equill-shim.sh /usr/local/bin/equill
 COPY lane/bridge/agentbus-shim.sh /usr/local/bin/agentbus
 RUN chmod 755 /usr/local/bin/equill /usr/local/bin/agentbus
 
-# Пользователь без прав root: агент пишет в своё дерево, а не в систему.
-RUN useradd -m -u 1001 -s /bin/bash medulla
+# ПОЛЬЗОВАТЕЛЬ С UID ХОСТА, А НЕ С ПРОИЗВОЛЬНЫМ. Репозитории монтируются с
+# хоста, и git отказывается работать с чужим по владельцу деревом:
+# "fatal: detected dubious ownership in repository at /workspace/<repo>" - на
+# этом встал fetch, origin/<ветка> не появился, и узел доложил NO_TARGET_BRANCH.
+# Собирать так: docker build --build-arg USER_UID=$(id -u) -t medulla-crew .
+# Если uid уже занят (в node:24 это node с 1000), переименовываем существующего,
+# а не заводим второго - так же делает сама медулла в своём базовом образе.
+ARG USER_UID=501
+RUN if getent passwd ${USER_UID} >/dev/null; then \
+      existing="$(getent passwd ${USER_UID} | cut -d: -f1)"; \
+      usermod -l medulla "$existing"; \
+      usermod -d /home/medulla -m medulla; \
+    else \
+      useradd -m -u ${USER_UID} -s /bin/bash medulla; \
+    fi
 USER medulla
 
 # КАТАЛОГИ ДОМА СОЗДАЮТСЯ ЗАРАНЕЕ, И ЭТО НЕ КОСМЕТИКА. Медулла монтирует внутрь
@@ -93,7 +106,8 @@ USER medulla
 # создаёт недостающие родительские каталоги от ROOT. После этого init-docker.sh
 # не может сделать mkdir $HOME/.local/share и раскладка учётных данных падает.
 RUN mkdir -p /home/medulla/.local/bin /home/medulla/.local/share \
-             /home/medulla/.config /home/medulla/.cache /home/medulla/.medulla
+             /home/medulla/.config /home/medulla/.cache /home/medulla/.medulla \
+ && chown -R medulla:medulla /home/medulla
 
 # Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
 RUN curl -fsSL https://bun.sh/install | bash
