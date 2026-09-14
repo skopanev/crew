@@ -2,15 +2,16 @@
 set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
-usage: run.sh --ticket <id> --project <ntk workspace> --repo <host path to repo>
-              [--module <module>] [--also <repo>]... [--ssh-dir <dir>]
+usage: run.sh --ticket <id> --project <ntk workspace> --mount-rw <repo>
+              [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [extra medulla args...]
 
-  --repo     host path of the git repository the ticket is implemented in,
-             e.g. ~/Projects/<org>/<repo>
-  --module   ticket module; read from ntk when omitted
-  --also     another repository to mount READ-ONLY, for scope. Repeatable.
-             The lane writes only in --repo; these are there to be read.
+  --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
+              the lane writes in one place, and both the landing check and the
+              out-of-module verdict depend on that.
+  --module    ticket module; read from ntk when omitted
+  --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
+              Sibling repositories next to --mount-rw are added automatically.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
              made-up path that nobody created is worse than none. The whole
@@ -53,11 +54,18 @@ also=()
 passthrough=()
 while (( $# )); do
   case "$1" in
-    --ticket|--ticket_id) ticket="${2:-}"; shift 2 ;;
-    --project|--project_name) project="${2:-}"; shift 2 ;;
-    --repo|--project_dir) repo="${2:-}"; shift 2 ;;
-    --module|--module_name) module="${2:-}"; shift 2 ;;
-    --also) also+=("${2:-}"); shift 2 ;;
+    --ticket) ticket="${2:-}"; shift 2 ;;
+    --project) project="${2:-}"; shift 2 ;;
+    # Запись ровно ОДНА, и второй --mount-rw отвергается: посадка проверяет, что
+    # садится ровно то дерево, которое смотрела панель, а разведка - что правка
+    # не выходит за модуль. Два пишущих репозитория отменяют обе проверки.
+    --mount-rw)
+      [ -z "$repo" ] || { echo "run.sh: --mount-rw задан дважды: $repo и ${2:-}" >&2
+                          echo "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro" >&2
+                          exit 2; }
+      repo="${2:-}"; shift 2 ;;
+    --module) module="${2:-}"; shift 2 ;;
+    --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
@@ -65,10 +73,10 @@ while (( $# )); do
 done
 [[ -n "$ticket"  ]] || { echo "run.sh: --ticket is required" >&2; usage; }
 [[ -n "$project" ]] || { echo "run.sh: --project is required" >&2; usage; }
-[[ -n "$repo"    ]] || { echo "run.sh: --repo is required" >&2; usage; }
+[[ -n "$repo"    ]] || { echo "run.sh: --mount-rw is required" >&2; usage; }
 
 [[ -d "$repo/.git" || -f "$repo/.git" ]] || {
-  echo "run.sh: --repo is not a git repository: $repo" >&2
+  echo "run.sh: --mount-rw is not a git repository: $repo" >&2
   echo "        (it must be the repo itself, not the directory that holds several)" >&2
   exit 2
 }
@@ -148,12 +156,12 @@ mounts=(--mount-rw "$repo")
 # writes in exactly one place.
 scope=()
 for extra in ${also[@]+"${also[@]}"}; do
-  [[ -d "$extra" ]] || { echo "run.sh: --also is not a directory: $extra" >&2; exit 2; }
+  [[ -d "$extra" ]] || { echo "run.sh: --mount-ro is not a directory: $extra" >&2; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
   base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
   if [[ -e "$TOOLING_ROOT/$base" ]]; then
-    echo "run.sh: $TOOLING_ROOT/$base exists; --also $extra would hide it inside" >&2
+    echo "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside" >&2
     exit 2
   fi
   # Fetched HERE, on the host: the mount is read-only, so the container cannot
