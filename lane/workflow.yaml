@@ -306,7 +306,7 @@ nodes:
       effort: high
       task: Review the diff for clean code.
     - harness: agy
-      model: gemini-3.8-flash-high
+      model: Gemini 3.1 Pro (High)
       effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
                      # иначе {{input.effort}} не разрешится и МЕСТО УПАДЁТ — измерено.
       task: Review the diff for security flaws.
@@ -335,7 +335,25 @@ nodes:
       Review `git diff --cached`. Do not change the tree.
       {{last.message}}
       Tests already ran and passed - do not run them again.
-      Name the subject; give file:line for every finding.
+
+      **REPORT EVERY DEFECT IN THIS ONE PASS, NOT THE WORST ONE.** The round costs
+      the same whether you return one finding or nine, and whatever you hold back
+      comes back as ANOTHER full round of this panel on the same code. **A second
+      round is a failure of the first.** Measured on this lane: three rounds, and
+      each of the first two was stopped by a single finding that had been on the
+      screen since the first.
+      Sweep the change by name before you answer: every path through it; every
+      input that reaches it, empty and malformed included; every caller that
+      depends on it; every failure mode - error, retry, a second run; and what the
+      change SAYS against what it DOES, meaning comments, names and tests that now
+      describe something no longer true. Small defects go in too. There is no
+      reward for brevity and no limit on how many findings you may return.
+      Give file:line for every finding. If you found only one thing, say what you
+      swept to be sure - that is a claim about coverage and it is worth reading.
+
+      **REJECT only for what must be fixed BEFORE this ships.** Everything else
+      belongs in the same message, named as non-blocking: it reaches the same
+      person either way, and it does not cost a round.
       Print your verdict as a tag on its own line: <signal:CLEAR>what is clean</signal:CLEAR> or <signal:REJECT>what you found</signal:REJECT>.
   expert_review_synthesis:
     timeout: 60
@@ -362,14 +380,19 @@ nodes:
           found = {n for n in names if n in VERDICTS}
           return found.pop() if len(found) == 1 else ""
 
-      go, findings = 0, []
+      go, findings, notes = 0, [], []
       for r in rows:
           v = verdict(r)
           who = r.get("harness") or "?"
+          line = f"- {who}: {v or 'нет вердикта'} {r.get('message') or ''}".strip()
+          # ПИШЕМ ВСЕХ, И СКАЗАВШИХ CLEAR ТОЖЕ. Ревьюеру велено класть
+          # неблокирующие находки в то же сообщение - раньше они молча
+          # пропадали, потому что сюда попадали только реджекты.
+          notes.append(line)
           if v == "CLEAR":
               go += 1
           else:
-              findings.append(f"- {who}: {v or 'нет вердикта'} {r.get('message') or ''}".strip())
+              findings.append(line)
 
       art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
       art.mkdir(parents=True, exist_ok=True)
@@ -377,7 +400,7 @@ nodes:
       # и reject_gate собирал историю из этих обрезков. Всё, что длиннее, молча
       # не доезжало до того, кто правит.
       with (art / "panel-findings.txt").open("a") as fh:
-          fh.write("\n".join(findings) + "\n---\n")
+          fh.write("\n".join(notes) + "\n---\n")
       print(f"панель: {go} из {len(rows)} сказали CLEAR", file=sys.stderr)
 
       if rows and go == len(rows):
