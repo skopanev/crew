@@ -27,6 +27,10 @@ USAGE
 }
 
 WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ПЕЧАТАЕМ С ВОЗВРАТОМ КАРЕТКИ. В панели терминал оказывается без преобразования
+# \n в \r\n, и обычный echo уводит вывод лесенкой: строка опускается, но курсор
+# остаётся там же. Медулла печатает свои строки сама и ровно, наши - нет.
+say() { printf '%s\r\n' "$*" >&2; }
 # Комнаты и курьер - у каждого свои, в общий репозиторий им нельзя.
 # Файла нет - полоса работает молча. Образец: lane/local.env.example
 [ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
@@ -54,8 +58,8 @@ while (( $# )); do
     --project) project="${2:-}"; shift 2 ;;
     # Ровно ОДИН: на этом держатся и проверка посадки, и проверка модуля.
     --mount-rw)
-      [ -z "$repo" ] || { echo "run.sh: --mount-rw задан дважды: $repo и ${2:-}" >&2
-                          echo "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro" >&2
+      [ -z "$repo" ] || { say "run.sh: --mount-rw задан дважды: $repo и ${2:-}"
+                          say "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro"
                           exit 2; }
       repo="${2:-}"; shift 2 ;;
     --module) module="${2:-}"; shift 2 ;;
@@ -66,74 +70,74 @@ while (( $# )); do
     *) passthrough+=("$1"); shift ;;
   esac
 done
-[[ -n "$ticket"  ]] || { echo "run.sh: --ticket-id is required" >&2; usage; }
-[[ -n "$project" ]] || { echo "run.sh: --project is required" >&2; usage; }
-[[ -n "$repo"    ]] || { echo "run.sh: --mount-rw is required" >&2; usage; }
-[[ -n "$cbm_src" ]] || { echo "run.sh: --cbm-store is required" >&2; usage; }
+[[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
+[[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
+[[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
+[[ -n "$cbm_src" ]] || { say "run.sh: --cbm-store is required"; usage; }
 
 [[ -d "$repo/.git" || -f "$repo/.git" ]] || {
-  echo "run.sh: --mount-rw is not a git repository: $repo" >&2
-  echo "        (it must be the repo itself, not the directory that holds several)" >&2
+  say "run.sh: --mount-rw is not a git repository: $repo"
+  say "        (it must be the repo itself, not the directory that holds several)"
   exit 2
 }
 repo="$(cd "$repo" && pwd -P)"
 project_dir="/workspace/$(basename "$repo")"
 
 if [[ -e "$TOOLING_ROOT/$(basename "$repo")" ]]; then
-  echo "run.sh: $TOOLING_ROOT/$(basename "$repo") exists, and the mount would hide it inside" >&2
-  echo "        the container. Rename one of the two, or mount from elsewhere." >&2
+  say "run.sh: $TOOLING_ROOT/$(basename "$repo") exists, and the mount would hide it inside"
+  say "        the container. Rename one of the two, or mount from elsewhere."
   exit 2
 fi
 
 if ! ticket_json="$(cd "$repo" && ntk show "$ticket" -W "$project" --json 2>&1)"; then
-  echo "run.sh: ${ticket_json%%$'\n'*}" >&2
-  echo "run.sh: ticket $ticket does not exist in workspace $project - nothing to run" >&2
+  say "run.sh: ${ticket_json%%$'\n'*}"
+  say "run.sh: ticket $ticket does not exist in workspace $project - nothing to run"
   exit 2
 fi
 # --module СВЕРЯЕТ, а не подменяет: модуль принадлежит тикету.
 stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
 if [[ -n "$module" ]]; then
   if [[ -z "$stored" ]]; then
-    echo "run.sh: ticket $ticket declares no module, and --module cannot supply one." >&2
-    echo "        Set the module on the ticket; the launcher only asserts it." >&2
+    say "run.sh: ticket $ticket declares no module, and --module cannot supply one."
+    say "        Set the module on the ticket; the launcher only asserts it."
     exit 2
   fi
   if [[ "$module" != "$stored" ]]; then
-    echo "run.sh: --module disagrees with the ticket." >&2
-    echo "        ticket $ticket says: $stored" >&2
-    echo "        --module says:       $module" >&2
-    echo "        Refusing before any side effect. Fix the ticket or drop --module." >&2
+    say "run.sh: --module disagrees with the ticket."
+    say "        ticket $ticket says: $stored"
+    say "        --module says:       $module"
+    say "        Refusing before any side effect. Fix the ticket or drop --module."
     exit 2
   fi
-  echo "run.sh: module asserted: $stored" >&2
+  say "run.sh: module asserted: $stored"
 fi
 module="$stored"
 # Без модуля охват судят по границе, которой нет, И память молчит: хуку нужны
 # все EQUILL_* или ни одного, а EQUILL_MODULE один из них.
 if [[ -z "$module" ]]; then
-  echo "run.sh: ticket $ticket declares no module." >&2
-  echo "        A lane judges scope against the module and loads its contract by it;" >&2
-  echo "        with neither, it would work confidently against a boundary nobody drew." >&2
-  echo "        Set the module on the ticket, then run this again." >&2
+  say "run.sh: ticket $ticket declares no module."
+  say "        A lane judges scope against the module and loads its contract by it;"
+  say "        with neither, it would work confidently against a boundary nobody drew."
+  say "        Set the module on the ticket, then run this again."
   exit 2
 fi
 
 mounts=(--mount-rw "$repo")
 
 for extra in ${also[@]+"${also[@]}"}; do
-  [[ -d "$extra" ]] || { echo "run.sh: --mount-ro is not a directory: $extra" >&2; exit 2; }
+  [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
   base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
   if [[ -e "$TOOLING_ROOT/$base" ]]; then
-    echo "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside" >&2
+    say "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside"
     exit 2
   fi
   # fetch, НИКОГДА pull: в этих деревьях могут сидеть другие полосы.
   if git -C "$extra" rev-parse --git-dir >/dev/null 2>&1; then
     git -C "$extra" fetch --quiet --all --prune 2>/dev/null \
-      && echo "run.sh: fetched $base" >&2 \
-      || echo "run.sh: could not fetch $base - it travels as it is" >&2
+      && say "run.sh: fetched $base" \
+      || say "run.sh: could not fetch $base - it travels as it is"
   fi
   mounts+=(--mount "$extra")
 done
@@ -149,8 +153,8 @@ if [[ -f "$ssh_dir/id_ed25519" ]]; then
   git_ssh="ssh -F /dev/null -i $ssh_in/id_ed25519 -o IdentitiesOnly=yes"
   git_ssh+=" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$ssh_in/known_hosts"
 else
-  echo "run.sh: no key at $ssh_dir/id_ed25519 - git fetch will fail at create_worktree" >&2
-  echo "        put the lane's deploy key there (and nothing else), or pass --ssh-dir" >&2
+  say "run.sh: no key at $ssh_dir/id_ed25519 - git fetch will fail at create_worktree"
+  say "        put the lane's deploy key there (and nothing else), or pass --ssh-dir"
 fi
 
 made=()
@@ -192,13 +196,13 @@ for r in "$repo" ${also[@]+"${also[@]}"}; do
   pr="$(printf %s "$r" | sed 's|^/||; s|/|-|g')"
   fp="$(git -C "$r" rev-parse HEAD 2>/dev/null || echo unknown)"
   if [ "$fp" = "$(cat "$cbm_marks/$pr" 2>/dev/null)" ]; then
-    echo "run.sh: $(basename "$r") - индекс свежий ($fp)" >&2
+    say "run.sh: $(basename "$r") - индекс свежий ($fp)"
   else
     cbm_index_list="$cbm_index_list $pr=/workspace/$(basename "$r")"
     # Метка ставится ПОСЛЕ успеха, а не сейчас: проставь её здесь, и провалившаяся
     # индексация навсегда объявила бы репу свежей.
     cbm_pending_marks="${cbm_pending_marks:-} $pr=$fp"
-    echo "run.sh: $(basename "$r") сдвинулся - переиндексируем" >&2
+    say "run.sh: $(basename "$r") сдвинулся - переиндексируем"
   fi
 done
 
@@ -244,12 +248,12 @@ if (( cbm_ok )); then
          for pair in $CBM_INDEX_LIST; do
            codebase-memory-mcp cli index_repository --repo-path "${pair#*=}" \
              --name "${pair%%=*}" --mode fast >/dev/null 2>&1 \
-             || echo "index_repository: ${pair%%=*} не отработал - идём на том, что есть" >&2
+             || say "index_repository: ${pair%%=*} не отработал - идём на том, что есть"
          done
          for db in "$CBM_CACHE_DIR"/*.db; do
            [ -e "$db" ] || continue
            [ "$(sqlite3 "$db" "PRAGMA quick_check;" 2>/dev/null | head -1)" = ok ] || {
-             echo "torn: $db" >&2; exit 1; }
+             say "torn: $db"; exit 1; }
          done
          # Спрашиваем то, чего в исходниках НЕ МОЖЕТ не быть, и требуем
          # совпадений - по КАЖДОЙ репе: ремап мог не примениться, sqlite молчит.
@@ -257,20 +261,20 @@ if (( cbm_ok )); then
          for pr in $CBM_PROBE_PROJECTS; do
            codebase-memory-mcp cli search_code --project "$pr" --pattern import \
              --mode files 2>/dev/null | grep -qE "\"total_grep_matches\":[1-9]" \
-             || { echo "index unusable for $pr" >&2; ok=0; }
+             || { say "index unusable for $pr"; ok=0; }
          done
          [ "$ok" = 1 ]' 2>/dev/null; then
     for m in ${cbm_pending_marks:-}; do printf '%s' "${m#*=}" > "$cbm_marks/${m%%=*}"; done
-    echo "run.sh: codebase memory on ($cbm_clone)" >&2
+    say "run.sh: codebase memory on ($cbm_clone)"
   else
     cbm_ok=0
-    echo "run.sh: the index clone does not answer - a torn copy, or a store the" >&2
-    echo "        image cannot open. Refusing: a ticket needs the graph." >&2
+    say "run.sh: the index clone does not answer - a torn copy, or a store the"
+    say "        image cannot open. Refusing: a ticket needs the graph."
   fi
 fi
 if (( ! cbm_ok )); then
   rm -rf "$cbm_clone"
-  echo "run.sh: no usable codebase index at $cbm_src - refusing before the claim." >&2
+  say "run.sh: no usable codebase index at $cbm_src - refusing before the claim."
   exit 2
 fi
 
@@ -308,10 +312,10 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_MODULE=$module"
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
   )
-  echo "run.sh: memory on (equill bridge pid $(cat "$bridge_dir/bridge.pid"))" >&2
+  say "run.sh: memory on (equill bridge pid $(cat "$bridge_dir/bridge.pid"))"
 else
-  [[ -n "$module" ]] || echo "run.sh: no module - memory stays off (the hook needs every EQUILL_* or none)" >&2
-  echo "run.sh: memory off - equill bridge not running" >&2
+  [[ -n "$module" ]] || say "run.sh: no module - memory stays off (the hook needs every EQUILL_* or none)"
+  say "run.sh: memory off - equill bridge not running"
 fi
 
 # Имя на шине назначается ЗДЕСЬ и внутрь не едет: vars попадают в окружение
@@ -336,12 +340,12 @@ if [[ ! -f "$bus_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bus_dir/bridge.pid" 2>
   done
 fi
 if [[ -f "$bus_dir/bridge.pid" ]] && kill -0 "$(cat "$bus_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  echo "run.sh: bus on (bridge pid $(cat "$bus_dir/bridge.pid"), as $bus_from)" >&2
+  say "run.sh: bus on (bridge pid $(cat "$bus_dir/bridge.pid"), as $bus_from)"
 else
   # Отказ, а не предупреждение: шина - единственный выход. Без неё полоса
   # возьмёт тикет и не сможет сказать, чем кончила. Проверка ДО заявки.
-  echo "run.sh: bus bridge did not start - refusing, because every outcome leaves through it." >&2
-  echo "        log: $MEDULLA_BRIDGE/bus-bridge.log" >&2
+  say "run.sh: bus bridge did not start - refusing, because every outcome leaves through it."
+  say "        log: $MEDULLA_BRIDGE/bus-bridge.log"
   exit 2
 fi
 
