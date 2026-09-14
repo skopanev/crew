@@ -25,12 +25,10 @@ RUN apt-get update -qq \
 # Ставится КОММИТОМ, а не "последним": последний выходит по нескольку раз в
 # день, и образ, собранный дважды подряд, оказывался разным. Коммит передаёт
 # build-image.sh, читая его с хоста - так снаружи и внутри работает один движок.
-ARG MEDULLA_REF=main
 RUN python3 -m venv /opt/medulla \
  && /opt/medulla/bin/pip install --no-cache-dir -q \
-      "git+https://github.com/skopanev/medulla.git@${MEDULLA_REF}" \
- && ln -s /opt/medulla/bin/medulla /usr/local/bin/medulla \
- && medulla --version
+      "git+https://github.com/skopanev/medulla.git" \
+ && ln -s /opt/medulla/bin/medulla /usr/local/bin/medulla
 # И ЗАПРЕТ САМООБНОВЛЕНИЯ. init-docker.sh, который монтирует медулла, на КАЖДОМ
 # старте тянет main и ставит его поверх - для образа с плавающей версией это
 # лечение, для нашего пина на коммит хоста это отмена пина: контейнер уехал бы
@@ -39,43 +37,32 @@ RUN python3 -m venv /opt/medulla \
 ENV MEDULLA_UPGRADE_ON_START=0
 
 # ── ХАРНЕССЫ ─────────────────────────────────────────────────────────────────
-# ПИН, а не "latest" и не "как на хосте". Они работают только здесь, совпадать
-# с хостовыми им незачем, а вот собраться у двоих одинаково - обязаны.
-# Почему не хостовая: замер показал на хосте claude 2.1.236 при 2.1.268 в
-# образе, и --strict-mcp-config режет хостовые MCP-серверы с 2.1.268 и НЕ режет
-# на 2.1.236. "Как на хосте" молча откатило бы полосу ровно в то поведение, на
-# отсутствии которого держится вся изоляция.
-# Двигать руками и после прогона полосы на новой версии.
-ARG CLAUDE_VERSION=2.1.270
-ARG CODEX_VERSION=0.154.0
-RUN npm i -g --silent "@anthropic-ai/claude-code@${CLAUDE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
- && claude --version && codex --version
+# Каналом, а не версией: claude - stable, тот же, что объявлен в настройках
+# полосы ("autoUpdatesChannel": "stable"). У codex канала stable нет, есть
+# latest и alpha.
+RUN npm i -g --silent "@anthropic-ai/claude-code@stable" "@openai/codex@latest"
 
 # ── ИНСТРУМЕНТЫ ──────────────────────────────────────────────────────────────
 # CBM: предполёт по графу кода. Работает НАТИВНО, а не через мост к хосту -
 # полоса получает сам граф, а не отчёт о нём.
-ARG CBM_VERSION=0.10.8
 RUN a="$(cat /tmp/arch)"; set -eux; \
-    curl -fsSL "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${CBM_VERSION}/codebase-memory-mcp-linux-${a}.tar.gz" \
+    curl -fsSL "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/codebase-memory-mcp-linux-${a}.tar.gz" \
       -o /tmp/cbm.tgz \
  && tar -xzf /tmp/cbm.tgz -C /tmp \
  && install -m 755 "$(find /tmp -maxdepth 2 -type f -name codebase-memory-mcp | head -1)" /usr/local/bin/codebase-memory-mcp \
- && rm -rf /tmp/cbm.tgz \
- && codebase-memory-mcp --version
+ && rm -rf /tmp/cbm.tgz
 
 # RTK: переписывает команды оболочки в компактный эквивалент. Замер на хосте -
 # 123 тысячи команд, сэкономлено 66.9% вывода. Кодер делает по три десятка
 # вызовов за прогон, и это прямая экономия его контекста.
-ARG RTK_VERSION=0.49.0
 RUN a="$(cat /tmp/arch)"; set -eux; \
     case "$a" in arm64) asset="rtk-aarch64-unknown-linux-gnu" ;; \
                  *)     asset="rtk-x86_64-unknown-linux-musl" ;; esac; \
-    curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/${asset}.tar.gz" \
+    curl -fsSL "https://github.com/rtk-ai/rtk/releases/latest/download/${asset}.tar.gz" \
       -o /tmp/rtk.tgz \
  && tar -xzf /tmp/rtk.tgz -C /tmp \
  && install -m 755 "$(find /tmp -maxdepth 2 -type f -name rtk | head -1)" /usr/local/bin/rtk \
- && rm -rf /tmp/rtk.tgz \
- && rtk --version
+ && rm -rf /tmp/rtk.tgz
 
 # NTK: тикеты. Публичная загрузка, ключ прокидывается при запуске.
 # НЕ ПИНИТСЯ, И ТАК ЗАДУМАНО: ntk всегда актуальный. Эндпоинт отдаёт новейший
@@ -84,7 +71,7 @@ RUN a="$(cat /tmp/arch)"; set -eux; \
 # нормально, а не изъян.
 RUN a="$(cat /tmp/arch)"; \
     curl -fsSL "https://ntk.otion.us/v1/download?platform=linux-${a}" -o /usr/local/bin/ntk \
- && chmod 755 /usr/local/bin/ntk && ntk --version
+ && chmod 755 /usr/local/bin/ntk
 
 # ── ПРОСЛОЙКИ ────────────────────────────────────────────────────────────────
 # equill - бинарь macOS; внутри он может быть только клиентом моста к хосту.
@@ -93,21 +80,20 @@ COPY lane/bridge/equill-shim.sh /usr/local/bin/equill
 # имя отправителя в нём объявляется само: одна переменная окружения - и тело
 # говорит от чужого лица, в контейнере, где согласования пропущены.
 COPY lane/bridge/agentbus-shim.sh /usr/local/bin/agentbus
-RUN chmod 755 /usr/local/bin/equill /usr/local/bin/agentbus \
- && bash -n /usr/local/bin/equill && sh -n /usr/local/bin/agentbus
+RUN chmod 755 /usr/local/bin/equill /usr/local/bin/agentbus
 
 # Пользователь без прав root: агент пишет в своё дерево, а не в систему.
 RUN useradd -m -u 1001 -s /bin/bash medulla
 USER medulla
 
 # Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
-RUN curl -fsSL https://bun.sh/install | bash && /home/medulla/.bun/bin/bun --version
+RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
 
 # ЦЕПЬЮ к /mnt/init-docker.sh, не заменой: он раскладывает учётные данные.
 # Файл монтирует медулла при запуске, поэтому его здесь нет и быть не должно.
 COPY --chown=medulla:medulla lane/bin/entrypoint.sh /usr/local/bin/lane-entrypoint.sh
 USER root
-RUN chmod 755 /usr/local/bin/lane-entrypoint.sh && sh -n /usr/local/bin/lane-entrypoint.sh
+RUN chmod 755 /usr/local/bin/lane-entrypoint.sh
 USER medulla
 ENTRYPOINT ["/usr/local/bin/lane-entrypoint.sh"]

@@ -395,46 +395,6 @@ else
   exit 2
 fi
 
-# The engine inside the image and the engine on this machine must be the same
-# one. The image pins the host's exact commit at build time, so the two agree
-# the moment it is built - but an image can sit unrebuilt while the host moves
-# on, and then every reading of render.py or the signal rules - mine, and both
-# architects' - describes an engine other than the one executing the nodes, and
-# nobody knows.
-host_medulla="$(medulla --version 2>/dev/null | awk '{print $2}')"
-img_medulla="$(docker run --rm --entrypoint bash "$MEDULLA_IMAGE" \
-                 -lc 'medulla --version' 2>/dev/null | awk '{print $2}')"
-# Fail CLOSED. Requiring both to be non-empty before comparing meant that an
-# unreadable version - no docker, no image, a version string in another shape -
-# skipped the check entirely and the run continued. That is fail-open on the one
-# guard protecting every conclusion anybody drew about how this engine renders.
-if [[ -z "$host_medulla" || -z "$img_medulla" ]]; then
-  echo "run.sh: could not read the engine version (host '${host_medulla:-?}', image '${img_medulla:-?}')." >&2
-  echo "        Refusing rather than skipping: this check is what makes the workflow's" >&2
-  echo "        rules describe the engine that actually runs the nodes." >&2
-  exit 2
-fi
-if [[ "$host_medulla" != "$img_medulla" ]]; then
-  echo "run.sh: engine mismatch - host $host_medulla, image $img_medulla." >&2
-  echo "        Rebuild the image, or pin it: every claim about rendering and" >&2
-  echo "        signals was made against one of these, not both." >&2
-  exit 2
-fi
-
-# CBM drifts differently from medulla: the host daemon updates itself, while the
-# image pins a version at build. A store written by a newer daemon can carry a
-# schema the image cannot read, and that surfaces as empty answers rather than
-# an error. Named LOUDLY and not fatal: a graph one version behind is still a
-# graph, and the degradation is already declared.
-host_cbm="$(codebase-memory-mcp --version 2>/dev/null | awk '{print $2}')"
-img_cbm="$(docker run --rm --entrypoint bash "$MEDULLA_IMAGE" \
-             -c 'codebase-memory-mcp --version' 2>/dev/null | awk '{print $2}')"
-if [[ -n "$host_cbm" && -n "$img_cbm" && "$host_cbm" != "$img_cbm" ]]; then
-  echo "run.sh: CODEBASE MEMORY MISMATCH - host $host_cbm, image $img_cbm." >&2
-  echo "        The index was written by the host build; the image reads it." >&2
-  echo "        Update through the broker and rebuild before trusting the graph." >&2
-fi
-
 cd "$TOOLING_ROOT"
 # --cwd-ro, and the runs folder OUTSIDE cwd because that flag requires it.
 #

@@ -61,7 +61,7 @@ Dockerfile           образ
 ## Установка
 
 ```sh
-./build-image.sh                       # образ; версии харнессов берутся с хоста
+docker build -t medulla-crew:latest .       # образ
 equill record --store <store> roles/medulla-records.jsonl
 ./lane/run.sh --ticket-id <id> --project <workspace> --mount-rw <repo> --ssh-dir <dir>
 ```
