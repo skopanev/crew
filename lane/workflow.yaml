@@ -122,6 +122,13 @@ nodes:
       any Bash; check SIMILAR_TO before writing anything new. Cite both.
       Do not survey unrelated code.
 
+      WRITE YOUR RECONNAISSANCE TO $MEDULLA_RUN_DIR/artifacts/scout.txt BEFORE
+      YOU FINISH. That file is the whole of what the coder receives from you -
+      your signal is one line and carries nothing. Files you read, what you
+      found where, with file:line, and what remains unknown. Say the unknowns
+      plainly: the coder is told to trust this file, so a guess written as a
+      finding costs more than a gap named as one.
+
   create_worktree:
     env:
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
@@ -202,14 +209,18 @@ nodes:
           deps=" NOTE: bun install failed here - install before trusting any test."
         fi
       fi
-      # Своё сообщение, а не служебное. Без сигнала сюда приезжает текст движка
-      # про __default__, и на первом проходе он становится ВСЕМ промптом кодера.
-      # Находка разведчика — ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
-      # нельзя: одна кавычка внутри превращает сообщение в исполняемый код,
-      # и разведчик получает shell до панели. Пишем как ДАННЫЕ, через printf,
-      # и несём дальше СТАТИЧЕСКИЙ путь, а не содержимое.
+      # Находка разведчика - ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
+      # нельзя: одна кавычка внутри превращает сообщение в исполняемый код.
+      # Пишем как ДАННЫЕ, через printf, и несём дальше СТАТИЧЕСКИЙ путь.
+      # ТОЛЬКО ЕСЛИ РАЗВЕДЧИК НЕ НАПИСАЛ САМ. Раньше сюда всегда ложился текст
+      # сигнала - 119 байт "runtime premise remains unverified, UNKNOWN", - и
+      # это было всё, что доходило до кодера от узла, прочитавшего два десятка
+      # файлов и съевшего 634 тысячи токенов.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
-      printf '%s' "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
+      if [ ! -s "$MEDULLA_RUN_DIR/artifacts/scout.txt" ]; then
+        printf 'РАЗВЕДЧИК НЕ ОСТАВИЛ ОТЧЁТА. Всё, что от него есть:\n%s\n' \
+          "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
+      fi
       # "РАЗВЕДКА ПО КОДОВОЙ БАЗЕ, ЕЙ ДОВЕРЯЙ" - слова владельца, и за ними замер.
       # Прогон d33de436: разведка нашла причину и передала её - LocaleLayout
       # omits messages, i18n/request.ts loads the entire catalogue, - плюс 20
@@ -489,6 +500,7 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
     timeout: 180
     on_signal:
+      LANDED: notify_success
       LANDED_TICKET_STUCK: notify_success
       __failed__: notify_failure
       __default__: notify_success
@@ -506,7 +518,11 @@ nodes:
           "$head_sha" "$target" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" "${left:-}"
         exit 0
       fi
-      echo "landed ${head_sha} onto ${target}${left:-}"
+      # СИГНАЛОМ, а не голым echo. Без тега движок подставляет в сообщение своё
+      # объяснение про __default__, и владелец получал его в уведомлении:
+      # "no known signal emitted, so the node took __default__ ...; stdout: ..."
+      printf '<signal:LANDED>сел %s на %s%s</signal:LANDED>\n' \
+        "$head_sha" "$target" "${left:-}"
   notify_failure:
     env:
       ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
