@@ -88,6 +88,13 @@ RUN chmod 755 /usr/local/bin/equill /usr/local/bin/agentbus
 RUN useradd -m -u 1001 -s /bin/bash medulla
 USER medulla
 
+# КАТАЛОГИ ДОМА СОЗДАЮТСЯ ЗАРАНЕЕ, И ЭТО НЕ КОСМЕТИКА. Медулла монтирует внутрь
+# отдельные ФАЙЛЫ - ~/.local/bin/claude, ~/.config/ntk и прочее, - а Docker
+# создаёт недостающие родительские каталоги от ROOT. После этого init-docker.sh
+# не может сделать mkdir $HOME/.local/share и раскладка учётных данных падает.
+RUN mkdir -p /home/medulla/.local/bin /home/medulla/.local/share \
+             /home/medulla/.config /home/medulla/.cache /home/medulla/.medulla
+
 # Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
