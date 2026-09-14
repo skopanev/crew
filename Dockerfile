@@ -1,8 +1,25 @@
-FROM medulla-default:4317a0852042
+# БАЗА НЕ ПРИШПИЛЕНА ЧИСЛОМ. Медулла везёт свой базовый образ с собой, и его
+# тег - отпечаток той версии движка, что была при сборке. Пришпиленный тег
+# застывает: у нас внутри оказалась 4.76.4 при 4.90 на хосте, разрыв в
+# четырнадцать версий, и все замеры описывали не тот движок, который исполняет.
+# Тег подставляет build-image.sh, беря САМЫЙ СВЕЖИЙ из имеющихся. Обновил
+# медуллу - пересобрал - база подтянулась. Править тут нечего и не надо.
+ARG BASE_IMAGE=medulla-default:latest
+FROM ${BASE_IMAGE}
 
 USER root
 
-RUN curl -fsSL "https://ntk.otion.us/v1/download?platform=linux-arm64" -o /usr/local/bin/ntk \
+# АРХИТЕКТУРА ОПРЕДЕЛЯЕТСЯ, А НЕ ПРЕДПОЛАГАЕТСЯ. Раньше здесь было жёстко
+# arm64 - на Apple Silicon это родная и всё работало, а на обычном linux/amd64
+# сборка либо падает на скачивании, либо кладёт внутрь двоичные файлы не той
+# архитектуры, и они не запускаются.
+ARG TARGETARCH
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture 2>/dev/null || uname -m)}"; \
+    case "$arch" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo amd64 ;; \
+      *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac > /tmp/arch
+
+RUN a="$(cat /tmp/arch)"; \
+    curl -fsSL "https://ntk.otion.us/v1/download?platform=linux-${a}" -o /usr/local/bin/ntk \
  && chmod +x /usr/local/bin/ntk \
  && ntk --version
 
@@ -13,11 +30,11 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends sqlite3
  && rm -rf /var/lib/apt/lists/* && sqlite3 --version
 
 # Codebase Memory runs NATIVELY here, not through the host bridge: the project
-# ships a linux-arm64 build of the same version the host runs, so the lane gets
+# ships a build for this architecture of the same version the host runs, so the lane gets
 # the graph itself rather than a report about it.
 ARG CBM_VERSION=0.10.8
-RUN set -eux; \
-    curl -fsSL "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${CBM_VERSION}/codebase-memory-mcp-linux-arm64.tar.gz" \
+RUN set -eux; a="$(cat /tmp/arch)"; \
+    curl -fsSL "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${CBM_VERSION}/codebase-memory-mcp-linux-${a}.tar.gz" \
       -o /tmp/cbm.tar.gz; \
     tar -xzf /tmp/cbm.tar.gz -C /tmp; \
     install -m 755 "$(find /tmp -maxdepth 2 -type f -name 'codebase-memory-mcp' | head -1)" \
@@ -37,8 +54,9 @@ RUN set -eux; \
 # в контракте всё это время, а бинаря в образе не было вовсе - я это замерил и
 # снял правило отбором. Теперь оно исполнимо.
 ARG RTK_VERSION=0.49.0
-RUN set -eux; \
-    curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/rtk-aarch64-unknown-linux-gnu.tar.gz" \
+RUN set -eux; a="$(cat /tmp/arch)"; \
+    rtk_arch="$([ "$a" = arm64 ] && echo aarch64 || echo x86_64)"; \
+    curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/rtk-${rtk_arch}-unknown-linux-gnu.tar.gz" \
       -o /tmp/rtk.tar.gz; \
     tar -xzf /tmp/rtk.tar.gz -C /tmp; \
     install -m 755 "$(find /tmp -maxdepth 2 -type f -name rtk | head -1)" /usr/local/bin/rtk; \
@@ -111,14 +129,15 @@ RUN set -eu; \
       npm i -g --silent "@openai/codex@${CODEX_HOST_VERSION}"; \
     else echo "codex: image $have kept (host '${CODEX_HOST_VERSION}')" >&2; fi
 
-ARG MEDULLA_VERSION=4.88.0
-RUN set -eux; \
-    medulla upgrade; \
-    got="$(medulla --version | awk '{print $2}')"; \
-    if [ "$got" != "${MEDULLA_VERSION}" ]; then \
-      echo "medulla is $got, this image pins ${MEDULLA_VERSION}." >&2; \
-      echo "Bump MEDULLA_VERSION once the workflow has been read against $got." >&2; \
-      exit 1; \
-    fi
+# ДВИЖОК БЕРЁТСЯ ИЗ БАЗОВОГО ОБРАЗА, БЕЗ upgrade. Обновление на сборке тянуло
+# самую свежую версию из сети - а она выходит по нескольку раз в день: сегодня
+# хост ушёл с 4.86 на 4.87, потом 4.88, потом 4.90, и каждый раз сборка падала
+# на несовпадении с пришпиленным числом.
+# Версия здесь ТА, ЧТО В БАЗОВОМ ОБРАЗЕ, и меняется вместе с ним - осознанно, а
+# не на каждой пересборке.
+# Совпадение с хостом проверяет run.sh при запуске: утверждения о том, как
+# раскрываются шаблоны и маршрутизируются сигналы, описывают ОДИН движок, и
+# расхождение делает их описанием другого.
+RUN medulla --version
 
 ENTRYPOINT ["/usr/local/bin/lane-entrypoint.sh"]
