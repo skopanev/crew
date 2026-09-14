@@ -396,10 +396,11 @@ else
 fi
 
 # The engine inside the image and the engine on this machine must be the same
-# one. The image used to run `medulla upgrade` at build time, so its version
-# floated: every reading of render.py or the signal rules - mine, and both
-# architects' - would have described an engine other than the one executing the
-# nodes, and nobody would have known.
+# one. The image pins the host's exact commit at build time, so the two agree
+# the moment it is built - but an image can sit unrebuilt while the host moves
+# on, and then every reading of render.py or the signal rules - mine, and both
+# architects' - describes an engine other than the one executing the nodes, and
+# nobody knows.
 host_medulla="$(medulla --version 2>/dev/null | awk '{print $2}')"
 img_medulla="$(docker run --rm --entrypoint bash "$MEDULLA_IMAGE" \
                  -lc 'medulla --version' 2>/dev/null | awk '{print $2}')"

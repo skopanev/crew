@@ -1,5 +1,7 @@
 {
   "language": "english",
+  "autoUpdatesChannel": "stable",
+  "disableAutoUpdates": true,
   "includeCoAuthoredBy": false,
   "sandbox": {
     "filesystem": {
