@@ -469,7 +469,8 @@ nodes:
       [ -f "$snap" ] || { echo "<signal:LAND_FAILED>нет зафиксированного снимка панели</signal:LAND_FAILED>"; exit 0; }
       want_tree="$(sed -n 1p "$snap")"
       git diff --quiet || { echo "<signal:LAND_FAILED>дерево изменилось после панели: есть неиндексированные правки</signal:LAND_FAILED>"; exit 0; }
-      [ -z "$(git ls-files --others --exclude-standard)" ] || { echo "<signal:LAND_FAILED>дерево изменилось после панели: появились новые файлы</signal:LAND_FAILED>"; exit 0; }
+      new_files="$(git ls-files --others --exclude-standard | head -10 | tr '\n' ' ')"
+      [ -z "$new_files" ] || { echo "<signal:LAND_FAILED>дерево изменилось после панели, появились новые файлы: ${new_files}</signal:LAND_FAILED>"; exit 0; }
       have_tree="$(git write-tree)"
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
 
@@ -572,9 +573,16 @@ nodes:
       saved=""
       if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WT_ROOT}/wt-${ticket_id}" ]; then
         if [ -n "$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" status --porcelain 2>/dev/null)" ]; then
+          # --no-verify ИМЕННО ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ. Это не посадка: коммит никуда
+          # не уезжает, он существует, чтобы работа пережила контейнер с --rm.
+          # Замер: pre-commit репозитория зовёт i18n:check, тот падает на
+          # "ENOENT ... node_modules/@finik/shared-types" - установка в дереве
+          # неполная, - и сеть безопасности рвётся ровно там, где она нужна.
+          # Посадка хуки проходит по-прежнему: land.sh отказывается от --no-verify
+          # по построению.
           if git -C "${LANE_WT_ROOT}/wt-${ticket_id}" add -A 2>&1 \
              && git -C "${LANE_WT_ROOT}/wt-${ticket_id}" -c user.name=lane -c user.email=lane@local \
-                    commit -q -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
+                    commit -q --no-verify -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
             saved=" Работа сохранена коммитом в ветке ticket-${ticket_id}."
           else
             saved=" РАБОТА НЕ СОХРАНЕНА: коммит не прошёл, дерево умрёт с контейнером."
