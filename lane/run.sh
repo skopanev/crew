@@ -3,12 +3,16 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
+              --cbm-store <dir>
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [extra medulla args...]
 
   --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
               the lane writes in one place, and both the landing check and the
               out-of-module verdict depend on that.
+  --cbm-store the codebase-memory index directory. The lane gets a COPY of it,
+              never the directory itself, and refuses to start if the copy does
+              not open and answer.
   --module    ticket module; read from ntk when omitted
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
@@ -36,7 +40,7 @@ mkdir -p "$WT_ROOT"
 # ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}"
+ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src=""
 also=()
 passthrough=()
 while (( $# )); do
@@ -52,6 +56,7 @@ while (( $# )); do
     --module) module="${2:-}"; shift 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
+    --cbm-store) cbm_src="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -59,6 +64,7 @@ done
 [[ -n "$ticket"  ]] || { echo "run.sh: --ticket-id is required" >&2; usage; }
 [[ -n "$project" ]] || { echo "run.sh: --project is required" >&2; usage; }
 [[ -n "$repo"    ]] || { echo "run.sh: --mount-rw is required" >&2; usage; }
+[[ -n "$cbm_src" ]] || { echo "run.sh: --cbm-store is required" >&2; usage; }
 
 [[ -d "$repo/.git" || -f "$repo/.git" ]] || {
   echo "run.sh: --mount-rw is not a git repository: $repo" >&2
@@ -162,7 +168,6 @@ export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 # границу монтирования, и снимок застывает на старте.
 # Имя УНИКАЛЬНО НА ПРОГОН: по одному тикету второй запуск снёс бы индекс уже
 # работающей полосы.
-cbm_src="${LANE_CBM_STORE:-$HOME/.cache/skk-cbm/store}"
 cbm_clone="$MEDULLA_BRIDGE/cbm-$ticket-$$-$(date +%s)"
 cbm_ok=0
 # Имя проекта в индексе выводится из абсолютного пути репозитория.
