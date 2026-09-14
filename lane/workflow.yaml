@@ -562,6 +562,13 @@ nodes:
       # с --rm: всё несохранённое исчезает вместе с ним. Первый сквозной прогон
       # потерял двенадцать минут работы кодера ровно так — а эти две команды
       # стояли под `|| true` и упали МОЛЧА, поэтому никто не узнал.
+      # И ЗДЕСЬ ТОЖЕ bun В PATH. Хук репозитория зовёт `nice -n 15 bun run
+      # typecheck`, и без него коммит-спасение падает с "nice: 'bun': No such
+      # file or directory" - ровно это и случилось: три раунда работы кодера
+      # умерли вместе с контейнером, а артефакт честно сказал "РАБОТА НЕ
+      # СОХРАНЕНА". Я чинил это в create_worktree и в git_landing, а третье
+      # место, где коммит делается, пропустил.
+      export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
       if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WT_ROOT}/wt-${ticket_id}" ]; then
         if [ -n "$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" status --porcelain 2>/dev/null)" ]; then
