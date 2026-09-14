@@ -276,6 +276,7 @@ nodes:
   prepare_review:
     env:
       ticket_id: '{{var:ticket_id}}'
+      project_dir: '{{var:project_dir}}'
     timeout: 120
     on_signal:
       SNAPSHOT: expert_review
@@ -291,7 +292,15 @@ nodes:
       # ревьюера — а у них есть запись в дерево — в одобренный коммит.
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
-      if git diff --cached --quiet "$base" -- 2>/dev/null; then
+      # И ЕЩЁ УСЛОВИЕ: НЕТ КОММИТОВ НАД ЦЕЛЬЮ. Пустой индекс означает "ничего не
+      # сделано" только на пути юнита, где кодер оставляет работу незакоммиченной.
+      # Сюда же ведёт ребро git_fix→OK, а сведение конфликта КОММИТИТ само
+      # (rebase --continue), и после него дерево чисто, индекс равен HEAD - по
+      # одному первому условию успешно разрешённый конфликт докладывался как
+      # "дерево не изменилось" и ронял прогон. Нашёл glm-architector.
+      target=$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)
+      if git diff --cached --quiet "$base" -- 2>/dev/null \
+         && [ -z "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ]; then
         echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
         exit 0
       fi
