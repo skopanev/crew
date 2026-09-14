@@ -123,7 +123,6 @@ done
 
 mounts=(--mount-rw "$repo")
 
-scope=()
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { echo "run.sh: --mount-ro is not a directory: $extra" >&2; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
@@ -140,7 +139,6 @@ for extra in ${also[@]+"${also[@]}"}; do
       || echo "run.sh: could not fetch $base - it travels as it is" >&2
   fi
   mounts+=(--mount "$extra")
-  scope+=("/workspace/$base")
 done
 git_ssh=""
 # НЕ ЗАКРЫТО. Ключ с правом ЗАПИСИ попадает в окружение КАЖДОГО узла, включая

@@ -581,15 +581,11 @@ nodes:
         BRANCH_HAS_WORK|DUPLICATE|PREMISE_BROKEN|OUT_OF_MODULE|LAND_FAILED|TOO_MANY_ROUNDS) want=blocked ;;
         *)               want=open ;;
       esac
-        # ТОЛЬКО СТАТУС, БЕЗ ПРИПИСКИ В ТЕЛО. Полоса дописывала отчёт в тело
-        # тикета, тело росло и упёрлось в предел 2000 символов — перевод отказал,
-        # а `|| true` это проглотил. Подробности идут владельцу в Телеграм и
-        # лежат в артефактах; тикету нужен статус, а не пересказ.
-        if [ -n "${want:-}" ] && ! upd="$(ntk update "${ticket_id}" -W "${project_name}" -s "$want" --force 2>&1)"; then
-          msg="${msg} ТИКЕТ НЕ ПЕРЕВЕДЁН в ${want}: $(printf '%s' "$upd" | tr '\n' ' ' | cut -c1-160)"
-        fi
-      case x in x)
-      esac
+      # Только статус: полоса дописывала отчёт в тело, тело упёрлось в предел
+      # 2000 символов, перевод отказал, а `|| true` это проглотил.
+      if [ -n "${want:-}" ] && ! upd="$(ntk update "${ticket_id}" -W "${project_name}" -s "$want" --force 2>&1)"; then
+        msg="${msg} ТИКЕТ НЕ ПЕРЕВЕДЁН в ${want}: $(printf '%s' "$upd" | tr '\n' ' ' | cut -c1-160)"
+      fi
       # Владельцу, а не в роли флота: полоса сейчас отлаживается, и её отказ —
       # новость для того, кто её запустил, а не для PM или генерального.
       agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
