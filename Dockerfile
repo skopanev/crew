@@ -113,6 +113,16 @@ RUN mkdir -p /home/medulla/.local/bin /home/medulla/.local/share \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
 
+# GIT ДОЛЖЕН ПРИНЯТЬ ПРИМОНТИРОВАННЫЕ РЕПОЗИТОРИИ. Docker Desktop отдаёт тома с
+# владельцем root, и git отказывается: "fatal: detected dubious ownership in
+# repository at /workspace/<repo>" - fetch не проходит, origin/<ветка> не
+# появляется, узел докладывает NO_TARGET_BRANCH. Подгонка uid этого НЕ решает:
+# владелец внутри всё равно root. Базовый образ медуллы нёс ровно эти
+# переменные, и с ними полоса работала; при отказе от базы они потерялись.
+ENV GIT_CONFIG_COUNT=2 \
+    GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/workspace \
+    GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1=*
+
 # ЦЕПЬЮ к /mnt/init-docker.sh, не заменой: он раскладывает учётные данные.
 # Файл монтирует медулла при запуске, поэтому его здесь нет и быть не должно.
 COPY --chown=medulla:medulla lane/bin/entrypoint.sh /usr/local/bin/lane-entrypoint.sh
