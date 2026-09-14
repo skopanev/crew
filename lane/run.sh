@@ -11,7 +11,6 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               out-of-module verdict depend on that.
   --module    ticket module; read from ntk when omitted
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
-              Sibling repositories next to --mount-rw are added automatically.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
              made-up path that nobody created is worse than none. The whole
@@ -107,19 +106,6 @@ if [[ -z "$module" ]]; then
   echo "        Set the module on the ticket, then run this again." >&2
   exit 2
 fi
-
-# Соседи подключаются сами, на чтение: модуль ограничивает, ГДЕ писать, а
-# читать надо всё рядом. Иначе полоса встаёт на OUT_OF_MODULE из-за того, что
-# ей просто не дали соседнюю репу.
-parent="$(dirname "$repo")"
-for sib in "$parent"/*/; do
-  sib="${sib%/}"
-  [[ -e "$sib/.git" ]] || continue
-  [[ "$sib" != "$repo" ]] || continue
-  skip=""
-  for a in ${also[@]+"${also[@]}"}; do [[ "$a" != "$sib" ]] || skip=1; done
-  [[ -n "$skip" ]] || also+=("$sib")
-done
 
 mounts=(--mount-rw "$repo")
 
