@@ -696,6 +696,8 @@ nodes:
         || { echo "bus refused - record is in $MEDULLA_RUN_DIR/artifacts/failure.txt" >&2; exit 1; }
   notify_success:
     env:
+      project_name: '{{var:project_name}}'
+      module_name: '{{var:module_name}}'
       ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
       ESCALATION_ROOM: '{{var:ESCALATION_ROOM}}'
       TELEGRAM_ROOM: '{{var:TELEGRAM_ROOM}}'
@@ -729,7 +731,21 @@ nodes:
       grep -h -E '^- (MED|LOW) ' "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null \
         | sort -u > "$followups" || true
       n_follow="$(wc -l < "$followups" 2>/dev/null | tr -d ' ')"
-      [ "${n_follow:-0}" -gt 0 ] && msg="${msg} Неблокирующих находок: ${n_follow}, на тикеты: ${followups}"
+      # И ЗАВОДЯТСЯ ТИКЕТАМИ, СЫРЫМИ. Решает не модель, а форма: узел шелловый,
+      # берёт строку как есть и создаёт тикет в open БЕЗ ТЕГОВ - очередь его не
+      # подхватит, пока человек или триаж не разберёт. Потолок назван вслух:
+      # больше десяти за прогон не заводим, и если отрезали - говорим сколько.
+      made=0; cap=10
+      if [ "${n_follow:-0}" -gt 0 ]; then
+        while IFS= read -r line; do
+          [ "$made" -lt "$cap" ] || break
+          body="$(printf 'Сырая находка панели, прогон %s, тикет %s.\n\n%s\n\nРазобрать: подтвердить, оценить, при необходимости разрезать.' "${MEDULLA_RUN_ID:-?}" "${ticket_id}" "$line")"
+          ntk create "$(printf '%s' "$line" | cut -c1-110)" -W "${project_name}" \
+            --module "${module_name}" -s open -b "$body" >/dev/null 2>&1 && made=$((made+1))
+        done < "$followups"
+        msg="${msg} Неблокирующих находок ${n_follow}, заведено тикетами ${made}"
+        [ "$n_follow" -gt "$cap" ] && msg="${msg} (потолок ${cap} за прогон, остальные в ${followups})"
+      fi
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
       agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
         "Посыльный, в Телеграм ${TELEGRAM_ROOM} (топик ${TELEGRAM_TOPIC}): ${mark} ${msg}" \
