@@ -297,6 +297,32 @@ if (( ! cbm_ok )); then
   exit 2
 fi
 
+# ОСНАСТКА ПОД ЯЗЫК РЕПОЗИТОРИЯ - ДО ЗАЯВКИ, как и всё остальное здесь.
+# Кодер обязан прогнать тесты и выдать OK только после того, как они прошли.
+# Если собирать нечем, он этого не может - и узнаёт об этом на середине.
+# Замер: на Rust-тикете он честно доложил "unverified by compilation", потом
+# сам полез ставить rustup внутрь контейнера (около гигабайта на прогон), а
+# круг стоил 730 секунд. Ни разу не отказ - просто работа без проверки.
+#
+# СПРАШИВАЕМ ОБА ИСТОЧНИКА, А НЕ ОДИН ОБРАЗ. Инструмент может приехать и
+# оверлеем медуллы (~/.medulla/container/bin/<имя> монтируется в
+# /usr/local/bin), и тогда в образе его нет, а у кодера он есть. Проверка
+# только по образу давала ложную тревогу ровно там, где всё настроено.
+# Не отказ, а имя: тикет может не требовать сборки вовсе.
+lang_probe() {
+  local marker="$1" tool="$2" what="$3"
+  [[ -e "$repo/$marker" ]] || return 0
+  [[ -e "${MEDULLA_HOME:-$HOME/.medulla}/container/bin/$tool" ]] && return 0
+  docker run --rm --entrypoint sh "$MEDULLA_IMAGE" -c "command -v $tool" >/dev/null 2>&1 && return 0
+  say "run.sh: $marker есть, а $tool ни в образе, ни в оверлее - $what проверить нечем."
+  say "        Кодер напишет правку, но тесты не прогонит: контракт требует"
+  say "        OK только после прохождения тестов, и он это честно сообщит."
+}
+lang_probe Cargo.toml       cargo   "Rust"
+lang_probe go.mod           go      "Go"
+lang_probe pyproject.toml   python3 "Python"
+lang_probe build.gradle.kts gradle  "Kotlin/JVM"
+
 bridge_dir="$MEDULLA_BRIDGE/equill"
 mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
 if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
