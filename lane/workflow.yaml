@@ -268,7 +268,7 @@ nodes:
       __default__: notify_failure
     agent:
       harness: claude-code
-      model: claude-sonnet-5
+      model: claude-opus-5
       effort: high
       # ОДНА СЕССИЯ НА ВСЕ КРУГИ. Узел проходится заново после каждого отказа
       # панели, и без имени сессии это КАЖДЫЙ РАЗ новый разговор: кодер не
