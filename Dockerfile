@@ -32,6 +32,21 @@ RUN apt-get update -qq \
       gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
+# GIT ДОЛЖЕН ПРИНЯТЬ ПРИМОНТИРОВАННЫЕ РЕПОЗИТОРИИ. Docker Desktop отдаёт тома с
+# владельцем root, и git отказывается: "fatal: detected dubious ownership in
+# repository at /workspace/<repo>". Подгонка uid этого НЕ решает: владелец
+# внутри всё равно root.
+#
+# ФАЙЛОМ, А НЕ ПЕРЕМЕННЫМИ. Базовый образ медуллы нёс это в GIT_CONFIG_COUNT и
+# ключах, и мы сначала повторили - но окружение вычищают. Замер: проверяльщик
+# finik-app (scripts/lib/shared-types-source.cli.ts) СПЕЦИАЛЬНО удаляет
+# GIT_CONFIG_COUNT, чтобы "проба не наследовала git-контекст вызывающего", -
+# и вместе с ним исчезает всё наше доверие: линковка shared-types падает с
+# просьбой добавить safe.directory, установка не проходит, посадка встаёт на
+# pre-commit. Файл системной конфигурации так не отнимешь.
+RUN git config --system --add safe.directory /workspace \
+ && git config --system --add safe.directory '*'
+
 # ── ДВИЖОК ───────────────────────────────────────────────────────────────────
 # Ставится КОММИТОМ, а не "последним": последний выходит по нескольку раз в
 # день, и образ, собранный дважды подряд, оказывался разным. Коммит передаёт
@@ -135,16 +150,6 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 # Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
-
-# GIT ДОЛЖЕН ПРИНЯТЬ ПРИМОНТИРОВАННЫЕ РЕПОЗИТОРИИ. Docker Desktop отдаёт тома с
-# владельцем root, и git отказывается: "fatal: detected dubious ownership in
-# repository at /workspace/<repo>" - fetch не проходит, origin/<ветка> не
-# появляется, узел докладывает NO_TARGET_BRANCH. Подгонка uid этого НЕ решает:
-# владелец внутри всё равно root. Базовый образ медуллы нёс ровно эти
-# переменные, и с ними полоса работала; при отказе от базы они потерялись.
-ENV GIT_CONFIG_COUNT=2 \
-    GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/workspace \
-    GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1=*
 
 # ЦЕПЬЮ к /mnt/init-docker.sh, не заменой: он раскладывает учётные данные.
 # Файл монтирует медулла при запуске, поэтому его здесь нет и быть не должно.
