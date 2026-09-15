@@ -54,6 +54,18 @@ nodes:
       # config.toml - кодекс не принимает --settings и --mcp-config.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
+      # КОНТРАКТ ПАНЕЛИ ДОСТАЁТСЯ ЗДЕСЬ, ОДИН РАЗ, ФАЙЛОМ. Хук - не путь для
+      # панели: у opencode и agy Equill подключён MCP-сервером, а не хуком, то
+      # есть позвать его они могут, а вложить им контракт на старте некому.
+      # Замер прогона eeea8f74: роль medulla-qa в журнале хуков не встречается
+      # НИ РАЗУ, все три места работали на одном узловом промпте.
+      # Файл читают все трое одинаково, независимо от харнесса.
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
+        --profile agent.context.target --role medulla-qa --process medulla-qa \
+        --coordinate rules=none \
+        > "$MEDULLA_RUN_DIR/artifacts/qa-contract.txt" 2>/dev/null \
+        || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
       if ! ntk show "${ticket_id}" -W "${project_name}" --json >/dev/null 2>&1; then
         echo "<signal:NO_TICKET>no ticket ${ticket_id} in ${project_name}</signal:NO_TICKET>"
         exit 0
@@ -385,6 +397,9 @@ nodes:
       - '{{input.flag:-}}'
     prompt: |
       Ticket {{var:ticket_id}}, worktree {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}. {{input.task}}
+      YOUR CONTRACT - role, ordered steps, rules - is at
+      $MEDULLA_RUN_DIR/artifacts/qa-contract.txt. Read it first; it is what you
+      are held to, and it is not repeated here.
       Review `git diff --cached`. Do not change the tree.
       Need to write anything down - notes, scratch, command output? One file,
       and it is yours: $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md
