@@ -14,6 +14,11 @@ vars:
 nodes:
   ntk_claim:
     env:
+      # СБОРКА КОНТРАКТА РАЗВЕДКИ ИДЁТ ОТСЮДА, а equill требует имя пишущего
+      # из окружения и отказывает ДО чтения стора, если его нет. Пусковик обе
+      # переменные передаёт, узлу их надо только принять.
+      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
+      EQUILL_STORE: '{{var:EQUILL_STORE}}'
       LANE_PATH: '{{var:LANE_PATH}}'   # читает inject.sh, не тело узла
       # Нужны ЗДЕСЬ, а не только у агентных узлов: codex-home.sh пишет их в
       # config.toml дома кодекса. Кодекс запускает MCP-сервер сам и окружение
@@ -314,6 +319,12 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
       EQUILL_STORE: '{{var:EQUILL_STORE}}'
+      # БЕЗ АКТОРА КОНТРАКТ ПАНЕЛИ НЕ СОБИРАЛСЯ НИ РАЗУ: equill читает имя
+      # пишущего только из окружения и отказывает до чтения стора словами
+      # "EQUILL_ACTOR must be supplied by the calling orchestrator". Отказ
+      # уходил в 2>/dev/null, на месте оставался пустой файл, и панель шла
+      # на одном промпте - молча и с виду исправно.
+      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
     timeout: 120
     on_signal:
       SNAPSHOT: expert_review
