@@ -83,8 +83,18 @@ done
 repo="$(cd "$repo" && pwd -P)"
 project_dir="/workspace/$(basename "$repo")"
 
-if [[ -e "$TOOLING_ROOT/$(basename "$repo")" ]]; then
-  say "run.sh: $TOOLING_ROOT/$(basename "$repo") exists, and the mount would hide it inside"
+# ПУСТОЙ КАТАЛОГ ЗДЕСЬ - НАШ ЖЕ СЛЕД, а не чужое имя. Точки монтирования
+# заводятся ниже и снимаются в trap; при аварийной остановке (Ctrl+C, упавший
+# узел, снятый контейнер) trap не отрабатывает, и пустой каталог остаётся.
+# Следующий запуск утыкался в него и объявлял столкновение имён - то есть
+# показывал на чужое там, где лежало своё. Замерено трижды за один день.
+# Пустой снимаем молча, непустой по-прежнему останавливает: там чужое.
+_point="$TOOLING_ROOT/$(basename "$repo")"
+if [[ -d "$_point" && -z "$(ls -A "$_point" 2>/dev/null)" ]]; then
+  rmdir "$_point" 2>/dev/null || true
+fi
+if [[ -e "$_point" ]]; then
+  say "run.sh: $_point exists, and the mount would hide it inside"
   say "        the container. Rename one of the two, or mount from elsewhere."
   exit 2
 fi
@@ -129,6 +139,10 @@ for extra in ${also[@]+"${also[@]}"}; do
   extra="$(cd "$extra" && pwd -P)"
   base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
+  # Тот же след аварийной остановки, что и у --mount-rw выше.
+  if [[ -d "$TOOLING_ROOT/$base" && -z "$(ls -A "$TOOLING_ROOT/$base" 2>/dev/null)" ]]; then
+    rmdir "$TOOLING_ROOT/$base" 2>/dev/null || true
+  fi
   if [[ -e "$TOOLING_ROOT/$base" ]]; then
     say "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside"
     exit 2
@@ -282,6 +296,32 @@ if (( ! cbm_ok )); then
   say "run.sh: no usable codebase index at $cbm_src - refusing before the claim."
   exit 2
 fi
+
+# ОСНАСТКА ПОД ЯЗЫК РЕПОЗИТОРИЯ - ДО ЗАЯВКИ, как и всё остальное здесь.
+# Кодер обязан прогнать тесты и выдать OK только после того, как они прошли.
+# Если собирать нечем, он этого не может - и узнаёт об этом на середине.
+# Замер: на Rust-тикете он честно доложил "unverified by compilation", потом
+# сам полез ставить rustup внутрь контейнера (около гигабайта на прогон), а
+# круг стоил 730 секунд. Ни разу не отказ - просто работа без проверки.
+#
+# СПРАШИВАЕМ ОБА ИСТОЧНИКА, А НЕ ОДИН ОБРАЗ. Инструмент может приехать и
+# оверлеем медуллы (~/.medulla/container/bin/<имя> монтируется в
+# /usr/local/bin), и тогда в образе его нет, а у кодера он есть. Проверка
+# только по образу давала ложную тревогу ровно там, где всё настроено.
+# Не отказ, а имя: тикет может не требовать сборки вовсе.
+lang_probe() {
+  local marker="$1" tool="$2" what="$3"
+  [[ -e "$repo/$marker" ]] || return 0
+  [[ -e "${MEDULLA_HOME:-$HOME/.medulla}/container/bin/$tool" ]] && return 0
+  docker run --rm --entrypoint sh "$MEDULLA_IMAGE" -c "command -v $tool" >/dev/null 2>&1 && return 0
+  say "run.sh: $marker есть, а $tool ни в образе, ни в оверлее - $what проверить нечем."
+  say "        Кодер напишет правку, но тесты не прогонит: контракт требует"
+  say "        OK только после прохождения тестов, и он это честно сообщит."
+}
+lang_probe Cargo.toml       cargo   "Rust"
+lang_probe go.mod           go      "Go"
+lang_probe pyproject.toml   python3 "Python"
+lang_probe build.gradle.kts gradle  "Kotlin/JVM"
 
 bridge_dir="$MEDULLA_BRIDGE/equill"
 mkdir -p "$bridge_dir/req" "$bridge_dir/resp"

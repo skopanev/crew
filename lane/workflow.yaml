@@ -14,6 +14,11 @@ vars:
 nodes:
   ntk_claim:
     env:
+      # СБОРКА КОНТРАКТА РАЗВЕДКИ ИДЁТ ОТСЮДА, а equill требует имя пишущего
+      # из окружения и отказывает ДО чтения стора, если его нет. Пусковик обе
+      # переменные передаёт, узлу их надо только принять.
+      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
+      EQUILL_STORE: '{{var:EQUILL_STORE}}'
       LANE_PATH: '{{var:LANE_PATH}}'   # читает inject.sh, не тело узла
       # Нужны ЗДЕСЬ, а не только у агентных узлов: codex-home.sh пишет их в
       # config.toml дома кодекса. Кодекс запускает MCP-сервер сам и окружение
@@ -60,6 +65,24 @@ nodes:
         echo "<signal:CLAIM_REFUSED>ticket ${ticket_id} is held or blocked</signal:CLAIM_REFUSED>"
         exit 0
       fi
+      # КОНТРАКТ РАЗВЕДЧИКА ТОЖЕ ФАЙЛОМ, по образцу контракта панели. Хук был
+      # единственным путём, и держался он на --dangerously-bypass-hook-trust;
+      # с codex 0.154.0 флаг больше не включает хуки, а РУШИТ оборот.
+      # Через временный файл: `>` обрезает цель ДО запуска, и при отказе
+      # equill остаётся файл нулевой длины - агент читает "контракт пустой"
+      # вместо "контракта нет" и тратит на это круг. Замерено.
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      _sc="$MEDULLA_RUN_DIR/artifacts/scout-contract.txt"
+      if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
+           --profile agent.context.target --role medulla-scout \
+           --process medulla-scout --coordinate rules=none --json 2>"$_sc.err" \
+         | jq -r '.content // empty' > "$_sc.tmp" && [ -s "$_sc.tmp" ]; then
+        mv "$_sc.tmp" "$_sc"
+      else
+        rm -f "$_sc.tmp" "$_sc"
+        echo "контракт разведки не собрался ($(head -1 "$_sc.err" 2>/dev/null)) - узел пойдёт на одном промпте" >&2
+      fi
+      rm -f "$_sc.err"
   cbm_discovery:
     timeout: 900
     env:
@@ -107,14 +130,19 @@ nodes:
       # замерено, в отличие от allow, который там инертен.
       # -s read-only ограничивает ТОЛЬКО shell и MCP не глушит - в отличие от
       # режима плана у claude, который закрывал CBM целиком.
-      # --dangerously-bypass-hook-trust: кодекс МОЛЧА пропускает хуки, которые
-      # считает непросмотренными, а наш hooks.json создаётся заново каждый
-      # прогон и таким для него и выглядит. В прогоне eead888a журнал событий
-      # был ПУСТ: ни контракта, ни роли, ни тикета - разведчик работал вслепую.
-      # Флаг предназначен ровно для автоматики, которая сама отвечает за
-      # источник хуков; источник тут наш файл в нашем репозитории.
-      args: [-s, read-only, --dangerously-bypass-hook-trust]
+      # ФЛАГА --dangerously-bypass-hook-trust ЗДЕСЬ БОЛЬШЕ НЕТ. Он ставился,
+      # чтобы кодекс не пропускал наши хуки молча (прогон eead888a: журнал
+      # событий ПУСТ, разведчик работал вслепую). На codex 0.154.0 он делает
+      # обратное - оборот умирает с input_tokens=0, не начавшись. Слепота
+      # лечится контрактом-файлом из ntk_claim, а не опасным флагом.
+      args: [-s, read-only]
     prompt: |
+      YOUR CONTRACT - role, ordered steps, rules - is at
+      $MEDULLA_RUN_DIR/artifacts/scout-contract.txt. Read it first; it is what
+      you are held to, and it is not repeated here. If that file is absent the
+      contract did not build: say so plainly in your report and work from this
+      prompt alone - do not invent the missing rules.
+
       Read the ticket.
       Run the CBM preflight now: search_code and search_graph, once each, before
       any Bash; check SIMILAR_TO before writing anything new. Cite both.
@@ -297,6 +325,12 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
       EQUILL_STORE: '{{var:EQUILL_STORE}}'
+      # БЕЗ АКТОРА КОНТРАКТ ПАНЕЛИ НЕ СОБИРАЛСЯ НИ РАЗУ: equill читает имя
+      # пишущего только из окружения и отказывает до чтения стора словами
+      # "EQUILL_ACTOR must be supplied by the calling orchestrator". Отказ
+      # уходил в 2>/dev/null, на месте оставался пустой файл, и панель шла
+      # на одном промпте - молча и с виду исправно.
+      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
     timeout: 120
     on_signal:
       SNAPSHOT: expert_review
@@ -350,11 +384,24 @@ nodes:
       # ПОЛЕ content, А НЕ СЫРОЙ ВЫВОД. В сыром у каждой записи тянется её
       # evidence - директивы, ссылки, обоснования: замер прогона 380dcd95 дал
       # 29210 байт на девяти записях. Собранный контракт - это content, 1.9 КБ.
-      [ -s "$qa" ] || equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
-        --profile agent.context.target --role medulla-qa --process medulla-qa \
-        --coordinate rules=none --json 2>/dev/null \
-        | jq -r '.content // empty' > "$qa" \
-        || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
+      # ЧЕРЕЗ ВРЕМЕННЫЙ ФАЙЛ. `>` обрезает цель ДО запуска команды, поэтому
+      # при отказе equill на месте остаётся файл нулевой длины - и панель
+      # читает не "контракта нет", а "контракт пустой". Замерено на разведке:
+      # агент честно доложил "the supplied contract is empty" и потратил круг.
+      # Причина отказа бывает обыденной - профиль agent.context.target просто
+      # не зарегистрирован в сторе ("registered profiles entry not found").
+      if [ ! -s "$qa" ]; then
+        if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
+             --profile agent.context.target --role medulla-qa --process medulla-qa \
+             --coordinate rules=none --json 2>"$qa.err" \
+           | jq -r '.content // empty' > "$qa.tmp" && [ -s "$qa.tmp" ]; then
+          mv "$qa.tmp" "$qa"
+        else
+          rm -f "$qa.tmp" "$qa"
+          echo "контракт QA не собрался ($(head -1 "$qa.err" 2>/dev/null)) - панель пойдёт на одном промпте" >&2
+        fi
+        rm -f "$qa.err"
+      fi
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       # ОТЧЁТ КОДЕРА О ТЕСТАХ СОХРАНЯЕТСЯ ДЛЯ ПАНЕЛИ. Он приходит в сигнале
       # кодера, а между ним и панелью стоит этот узел - дальше сообщение не
@@ -381,7 +428,10 @@ nodes:
       # непросмотренными, а наш hooks.json создаётся заново каждый прогон и
       # таким для него и выглядит. Пустые args движок выбрасывает
       # (engine_body.py:74), поэтому у остальных мест строка не появится.
-      flag: --dangerously-bypass-hook-trust
+      # ФЛАГ СНЯТ И ЗДЕСЬ. На codex 0.154.0 он не включает хуки, а убивает
+      # оборот: два item.completed{type:"error"} и turn.completed с
+      # input_tokens=0. Контракт панели с 72883ec приезжает файлом и от хуков
+      # не зависит - флагу нечего защищать, а сломать он может всё место.
       task: Does this change fit the contracts and boundaries the system already has? Name every place it diverges, and what it should have done instead.
     - harness: agy
       model: Gemini 3.1 Pro (High)
