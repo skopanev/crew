@@ -201,10 +201,18 @@ nodes:
       # Та же причина роняла посадку - хук репозитория зовёт bun и не находил.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       if [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
-        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile >/dev/null 2>&1); then
+        # ПРИЧИНА ОТКАЗА СОХРАНЯЕТСЯ, А НЕ ГЛУШИТСЯ. Вывод уходил в /dev/null, и
+        # сигнал говорил голое "bun install failed here": кодер шёл ставить
+        # зависимости руками, а починить узел было нечем - причины не осталось
+        # нигде. Замер, когда её наконец сохранили: "401 Unauthorized" по
+        # приватному пакету. Тащить его из реестра НЕ НАДО - у этого потребителя
+        # он резолвится симлинком на ЛОКАЛЬНУЮ соседнюю репу, и это записано
+        # уроком в Equill; кодер получает урок и линкует сам.
+        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile \
+              > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
           deps=" Dependencies are installed."
         else
-          deps=" NOTE: bun install failed here - install before trusting any test."
+          deps=" NOTE: bun install did not complete: $(grep -iE 'error|failed' "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>/dev/null | tail -2 | tr '\n' ' ' | cut -c1-200) Full log: ${MEDULLA_RUN_DIR}/artifacts/bun-install.txt"
         fi
       fi
       # Находка разведчика - ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
