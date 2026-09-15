@@ -178,6 +178,17 @@ nodes:
     shell: |
       set -euo pipefail
       cd "${project_dir}"
+      # GIT ЧИТАЕТ КОНФИГУРАЦИЮ ИЛИ НЕТ - ПРОВЕРЯЕТСЯ ПЕРВЫМ, И С ПРИЧИНОЙ.
+      # Прогон b0917389 умер здесь с rc=128 и двумя строками "fatal: unknown
+      # error occurred while reading the configuration files" - без указания
+      # ФАЙЛА, на котором споткнулся. Вне прогона не воспроизвелось: ни ключи
+      # GIT_CONFIG_*, ни хостовый .gitconfig, ни конфиг репозитория не ломались.
+      # Поэтому спрашиваем git сам и сохраняем, откуда он читает.
+      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      if ! git config --list --show-origin > "$MEDULLA_RUN_DIR/artifacts/git-config.txt" 2>&1; then
+        echo "<signal:FETCH_FAILED>git не читает конфигурацию: $(head -2 "$MEDULLA_RUN_DIR/artifacts/git-config.txt" | tr '\n' ' ' | cut -c1-200) HOME=$HOME GIT_CONFIG_COUNT=${GIT_CONFIG_COUNT:-нет}; полный вывод: ${MEDULLA_RUN_DIR}/artifacts/git-config.txt</signal:FETCH_FAILED>"
+        exit 0
+      fi
       if [ -z "${GIT_SSH_COMMAND:-}" ] && git remote get-url origin | grep -q '^ssh://\|^git@'; then
         echo "<signal:NO_GIT_KEY>origin is ssh and no key was mounted; launch with --ssh-dir</signal:NO_GIT_KEY>"
         exit 0
