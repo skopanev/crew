@@ -27,7 +27,6 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
     timeout: 120
     on_signal:
-      NO_TICKET: notify_failure
       CLAIM_REFUSED: notify_failure
       __failed__: notify_failure
       __default__: cbm_discovery
@@ -66,10 +65,9 @@ nodes:
         --coordinate rules=none \
         > "$MEDULLA_RUN_DIR/artifacts/qa-contract.txt" 2>/dev/null \
         || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
-      if ! ntk show "${ticket_id}" -W "${project_name}" --json >/dev/null 2>&1; then
-        echo "<signal:NO_TICKET>no ticket ${ticket_id} in ${project_name}</signal:NO_TICKET>"
-        exit 0
-      fi
+      # `ntk show` ЗДЕСЬ БЫЛ ЛИШНИМ СЕТЕВЫМ ВЫЗОВОМ. Существование тикета
+      # проверяет пусковик ещё до запуска контейнера и отказывается стартовать,
+      # если его нет; а `ntk start` и сам не возьмёт несуществующий.
       if ! ntk start "${ticket_id}" -W "${project_name}"; then
         echo "<signal:CLAIM_REFUSED>ticket ${ticket_id} is held or blocked</signal:CLAIM_REFUSED>"
         exit 0
