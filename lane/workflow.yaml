@@ -449,6 +449,16 @@ nodes:
       belongs in the same message, named as non-blocking: it reaches the same
       person either way, and it does not cost a round.
 
+      EVERY REJECT CARRIES A PROPOSAL, AND THE PROPOSAL SAYS HOW. Name the
+      place, the change and the reason, so the author can accept it, adapt it,
+      or refuse it on evidence - without the reason there is nothing to refuse
+      except your authority. "The regression is missing" is a diagnosis with no
+      mechanism; "add a test that dispatches the second action through the real
+      dispatcher while the first is in flight and requires a refusal - it
+      currently passes either way" is a proposal. If you do not know the fix,
+      write it as unknown and say what would tell you: that is information, and
+      better than an invented remedy stated with confidence.
+
       EVERY REJECT CARRIES THE CONDITION THAT CLEARS IT. Not "the test is weak"
       but "this test must fail if a conflicting action is dispatched, and it
       currently passes either way". The person fixing it has one attempt to
