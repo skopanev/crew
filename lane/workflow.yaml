@@ -129,7 +129,6 @@ nodes:
 
   create_worktree:
     env:
-      LANE_NPMRC: '{{var:LANE_NPMRC}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
@@ -201,21 +200,11 @@ nodes:
       # не сработала вся ветка целиком.
       # Та же причина роняла посадку - хук репозитория зовёт bun и не находил.
       export PATH="/home/medulla/.bun/bin:${PATH}"
-      # УЧЁТНЫЕ ДАННЫЕ РЕЕСТРА - В ДОМ, ИНАЧЕ ПРИВАТНЫЕ ПАКЕТЫ НЕ СТАВЯТСЯ.
-      # Замер: без них install падает на "401 Unauthorized" по @<scope>/пакету,
-      # и кодер тратит свой ход, линкуя их руками из соседней репы.
-      [ -n "${LANE_NPMRC:-}" ] && [ -r "${LANE_NPMRC}" ] \
-        && install -m 600 "${LANE_NPMRC}" "$HOME/.npmrc" || true
       if [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
-        # ПРИЧИНА ОТКАЗА СОХРАНЯЕТСЯ, А НЕ ГЛУШИТСЯ. Раньше вывод уходил в
-        # /dev/null, и сигнал говорил только "bun install failed here" - кодер
-        # шёл ставить зависимости руками, тратя на это свой ход, а починить
-        # сам узел было нечем: причины не осталось нигде.
-        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile \
-              > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
+        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile >/dev/null 2>&1); then
           deps=" Dependencies are installed."
         else
-          deps=" NOTE: bun install failed: $(tail -3 "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>/dev/null | tr '\n' ' ' | cut -c1-200) Full log: ${MEDULLA_RUN_DIR}/artifacts/bun-install.txt"
+          deps=" NOTE: bun install failed here - install before trusting any test."
         fi
       fi
       # Находка разведчика - ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
