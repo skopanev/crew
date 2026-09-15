@@ -327,7 +327,7 @@ nodes:
       model: gpt-6-astra
       effort: high
       slug: architecture
-      task: Review the diff for architectural consistency.
+      task: Does this change fit the contracts and boundaries the system already has? Name every place it diverges, and what it should have done instead.
     - harness: agy
       model: Gemini 3.1 Pro (High)
       effort: high   # agy игнорирует: у него усилие в суффиксе модели. Ключ нужен,
@@ -337,12 +337,12 @@ nodes:
       # request...", девять секунд, ноль сигналов, - и унесла с собой посадку
       # при двух CLEAR. Здесь формулировка отказ не задевает.
       slug: codereview
-      task: Review the diff for clean code.
+      task: Naming, duplication, dead code, and anything that SAYS one thing and DOES another - stale comments, misleading names, tests that assert nothing.
     - harness: opencode
       model: zai-coding-plan/glm-5.3
       effort: high
       slug: security
-      task: Review how this change handles untrusted input, permissions and secrets.
+      task: 'Untrusted input, permissions and secrets: what reaches this code, who is allowed to, and what leaks if it fails.'
     env:
       EQUILL_ROLE: medulla-qa
       EQUILL_RULES: tickets
@@ -392,6 +392,16 @@ nodes:
       REJECT only for what must be fixed BEFORE this ships. Everything else
       belongs in the same message, named as non-blocking: it reaches the same
       person either way, and it does not cost a round.
+
+      EVERY REJECT CARRIES THE CONDITION THAT CLEARS IT. Not "the test is weak"
+      but "this test must fail if a conflicting action is dispatched, and it
+      currently passes either way". The person fixing it has one attempt to
+      satisfy you and cannot ask a question. Measured here: the same objection
+      came back three rounds running, sharpened each time, and the work escalated
+      unfixed - not because the author refused, but because they were told the
+      full requirement only on the third pass.
+      If you are rejecting something you also rejected last round, say so and
+      state the condition in full: the earlier wording did not carry it.
       Print your verdict as a tag on its own line: <signal:CLEAR>what is clean</signal:CLEAR> or <signal:REJECT>what you found</signal:REJECT>.
   expert_review_synthesis:
     timeout: 60
