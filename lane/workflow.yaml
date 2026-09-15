@@ -132,9 +132,12 @@ nodes:
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
-    # БЮДЖЕТ УЗЛА ПОКРЫВАЕТ ТО, ЧТО В НЁМ ЗАПУЩЕНО. Было 180 при установке
-    # зависимостей на 600 внутри: узел умирал раньше, чем она успевала, и
-    # прогон падал на ровном месте - прошлые пролезали только на тёплом кэше.
+    # БЮДЖЕТ ИЗ ЗАМЕРА, А НЕ С ПОТОЛКА. Прогон 4df5b72f упал на 180.04 с при
+    # пределе узла 180, и установка зависимостей в нём даже НЕ НАЧИНАЛАСЬ: все
+    # 180 секунд ушли на сам чекаут - git выкладывал 1377 файлов на
+    # примонтированный том, где Docker Desktop пишет медленно. Дорогая часть
+    # здесь - выкладка дерева, а не bun. Прежние 180 на узел и 600 на установку
+    # внутри были оба выдуманы и друг другу противоречили.
     timeout: 900   # the fetch cap inside is 120s, so its signal wins
     on_signal:
       READY: implement_code
@@ -211,7 +214,7 @@ nodes:
         # приватному пакету. Тащить его из реестра НЕ НАДО - у этого потребителя
         # он резолвится симлинком на ЛОКАЛЬНУЮ соседнюю репу, и это записано
         # уроком в Equill; кодер получает урок и линкует сам.
-        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 bun install --frozen-lockfile \
+        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 240 bun install --frozen-lockfile \
               > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
           deps=" Dependencies are installed."
         else
