@@ -621,6 +621,58 @@ nodes:
       # "no known signal emitted, so the node took __default__ ...; stdout: ..."
       printf '<signal:LANDED>сел %s на %s%s</signal:LANDED>\n' \
         "$head_sha" "$target" "${left:-}"
+  file_followups:
+    # НЕБЛОКИРУЮЩИЕ НАХОДКИ СТАНОВЯТСЯ ТИКЕТАМИ, И ЭТО ДЕЛАЕТ ТРИАЖ, А НЕ ШЕЛЛ.
+    # Завести тикет - не печать строки: надо проверить дубликаты, выбрать
+    # зарегистрированный модуль, не выйти за кап единицы. Всё это уже описано
+    # процессом medulla-triage, поэтому узел идёт под его ролью и его правилами.
+    # ПОСЛЕ уведомления: о посадке владелец узнаёт сразу, тикеты заводятся следом.
+    env:
+      EQUILL_ROLE: medulla-triage
+      EQUILL_PROCESS: medulla-triage
+      EQUILL_RULES: tickets
+      EQUILL_RULE_MODULES: tickets
+      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
+      EQUILL_TICKET: '{{var:ticket_id}}'
+      EQUILL_PROJECT: '{{var:project_name}}'
+      EQUILL_MODULE: '{{var:module_name}}'
+      project_name: '{{var:project_name}}'
+      module_name: '{{var:module_name}}'
+      ticket_id: '{{var:ticket_id}}'
+    timeout: 900
+    on_signal:
+      # Любой исход терминален: работа уже села, тикеты - хвост.
+      __failed__: __exit_ok__
+      __default__: __exit_ok__
+    agent:
+      harness: claude-code
+      model: claude-sonnet-5
+      effort: high
+      args:
+      # ЕДИНСТВЕННЫЙ УЗЕЛ С ПРАВОМ ПИСАТЬ В ТИКЕТЫ: у этого файла сняты запреты
+      # mcp__ntk__, у остальных они в силе.
+      - --settings
+      - /tmp/lane-settings-triage.json
+      - --mcp-config
+      - /workspace/lane/hooks/mcp.json
+      - --strict-mcp-config
+      - --setting-sources=
+    prompt: |
+      Raw panel findings from ticket {{var:ticket_id}} are in
+      $MEDULLA_RUN_DIR/artifacts/followups.txt, one per line, in the shape
+      SEVERITY - claim - file:line - why it matters - FIX: what to do.
+      The work they came from has ALREADY LANDED. These are leftovers the
+      reviewers judged non-blocking.
+
+      File each as its own ticket in workspace {{var:project_name}}, module
+      {{var:module_name}}, status open, NO TAGS - untagged keeps the queue from
+      taking it before a person has looked. Search for duplicates first and
+      reuse an existing ticket instead of adding a second one.
+      The finding line goes in the body verbatim, with the run id and the
+      originating ticket, so whoever picks it up can see where it came from.
+      Skip a line that is not actionable and say which and why.
+
+      No file? Nothing to do - say so and finish.
   notify_failure:
     env:
       ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
@@ -708,7 +760,7 @@ nodes:
       # Мост мог умереть после старта. Посадка, о которой никто не узнал, для
       # оператора неотличима от несостоявшейся — прогон обязан упасть.
       __failed__: __exit_fail__
-      __default__: __exit_ok__
+      __default__: file_followups
     shell: |
       # Сюда ведут два пути, и они не равны: чистая посадка и посадка с
       # застрявшим тикетом. Под одним значком второй читается как первый.
@@ -731,21 +783,7 @@ nodes:
       grep -h -E '^- (MED|LOW) ' "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null \
         | sort -u > "$followups" || true
       n_follow="$(wc -l < "$followups" 2>/dev/null | tr -d ' ')"
-      # И ЗАВОДЯТСЯ ТИКЕТАМИ, СЫРЫМИ. Решает не модель, а форма: узел шелловый,
-      # берёт строку как есть и создаёт тикет в open БЕЗ ТЕГОВ - очередь его не
-      # подхватит, пока человек или триаж не разберёт. Потолок назван вслух:
-      # больше десяти за прогон не заводим, и если отрезали - говорим сколько.
-      made=0; cap=10
-      if [ "${n_follow:-0}" -gt 0 ]; then
-        while IFS= read -r line; do
-          [ "$made" -lt "$cap" ] || break
-          body="$(printf 'Сырая находка панели, прогон %s, тикет %s.\n\n%s\n\nРазобрать: подтвердить, оценить, при необходимости разрезать.' "${MEDULLA_RUN_ID:-?}" "${ticket_id}" "$line")"
-          ntk create "$(printf '%s' "$line" | cut -c1-110)" -W "${project_name}" \
-            --module "${module_name}" -s open -b "$body" >/dev/null 2>&1 && made=$((made+1))
-        done < "$followups"
-        msg="${msg} Неблокирующих находок ${n_follow}, заведено тикетами ${made}"
-        [ "$n_follow" -gt "$cap" ] && msg="${msg} (потолок ${cap} за прогон, остальные в ${followups})"
-      fi
+      [ "${n_follow:-0}" -gt 0 ] && msg="${msg} Неблокирующих находок ${n_follow}, заводятся тикетами.
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
       agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
         "Посыльный, в Телеграм ${TELEGRAM_ROOM} (топик ${TELEGRAM_TOPIC}): ${mark} ${msg}" \
