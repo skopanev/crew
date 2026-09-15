@@ -709,10 +709,6 @@ nodes:
       harness: claude-code
       model: claude-sonnet-5
       effort: high
-      # ТОТ ЖЕ РАЗГОВОР, ЧТО У КОДЕРА. Сведение конфликта - это дописывание того
-      # же изменения, и начинать его вслепую значит заново выяснять, что вообще
-      # делалось в этом тикете.
-      session: coder
       args:
       - --settings
       - /tmp/lane-settings.json
