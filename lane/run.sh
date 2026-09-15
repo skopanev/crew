@@ -5,7 +5,6 @@ usage() {
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               --cbm-store <dir>
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
-              [--npmrc <file>]
               [extra medulla args...]
 
   --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
@@ -16,9 +15,6 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               not open and answer.
   --module    ticket module; read from ntk when omitted
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
-  --npmrc     registry credentials, for a repository whose dependencies are
-              private. Without it `bun install` dies on 401 and the coder
-              spends its turn linking packages by hand.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
              made-up path that nobody created is worse than none. The whole
@@ -53,7 +49,7 @@ mkdir -p "$WT_ROOT"
 # ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src="" npmrc="${LANE_NPMRC:-}"
+ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src=""
 also=()
 passthrough=()
 while (( $# )); do
@@ -70,7 +66,6 @@ while (( $# )); do
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-store) cbm_src="${2:-}"; shift 2 ;;
-    --npmrc) npmrc="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -174,18 +169,6 @@ for m in "$repo" "$ssh_dir" ${also[@]+"${also[@]}"}; do
   [[ " ${mounts[*]} " == *" $m "* ]] || continue
   [[ -e "$point" ]] || { mkdir -p "$point" && made+=("$point"); }
 done
-
-# УЧЁТНЫЕ ДАННЫЕ РЕЕСТРА ЕДУТ ЧЕРЕЗ МОСТ. medulla --mount кладёт только под
-# /workspace/<имя>, а bun ищет их в домашнем каталоге; мост смонтирован и так.
-# Замер: без них install падает на "401 Unauthorized" по приватному пакету, узел
-# сообщает "bun install failed", и кодер тратит свой ход, линкуя пакеты руками.
-lane_npmrc=""
-if [ -n "$npmrc" ]; then
-  [ -r "$npmrc" ] || { echo "run.sh: --npmrc не читается: $npmrc" >&2; exit 2; }
-  mkdir -p "${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
-  install -m 600 "$npmrc" "${MEDULLA_BRIDGE:-/tmp/medulla-bridge}/npmrc"
-  lane_npmrc="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}/npmrc"
-fi
 
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
@@ -388,6 +371,5 @@ medulla \
   --var "module_name=$module" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   --var "LANE_BUS_DIR=$bus_dir" \
-  --var "LANE_NPMRC=$lane_npmrc" \
   ${equill_vars[@]+"${equill_vars[@]}"} \
   ${passthrough[@]+"${passthrough[@]}"}
