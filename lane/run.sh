@@ -83,8 +83,18 @@ done
 repo="$(cd "$repo" && pwd -P)"
 project_dir="/workspace/$(basename "$repo")"
 
-if [[ -e "$TOOLING_ROOT/$(basename "$repo")" ]]; then
-  say "run.sh: $TOOLING_ROOT/$(basename "$repo") exists, and the mount would hide it inside"
+# ПУСТОЙ КАТАЛОГ ЗДЕСЬ - НАШ ЖЕ СЛЕД, а не чужое имя. Точки монтирования
+# заводятся ниже и снимаются в trap; при аварийной остановке (Ctrl+C, упавший
+# узел, снятый контейнер) trap не отрабатывает, и пустой каталог остаётся.
+# Следующий запуск утыкался в него и объявлял столкновение имён - то есть
+# показывал на чужое там, где лежало своё. Замерено трижды за один день.
+# Пустой снимаем молча, непустой по-прежнему останавливает: там чужое.
+_point="$TOOLING_ROOT/$(basename "$repo")"
+if [[ -d "$_point" && -z "$(ls -A "$_point" 2>/dev/null)" ]]; then
+  rmdir "$_point" 2>/dev/null || true
+fi
+if [[ -e "$_point" ]]; then
+  say "run.sh: $_point exists, and the mount would hide it inside"
   say "        the container. Rename one of the two, or mount from elsewhere."
   exit 2
 fi
@@ -129,6 +139,10 @@ for extra in ${also[@]+"${also[@]}"}; do
   extra="$(cd "$extra" && pwd -P)"
   base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
+  # Тот же след аварийной остановки, что и у --mount-rw выше.
+  if [[ -d "$TOOLING_ROOT/$base" && -z "$(ls -A "$TOOLING_ROOT/$base" 2>/dev/null)" ]]; then
+    rmdir "$TOOLING_ROOT/$base" 2>/dev/null || true
+  fi
   if [[ -e "$TOOLING_ROOT/$base" ]]; then
     say "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside"
     exit 2
