@@ -53,18 +53,6 @@ nodes:
       # config.toml - кодекс не принимает --settings и --mcp-config.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
-      # КОНТРАКТ ПАНЕЛИ ДОСТАЁТСЯ ЗДЕСЬ, ОДИН РАЗ, ФАЙЛОМ. Хук - не путь для
-      # панели: у opencode и agy Equill подключён MCP-сервером, а не хуком, то
-      # есть позвать его они могут, а вложить им контракт на старте некому.
-      # Замер прогона eeea8f74: роль medulla-qa в журнале хуков не встречается
-      # НИ РАЗУ, все три места работали на одном узловом промпте.
-      # Файл читают все трое одинаково, независимо от харнесса.
-      mkdir -p "$MEDULLA_RUN_DIR/artifacts"
-      equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
-        --profile agent.context.target --role medulla-qa --process medulla-qa \
-        --coordinate rules=none \
-        > "$MEDULLA_RUN_DIR/artifacts/qa-contract.txt" 2>/dev/null \
-        || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
       # `ntk show` ЗДЕСЬ БЫЛ ЛИШНИМ СЕТЕВЫМ ВЫЗОВОМ. Существование тикета
       # проверяет пусковик ещё до запуска контейнера и отказывается стартовать,
       # если его нет; а `ntk start` и сам не возьмёт несуществующий.
@@ -294,6 +282,7 @@ nodes:
     env:
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
+      EQUILL_STORE: '{{var:EQUILL_STORE}}'
     timeout: 120
     on_signal:
       SNAPSHOT: expert_review
@@ -322,6 +311,18 @@ nodes:
         exit 0
       fi
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      # КОНТРАКТ ПАНЕЛИ - ЗДЕСЬ, ПЕРЕД САМОЙ ПАНЕЛЬЮ, И ОДИН РАЗ НА ПРОГОН.
+      # Хук панели не годится: у opencode и agy Equill подключён MCP-сервером,
+      # а не хуком - позвать его они могут, а вложить контракт на старте некому.
+      # Замер прогона eeea8f74: роли medulla-qa в журнале хуков нет НИ РАЗУ,
+      # все три места работали на одном узловом промпте. Файл читают все трое
+      # одинаково. В узле заявки ему было не место: тикет ждал бы моста Equill,
+      # а на кругах ниже файл уже готов и второй раз не собирается.
+      qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
+      [ -s "$qa" ] || equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
+        --profile agent.context.target --role medulla-qa --process medulla-qa \
+        --coordinate rules=none > "$qa" 2>/dev/null \
+        || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       # ОТЧЁТ КОДЕРА О ТЕСТАХ СОХРАНЯЕТСЯ ДЛЯ ПАНЕЛИ. Он приходит в сигнале
       # кодера, а между ним и панелью стоит этот узел - дальше сообщение не
