@@ -815,5 +815,12 @@ nodes:
         exit 0
       fi
 
-      printf '<signal:PANEL_REJECTED>ROUND %s OF %s. The panel rejected the work. Finding: %s -- read %s/artifacts/panel-findings.txt before fixing - every round in full.</signal:PANEL_REJECTED>\n' \
-        "$done_rounds" "$limit" "$finding" "$MEDULLA_RUN_DIR"
+      # РАЗБОРЫ РЕВЬЮВЕРОВ НАЗЫВАЮТСЯ ПОИМЁННО. Замер прогона 380dcd95: места
+      # написали architecture.md 13921 б, security.md 3812 б, codereview.md
+      # 975 б - и кодер о них не знал. Ему давали panel-findings.txt, где лежат
+      # ОДНОСТРОЧНЫЕ тексты сигналов, обрезанные до 600 символов на весь раунд.
+      # Восемнадцать килобайт подробного ревью лежали непрочитанными, пока он
+      # чинил по двум строкам, и три круга подряд чинил не то.
+      reviews="$(ls "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null | tr '\n' ' ')"
+      printf '<signal:PANEL_REJECTED>ROUND %s OF %s. The panel rejected the work. Finding: %s -- the reviewers wrote their full reviews here, read them: %s -- verdicts of every round: %s/artifacts/panel-findings.txt</signal:PANEL_REJECTED>\n' \
+        "$done_rounds" "$limit" "$finding" "${reviews:-нет}" "$MEDULLA_RUN_DIR"
