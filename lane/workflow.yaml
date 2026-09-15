@@ -721,6 +721,15 @@ nodes:
         mark="🍀"; msg="${ticket_id} заленделся: ${MEDULLA_LAST_MESSAGE:-}"
       fi
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      # НЕБЛОКИРУЮЩИЕ НАХОДКИ СОБИРАЮТСЯ НА ВЫХОДЕ, ИНАЧЕ ОНИ УМИРАЮТ С ПРОГОНОМ.
+      # Панель обязана класть MED и LOW в свой файл: MED - чинить, но не сегодня,
+      # LOW - знать и только. Работа села, тикета на них нет, и через неделю их
+      # никто не вспомнит. Форма задана нами же, поэтому строки берутся as is.
+      followups="$MEDULLA_RUN_DIR/artifacts/followups.txt"
+      grep -h -E '^- (MED|LOW) ' "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null \
+        | sort -u > "$followups" || true
+      n_follow="$(wc -l < "$followups" 2>/dev/null | tr -d ' ')"
+      [ "${n_follow:-0}" -gt 0 ] && msg="${msg} Неблокирующих находок: ${n_follow}, на тикеты: ${followups}"
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
       agentbus send "${ESCALATION_ROOM}" --to "${ESCALATION_COURIER}" --fyi \
         "Посыльный, в Телеграм ${TELEGRAM_ROOM} (топик ${TELEGRAM_TOPIC}): ${mark} ${msg}" \
