@@ -426,52 +426,36 @@ nodes:
       $MEDULLA_RUN_DIR/artifacts/qa-contract.txt. Read it first; it is what you
       are held to, and it is not repeated here.
       Review `git diff --cached`. Do not change the tree.
-      Need to write anything down - notes, scratch, command output? One file,
-      and it is yours: $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md
-      NEVER into the worktree. A file left there is a file the landing has to
-      reason about, and one of them already cost a run that had your unanimous
-      CLEAR.
-      {{last.message}}
-      Tests already ran and passed - do not run them again.
+      WRITE YOUR REVIEW TO $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md IN THIS
+      SHAPE, AND IN NO OTHER. The author reads that file to fix the work; prose
+      around a finding is a finding they have to go hunting for.
 
-      REPORT EVERY DEFECT FOUND IN THIS ONE PASS. The round costs
-      the same whether you return one finding or nine, and whatever you hold back
-      comes back as ANOTHER full round of this panel on the same code. **A second
-      round is a failure of the first.** Measured on this lane: three rounds, and
-      each of the first two was stopped by a single finding that had been on the
-      screen since the first.
-      Sweep the change by name before you answer: every path through it; every
-      input that reaches it, empty and malformed included; every caller that
-      depends on it; every failure mode - error, retry, a second run; and what the
-      change SAYS against what it DOES, meaning comments, names and tests that now
-      describe something no longer true. Small defects go in too. There is no
-      reward for brevity and no limit on how many findings you may return.
-      Give file:line for every finding. If you found only one thing, say what you
-      swept to be sure - that is a claim about coverage and it is worth reading.
+      ## FINDINGS
+      One line per finding, nothing merged, HIGHEST FIRST:
 
-      REJECT only for what must be fixed BEFORE this ships. Everything else
-      belongs in the same message, named as non-blocking: it reaches the same
-      person either way, and it does not cost a round.
+      - HIGH|MED|LOW - <claim> - <file:line> - <why it matters> - FIX: <what to do>
 
-      EVERY REJECT CARRIES A PROPOSAL, AND THE PROPOSAL SAYS HOW. Name the
-      place, the change and the reason, so the author can accept it, adapt it,
-      or refuse it on evidence - without the reason there is nothing to refuse
-      except your authority. "The regression is missing" is a diagnosis with no
-      mechanism; "add a test that dispatches the second action through the real
-      dispatcher while the first is in flight and requires a refusal - it
-      currently passes either way" is a proposal. If you do not know the fix,
-      write it as unknown and say what would tell you: that is information, and
-      better than an invented remedy stated with confidence.
+      HIGH stops the change, MED must be fixed but not today, LOW is worth
+      knowing and nothing more. Do not inflate: a file where everything is HIGH
+      sorts exactly like a file with no ratings at all.
+      FIX IS A PROPOSAL AND IT SAYS HOW - the place, the change and the reason,
+      so the author can accept it, adapt it, or refuse it on evidence. "The
+      regression is missing" is a diagnosis with no mechanism. "Dispatch the
+      second action through the real dispatcher while the first is in flight and
+      require a refusal - it currently passes either way" is a proposal. A route,
+      not a patch. Do not know the fix? `FIX: unknown - <what would tell you>`,
+      which is information; an invented remedy stated with confidence is not.
+      Small defects go in too, at LOW - a misleading name, a test that asserts
+      nothing. They cost you one line and save the author a round.
+      No findings? Write NONE.
+      Close with one COVERAGE line, no bullet: what you actually swept and what
+      you did NOT reach. That is the difference between "nothing else is wrong"
+      and "I did not look".
 
-      EVERY REJECT CARRIES THE CONDITION THAT CLEARS IT. Not "the test is weak"
-      but "this test must fail if a conflicting action is dispatched, and it
-      currently passes either way". The person fixing it has one attempt to
-      satisfy you and cannot ask a question. Measured here: the same objection
-      came back three rounds running, sharpened each time, and the work escalated
-      unfixed - not because the author refused, but because they were told the
-      full requirement only on the third pass.
-      If you are rejecting something you also rejected last round, say so and
-      state the condition in full: the earlier wording did not carry it.
+      NEVER write into the worktree. A file left there is a file the landing has
+      to reason about, and one of them already cost a run that had your
+      unanimous CLEAR.
+
       Print your verdict as a tag on its own line: <signal:CLEAR>what is clean</signal:CLEAR> or <signal:REJECT>what you found</signal:REJECT>.
   expert_review_synthesis:
     timeout: 60
