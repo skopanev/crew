@@ -245,44 +245,42 @@ nodes:
       # не сработала вся ветка целиком.
       # Та же причина роняла посадку - хук репозитория зовёт bun и не находил.
       export PATH="/home/medulla/.bun/bin:${PATH}"
-      if [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
-        # ПРЕДПОЛЁТ РЕПОЗИТОРИЯ, ЕСЛИ ОН ЕГО ОБЪЯВИЛ. Воркфлоу обязан оставаться
-      # ОБЩИМ: что именно нужно ЭТОМУ проекту, чтобы свежее дерево стало
-      # сборочным, знает сам проект, а не полоса. Объявляется в .ntkrc, который
+      # ПРЕДПОЛЁТ РЕПОЗИТОРИЯ - НА КАЖДЫЙ ЗАПУСК И ДО ВСЕГО ОСТАЛЬНОГО.
+      # Воркфлоу обязан оставаться ОБЩИМ: что нужно ЭТОМУ проекту, чтобы свежее
+      # дерево стало сборочным, знает сам проект. Объявляется в .ntkrc, который
       # тут и так читается ради target_branch:
       #     { "v": 2, ..., "preflight": "scripts/lane-preflight.sh" }
+      # НЕ ВНУТРИ проверки package.json и bun: сперва я его туда и положил, и
+      # тогда репозиторий на Rust своего предполёта не получил бы вовсе.
       # Замер, из-за которого это появилось: у finik-app пин @finik/shared-types
-      # в package.json обгоняет локфайл и не опубликован в реестре, поэтому
+      # обгоняет собственный локфайл и не опубликован в реестре, поэтому
       # `bun install` не проходит НИКАК - ни с --frozen-lockfile, ни без него.
       # Лечится линковкой ПОВЕРХ уже стоящих node_modules, без переустановки, и
-      # это знание принадлежит репозиторию: на ветке со старым пином нужен
-      # другой порядок. Объявил предполёт - он и отвечает за зависимости,
-      # нашей установки тогда не будет.
+      # порядок этот меняется от ветки к ветке - значит принадлежит репозиторию.
+      deps=""
       pf="$(jq -r '.preflight // empty' "${project_dir}/.ntkrc" 2>/dev/null || true)"
-      if [ -n "$pf" ] && [ -x "${LANE_WT_ROOT}/wt-${ticket_id}/$pf" ]; then
-        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 "./$pf" \
-              > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
-          deps=" Repository preflight ($pf) ran."
+      if [ -n "$pf" ]; then
+        if [ -x "${LANE_WT_ROOT}/wt-${ticket_id}/$pf" ]; then
+          if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 "./$pf" \
+                > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
+            deps=" Repository preflight ($pf) ran."
+          else
+            deps=" NOTE: repository preflight ($pf) failed: $(tail -2 "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>/dev/null | tr '\n' ' ' | cut -c1-200) Full log: ${MEDULLA_RUN_DIR}/artifacts/preflight.txt"
+          fi
         else
-          deps=" NOTE: repository preflight ($pf) failed: $(tail -2 "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+          deps=" NOTE: .ntkrc names preflight $pf and it is not executable here."
         fi
-      elif [ -n "$pf" ]; then
-        deps=" NOTE: .ntkrc names preflight $pf and it is not executable here."
-      else
-      # ПРИЧИНА ОТКАЗА СОХРАНЯЕТСЯ, А НЕ ГЛУШИТСЯ. Вывод уходил в /dev/null, и
+      # Объявил предполёт - он и отвечает за зависимости; нашей установки нет.
+      elif [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
+        # ПРИЧИНА ОТКАЗА СОХРАНЯЕТСЯ, А НЕ ГЛУШИТСЯ. Вывод уходил в /dev/null, и
         # сигнал говорил голое "bun install failed here": кодер шёл ставить
-        # зависимости руками, а починить узел было нечем - причины не осталось
-        # нигде. Замер, когда её наконец сохранили: "401 Unauthorized" по
-        # приватному пакету. Тащить его из реестра НЕ НАДО - у этого потребителя
-        # он резолвится симлинком на ЛОКАЛЬНУЮ соседнюю репу, и это записано
-        # уроком в Equill; кодер получает урок и линкует сам.
+        # зависимости руками, а починить узел было нечем.
         if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 240 bun install --frozen-lockfile \
               > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
           deps=" Dependencies are installed."
         else
           deps=" NOTE: bun install did not complete: $(grep -iE 'error|failed' "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>/dev/null | tail -2 | tr '\n' ' ' | cut -c1-200) Full log: ${MEDULLA_RUN_DIR}/artifacts/bun-install.txt"
         fi
-      fi
       fi
       # Находка разведчика - ТЕКСТ МОДЕЛИ. Подставлять его в исходник шелла
       # нельзя: одна кавычка внутри превращает сообщение в исполняемый код.
