@@ -341,9 +341,13 @@ nodes:
       # В узле заявки ему было не место - тикет ждал бы моста Equill; на кругах
       # ниже файл уже готов и второй раз не собирается.
       qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
+      # ПОЛЕ content, А НЕ СЫРОЙ ВЫВОД. В сыром у каждой записи тянется её
+      # evidence - директивы, ссылки, обоснования: замер прогона 380dcd95 дал
+      # 29210 байт на девяти записях. Собранный контракт - это content, 1.9 КБ.
       [ -s "$qa" ] || equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
         --profile agent.context.target --role medulla-qa --process medulla-qa \
-        --coordinate rules=none > "$qa" 2>/dev/null \
+        --coordinate rules=none --json 2>/dev/null \
+        | jq -r '.content // empty' > "$qa" \
         || echo "контракт QA не собрался - панель пойдёт на одном промпте" >&2
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       # ОТЧЁТ КОДЕРА О ТЕСТАХ СОХРАНЯЕТСЯ ДЛЯ ПАНЕЛИ. Он приходит в сигнале
