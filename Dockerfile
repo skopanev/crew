@@ -96,6 +96,12 @@ RUN if getent passwd ${USER_UID} >/dev/null; then \
       existing="$(getent passwd ${USER_UID} | cut -d: -f1)"; \
       usermod -l medulla "$existing"; \
       usermod -d /home/medulla -m medulla; \
+      # usermod -l переименовывает ПОЛЬЗОВАТЕЛЯ, но не его группу: в node:24
+      # uid 1000 это node:node, и после переименования chown medulla:medulla
+      # падает на "invalid group". Видно только там, где uid хоста совпал с
+      # существующим - на маке с uid 501 срабатывает ветка useradd, которая
+      # заводит группу сама.
+      groupmod -n medulla "$(id -gn medulla)" 2>/dev/null || true; \
     else \
       useradd -m -u ${USER_UID} -s /bin/bash medulla; \
     fi
