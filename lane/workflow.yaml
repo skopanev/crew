@@ -73,7 +73,7 @@ nodes:
       # попадают НИ ПРИ КАКИХ координатах, отсекает адресат.
       # Значение medulla я завёл по ошибке, прочитав "назвать медулла" как
       # заказ на координату, хотя речь была о ролях. Снято.
-      EQUILL_RULES: tickets
+      EQUILL_RULES: none
       # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
       # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
       # не приехало ни одного урока: событие было ни при чём, выдачу просто
@@ -240,7 +240,7 @@ nodes:
     timeout: 7200   # writing the code
     env:
       EQUILL_ROLE: medulla-coder
-      EQUILL_RULES: tickets
+      EQUILL_RULES: none
       # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
       # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
       # не приехало ни одного урока: событие было ни при чём, выдачу просто
@@ -352,7 +352,7 @@ nodes:
       task: 'Untrusted input, permissions and secrets: what reaches this code, who is allowed to, and what leaks if it fails.'
     env:
       EQUILL_ROLE: medulla-qa
-      EQUILL_RULES: tickets
+      EQUILL_RULES: none
       # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
       # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
       # не приехало ни одного урока: событие было ни при чём, выдачу просто
@@ -682,7 +682,7 @@ nodes:
     timeout: 900
     env:
       EQUILL_ROLE: medulla-coder
-      EQUILL_RULES: tickets
+      EQUILL_RULES: none
       # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
       # disables retrieval" - молча, без предупреждения. Так у нас НИ РАЗУ
       # не приехало ни одного урока: событие было ни при чём, выдачу просто
