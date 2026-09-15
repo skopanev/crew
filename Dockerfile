@@ -16,9 +16,20 @@ RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
 
 # git и ssh нужны посадке, python3 - движку, jq - хукам, sqlite3 - проверке
 # индекса перед стартом: копия базы открывается и отвечает, а не просто лежит.
+# gcc с заголовками - ЛИНКЕР ДЛЯ RUST, и без него полоса такой репозиторий не
+# проверяет. Сам тулчейн в образ не кладём: он приезжает с хоста оверлеем
+# медуллы (~/.cargo и ~/.rustup симлинками в ~/.medulla/container/), и тогда
+# кодер компилирует ТЕМ ЖЕ rustc, что и человек, с уже прогретым кэшем крейтов.
+# А вот линковать нечем: rustc зовёт системный cc, и без него не собирается
+# даже cargo check - сборочные скрипты зависимостей (proc-macro2, quote, libc)
+# сами исполняемые, "No such file or directory (os error 2)" на каждом.
+# Замерено на ntk: с этой строкой cargo check 29s и cargo test 20 passed,
+# оба --offline. Без неё кодер честно доложил, что проверить компиляцией не
+# может, и пошёл качать rustup внутрь контейнера - гигабайт на каждый прогон.
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       ca-certificates curl git openssh-client python3 python3-venv jq sqlite3 ripgrep unzip less procps \
+      gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # ── ДВИЖОК ───────────────────────────────────────────────────────────────────
