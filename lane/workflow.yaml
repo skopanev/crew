@@ -334,6 +334,11 @@ nodes:
       model: gpt-6-astra
       effort: high
       slug: architecture
+      # ФЛАГ ТОЛЬКО КОДЕКСУ. Он МОЛЧА пропускает хуки, которые считает
+      # непросмотренными, а наш hooks.json создаётся заново каждый прогон и
+      # таким для него и выглядит. Пустые args движок выбрасывает
+      # (engine_body.py:74), поэтому у остальных мест строка не появится.
+      flag: --dangerously-bypass-hook-trust
       task: Does this change fit the contracts and boundaries the system already has? Name every place it diverges, and what it should have done instead.
     - harness: agy
       model: Gemini 3.1 Pro (High)
@@ -351,6 +356,12 @@ nodes:
       slug: security
       task: 'Untrusted input, permissions and secrets: what reaches this code, who is allowed to, and what leaks if it fails.'
     env:
+      # БЕЗ ЭТОГО ПАНЕЛЬ РАБОТАЕТ БЕЗ КОНТРАКТА ВООБЩЕ. Замер прогона eeea8f74:
+      # в журнале хуков роль medulla-qa не встречается НИ РАЗУ - ни одного
+      # SessionStart, - потому что кодекс брал дом по умолчанию, где нашего
+      # hooks.json нет. Ни роли, ни шагов, ни правил: всё поведение панели
+      # задавал один узловой промпт.
+      CODEX_HOME: /tmp/codex-home
       EQUILL_ROLE: medulla-qa
       EQUILL_RULES: none
       # ВЫДАЧА УРОКОВ. Без него хук выходит на строке 203 - "unset profile
@@ -370,6 +381,8 @@ nodes:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
       effort: '{{input.effort}}'
+      args:
+      - '{{input.flag:-}}'
     prompt: |
       Ticket {{var:ticket_id}}, worktree {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}. {{input.task}}
       Review `git diff --cached`. Do not change the tree.
