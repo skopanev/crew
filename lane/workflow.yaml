@@ -132,7 +132,10 @@ nodes:
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 180   # the fetch cap inside is 120s, so its signal wins
+    # БЮДЖЕТ УЗЛА ПОКРЫВАЕТ ТО, ЧТО В НЁМ ЗАПУЩЕНО. Было 180 при установке
+    # зависимостей на 600 внутри: узел умирал раньше, чем она успевала, и
+    # прогон падал на ровном месте - прошлые пролезали только на тёплом кэше.
+    timeout: 900   # the fetch cap inside is 120s, so its signal wins
     on_signal:
       READY: implement_code
       NO_GIT_KEY: notify_failure
