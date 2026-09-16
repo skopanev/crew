@@ -11,6 +11,12 @@ poll="${EQUILL_BRIDGE_POLL:-0.1}"
 # which is the opposite of giving them the tool.
 allowed_verbs="context search"
 
+# ИМЯ ЧИТАТЕЛЯ - У МОСТА, НЕ У ЗАПРОСА. Прослойка шлёт только argv, окружение
+# через границу не едет; equill же берёт актора ТОЛЬКО из окружения и падает до
+# чтения стора, если его нет. Требуем здесь, как bus-bridge требует свой
+# LANE_BUS_FROM: подделать личность из контейнера тогда нечем.
+: "${EQUILL_ACTOR:?equill-bridge: EQUILL_ACTOR is required}"
+export EQUILL_ACTOR
 command -v "$equill_bin" >/dev/null 2>&1 || { echo "equill-bridge: no equill on PATH" >&2; exit 127; }
 command -v jq >/dev/null 2>&1 || { echo "equill-bridge: no jq on PATH" >&2; exit 127; }
 mkdir -p "$bridge/req" "$bridge/resp" || exit 1

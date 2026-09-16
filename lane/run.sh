@@ -326,7 +326,16 @@ lang_probe build.gradle.kts gradle  "Kotlin/JVM"
 bridge_dir="$MEDULLA_BRIDGE/equill"
 mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
 if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  nohup bash "$WORKFLOW_DIR/bridge/equill-bridge.sh" >>"$MEDULLA_BRIDGE/equill-bridge.log" 2>&1 &
+  # ЛИЧНОСТЬ И СТОР ОТДАЮТСЯ МОСТУ ЗДЕСЬ, как и мосту шины ниже. Прослойка в
+  # контейнере шлёт ТОЛЬКО argv (equill-shim.sh:26), окружение не едет вовсе, а
+  # equill исполняет ЭТОТ мост - со своим окружением. Поэтому EQUILL_ACTOR,
+  # выставленный у узла внутри, до equill не доходит в принципе, и сборка
+  # контракта отвечала "EQUILL_ACTOR must be supplied by the calling
+  # orchestrator". Снаружи же это и правильнее: кто читает память, решает
+  # хозяин моста, а не тело в контейнере.
+  EQUILL_ACTOR="${EQUILL_ACTOR:-lane}" \
+  EQUILL_STORE="${EQUILL_STORE:-$HOME/.equill/dev}" \
+    nohup bash "$WORKFLOW_DIR/bridge/equill-bridge.sh" >>"$MEDULLA_BRIDGE/equill-bridge.log" 2>&1 &
   disown || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     [[ -f "$bridge_dir/bridge.pid" ]] && break
