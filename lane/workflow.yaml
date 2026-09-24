@@ -152,6 +152,8 @@ nodes:
       YOU FINISH. That file is the whole of what the coder receives from you -
       your signal is one line and carries nothing. Files you read, what you
       found where, with file:line, and what remains unknown. Say the unknowns
+      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+
       plainly: the coder is told to trust this file, so a guess written as a
       finding costs more than a gap named as one.
 
@@ -352,6 +354,8 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
+      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+
       Task: {{last.message}}
   prepare_review:
     env:
@@ -549,6 +553,8 @@ nodes:
       unanimous CLEAR.
 
       Print your verdict as a tag on its own line: <signal:CLEAR>what is clean</signal:CLEAR> or <signal:REJECT>what you found</signal:REJECT>.
+      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+
   expert_review_synthesis:
     timeout: 60
     on_signal:
@@ -765,6 +771,8 @@ nodes:
       Skip a line that is not actionable and say which and why.
 
       No file? Nothing to do - say so and finish.
+      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+
   notify_failure:
     env:
       ESCALATION_COURIER: '{{var:ESCALATION_COURIER}}'
@@ -920,6 +928,8 @@ nodes:
       - --setting-sources=
     prompt: |
       {{last.message}}
+      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+
   reject_gate:
     env:
       REJECT_ROUNDS: '{{var:REJECT_ROUNDS}}'
