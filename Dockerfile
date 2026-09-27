@@ -90,25 +90,14 @@ RUN a="$(cat /tmp/arch)"; set -eux; \
  && install -m 755 "$(find /tmp -maxdepth 2 -type f -name rtk | head -1)" /usr/local/bin/rtk \
  && rm -rf /tmp/rtk.tgz
 
-# NTK: тикеты. Публичная загрузка, ключ прокидывается при запуске.
-# БЕЗ ВЕРСИИ НАМЕРЕННО: ntk должен быть свежим, эндпоинт без параметра отдаёт
-# новейший. Две сборки в разные дни несут разный ntk - это замысел, не изъян.
-# Перевод архитектуры здесь больше не нужен: раньше /tmp/arch с дебиановским
-# amd64 давал 404 (ntk публиковался как linux-x86_64), и сборка на linux/amd64
-# падала. С 0.5.70 служба читает amd64, x64, x86-64 как x86_64 и aarch64 как
-# arm64 - проверено: оба имени отдают один объект, sha256 8d73a56b5ce3a3ad.
-RUN a="$(cat /tmp/arch)"; \
-    curl -fsSL "https://ntk.otion.us/v1/download?platform=linux-${a}" -o /usr/local/bin/ntk \
- && chmod 755 /usr/local/bin/ntk
+# Status-only HTTP CLI, including atomic claim with --claim.
+COPY lane-launcher/ntk-status lane-launcher/ntk-status.mjs lane-launcher/ntk.mjs /usr/local/bin/
+RUN chmod 755 /usr/local/bin/ntk-status
 
 # ── ПРОСЛОЙКИ ────────────────────────────────────────────────────────────────
 # equill - бинарь macOS; внутри он может быть только клиентом моста к хосту.
 COPY lane/bridge/equill-shim.sh /usr/local/bin/equill
-# Шина: сюда едет ТОЛЬКО прослойка, без клиента. Клиент - полный диспетчер, и
-# имя отправителя в нём объявляется само: одна переменная окружения - и тело
-# говорит от чужого лица, в контейнере, где согласования пропущены.
-COPY lane/bridge/agentbus-shim.sh /usr/local/bin/agentbus
-RUN chmod 755 /usr/local/bin/equill /usr/local/bin/agentbus
+RUN chmod 755 /usr/local/bin/equill
 
 # ПОЛЬЗОВАТЕЛЬ С UID ХОСТА, А НЕ С ПРОИЗВОЛЬНЫМ. Репозитории монтируются с
 # хоста, и git отказывается работать с чужим по владельцу деревом:

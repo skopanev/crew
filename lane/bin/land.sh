@@ -32,6 +32,8 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo 'lane-push: не репози�
   echo 'lane-push: рабочее дерево грязное — сначала сохрани работу, пуш незакоммиченного не бывает' >&2; exit 2; }
 
 sha="$(git rev-parse HEAD)"
+# Commit hooks may have changed the reviewed index. Check the final tree too.
+python3 "$(dirname "${BASH_SOURCE[0]}")/gates.py" verify
 before="$(git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
 echo "lane-push: HEAD=$sha target=$target before=${before:-<ветки нет>}"
 
