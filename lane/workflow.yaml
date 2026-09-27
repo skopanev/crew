@@ -64,6 +64,8 @@ nodes:
         . + {workspace: $ws, run_dir: $run}
       ' "$claim.raw" > "$claim.tmp"
       mv "$claim.tmp" "$claim"
+      # Full ticket body and acceptance criteria, read by shell over HTTP.
+      node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       # КОНТРАКТ РАЗВЕДЧИКА ТОЖЕ ФАЙЛОМ, по образцу контракта панели. Хук был
       # единственным путём, и держался он на --dangerously-bypass-hook-trust;
       # с codex 0.154.0 флаг больше не включает хуки, а РУШИТ оборот.
@@ -143,7 +145,8 @@ nodes:
       contract did not build: say so plainly in your report and work from this
       prompt alone - do not invent the missing rules.
 
-      Read the ticket.
+      Read the full ticket at $MEDULLA_RUN_DIR/artifacts/ticket.json, including
+      its description, acceptance criteria and module. NTK MCP is not provided.
       Run the CBM preflight now: search_code and search_graph, once each, before
       any Bash; check SIMILAR_TO before writing anything new. Cite both.
       Do not survey unrelated code.

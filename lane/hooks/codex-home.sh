@@ -25,7 +25,7 @@ jq '{hooks}' "$settings" \
 # У кодекса нет своего процессора rtk, но вход PreToolUse у него того же вида,
 # что у claude - tool_name и tool_input, - поэтому годится процессор claude.
 
-# MCP: у кодекса своё место. Те же два сервера, что в mcp.json для claude.
+# MCP: только локальный CBM, как в mcp.json для Claude. NTK читает shell.
 # ОКРУЖЕНИЕ СЕРВЕРАМ НАДО ОТДАТЬ ЯВНО. Кодекс запускает MCP-сервер сам и не
 # передаёт ему переменные узла: в прогоне eead888a search_code и search_graph
 # отработали, но оба вернули "project not found or not indexed" - сервер
@@ -35,8 +35,4 @@ cat > "$home/config.toml" <<TOML
 [mcp_servers.codebase-memory]
 command = "/usr/local/bin/codebase-memory-mcp"
 env = { CBM_CACHE_DIR = "${CBM_CACHE_DIR:-}", CBM_ALLOWED_ROOT = "${CBM_ALLOWED_ROOT:-/workspace}" }
-
-[mcp_servers.ntk]
-command = "/usr/local/bin/ntk"
-args = ["mcp"]
 TOML
