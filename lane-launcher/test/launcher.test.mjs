@@ -1,0 +1,233 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {activeCount, dockerLanes} from '../launcher.mjs';
+import {save, read} from '../runtime.mjs';
+
+const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
+const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, [script, ...args], {env, cwd});
+    let stdout = '', stderr = '';
+    child.stdout.on('data', data => stdout += data);
+    child.stderr.on('data', data => stderr += data);
+    child.on('error', reject);
+    child.on('close', code => resolve({code, stdout, stderr}));
+  });
+}
+async function setup(t, {empty = false, dockerFailure = false, launchLanes = true} = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const bins = path.join(root, 'bin');
+  for (const dir of [bins, path.join(root, 'repo/.git'), path.join(root, 'cbm'), path.join(root, 'ssh')]) {
+    fs.mkdirSync(dir, {recursive: true});
+  }
+  const events = path.join(root, 'events.jsonl'), panes = path.join(root, 'panes.json');
+  fs.writeFileSync(panes, '[]');
+  const herdr = path.join(bins, 'herdr');
+  fs.writeFileSync(herdr, `#!${process.execPath}
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.TEST_EVENTS, JSON.stringify(args) + '\\n');
+const panes = JSON.parse(fs.readFileSync(process.env.TEST_PANES));
+let result = {};
+if (args[0] === 'tab' && args[1] === 'create') {
+  panes.push({pane_id: 'test-pane'});
+  fs.writeFileSync(process.env.TEST_PANES, JSON.stringify(panes));
+  result = {root_pane: {pane_id: 'test-pane'}};
+}
+if (args[1] === 'list') result = {panes};
+if (args[1] === 'close' && process.env.TEST_RESULT) {
+  if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(2);
+}
+console.log(JSON.stringify({result}));
+`, {mode: 0o755});
+  fs.writeFileSync(path.join(bins, 'docker'), '#!/bin/sh\nif [ "$TEST_DOCKER_FAILURE" = 1 ]; then exit 1; fi\ncat "$TEST_DOCKER"\n', {mode: 0o755});
+  for (const bin of ['medulla', 'jq']) fs.writeFileSync(path.join(bins, bin), '#!/bin/sh\nexit 0\n', {mode: 0o755});
+  const docker = path.join(root, 'docker.jsonl');
+  fs.writeFileSync(docker, '');
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    calls.push({method: req.method, url: req.url});
+    if (empty) { res.writeHead(204); res.end(); }
+    else res.end('{"id":"T1","status":"open","claimed":false}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const config = {workspace: 'test', project: 'project', tags: ['crew'], strict: true,
+    launchLanes, repo: path.join(root, 'repo'),
+    cbmStore: path.join(root, 'cbm'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
+    stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
+  const configFile = path.join(root, 'config.json');
+  save(configFile, config);
+  const env = {...process.env, PATH: `${bins}:${process.env.PATH}`,
+    HERDR_WORKSPACE_ID: 'workspace',
+    TEST_EVENTS: events, TEST_PANES: panes, TEST_DOCKER: docker,
+    TEST_DOCKER_FAILURE: dockerFailure ? '1' : '0', NTK_CONFIG: path.join(root, 'absent'),
+    NTK_URL: `http://127.0.0.1:${server.address().port}`, NTK_KEY: 'fixture-key'};
+  return {root, config, configFile, env, calls, events, docker, bins,
+    run: () => execute(launcher, ['--config', configFile, '--once'], env)};
+}
+
+test('open tagged ticket launches once; pending tab consumes the only slot', async t => {
+  const f = await setup(t);
+  let result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(f.calls.length, 1);
+  const query = new URL(f.calls[0].url, 'http://fixture');
+  assert.equal(query.pathname, '/v1/tickets/next');
+  for (const [key, value] of Object.entries({workspace: 'test', project: 'project', tag: 'crew',
+    dry_run: 'true', has_module: 'true', strict: 'true'})) assert.equal(query.searchParams.get(key), value);
+  const events = fs.readFileSync(f.events, 'utf8').trim().split('\n').map(JSON.parse);
+  const create = events.find(args => args[1] === 'create');
+  assert.deepEqual(create.slice(0, 4), ['tab', 'create', '--workspace', 'workspace']);
+  assert.ok(create.includes('--no-focus'));
+  assert.ok(events.find(args => args[1] === 'run')[3].includes('worker.mjs'));
+  result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /lanes 1 of 1/);
+  assert.equal(f.calls.length, 1);
+});
+test('existing external Docker lane prevents a queue read', async t => {
+  const f = await setup(t);
+  fs.writeFileSync(f.docker, JSON.stringify({Names: 'medulla-existing', Labels: 'medulla.workflow=lane'}));
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(f.calls.length, 0);
+});
+test('Docker failure fails closed before any queue read', async t => {
+  const f = await setup(t, {dockerFailure: true});
+  const result = await f.run();
+  assert.equal(result.code, 1);
+  assert.equal(f.calls.length, 0);
+});
+test('empty queue leaves Herdr tabs unchanged', async t => {
+  const f = await setup(t, {empty: true});
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /no open tickets/);
+  assert.ok(!fs.readFileSync(f.events, 'utf8').includes('create'));
+});
+test('lock refuses a second dispatcher before it selects work', async t => {
+  const f = await setup(t);
+  fs.mkdirSync(path.join(f.config.stateDir, 'dispatcher.lock'), {recursive: true});
+  const result = await f.run();
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Dispatcher lock exists/);
+  assert.equal(f.calls.length, 0);
+});
+test('Docker and its pending reservation count as one lane', async t => {
+  const f = await setup(t);
+  const dir = path.join(f.config.stateDir, 'runs', 'test');
+  fs.mkdirSync(dir, {recursive: true});
+  save(path.join(dir, 'launch.json'), {runFolder: '/fixture/run', pane: 'test-pane'});
+  const containers = dockerLanes(JSON.stringify({Names: 'medulla-one',
+    Labels: 'medulla.workflow=lane,medulla.runs_under=/fixture/run'}));
+  assert.equal(activeCount(f.config, containers, new Set(['test-pane'])), 1);
+});
+test('dolber.sh reads adjacent dolber.json from another cwd and only previews with configured filters', async t => {
+  const f = await setup(t, {launchLanes: false});
+  const folder = path.join(f.root, 'dolber folder');
+  fs.mkdirSync(folder);
+  for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs']) {
+    fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(folder, file));
+  }
+  const config = {...f.config, tags: ['open', 'agent-ready'], strict: false,
+    preferTags: ['KYC', 'ceo60', 'KYT'], intervalSeconds: 60,
+    project: '', repo: '', cbmStore: '', sshDir: '', gateCommands: []};
+  delete config.launchLanes; // Omission must also default to preview.
+  save(path.join(folder, 'dolber.json'), config);
+  const result = await execute(path.join(folder, 'dolber.sh'), ['--once'], f.env,
+    {bin: 'bash', cwd: f.root});
+  assert.equal(result.code, 0, result.stderr);
+  const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
+  assert.equal(lines[0], 'lanes 0 of 1');
+  assert.equal(lines[1], 'checking params:');
+  assert.equal(lines[2], '  tags: open, agent-ready');
+  assert.equal(lines[3], '  prefer: KYC → ceo60 → KYT');
+  assert.equal(lines[4], 'Запускаю lane на тикет id: T1 (preview: запуск отключён)');
+  const query = new URL(f.calls[0].url, 'http://fixture');
+  assert.equal(query.searchParams.get('tag'), 'open,agent-ready');
+  assert.equal(query.searchParams.get('prefer'), 'KYC,ceo60,KYT');
+  assert.equal(query.searchParams.get('strict'), 'false');
+  assert.equal(query.searchParams.get('dry_run'), 'true');
+  assert.equal(query.searchParams.has('project'), false);
+  assert.equal(f.calls.length, 1);
+  assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
+  assert.deepEqual(fs.readdirSync(path.join(f.config.stateDir, 'runs')), []);
+});
+test('--dry-run overrides live config, previews once and never calls Herdr or claims work', async t => {
+  const f = await setup(t);
+  save(f.configFile, {...f.config, project: '', repo: '', cbmStore: '', sshDir: '', gateCommands: []});
+  const before = fs.readFileSync(f.configFile, 'utf8');
+  fs.rmSync(path.join(f.bins, 'medulla'));
+  fs.rmSync(path.join(f.bins, 'jq'));
+  const result = await execute(fileURLToPath(new URL('../dolber.sh', import.meta.url)),
+    ['--config', f.configFile, '--dry-run'], f.env, {bin: 'sh'});
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /T1 \(preview: запуск отключён\)/);
+  assert.doesNotMatch(result.stdout, /pause /);
+  assert.equal(f.calls.length, 1);
+  const query = new URL(f.calls[0].url, 'http://fixture');
+  assert.equal(query.pathname, '/v1/tickets/next');
+  assert.equal(query.searchParams.get('dry_run'), 'true');
+  assert.ok(!fs.existsSync(f.events));
+  assert.deepEqual(fs.readdirSync(path.join(f.config.stateDir, 'runs')), []);
+  assert.equal(fs.readFileSync(f.configFile, 'utf8'), before);
+});
+test('--dry-run exits with an error when Docker cannot be inspected', async t => {
+  const f = await setup(t, {dockerFailure: true});
+  const result = await execute(launcher, ['--config', f.configFile, '--dry-run'], f.env);
+  assert.equal(result.code, 1);
+  assert.equal(f.calls.length, 0);
+  assert.ok(!fs.existsSync(f.events));
+});
+test('preview loop repeats after its interval and Ctrl+C releases the dispatcher lock', async t => {
+  const f = await setup(t, {launchLanes: false});
+  save(f.configFile, {...f.config, intervalSeconds: 1});
+  const child = spawn(process.execPath, [launcher, '--config', f.configFile], {env: f.env});
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let output = '', errors = '', signalled = false;
+  child.stdout.on('data', data => {
+    output += data;
+    if (!signalled && (output.match(/preview: запуск отключён/g) || []).length === 2) {
+      signalled = true;
+      child.kill('SIGINT');
+    }
+  });
+  child.stderr.on('data', data => errors += data);
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('loop did not stop')); }, 5000);
+    child.once('close', code => { clearTimeout(timer); resolve(code); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+  assert.equal(code, 0, errors);
+  assert.equal(f.calls.length, 2);
+  assert.ok(!fs.existsSync(f.events));
+  assert.ok(!fs.existsSync(path.join(f.config.stateDir, 'dispatcher.lock')));
+});
+for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
+  test(`worker saves exit ${exitCode}; closeTabOnExit=${closeTabOnExit}`, async t => {
+    const f = await setup(t);
+    // Stand in for the lane process; exercise the real worker and Herdr dispatch.
+    fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\nprintf 'lane-output\\n'\nexit ${exitCode}\n`, {mode: 0o755});
+    const dir = path.join(f.root, 'worker');
+    fs.mkdirSync(dir);
+    const file = path.join(dir, 'launch.json');
+    save(file, {config: {...f.config, closeTabOnExit}, args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: dir});
+    const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json')});
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(read(path.join(dir, 'result.json')).code, exitCode);
+    assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /lane-output/);
+    const events = fs.existsSync(f.events)
+      ? fs.readFileSync(f.events, 'utf8').trim().split('\n').map(JSON.parse) : [];
+    assert.deepEqual(events, closeTabOnExit ? [['pane', 'close', 'owned-pane']] : []);
+    if (!closeTabOnExit) assert.match(result.stdout, /Tab kept open/);
+  });
+}

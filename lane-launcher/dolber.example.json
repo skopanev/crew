@@ -1,0 +1,18 @@
+{
+  "workspace": "",
+  "project": "",
+  "tags": ["agent-ready"],
+  "strict": false,
+  "launchLanes": false,
+  "closeTabOnExit": false,
+  "preferTags": ["kyc", "ceo60", "kyt"],
+  "module": null,
+  "assignee": null,
+  "limit": 1,
+  "intervalSeconds": 60,
+  "repo": "",
+  "cbmStore": "",
+  "sshDir": "",
+  "readOnlyRepos": [],
+  "gateCommands": []
+}

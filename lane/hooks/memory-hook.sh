@@ -219,15 +219,15 @@ ctx_args=(context --json --store "$EQUILL_STORE" --role "$EQUILL_ROLE"
 [[ -z "${EQUILL_PROJECT:-}" ]] || ctx_args+=(--project "$EQUILL_PROJECT")
 
 # TWO ROLES, BECAUSE THEY ANSWER TWO QUESTIONS. The contract asks what this node
-# is ALLOWED to do, and that differs per node - medulla-coder may not land.
+# is ALLOWED to do, and that differs per node - crew-lane-coder may not land.
 # A lesson asks what this codebase has already taught us, and that is the same
 # whoever is holding the keyboard: "scripts/*.test.ts are auto-discovered" is a
 # fact about the repository, not about rank.
 #
 # Measured on one query against the live store:
 #   role=lane           29 lessons
-#   role=medulla-coder   1
-#   role=medulla-qa      1
+#   role=crew-lane-coder   1
+#   role=crew-lane-qa      1
 # Lessons carry `role: lane, pm` and the selector matches role as a SET, so the
 # per-node roles I introduced to stop the lane landing on its own authority cut
 # it off from the whole corpus at the same stroke. Retrieval asks as the lane.
@@ -239,7 +239,7 @@ if [[ "$event" == SessionStart ]]; then
         --profile "${EQUILL_SESSION_PROFILE:-agent.context.target}"
         --coordinate "rules=$EQUILL_RULES"
         # НА СТАРТЕ ОГРАНИЧЕНИЙ НЕТ, и это проверено, а не заявлено: контракт
-        # medulla-coder это 19 записей и при бюджете 30, и при 1000, и при
+        # crew-lane-coder это 19 записей и при бюджете 30, и при 1000, и при
         # 100000, degraded:false во всех трёх. Безлимита у equill нет, поэтому
         # стоит потолок заведомо выше всего, что может прийти. А если он всё же
         # когда-нибудь сработает — теперь об этом скажут: предупреждение об

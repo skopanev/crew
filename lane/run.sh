@@ -3,7 +3,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
-              --cbm-store <dir>
+              --cbm-store <dir> --gate-command <shell command> [...]
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [extra medulla args...]
 
@@ -14,6 +14,8 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               never the directory itself, and refuses to start if the copy does
               not open and answer.
   --module    ticket module; read from ntk when omitted
+  --gate-command  required check, run from the candidate repo root. Repeatable.
+                  Supplied by the operator; no commands are inferred from code.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
@@ -31,11 +33,11 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # \n в \r\n, и обычный echo уводит вывод лесенкой: строка опускается, но курсор
 # остаётся там же. Медулла печатает свои строки сама и ровно, наши - нет.
 say() { printf '%s\r\n' "$*" >&2; }
-# Комнаты и курьер - у каждого свои, в общий репозиторий им нельзя.
-# Файла нет - полоса работает молча. Образец: lane/local.env.example
+# Локальные пути и параметры запуска. Образец: lane/local.env.example
+requested_runs_folder="${LANE_RUNS_FOLDER:-}"
 [ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
 # Вне дерева инструментов: этого требует --cwd-ro.
-RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
+RUNS_FOLDER="${requested_runs_folder:-${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}}"
 mkdir -p "$RUNS_FOLDER"
 # ФИЗИЧЕСКИЙ ПУТЬ, А НЕ ЧЕРЕЗ СИМЛИНК. Медулла монтирует каталог прогонов по
 # разрешённому пути, и если ~/.medulla - симлинк, внутри контейнера он лежит
@@ -51,6 +53,7 @@ TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src=""
 also=()
+gate_commands=()
 passthrough=()
 while (( $# )); do
   case "$1" in
@@ -66,6 +69,7 @@ while (( $# )); do
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-store) cbm_src="${2:-}"; shift 2 ;;
+    --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -74,6 +78,11 @@ done
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
 [[ -n "$cbm_src" ]] || { say "run.sh: --cbm-store is required"; usage; }
+(( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
+for command in "${gate_commands[@]}"; do
+  [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
+done
+gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
 
 [[ -d "$repo/.git" || -f "$repo/.git" ]] || {
   say "run.sh: --mount-rw is not a git repository: $repo"
@@ -99,7 +108,12 @@ if [[ -e "$_point" ]]; then
   exit 2
 fi
 
-if ! ticket_json="$(cd "$repo" && ntk show "$ticket" -W "$project" --json 2>&1)"; then
+if ! ticket_json="$(node --input-type=module -e '
+  import {pathToFileURL} from "node:url";
+  const {getTicket} = await import(pathToFileURL(process.argv[1]));
+  try { console.log(JSON.stringify(await getTicket(process.argv[2], process.argv[3]))); }
+  catch (error) { console.error(error.message); process.exit(1); }
+' "$TOOLING_ROOT/lane-launcher/ntk.mjs" "$ticket" "$project" 2>&1)"; then
   say "run.sh: ${ticket_json%%$'\n'*}"
   say "run.sh: ticket $ticket does not exist in workspace $project - nothing to run"
   exit 2
@@ -257,8 +271,8 @@ if (( cbm_ok )); then
          codebase-memory-mcp daemon start >/dev/null 2>&1 || true
          # ДОГОНЯЕМ ТОЛЬКО ТО, ЧТО СДВИНУЛОСЬ. Список считает хост: он только
          # что сделал fetch и знает отпечатки. Пусто - значит всё свежее.
-         # Замер: база finik-app не писалась СУТКИ при живом демоне, а
-         # index_status всё это время отвечал "ready" - свежесть он не
+         # Замер: база одного из проектов не писалась СУТКИ при живом
+         # демоне, а index_status всё это время отвечал "ready" - свежесть не
          # показывает вовсе, и разведчик тратил шесть обращений из восьми на
          # проверку покрытия вместо поиска.
          # --name ОБЯЗАТЕЛЕН: имя проекта выводится из пути, а внутри репа лежит
@@ -340,7 +354,7 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
     --var "EQUILL_ACTOR=lane"
     # Роль контракта - на узле; роль ПАМЯТИ одна на прогон (29 уроков против
-    # одного под medulla-coder).
+    # одного под crew-lane-coder).
     --var "EQUILL_MEMORY_ROLE=lane"
     # Тикетные правила узлу не адресованы. Коммуникационные так не убрать: у
     # них координаты rules нет вовсе, значит они подстановочные.
@@ -348,10 +362,6 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
     --var "LANE_WT_ROOT=$WT_ROOT"
-    --var "TELEGRAM_ROOM=${TELEGRAM_ROOM:-}"
-    --var "TELEGRAM_TOPIC=${TELEGRAM_TOPIC:-}"
-    --var "ESCALATION_ROOM=${ESCALATION_ROOM:-}"
-    --var "ESCALATION_COURIER=${ESCALATION_COURIER:-}"
     --var "EQUILL_PROJECT=$project"
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
@@ -361,37 +371,6 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
 else
   [[ -n "$module" ]] || say "run.sh: no module - memory stays off (the hook needs every EQUILL_* or none)"
   say "run.sh: memory off - equill bridge not running"
-fi
-
-# Имя на шине назначается ЗДЕСЬ и внутрь не едет: vars попадают в окружение
-# агентных тел, а значит имя оттуда можно перечитать и переобъявить.
-bus_from="$(printf 'lane-%s' "$project" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')"
-
-# Мост шины: комната, имя и список получателей живут на ЭТОЙ стороне.
-# ПО ПРОЕКТУ: на общем пидфайле вторая полоса слала уведомления под именем и в
-# комнату ПЕРВОЙ. От намеренного захода в чужой каталог это не ограждает -
-# нужен помонтажный монтаж, и это к медулле.
-bus_dir="$MEDULLA_BRIDGE/bus-$bus_from"
-mkdir -p "$bus_dir/req" "$bus_dir/resp"
-if [[ ! -f "$bus_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bus_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  LANE_BUS_ROOM="${LANE_BUS_ROOM:-}" \
-  LANE_BUS_FROM="$bus_from" \
-  LANE_BUS_ALLOWED="${LANE_BUS_ALLOWED:-}" \
-  LANE_BUS_DIR="$bus_dir" \
-    nohup bash "$WORKFLOW_DIR/bridge/bus-bridge.sh" >>"$MEDULLA_BRIDGE/bus-bridge.log" 2>&1 &
-  for _ in {1..30}; do
-    [[ -f "$bus_dir/bridge.pid" ]] && break
-    sleep 0.1
-  done
-fi
-if [[ -f "$bus_dir/bridge.pid" ]] && kill -0 "$(cat "$bus_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  say "run.sh: bus on (bridge pid $(cat "$bus_dir/bridge.pid"), as $bus_from)"
-else
-  # Отказ, а не предупреждение: шина - единственный выход. Без неё полоса
-  # возьмёт тикет и не сможет сказать, чем кончила. Проверка ДО заявки.
-  say "run.sh: bus bridge did not start - refusing, because every outcome leaves through it."
-  say "        log: $MEDULLA_BRIDGE/bus-bridge.log"
-  exit 2
 fi
 
 cd "$TOOLING_ROOT"
@@ -406,10 +385,11 @@ medulla \
   "${mounts[@]}" \
   --var "cbm_cache_dir=$cbm_clone" \
   --var "ticket_id=$ticket" \
+  --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
   --var "module_name=$module" \
+  --var "gate_commands=$gate_json" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
-  --var "LANE_BUS_DIR=$bus_dir" \
   ${equill_vars[@]+"${equill_vars[@]}"} \
   ${passthrough[@]+"${passthrough[@]}"}
