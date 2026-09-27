@@ -3,12 +3,10 @@ set -uo pipefail
 bridge="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}/equill"
 equill_bin="${EQUILL_BIN:-equill}"
 poll="${EQUILL_BRIDGE_POLL:-0.1}"
+export EQUILL_ACTOR=lane
 
-# CLI verbs, not MCP tool names. schema_list/schema_show stood here and are not
-# equill subcommands at all - the CLI has one `schema` with list/show under it -
-# so reading the store's schema was refused outright. --help and --version are
-# introspection: two agents in one run asked for help and the bridge refused,
-# which is the opposite of giving them the tool.
+# Host identity is fixed here; the caller's actor/env never crosses the bridge.
+# Only the two read operations needed by lane contracts and memory are exposed.
 allowed_verbs="context search"
 
 command -v "$equill_bin" >/dev/null 2>&1 || { echo "equill-bridge: no equill on PATH" >&2; exit 127; }
@@ -24,8 +22,9 @@ if [ -f "$pidfile" ]; then
     exit 0
   fi
 fi
+printf 'lane:%s\n' "$$" > "$bridge/bridge.identity"
 echo $$ > "$pidfile"
-trap 'rm -f "$pidfile"; exit 0' INT TERM HUP
+trap 'rm -f "$pidfile" "$bridge/bridge.identity"; exit 0' INT TERM HUP
 
 echo "equill-bridge listening on $bridge (pid $$)"
 

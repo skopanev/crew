@@ -17,11 +17,16 @@ class ClaimCleanupTests(unittest.TestCase):
             with self.subTest(response=response, rc=rc), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 (root / 'lane/hooks').mkdir(parents=True)
+                (root / 'lane/bin').mkdir()
                 (root / 'lane-launcher').mkdir()
                 (root / 'bin').mkdir()
                 (root / 'lane/hooks/inject.sh').write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
                 (root / 'lane/hooks/codex-home.sh').write_text('exit 0\n')
                 (root / 'lane-launcher/ntk-status').write_text('printf "%s" "$RESPONSE"\nexit "$RESPONSE_RC"\n')
+                (root / 'lane-launcher/ntk.mjs').write_text(
+                    'export async function getTicket(id) { return {id, body: "fixture acceptance"}; }\n')
+                helper = Path(__file__).resolve().parents[1] / 'bin/ticket-input.mjs'
+                (root / 'lane/bin/ticket-input.mjs').write_text(helper.read_text())
                 equill = root / 'bin/equill'
                 equill.write_text('#!/bin/sh\nprintf \'{"content":"fixture contract"}\'\n')
                 equill.chmod(0o755)
@@ -36,8 +41,11 @@ class ClaimCleanupTests(unittest.TestCase):
                     claim = json.loads(receipt.read_text())
                     self.assertEqual(claim['workspace'], 'test')
                     self.assertEqual(claim['run_dir'], str(root / 'run'))
+                    ticket = json.loads((root / 'run/artifacts/ticket.json').read_text())
+                    self.assertEqual(ticket['body'], 'fixture acceptance')
                 else:
                     self.assertFalse(receipt.exists())
+                    self.assertFalse((root / 'run/artifacts/ticket.json').exists())
                     self.assertTrue(result.returncode != 0 or 'CLAIM_REFUSED' in result.stdout)
 
     def test_cleanup_preserves_landing_and_fails_when_to_test_fails(self):

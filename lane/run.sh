@@ -348,11 +348,22 @@ if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.p
   done
 fi
 
+# An already-running old bridge may still inherit its owner's write identity.
+# Do not reuse it silently or stop it while another caller might be using it.
+bridge_pid="$(cat "$bridge_dir/bridge.pid" 2>/dev/null || true)"
+if [[ -z "$bridge_pid" ]] || ! kill -0 "$bridge_pid" 2>/dev/null \
+   || [[ "$(cat "$bridge_dir/bridge.identity" 2>/dev/null || true)" != "lane:$bridge_pid" ]]; then
+  say "run.sh: Equill bridge is unavailable or predates the fixed lane identity."
+  say "        Stop the old bridge when unused, then retry; refusing before claim."
+  exit 2
+fi
+
 equill_vars=()
 if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")" 2>/dev/null && [[ -n "$module" ]]; then
   equill_vars=(
     --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
     --var "EQUILL_ACTOR=lane"
+    --var "EQUILL_BRIDGE=$bridge_dir"
     # Роль контракта - на узле; роль ПАМЯТИ одна на прогон (29 уроков против
     # одного под crew-lane-coder).
     --var "EQUILL_MEMORY_ROLE=lane"
