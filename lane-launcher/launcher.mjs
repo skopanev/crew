@@ -124,7 +124,7 @@ export async function tick(config) {
   const {containers, panes} = snapshots(config);
   const active = activeCount(config, containers, panes);
   divider();
-  console.log(`lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   if (active >= config.limit) return;
   const query = {workspace: config.workspace, project: config.project || undefined,
     tag: config.tags.length ? config.tags.join(',') : undefined,
@@ -137,7 +137,7 @@ export async function tick(config) {
   const candidate = await nextTicket(query);
   if (!candidate) { console.log('no open tickets matching dolber.json filters'); return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('NTK returned a ticket without an id');
-  console.log(`Запускаю lane на тикет id: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
+  console.log(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
   if (candidate.title) console.log(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
   if (!config.launchLanes) return;
   const dir = path.join(config.stateDir, 'runs', randomUUID());

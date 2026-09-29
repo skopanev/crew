@@ -401,7 +401,12 @@ nodes:
       for r in rows:
           v = verdict(r)
           who = r.get("harness") or "?"
-          line = f"- {who}: {v or 'нет вердикта'} {r.get('message') or ''}".strip()
+          result = v or 'no verdict'
+          if r.get("timed_out"):
+              v = ""
+              result = f"TIMEOUT ({r.get('model') or '?'}, rc={r.get('rc')}, attempts={r.get('attempts')})"
+              print(f"[lane] {who}: {result}", file=sys.stderr)
+          line = f"- {who}: {result} {r.get('message') or ''}".strip()
           # Keep every reviewer result, including nonblocking findings.
           notes.append(line)
           if v == "CLEAR":
@@ -680,7 +685,7 @@ nodes:
 
       # Кап ДО первого сигнала: движок маршрутизирует по первому известному.
       if [ "$done_rounds" -ge "$limit" ]; then
-        echo "<signal:TOO_MANY_ROUNDS>панель отклонила ${done_rounds} раз; четвёртая попытка это не починка</signal:TOO_MANY_ROUNDS>"
+        echo "<signal:TOO_MANY_ROUNDS>Review rejected ${done_rounds} times. Last review: ${finding}</signal:TOO_MANY_ROUNDS>"
         exit 0
       fi
 

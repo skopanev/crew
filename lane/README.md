@@ -33,6 +33,16 @@ medulla -w lane --graph
 ошибкой; оператор разбирает причину и подхватывает работу с исправлениями.
 AgentBus для запуска и завершения lane не нужен.
 
+Optional progress notifications run on the host after lane completion. The
+`notify.mjs` script sends a single `CREW READY|FAILED|TIMEOUT` event through AgentBus
+to the configured messenger. No LLM is called by the script. The messenger delivers
+to its agreed Progress channel; queueing is not a Telegram delivery receipt.
+Configure `notify: {"to": "messenger-alias", "room": "conv.crew.notify", "from": "crew-notify-project"}`
+in the local Dolber JSON, or leave `notify` null to disable it. A notification
+failure is logged in `notification-error.json` and does not change the lane result.
+
+Manual use: `node notify.mjs config.json READY ticket-id "Ticket ready for test"`.
+
 ## Правка
 
 `workflow.yaml` правится напрямую. Проверка — `medulla -w workflow.yaml --validate`.
