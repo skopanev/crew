@@ -32,9 +32,10 @@ export function herdr(config, args) {
   return reply.result;
 }
 export function laneArgs(config, ticket) {
-  return ['--ticket-id', ticket, '--project', config.workspace, '--mount-rw', config.repo,
+  return ['--ticket-id', ticket, '--project', config.workspace, '--repo', config.repo,
     '--dispatcher-id', config.id,
     '--cbm-mcp-command', config.cbmMcpCommand, '--ssh-dir', config.sshDir,
+    ...(config.sourceRoot ? ['--source-root', config.sourceRoot] : []),
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];
 }

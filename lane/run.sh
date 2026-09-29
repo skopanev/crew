@@ -2,16 +2,17 @@
 set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
-usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
+usage: run.sh --ticket-id <id> --project <ntk workspace> --repo <repo>
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --gate-command <shell command> [...]
-              [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
+              [--source-root <workspace>] [--module <module>]
+              [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
-  --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
-              the lane writes in one place, and both the landing check and the
-              out-of-module verdict depend on that.
+  --repo      primary Git checkout, mounted read-only. Only its Git metadata
+              and the ticket worktree are writable. --mount-rw is an old alias.
+  --source-root  entire source workspace to expose read-only.
   --cbm-mcp-command  existing Python stdio connector to the shared host CBM.
               The lane uses that service; it never copies or indexes a database.
   --module    ticket module; read from ntk when omitted
@@ -39,7 +40,7 @@ say() { printf '%s\r\n' "$*" >&2; }
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
+ticket="" project="" repo="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
 planning_result="" planning_task=""
 also=()
 gate_commands=()
@@ -49,11 +50,10 @@ while (( $# )); do
     --ticket-id) ticket="${2:-}"; shift 2 ;;
     --dispatcher-id) dispatcher_id="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
-    --mount-rw)
-      [ -z "$repo" ] || { say "run.sh: --mount-rw задан дважды: $repo и ${2:-}"
-                          say "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro"
-                          exit 2; }
+    --repo|--mount-rw)
+      [ -z "$repo" ] || { say "run.sh: specify exactly one --repo"; exit 2; }
       repo="${2:-}"; shift 2 ;;
+    --source-root) source_root="${2:-}"; shift 2 ;;
     --module) module="${2:-}"; shift 2 ;;
     --planning-result) planning_result="${2:-}"; shift 2 ;;
     --planning-task) planning_task="${2:-}"; shift 2 ;;
@@ -73,7 +73,7 @@ if [[ -n "$planning_result" || -n "$planning_task" ]]; then
 fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
-[[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
+[[ -n "$repo"    ]] || { say "run.sh: --repo is required"; usage; }
 [[ -f "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an existing shared CBM connector"; exit 2; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
@@ -82,13 +82,20 @@ for command in "${gate_commands[@]}"; do
 done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
 
-[[ -d "$repo/.git" || -f "$repo/.git" ]] || {
-  say "run.sh: --mount-rw is not a git repository: $repo"
-  say "        (it must be the repo itself, not the directory that holds several)"
+[[ -d "$repo/.git" ]] || {
+  say "run.sh: --repo must be a primary checkout with a .git directory: $repo"
   exit 2
 }
 repo="$(cd "$repo" && pwd -P)"
 project_dir="/workspace/$(basename "$repo")"
+source_root_in=""
+if [[ -n "$source_root" ]]; then
+  source_root="$(cd "$source_root" && pwd -P)"
+  source_root_in="/workspace/$(basename "$source_root")"
+  [[ "$repo" == "$source_root/"* ]] || {
+    say "run.sh: --repo must be inside --source-root"; exit 2; }
+  also+=("$source_root")
+fi
 
 # Remove empty mountpoints left by interrupted runs; never hide existing files.
 _point="$TOOLING_ROOT/$(basename "$repo")"
@@ -155,8 +162,11 @@ RUNS_FOLDER="$(cd "$RUNS_FOLDER" && pwd -P)"
 # Worktrees stay outside the tooling repository mounted read-only.
 WT_ROOT="$RUNS_FOLDER/worktrees"
 mkdir -p "$WT_ROOT"
+say "run.sh: sources RO: ${source_root:-$repo}"
+say "run.sh: worktree RW: $WT_ROOT/wt-$ticket"
+say "run.sh: Git metadata RW: $repo/.git"
 
-mounts=(--mount-rw "$repo")
+mounts=(--mount "$repo" --mount-rw "$repo/.git")
 
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
@@ -213,14 +223,11 @@ cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
 cbm_connector="$cbm_connector_dir/mcp.py"
 cp "$cbm_command" "$cbm_connector"
 chmod 600 "$cbm_connector"
-cbm_projects=("$(printf %s "$repo" | sed 's|^/||; s|/|-|g')")
-for _e in ${also[@]+"${also[@]}"}; do
-  cbm_projects+=("$(cd "$_e" && pwd -P | sed 's|^/||; s|/|-|g')")
-done
+cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"
 if ! docker run --rm --entrypoint python3 \
      -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
      -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
-     "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "${cbm_projects[@]}"; then
+     "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"; then
   say "run.sh: shared CBM is unavailable; refusing before the claim."
   exit 2
 fi
@@ -262,9 +269,7 @@ if [[ -z "$bridge_pid" ]] || ! kill -0 "$bridge_pid" 2>/dev/null \
   exit 2
 fi
 
-equill_vars=()
-if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")" 2>/dev/null && [[ -n "$module" ]]; then
-  equill_vars=(
+equill_vars=(
     --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
     --var "EQUILL_ACTOR=lane"
     --var "EQUILL_BRIDGE=$bridge_dir"
@@ -277,12 +282,8 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
-  )
-  say "run.sh: memory on (equill bridge pid $(cat "$bridge_dir/bridge.pid"))"
-else
-  [[ -n "$module" ]] || say "run.sh: no module - memory stays off (the hook needs every EQUILL_* or none)"
-  say "run.sh: memory off - equill bridge not running"
-fi
+)
+say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
 cd "$TOOLING_ROOT"
 planning_admission
@@ -300,6 +301,8 @@ medulla \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
+  --var "repository_git_dir=/workspace/.git" \
+  --var "source_root=$source_root_in" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
   --var "GIT_SSH_COMMAND=$git_ssh" \

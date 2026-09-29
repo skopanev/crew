@@ -8,8 +8,11 @@ read-only repositories are mounted as they are; startup never fetches them.
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
 ```
-run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --mount-rw <репозиторий> --cbm-mcp-command <shared-connector.py> --gate-command '<проверка>' --ssh-dir <каталог ключа>
+run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --repo <repository> --source-root <source-workspace> --cbm-mcp-command <shared-connector.py> --gate-command '<check>' --ssh-dir <key-directory>
 ```
+
+Sources are read-only. Only the run directory (including the ticket worktree)
+and the selected repository's Git metadata are writable. No repository is copied.
 
 ## Граф
 
