@@ -103,14 +103,14 @@ AgentBus в lane не используется. Исход и причина о�
   --mount-rw  <repo>          `# сюда полоса пишет, РОВНО ОДИН` \
   --mount-ro  <lib>           `# на чтение, повторяемо` \
   --mount-ro  <docs> \
-  --cbm-store <dir>           `# индекс codebase-memory` \
+  --cbm-mcp-command <file>    `# connector to shared host CBM` \
   --gate-command '<check>'    `# проверка из корня репозитория; повторяемо` \
   --ssh-dir   <dir>
 ```
 
-`--cbm-store` — каталог индекса codebase-memory. Полоса получает его **копию**,
-а не сам каталог, и не стартует, если копия не открывается или не отвечает:
-прогон без графа повторяет ровно то, на чём встал предыдущий.
+`--cbm-mcp-command` points to the existing Python stdio connector for the
+shared host CBM service. Every lane uses that service; no database copy or
+local daemon is created. A failed connection stops the lane before claim.
 
 `--mount-rw` ровно один: на этом держатся и проверка посадки, и вердикт о
 выходе за модуль. Всё, что полосе нужно ЧИТАТЬ, перечисляется через

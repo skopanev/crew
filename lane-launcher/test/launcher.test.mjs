@@ -26,7 +26,8 @@ async function setup(t, {empty = false, dockerFailure = false, launchLanes = tru
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
-  for (const dir of [bins, path.join(root, 'repo/.git'), path.join(root, 'cbm'), path.join(root, 'ssh')]) {
+  fs.writeFileSync(path.join(root, 'cbm-mcp.py'), '# connector fixture\n');
+  for (const dir of [bins, path.join(root, 'repo/.git'), path.join(root, 'ssh')]) {
     fs.mkdirSync(dir, {recursive: true});
   }
   const events = path.join(root, 'events.jsonl'), panes = path.join(root, 'panes.json');
@@ -64,7 +65,7 @@ console.log(JSON.stringify({result}));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const config = {id: 'test-project', workspace: 'test', project: 'project', tags: ['crew'], strict: true,
     launchLanes, repo: path.join(root, 'repo'),
-    cbmStore: path.join(root, 'cbm'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
+    cbmMcpCommand: path.join(root, 'cbm-mcp.py'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
     stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
   const configFile = path.join(root, 'config.json');
   save(configFile, config);
@@ -192,7 +193,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   }
   const config = {...f.config, tags: ['open', 'agent-ready'], strict: false,
     preferTags: ['KYC', 'ceo60', 'KYT'], intervalSeconds: 60,
-    project: '', repo: '', cbmStore: '', sshDir: '', gateCommands: []};
+    project: '', repo: '', cbmMcpCommand: '', sshDir: '', gateCommands: []};
   delete config.launchLanes; // Omission must also default to preview.
   save(path.join(folder, 'dolber.json'), config);
   const result = await execute(path.join(folder, 'dolber.sh'), ['--once'], f.env,
@@ -216,7 +217,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
 });
 test('--dry-run overrides live config, previews once and never calls Herdr or claims work', async t => {
   const f = await setup(t);
-  save(f.configFile, {...f.config, project: '', repo: '', cbmStore: '', sshDir: '', gateCommands: []});
+  save(f.configFile, {...f.config, project: '', repo: '', cbmMcpCommand: '', sshDir: '', gateCommands: []});
   const before = fs.readFileSync(f.configFile, 'utf8');
   fs.rmSync(path.join(f.bins, 'medulla'));
   fs.rmSync(path.join(f.bins, 'jq'));

@@ -22,8 +22,7 @@ nodes:
       # config.toml дома кодекса. Кодекс запускает MCP-сервер сам и окружение
       # узла ему не передаёт - в прогоне eead888a оба поиска вернули
       # "project not found or not indexed" именно поэтому.
-      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
-      CBM_ALLOWED_ROOT: /workspace
+      CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
@@ -106,8 +105,7 @@ nodes:
       EQUILL_TICKET: '{{var:ticket_id}}'
       EQUILL_PROJECT: '{{var:project_name}}'
       EQUILL_MODULE: '{{var:module_name}}'
-      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
-      CBM_ALLOWED_ROOT: /workspace
+      CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
     on_signal:
       OK: create_worktree          # закрытый набор скаута: OK, DUPLICATE, OUT_OF_MODULE, PREMISE_BROKEN
       DUPLICATE: notify_failure
@@ -149,6 +147,10 @@ nodes:
       its description, acceptance criteria and module. NTK MCP is not provided.
       Run the CBM preflight now: search_code and search_graph, once each, before
       any Bash; check SIMILAR_TO before writing anything new. Cite both.
+      CBM is a shared host service. Its paths refer to host repositories.
+      Match the returned project to the mounted repository and verify each
+      relevant finding against current files under ${project_dir}. Never
+      index a lane worktree or change shared CBM project paths.
       Do not survey unrelated code.
 
       WRITE YOUR RECONNAISSANCE TO $MEDULLA_RUN_DIR/artifacts/scout.txt BEFORE
@@ -300,19 +302,15 @@ nodes:
         printf 'РАЗВЕДЧИК НЕ ОСТАВИЛ ОТЧЁТА. Всё, что от него есть:\n%s\n' \
           "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
       fi
-      # "РАЗВЕДКА ПО КОДОВОЙ БАЗЕ, ЕЙ ДОВЕРЯЙ" - слова владельца, и за ними замер.
-      # Прогон d33de436: разведка нашла причину и передала её - LocaleLayout
-      # omits messages, i18n/request.ts loads the entire catalogue, - плюс 20
-      # совпадений search_code и готовый renderWithProviders для тестов.
-      # Кодер вместо этого поднял сервер и пошёл тянуть HTML: 31 вызов оболочки,
-      # семь минут, ноль правок в дереве. Он ВЫВОДИЛ ТУ ЖЕ ПРИЧИНУ ЗАНОВО.
-      # Виноват был мой текст: "What the scout found: <путь>" - справка, из
-      # которой не следует, что перепроверять не надо. Теперь следует.
+      # Shared CBM describes host repositories, which may differ from this
+      # ticket worktree. Reuse the scout report, then verify cited code locally.
       echo "<signal:READY>Branch ticket-${ticket_id} is checked out at ${LANE_WT_ROOT}/wt-${ticket_id}, cut from origin/${target}.${deps:-}
 
-      CODEBASE RECONNAISSANCE, ALREADY DONE ON THIS EXACT WORKTREE - TRUST IT: ${MEDULLA_RUN_DIR}/artifacts/scout.txt
-      It was run against origin/${target}, the same commit your worktree is cut from: the same files, the same code.
-      Read it first. Its findings are evidence: do not re-derive them, do not re-run its searches, do not reproduce what it already established. Start from where it stopped.
+      CODEBASE RECONNAISSANCE - verify its findings against your current worktree: ${MEDULLA_RUN_DIR}/artifacts/scout.txt
+      Read it first. Shared CBM describes host repositories; its paths and code
+      may differ from this worktree. Check cited files here before relying on a
+      finding. Reuse verified findings and investigate only gaps or differences.
+      Never index this worktree or change shared CBM project paths.
 
       Implement the ticket.</signal:READY>"
   implement_code:
@@ -331,8 +329,7 @@ nodes:
       EQUILL_PROJECT: '{{var:project_name}}'
       EQUILL_MODULE: '{{var:module_name}}'
       EQUILL_PHASE: unit
-      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
-      CBM_ALLOWED_ROOT: /workspace   # writing code: landing lessons do not apply
+      CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
     on_signal:
       OK: prepare_review
@@ -354,7 +351,7 @@ nodes:
       - --settings
       - /tmp/lane-settings.json
       - --mcp-config
-      - /workspace/lane/hooks/mcp.json
+      - /tmp/codex-home/mcp.json
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
@@ -844,8 +841,7 @@ nodes:
       EQUILL_PROJECT: '{{var:project_name}}'
       EQUILL_MODULE: '{{var:module_name}}'
       EQUILL_PHASE: land
-      CBM_CACHE_DIR: '{{var:cbm_cache_dir}}'
-      CBM_ALLOWED_ROOT: /workspace   # resolving a rebase IS landing work
+      CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
     on_signal:
       # Словарь берётся из контракта: crew-lane-coder знает OK и GATE_FAIL.
@@ -863,7 +859,7 @@ nodes:
       - --settings
       - /tmp/lane-settings.json
       - --mcp-config
-      - /workspace/lane/hooks/mcp.json
+      - /tmp/codex-home/mcp.json
       - --strict-mcp-config
       - --setting-sources=
     prompt: |

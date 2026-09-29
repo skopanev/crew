@@ -4,7 +4,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               --dispatcher-id <dolber id>
-              --cbm-store <dir> --gate-command <shell command> [...]
+              --cbm-mcp-command <file> --gate-command <shell command> [...]
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
@@ -12,9 +12,8 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
   --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
               the lane writes in one place, and both the landing check and the
               out-of-module verdict depend on that.
-  --cbm-store the codebase-memory index directory. The lane gets a COPY of it,
-              never the directory itself, and refuses to start if the copy does
-              not open and answer.
+  --cbm-mcp-command  existing Python stdio connector to the shared host CBM.
+              The lane uses that service; it never copies or indexes a database.
   --module    ticket module; read from ntk when omitted
   --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.
   --planning-result  completed planning receipt; requires a fresh live Joppa
@@ -47,7 +46,7 @@ RUNS_FOLDER="${requested_runs_folder:-${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-ru
 # ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src="" dispatcher_id=""
+ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
 planning_result="" planning_task=""
 also=()
 gate_commands=()
@@ -69,7 +68,7 @@ while (( $# )); do
     --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
-    --cbm-store) cbm_src="${2:-}"; shift 2 ;;
+    --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
@@ -83,7 +82,7 @@ fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
-[[ -n "$cbm_src" ]] || { say "run.sh: --cbm-store is required"; usage; }
+[[ -f "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an existing shared CBM connector"; exit 2; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
 for command in "${gate_commands[@]}"; do
@@ -214,7 +213,7 @@ fi
 made=()
 cleanup() {
   local d
-  [[ -z "${cbm_clone:-}" ]] || rm -rf "$cbm_clone"
+  [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
   for d in "${made[@]:-}"; do [[ -n "$d" ]] && rmdir "$d" 2>/dev/null || true; done
 }
 trap cleanup EXIT
@@ -233,117 +232,25 @@ fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
 
-# КЛОН индекса, не индекс: другой inode - блокировка SQLite не идёт через
-# границу монтирования, и снимок застывает на старте.
-# Имя УНИКАЛЬНО НА ПРОГОН: по одному тикету второй запуск снёс бы индекс уже
-# работающей полосы.
-cbm_clone="$MEDULLA_BRIDGE/cbm-$ticket-$$-$(date +%s)"
-cbm_ok=0
-# Имя проекта в индексе выводится из абсолютного пути репозитория.
-cbm_probe_projects="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"
+# Copy only the small stdio connector so its credentials are available to
+# this container. Every connector talks to the same existing host service.
+# No database mount, clone, daemon, path rewrite, or indexing belongs here.
+cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
+cbm_connector="$cbm_connector_dir/mcp.py"
+cp "$cbm_command" "$cbm_connector"
+chmod 600 "$cbm_connector"
+cbm_projects=("$(printf %s "$repo" | sed 's|^/||; s|/|-|g')")
 for _e in ${also[@]+"${also[@]}"}; do
-  [ -d "$_e" ] || continue
-  cbm_probe_projects="$cbm_probe_projects $(cd "$_e" && pwd -P | sed 's|^/||; s|/|-|g')"
+  cbm_projects+=("$(cd "$_e" && pwd -P | sed 's|^/||; s|/|-|g')")
 done
-# СПИСОК НА ПЕРЕИНДЕКСАЦИЮ: только те репы, что сдвинулись с прошлого прогона.
-# Отпечаток - HEAD после fetch; метка лежит в каталоге прогонов, то есть у нас,
-# а не рядом с чужим хранилищем. Совпало - индекс свежий, тратить 20 секунд не
-# на что; разошлось - догоняем именно эту репу.
-cbm_index_list=""
-cbm_marks="$RUNS_FOLDER/.cbm-marks"; mkdir -p "$cbm_marks"
-for r in "$repo" ${also[@]+"${also[@]}"}; do
-  [ -d "$r/.git" ] || [ -f "$r/.git" ] || continue
-  pr="$(printf %s "$r" | sed 's|^/||; s|/|-|g')"
-  fp="$(git -C "$r" rev-parse HEAD 2>/dev/null || echo unknown)"
-  if [ "$fp" = "$(cat "$cbm_marks/$pr" 2>/dev/null)" ]; then
-    say "run.sh: $(basename "$r") - индекс свежий ($fp)"
-  else
-    cbm_index_list="$cbm_index_list $pr=/workspace/$(basename "$r")"
-    # Метка ставится ПОСЛЕ успеха, а не сейчас: проставь её здесь, и провалившаяся
-    # индексация навсегда объявила бы репу свежей.
-    cbm_pending_marks="${cbm_pending_marks:-} $pr=$fp"
-    say "run.sh: $(basename "$r") сдвинулся - переиндексируем"
-  fi
-done
-
-if [[ -d "$cbm_src" ]]; then
-  rm -rf "$cbm_clone"
-  # Без отката в существующий каталог: cp -R вложил бы хранилище глубже.
-  if cp -Rc "$cbm_src" "$cbm_clone" 2>/dev/null; then cbm_ok=1
-  else rm -rf "$cbm_clone"; cp -R "$cbm_src" "$cbm_clone" 2>/dev/null && cbm_ok=1; fi
-fi
-# Закрыто ДО заявки: проверяем не "каталог есть", а "копия отвечает".
-if (( cbm_ok )); then
-  # ПУТИ ПОД КОНТЕЙНЕР: search_code это grep по projects.root_path, а там путь
-  # ХОСТА - внутри grep честно вернёт пусто. Правим в КЛОНЕ.
-  for db in "$cbm_clone"/*.db; do
-    [ -e "$db" ] || continue
-    for pair in "$repo:$project_dir" ${also[@]+"${also[@]}"}; do
-      src="${pair%%:*}"; [ -d "$src" ] || continue
-      sqlite3 "$db" "UPDATE projects SET root_path='/workspace/$(basename "$src")' WHERE root_path='$src';" 2>/dev/null || true
-    done
-  done
-
-  # cp каталога не атомарен для живой SQLite: битая база проходит list_projects
-  # и падает на первом search_graph в середине прогона. Окружение проверки - ТО
-  # ЖЕ, что у узлов, и репы монтируются сюда же, иначе проверяем пустоту.
-  probe_mounts=(-v "$repo:/workspace/$(basename "$repo"):ro")
-  for _e in ${also[@]+"${also[@]}"}; do
-    [ -d "$_e" ] && probe_mounts+=(-v "$_e:/workspace/$(basename "$_e"):ro")
-  done
-  if docker run --rm --entrypoint bash -v "$cbm_clone:$cbm_clone" "${probe_mounts[@]}" \
-       -e CBM_CACHE_DIR="$cbm_clone" -e CBM_ALLOWED_ROOT=/workspace \
-       -e CBM_PROBE_PROJECTS="$cbm_probe_projects" \
-       -e CBM_INDEX_LIST="$cbm_index_list" \
-       "$MEDULLA_IMAGE" -c '
-         set -o pipefail
-         say() { printf "%s\n" "$*" >&2; }
-         # ДЕМОН ПОДНИМАЕТСЯ ОДИН РАЗ. Каждый вызов codex-memory-mcp cli иначе
-         # заводит временного демона заново - секунды на каждый, а вызовов у нас
-         # по числу реп, плюс индексация. Замер на клоне: две канарейки без
-         # тёплого демона 34 с, с тёплым 6 с.
-         codebase-memory-mcp daemon start >/dev/null || exit 1
-         # ДОГОНЯЕМ ТОЛЬКО ТО, ЧТО СДВИНУЛОСЬ. Список считает хост: он только
-         # что сделал fetch и знает отпечатки. Пусто - значит всё свежее.
-         # Замер: база одного из проектов не писалась СУТКИ при живом
-         # демоне, а index_status всё это время отвечал "ready" - свежесть не
-         # показывает вовсе, и разведчик тратил шесть обращений из восьми на
-         # проверку покрытия вместо поиска.
-         # --name ОБЯЗАТЕЛЕН: имя проекта выводится из пути, а внутри репа лежит
-         # в /workspace/<имя>, и без него завёлся бы ВТОРОЙ проект вместо
-         # обновления существующего. Пишем в КЛОН, хостовое хранилище не трогаем.
-         for pair in $CBM_INDEX_LIST; do
-           codebase-memory-mcp cli index_repository --repo-path "${pair#*=}" \
-             --name "${pair%%=*}" --mode fast >/dev/null \
-             || say "index_repository: ${pair%%=*} не отработал - идём на том, что есть"
-         done
-         for db in "$CBM_CACHE_DIR"/*.db; do
-           [ -e "$db" ] || continue
-           [ "$(sqlite3 "$db" "PRAGMA quick_check;" 2>/dev/null | head -1)" = ok ] || {
-             say "torn: $db"; exit 1; }
-         done
-         # Спрашиваем то, чего в исходниках НЕ МОЖЕТ не быть, и требуем
-         # совпадений - по КАЖДОЙ репе: ремап мог не примениться, sqlite молчит.
-         ok=1
-         for pr in $CBM_PROBE_PROJECTS; do
-           codebase-memory-mcp cli search_code --project "$pr" --pattern import \
-             --mode files | grep -E "(^|[,{[:space:]])\"?total_grep_matches\"?[[:space:]]*:[[:space:]]*[1-9][0-9]*" >/dev/null \
-             || { say "index unusable for $pr"; ok=0; }
-         done
-         [ "$ok" = 1 ]'; then
-    for m in ${cbm_pending_marks:-}; do printf '%s' "${m#*=}" > "$cbm_marks/${m%%=*}"; done
-    say "run.sh: codebase memory on ($cbm_clone)"
-  else
-    cbm_ok=0
-    say "run.sh: the index clone does not answer - a torn copy, or a store the"
-    say "        image cannot open. Refusing: a ticket needs the graph."
-  fi
-fi
-if (( ! cbm_ok )); then
-  rm -rf "$cbm_clone"
-  say "run.sh: no usable codebase index at $cbm_src - refusing before the claim."
+if ! docker run --rm --entrypoint python3 \
+     -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
+     -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
+     "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "${cbm_projects[@]}"; then
+  say "run.sh: shared CBM is unavailable; refusing before the claim."
   exit 2
 fi
+say "run.sh: shared codebase memory connected"
 
 # ОСНАСТКА ПОД ЯЗЫК РЕПОЗИТОРИЯ - ДО ЗАЯВКИ, как и всё остальное здесь.
 # Кодер обязан прогнать тесты и выдать OK только после того, как они прошли.
@@ -431,7 +338,7 @@ medulla \
   -w "${WORKFLOW_DIR#"$TOOLING_ROOT"/}" \
   --runs-folder "$RUNS_FOLDER" \
   "${mounts[@]}" \
-  --var "cbm_cache_dir=$cbm_clone" \
+  --var "CBM_MCP_COMMAND=$cbm_connector" \
   --var "ticket_id=$ticket" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \

@@ -27,7 +27,7 @@ class McpSetupTests(unittest.TestCase):
                     if result.returncode:
                         self.assertIn('refusing before claim', result.stdout)
 
-    def test_codex_has_only_local_cbm_and_preserves_broker_auth(self):
+    def test_harnesses_share_cbm_connector_and_preserve_broker_auth(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             settings = root / 'settings.json'
@@ -36,16 +36,17 @@ class McpSetupTests(unittest.TestCase):
             home.mkdir()
             auth = home / 'auth.json'
             auth.write_text('fixture broker auth')
-            env = dict(os.environ, CBM_CACHE_DIR=str(root / 'index copy'), CBM_ALLOWED_ROOT='/workspace')
+            env = dict(os.environ, CBM_MCP_COMMAND=str(root / 'shared connector.py'))
             subprocess.run(['bash', str(LANE / 'hooks/codex-home.sh'), str(home), str(settings)],
                            env=env, check=True, capture_output=True)
             codex = tomllib.loads((home / 'config.toml').read_text())['mcp_servers']
-            claude = json.loads((LANE / 'hooks/mcp.json').read_text())['mcpServers']
+            claude = json.loads((home / 'mcp.json').read_text())['mcpServers']
             self.assertEqual(set(codex), {'codebase-memory'})
             self.assertEqual(set(claude), set(codex))
             self.assertEqual(codex['codebase-memory']['command'], claude['codebase-memory']['command'])
-            self.assertEqual(codex['codebase-memory']['env'], {
-                'CBM_CACHE_DIR': str(root / 'index copy'), 'CBM_ALLOWED_ROOT': '/workspace'})
+            self.assertEqual(codex, claude)
+            self.assertEqual(codex['codebase-memory'], {
+                'command': 'python3', 'args': [str(root / 'shared connector.py')]})
             self.assertEqual(auth.read_text(), 'fixture broker auth')
 
     def test_bridge_uses_lane_identity_and_refuses_writes(self):

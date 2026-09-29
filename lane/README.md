@@ -4,7 +4,7 @@
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
 ```
-run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --mount-rw <репозиторий> --cbm-store <индекс> --gate-command '<проверка>' --ssh-dir <каталог ключа>
+run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --mount-rw <репозиторий> --cbm-mcp-command <shared-connector.py> --gate-command '<проверка>' --ssh-dir <каталог ключа>
 ```
 
 ## Граф
@@ -86,10 +86,19 @@ Git tree и SHA кандидата, версии оболочки/Git/Python и 
 `equill` в контейнере — клиент хостового моста. AgentBus в образ не входит,
 моста и настроек доставки у lane нет. Текущие настройки MCP лежат в `hooks/`.
 
-MCP полосы — локальный `codebase-memory-mcp` внутри контейнера: Claude берёт
-`hooks/mcp.json`, Codex — сгенерированный `/tmp/codex-home/config.toml` с явными
-`CBM_CACHE_DIR` и `CBM_ALLOWED_ROOT`. У OpenCode и AGY отдельная настройка CBM
-сейчас не задана; ревью опирается на файл контракта, код и результаты проверок.
+Lane uses the **shared host CBM service**, through the existing Python stdio
+connector configured as `cbmMcpCommand` in Dolber (`--cbm-mcp-command` for
+`run.sh`). The same connector can be used by every dispatcher. Only the small
+connector script is copied into the run environment; no database is copied,
+mounted, reindexed, or started by lane. A read-only MCP handshake and search
+must succeed from the container before claiming a ticket.
+
+Codex and Claude receive generated configurations in `/tmp/codex-home` that
+point to this connector. CBM paths describe host repositories; agents must
+verify findings against the actual mounted repository or ticket worktree.
+OpenCode and AGY review the contract, code and verification results without
+separate CBM configuration.
+
 NTK MCP не используется: после захвата shell сохраняет полный тикет в
 `artifacts/ticket.json`; захват, чтение и обновление исхода идут через HTTP. Авторизацию Codex обслуживает
 broker; `codex-home.sh` не копирует и не заменяет его `auth.json`.
