@@ -14,7 +14,7 @@ LANE = Path(__file__).resolve().parents[1]
 class McpSetupTests(unittest.TestCase):
     def test_launcher_refuses_an_old_bridge_identity(self):
         source = (LANE / 'run.sh').read_text()
-        guard = source[source.index('bridge_pid="'):source.index('\nequill_vars=()')]
+        guard = source[source.index('bridge_pid="'):source.index('\nequill_vars=(')]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'bridge.pid').write_text(str(os.getpid()))
