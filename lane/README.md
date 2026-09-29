@@ -99,6 +99,12 @@ verify findings against the actual mounted repository or ticket worktree.
 OpenCode and AGY review the contract, code and verification results without
 separate CBM configuration.
 
+Related tickets are readable without an NTK CLI or MCP:
+`node /workspace/lane/bin/ticket-input.mjs --read <ticket-id> --workspace <workspace>`.
+This prints the ticket over the existing HTTP client and never changes status or
+replaces the current ticket artifact. Mandatory coordination cannot be waived:
+missing inputs stop discovery with `PREMISE_BROKEN` or implementation with `GATE_FAIL`.
+
 NTK MCP не используется: после захвата shell сохраняет полный тикет в
 `artifacts/ticket.json`; захват, чтение и обновление исхода идут через HTTP. Авторизацию Codex обслуживает
 broker; `codex-home.sh` не копирует и не заменяет его `auth.json`.
