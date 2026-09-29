@@ -226,6 +226,7 @@ done
 
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
+mkdir -p "$MEDULLA_BRIDGE"
 
 # КЛОН индекса, не индекс: другой inode - блокировка SQLite не идёт через
 # границу монтирования, и снимок застывает на старте.

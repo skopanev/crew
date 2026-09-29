@@ -203,6 +203,6 @@ export async function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   main(process.argv.slice(2)).catch(error => { console.error(paint('red', error.message)); process.exitCode = 1; });
 }

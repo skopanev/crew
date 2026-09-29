@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import {pathToFileURL} from 'node:url';
 
 export function validateId(id) {
@@ -23,7 +24,7 @@ export function laneRunFolder(root, id) {
   return scopeDirectory(root, id);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   try { console.log(laneRunFolder(...process.argv.slice(2))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

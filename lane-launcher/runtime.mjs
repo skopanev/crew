@@ -20,7 +20,14 @@ export function command(bin, args) {
     maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe']}).trim();
 }
 export function herdr(config, args) {
-  const reply = JSON.parse(command(config.herdr, args));
+  const output = command(config.herdr, args);
+  // Herdr's pane run/close acknowledge success through exit status and may
+  // produce no stdout. Commands that return pane IDs/lists must return JSON.
+  if (!output && args[0] === 'pane' && ['run', 'close'].includes(args[1])) return;
+  if (!output) throw new Error(`Herdr returned no JSON for ${args.slice(0, 2).join(' ')}`);
+  let reply;
+  try { reply = JSON.parse(output); }
+  catch { throw new Error(`Herdr returned invalid JSON for ${args.slice(0, 2).join(' ')}`); }
   if (reply.error || reply.ok === false) throw new Error(`Herdr refused ${args.slice(0, 2).join(' ')}`);
   return reply.result;
 }

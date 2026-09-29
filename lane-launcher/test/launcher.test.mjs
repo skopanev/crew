@@ -47,6 +47,7 @@ if (args[1] === 'list') result = {panes};
 if (args[1] === 'close' && process.env.TEST_RESULT) {
   if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(2);
 }
+if (args[0] === 'pane' && ['run', 'close'].includes(args[1])) process.exit(0);
 console.log(JSON.stringify({result}));
 `, {mode: 0o755});
   fs.writeFileSync(path.join(bins, 'docker'), '#!/bin/sh\nif [ "$TEST_DOCKER_FAILURE" = 1 ]; then exit 1; fi\ncat "$TEST_DOCKER"\n', {mode: 0o755});
