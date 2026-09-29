@@ -10,11 +10,12 @@ from test_failure_outcome import shell_body
 
 class ClaimCleanupTests(unittest.TestCase):
     def test_claim_receipt_requires_a_confirmed_response(self):
-        for response, rc in [('{"id":"T1","status":"in_progress","claimed":true}', 0),
-                             ('{"id":"T1","status":"open","claimed":false}', 0),
-                             ('{"id":"OTHER","status":"in_progress","claimed":true}', 0),
-                             ('', 1)]:
-            with self.subTest(response=response, rc=rc), tempfile.TemporaryDirectory() as d:
+        for response, rc, contract in [('{"id":"T1","status":"in_progress","claimed":true}', 0, 'fixture contract'),
+                                      ('{"id":"T1","status":"in_progress","claimed":true}', 0, ''),
+                                      ('{"id":"T1","status":"open","claimed":false}', 0, 'fixture contract'),
+                                      ('{"id":"OTHER","status":"in_progress","claimed":true}', 0, 'fixture contract'),
+                                      ('', 1, 'fixture contract')]:
+            with self.subTest(response=response, rc=rc, contract=contract), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 (root / 'lane/hooks').mkdir(parents=True)
                 (root / 'lane/bin').mkdir()
@@ -28,16 +29,20 @@ class ClaimCleanupTests(unittest.TestCase):
                 helper = Path(__file__).resolve().parents[1] / 'bin/ticket-input.mjs'
                 (root / 'lane/bin/ticket-input.mjs').write_text(helper.read_text())
                 equill = root / 'bin/equill'
-                equill.write_text('#!/bin/sh\nprintf \'{"content":"fixture contract"}\'\n')
+                equill.write_text('#!/bin/sh\nprintf "%s" "$CONTRACT_RESPONSE"\n')
                 equill.chmod(0o755)
                 env = dict(os.environ, TOOLING_ROOT=d, project_dir=d, ticket_id='T1', project_name='test',
                            MEDULLA_RUN_DIR=str(root / 'run'), RESPONSE=response, RESPONSE_RC=str(rc),
+                           CONTRACT_RESPONSE=json.dumps({'content': contract}),
                            PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'])
                 body = shell_body('ntk_claim').replace('/tmp/', d + '/')
                 result = subprocess.run(['bash', '-c', body], env=env, capture_output=True, text=True)
                 receipt = root / 'run/artifacts/claim.json'
                 if response and json.loads(response).get('claimed') and 'OTHER' not in response:
-                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.returncode, 0 if contract else 1, result.stderr)
+                    if not contract:
+                        self.assertIn('Scout contract unavailable', result.stderr)
+                        self.assertFalse((root / 'run/artifacts/scout-contract.txt').exists())
                     claim = json.loads(receipt.read_text())
                     self.assertEqual(claim['workspace'], 'test')
                     self.assertEqual(claim['run_dir'], str(root / 'run'))

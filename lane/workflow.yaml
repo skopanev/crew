@@ -66,11 +66,12 @@ nodes:
       if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
            --profile agent.context.target --role crew-lane-scout \
            --process crew-lane-scout --coordinate rules=none --json 2>"$_sc.err" \
-         | jq -r '.content // empty' > "$_sc.tmp" && [ -s "$_sc.tmp" ]; then
+         | jq -er '.content | select(type == "string" and test("\\S"))' > "$_sc.tmp"; then
         mv "$_sc.tmp" "$_sc"
       else
         rm -f "$_sc.tmp" "$_sc"
-        echo "контракт разведки не собрался ($(head -1 "$_sc.err" 2>/dev/null)) - узел пойдёт на одном промпте" >&2
+        echo "Scout contract unavailable: $(head -1 "$_sc.err" 2>/dev/null)" >&2
+        exit 1
       fi
       rm -f "$_sc.err"
   cbm_discovery:
@@ -100,22 +101,13 @@ nodes:
       effort: high
       args: [-s, read-only]
     prompt: |
-      Ticket {{var:ticket_id}} is ready for implementation.
-      1. Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt. Get your ticket from NTK:
-         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
-         Use this ticket's inputs and AC.
-      2. Run search_code and search_graph in CBM project {{var:CBM_PROJECT}},
-         scoped to module {{var:module_name}}. Check SIMILAR_TO before proposing
-         a new function or module. Use the existing shared index.
-      3. Verify relevant results against files under {{var:project_dir}} and read
-         their applicable repository instructions. Identify existing code to reuse
-         and the checks needed for this ticket.
-      4. Write a short $MEDULLA_RUN_DIR/artifacts/scout.txt: files to change,
-         verified findings, reuse, checks and concrete implementation blockers.
-      5. Emit OK when implementation can proceed. If blocked, state the missing
-         input or source contradiction and emit PREMISE_BROKEN. Emit DUPLICATE
-         if already implemented, or OUT_OF_MODULE if the task requires changes
-         outside {{var:module_name}}.
+      Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt and execute its steps.
+      Ticket: {{var:ticket_id}}. NTK workspace: {{var:project_name}}.
+      Module: {{var:module_name}}.
+      Source checkout: {{var:project_dir}}.
+      CBM project: {{var:CBM_PROJECT}}.
+      Read the ticket:
+        rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
 
   create_worktree:
     env:
