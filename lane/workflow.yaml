@@ -143,8 +143,9 @@ nodes:
       args: [-s, read-only]
     prompt: |
       Ticket {{var:ticket_id}} has completed reconnaissance and coordination.
-      1. Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt and
-         $MEDULLA_RUN_DIR/artifacts/ticket.json. Use this ticket's inputs and AC.
+      1. Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt. Get your ticket from NTK:
+         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
+         Use this ticket's inputs and AC.
       2. Run search_code and search_graph in CBM project {{var:CBM_PROJECT}},
          scoped to module {{var:module_name}}. Check SIMILAR_TO before proposing
          a new function or module. Use the existing shared index.
@@ -339,8 +340,9 @@ nodes:
     prompt: |
       Ticket {{var:ticket_id}} has completed reconnaissance and coordination.
       Current handoff: {{last.message}}
-      1. Read $MEDULLA_RUN_DIR/artifacts/ticket.json and
-         $MEDULLA_RUN_DIR/artifacts/scout.txt. Implement only this ticket's AC.
+      1. Get your ticket from NTK:
+         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
+         Read $MEDULLA_RUN_DIR/artifacts/scout.txt. Implement only this ticket's AC.
       2. Verify the relevant code in your worktree. Make the smallest sufficient
          change within module {{var:module_name}}, reusing existing code.
       3. Run the ticket's relevant tests and configured checks:
