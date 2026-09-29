@@ -34,16 +34,9 @@ USAGE
 }
 
 WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# ПЕЧАТАЕМ С ВОЗВРАТОМ КАРЕТКИ. В панели терминал оказывается без преобразования
-# \n в \r\n, и обычный echo уводит вывод лесенкой: строка опускается, но курсор
-# остаётся там же. Медулла печатает свои строки сама и ровно, наши - нет.
+# Herdr panes need explicit CRLF for shell messages.
 say() { printf '%s\r\n' "$*" >&2; }
-# Локальные пути и параметры запуска. Образец: lane/local.env.example
-requested_runs_folder="${LANE_RUNS_FOLDER:-}"
-[ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
-# Вне дерева инструментов: этого требует --cwd-ro.
-RUNS_FOLDER="${requested_runs_folder:-${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}}"
-# ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
+RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
@@ -56,7 +49,6 @@ while (( $# )); do
     --ticket-id) ticket="${2:-}"; shift 2 ;;
     --dispatcher-id) dispatcher_id="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
-    # Ровно ОДИН: на этом держатся и проверка посадки, и проверка модуля.
     --mount-rw)
       [ -z "$repo" ] || { say "run.sh: --mount-rw задан дважды: $repo и ${2:-}"
                           say "        полоса пишет в ОДИН репозиторий; остальные через --mount-ro"
@@ -98,12 +90,7 @@ gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]'
 repo="$(cd "$repo" && pwd -P)"
 project_dir="/workspace/$(basename "$repo")"
 
-# ПУСТОЙ КАТАЛОГ ЗДЕСЬ - НАШ ЖЕ СЛЕД, а не чужое имя. Точки монтирования
-# заводятся ниже и снимаются в trap; при аварийной остановке (Ctrl+C, упавший
-# узел, снятый контейнер) trap не отрабатывает, и пустой каталог остаётся.
-# Следующий запуск утыкался в него и объявлял столкновение имён - то есть
-# показывал на чужое там, где лежало своё. Замерено трижды за один день.
-# Пустой снимаем молча, непустой по-прежнему останавливает: там чужое.
+# Remove empty mountpoints left by interrupted runs; never hide existing files.
 _point="$TOOLING_ROOT/$(basename "$repo")"
 if [[ -d "$_point" && -z "$(ls -A "$_point" 2>/dev/null)" ]]; then
   rmdir "$_point" 2>/dev/null || true
@@ -124,7 +111,7 @@ if ! ticket_json="$(node --input-type=module -e '
   say "run.sh: ticket $ticket does not exist in workspace $project - nothing to run"
   exit 2
 fi
-# --module СВЕРЯЕТ, а не подменяет: модуль принадлежит тикету.
+# An explicit module asserts the ticket's module; it cannot replace it.
 stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
 if [[ -n "$module" ]]; then
   if [[ -z "$stored" ]]; then
@@ -142,8 +129,6 @@ if [[ -n "$module" ]]; then
   say "run.sh: module asserted: $stored"
 fi
 module="$stored"
-# Без модуля охват судят по границе, которой нет, И память молчит: хуку нужны
-# все EQUILL_* или ни одного, а EQUILL_MODULE один из них.
 if [[ -z "$module" ]]; then
   say "run.sh: ticket $ticket declares no module."
   say "        A lane judges scope against the module and loads its contract by it;"
@@ -178,7 +163,6 @@ for extra in ${also[@]+"${also[@]}"}; do
   extra="$(cd "$extra" && pwd -P)"
   base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
-  # Тот же след аварийной остановки, что и у --mount-rw выше.
   if [[ -d "$TOOLING_ROOT/$base" && -z "$(ls -A "$TOOLING_ROOT/$base" 2>/dev/null)" ]]; then
     rmdir "$TOOLING_ROOT/$base" 2>/dev/null || true
   fi
@@ -186,20 +170,10 @@ for extra in ${also[@]+"${also[@]}"}; do
     say "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside"
     exit 2
   fi
-  # fetch, НИКОГДА pull: в этих деревьях могут сидеть другие полосы.
-  if git -C "$extra" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$extra" fetch --quiet --all --prune 2>/dev/null \
-      && say "run.sh: fetched $base" \
-      || say "run.sh: could not fetch $base - it travels as it is"
-  fi
   mounts+=(--mount "$extra")
 done
 git_ssh=""
-# НЕ ЗАКРЫТО. Ключ с правом ЗАПИСИ попадает в окружение КАЖДОГО узла, включая
-# агентные (engine_vars.py:36), - агент способен запушить мимо панели. Запрет
-# Bash(*git push*) прикрывает случайность, границей не является: сверка идёт по
-# строке команды. Граница - разделение ключей; принято сознательно ради первой
-# посадки.
+# The Git key is visible to every node; prompt restrictions are not isolation.
 if [[ -f "$ssh_dir/id_ed25519" ]]; then
   mounts+=(--mount "$ssh_dir")
   ssh_in="/workspace/$(basename "$ssh_dir")"
@@ -252,18 +226,7 @@ if ! docker run --rm --entrypoint python3 \
 fi
 say "run.sh: shared codebase memory connected"
 
-# ОСНАСТКА ПОД ЯЗЫК РЕПОЗИТОРИЯ - ДО ЗАЯВКИ, как и всё остальное здесь.
-# Кодер обязан прогнать тесты и выдать OK только после того, как они прошли.
-# Если собирать нечем, он этого не может - и узнаёт об этом на середине.
-# Замер: на Rust-тикете он честно доложил "unverified by compilation", потом
-# сам полез ставить rustup внутрь контейнера (около гигабайта на прогон), а
-# круг стоил 730 секунд. Ни разу не отказ - просто работа без проверки.
-#
-# СПРАШИВАЕМ ОБА ИСТОЧНИКА, А НЕ ОДИН ОБРАЗ. Инструмент может приехать и
-# оверлеем медуллы (~/.medulla/container/bin/<имя> монтируется в
-# /usr/local/bin), и тогда в образе его нет, а у кодера он есть. Проверка
-# только по образу давала ложную тревогу ровно там, где всё настроено.
-# Не отказ, а имя: тикет может не требовать сборки вовсе.
+# Report missing build tools, checking both the image and Medulla's overlay.
 lang_probe() {
   local marker="$1" tool="$2" what="$3"
   [[ -e "$repo/$marker" ]] || return 0
@@ -305,11 +268,7 @@ if [[ -f "$bridge_dir/bridge.pid" ]] && kill -0 "$(cat "$bridge_dir/bridge.pid")
     --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
     --var "EQUILL_ACTOR=lane"
     --var "EQUILL_BRIDGE=$bridge_dir"
-    # Роль контракта - на узле; роль ПАМЯТИ одна на прогон (29 уроков против
-    # одного под crew-lane-coder).
     --var "EQUILL_MEMORY_ROLE=lane"
-    # Тикетные правила узлу не адресованы. Коммуникационные так не убрать: у
-    # них координаты rules нет вовсе, значит они подстановочные.
     --var "EQUILL_RULES=${EQUILL_RULES:-none}"
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
@@ -329,9 +288,7 @@ cd "$TOOLING_ROOT"
 planning_admission
 # Admission's service identity belongs to the host check, not lane agents.
 unset JOPPA_TOKEN JOPPA_TOKEN_FILE
-# --cwd-ro: иначе агент правит свой же workflow.yaml, хук памяти и скрипт
-# посадки - не прошедший панель может отредактировать правила панели.
-# Рабочий репозиторий - отдельное монтирование, остаётся записываемым.
+# Keep Crew's workflow, hooks and verification scripts read-only.
 medulla \
   --docker \
   --cwd-ro \

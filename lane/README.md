@@ -1,5 +1,9 @@
 # lane
 
+Configure Dolber in its selected `lane-launcher/*.json` file. `run.sh` receives
+those settings as arguments and does not load `lane/local.env`. Additional
+read-only repositories are mounted as they are; startup never fetches them.
+
 Ведёт один тикет от взятия до посадки внутри докера, под
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
