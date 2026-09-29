@@ -178,5 +178,38 @@ if os.environ.get('EXPIRE_DURING_SETUP'):
                         self.assertNotIn("no usable codebase index", proc.stderr)
 
 
+class LaneCBMProbeTests(unittest.TestCase):
+    def test_probe_accepts_cli_formats_and_rejects_empty_or_failed_search(self):
+        crew = Path(__file__).resolve().parents[2]
+        source = (crew / "lane/run.sh").read_text()
+        script = source.split('"$MEDULLA_IMAGE" -c \u0027', 1)[1].split('\u0027; then', 1)[0]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cli = root / "codebase-memory-mcp"
+            cli.write_text("""#!/usr/bin/env python3
+import os,sys
+if sys.argv[1] == 'daemon':
+ sys.exit(0)
+print(os.environ['CBM_TEST_OUTPUT'])
+sys.exit(int(os.environ['CBM_TEST_EXIT']))
+""")
+            cli.chmod(0o755)
+            for output, exit_code, accepted in (
+                ('total_grep_matches: 43', 0, True),
+                ('{"total_grep_matches":43}', 0, True),
+                ('{"total_grep_matches": 43}', 0, True),
+                ('total_grep_matches: 0', 0, False),
+                ('unavailable', 0, False),
+                ('total_grep_matches: 43', 1, False),
+            ):
+                with self.subTest(output=output, exit_code=exit_code):
+                    env = {**os.environ, "PATH": str(root) + os.pathsep + os.environ['PATH'],
+                           "CBM_CACHE_DIR": str(root), "CBM_PROBE_PROJECTS": "fixture",
+                           "CBM_INDEX_LIST": "", "CBM_TEST_OUTPUT": output,
+                           "CBM_TEST_EXIT": str(exit_code)}
+                    proc = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+                    self.assertEqual(proc.returncode == 0, accepted, proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

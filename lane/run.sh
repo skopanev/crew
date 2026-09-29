@@ -296,11 +296,13 @@ if (( cbm_ok )); then
        -e CBM_PROBE_PROJECTS="$cbm_probe_projects" \
        -e CBM_INDEX_LIST="$cbm_index_list" \
        "$MEDULLA_IMAGE" -c '
+         set -o pipefail
+         say() { printf "%s\n" "$*" >&2; }
          # ДЕМОН ПОДНИМАЕТСЯ ОДИН РАЗ. Каждый вызов codex-memory-mcp cli иначе
          # заводит временного демона заново - секунды на каждый, а вызовов у нас
          # по числу реп, плюс индексация. Замер на клоне: две канарейки без
          # тёплого демона 34 с, с тёплым 6 с.
-         codebase-memory-mcp daemon start >/dev/null 2>&1 || true
+         codebase-memory-mcp daemon start >/dev/null || exit 1
          # ДОГОНЯЕМ ТОЛЬКО ТО, ЧТО СДВИНУЛОСЬ. Список считает хост: он только
          # что сделал fetch и знает отпечатки. Пусто - значит всё свежее.
          # Замер: база одного из проектов не писалась СУТКИ при живом
@@ -312,7 +314,7 @@ if (( cbm_ok )); then
          # обновления существующего. Пишем в КЛОН, хостовое хранилище не трогаем.
          for pair in $CBM_INDEX_LIST; do
            codebase-memory-mcp cli index_repository --repo-path "${pair#*=}" \
-             --name "${pair%%=*}" --mode fast >/dev/null 2>&1 \
+             --name "${pair%%=*}" --mode fast >/dev/null \
              || say "index_repository: ${pair%%=*} не отработал - идём на том, что есть"
          done
          for db in "$CBM_CACHE_DIR"/*.db; do
@@ -325,7 +327,7 @@ if (( cbm_ok )); then
          ok=1
          for pr in $CBM_PROBE_PROJECTS; do
            codebase-memory-mcp cli search_code --project "$pr" --pattern import \
-             --mode files 2>/dev/null | grep -qE "\"total_grep_matches\":[1-9]" \
+             --mode files | grep -E "(^|[,{[:space:]])\"?total_grep_matches\"?[[:space:]]*:[[:space:]]*[1-9][0-9]*" >/dev/null \
              || { say "index unusable for $pr"; ok=0; }
          done
          [ "$ok" = 1 ]'; then
