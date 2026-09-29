@@ -14,15 +14,15 @@ const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !
 const tones = {red: 31, yellow: '1;33', description: 33, available: '1;32', accent: '1;36', line: 36};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
-export const usage = 'dolber.sh [--id <dispatcher-id>] [--config <file>] [--once | --dry-run]';
-export function configFrom(file, env = process.env, {dryRun = false, id} = {}) {
+export const usage = 'dolber.sh [--config <file>] [--once | --dry-run]';
+export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
     preferTags: [], readOnlyRepos: [],
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
   if (dryRun) config.launchLanes = false;
-  config.id = validateId(id ?? config.id);
+  config.id = validateId(config.id);
   // The terminal running dolber owns the destination workspace.
   config.herdrWorkspace = env.HERDR_WORKSPACE_ID || config.herdrWorkspace;
   for (const field of config.launchLanes ? ['workspace', 'project', 'herdrWorkspace'] : ['workspace']) {
@@ -155,16 +155,15 @@ export async function tick(config) {
 }
 
 export async function main(argv) {
-  let file = path.join(here, 'dolber.json'), mode = 'loop', id;
+  let file = path.join(here, 'dolber.json'), mode = 'loop';
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--config' && argv[i + 1]) file = path.resolve(argv[++i]);
-    else if (argv[i] === '--id' && argv[i + 1]) id = argv[++i];
     else if (['--once', '--dry-run'].includes(argv[i]) && mode === 'loop') mode = argv[i].slice(2);
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber.example.json')} to this path and fill in workspace.`);
-  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', id});
+  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
   fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   preflight(config);
   const lock = path.join(config.stateDir, 'dispatcher.lock');

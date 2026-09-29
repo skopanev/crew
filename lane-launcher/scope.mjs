@@ -3,7 +3,7 @@ import {pathToFileURL} from 'node:url';
 
 export function validateId(id) {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(id)) {
-    throw new Error('Config needs id (or --id): 1–64 letters, digits, dots, underscores or hyphens; start with a letter/digit');
+    throw new Error('Config needs id: 1–64 letters, digits, dots, underscores or hyphens; start with a letter/digit');
   }
   return id.toLowerCase();
 }

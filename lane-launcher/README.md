@@ -5,19 +5,19 @@ Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla and jq on
 ```bash
 cp -n lane-launcher/dolber.example.json lane-launcher/dolber.json
 # Edit lane-launcher/dolber.json, then run:
-./lane-launcher/dolber.sh --id my-project --dry-run
-./lane-launcher/dolber.sh --id my-project
+./lane-launcher/dolber.sh --dry-run
+./lane-launcher/dolber.sh
 ```
 
 `dolber.sh` reads **`dolber.json` beside the script**, regardless of the current directory. Settings are loaded once at startup; restart the dispatcher after editing them. An explicit `--config <file>` can select a different configuration.
 
-`--id` overrides `id` in the configuration. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Changing tags or moving the terminal does not change dispatcher identity.
+Set `id` in `dolber.json`. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Changing tags or moving the terminal does not change dispatcher identity.
 
 `dolber.json` is local and ignored by Git, including its `workspace` setting. Only the empty configuration template `dolber.example.json` belongs in the repository.
 
 | Setting | Meaning |
 | --- | --- |
-| `id` | Required stable dispatcher ID; `--id` overrides it. Case-insensitive, normalized to lowercase. 1–64 letters, digits, dots, underscores or hyphens, starting with a letter/digit |
+| `id` | Required stable dispatcher ID, set only in the config. Case-insensitive, normalized to lowercase. 1–64 letters, digits, dots, underscores or hyphens, starting with a letter/digit |
 | `workspace`, `project` | NTK workspace and project to search |
 | `tags` | Tag filters, for example `["crew", "backend"]`; `[]` means no tag filter |
 | `strict` | `false` matches tag substrings case-insensitively; `true` requires exact tags. All tag filters are required in either mode |
