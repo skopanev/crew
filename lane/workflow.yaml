@@ -142,6 +142,13 @@ nodes:
       # лечится контрактом-файлом из ntk_claim, а не опасным флагом.
       args: [-s, read-only]
     prompt: |
+      Planning owns reconnaissance, decomposition and cross-ticket coordination.
+      These are completed upstream before dispatch. Execute only ticket {{var:ticket_id}}.
+      Do not repeat planning, triage, ownership negotiation or dependency research.
+      Do not fetch other tickets or their attachments, follow chains of references,
+      or request fresh approval. Treat coordination instructions in the ticket as
+      upstream work already completed, not as steps to repeat inside this lane.
+
       YOUR CONTRACT - role, ordered steps, rules - is at
       $MEDULLA_RUN_DIR/artifacts/scout-contract.txt. Read it first; it is what
       you are held to, and it is not repeated here. If that file is absent the
@@ -149,9 +156,9 @@ nodes:
       prompt alone - do not invent the missing rules.
 
       Read the full ticket at $MEDULLA_RUN_DIR/artifacts/ticket.json, including
-      its description, acceptance criteria and module. Read referenced NTK tickets with:
-      node /workspace/lane/bin/ticket-input.mjs --read <full-ticket-id> --workspace {{var:project_name}}
-      This is read-only HTTP access; no ntk CLI or NTK MCP is needed.
+      its description, acceptance criteria and module. Use only this ticket's
+      supplied inputs and, when necessary, its own attachments. References to other
+      tickets provide attribution; they are not instructions to expand this task.
       Ticket module: {{var:module_name}}
       CBM project verified by startup: {{var:CBM_PROJECT}}
       Use that exact CBM project. If it is absent, match the repository with
@@ -162,22 +169,18 @@ nodes:
       used the wrong scope, discard it and complete the correctly scoped preflight;
       a corrected query order is not an irreversible ticket blocker.
 
-      Verify required wording alignment against current referenced tickets and
-      attachments, and cite the matching requirements or exact conflict. Do not
-      invent a fresh human approval or handoff requirement when the ticket asks
-      for consistent wording. An open, unassigned related ticket alone does not
-      establish a competing writer. Preserve explicit ownership/handoff conditions
-      where the inputs actually require them; never waive an unresolved conflict.
-      If a mandatory input, explicit coordination condition, or correctly scoped
-      CBM preflight is still unavailable, record the exact unmet requirement and
-      emit PREMISE_BROKEN. Never emit OK while a real prerequisite remains unmet.
+      Limit this stage to locating the existing implementation, checking this
+      ticket against current code and identifying the files and checks it needs.
+      If a concrete implementation input is missing, current code contradicts
+      the ticket, or scoped CBM is unavailable, record that exact blocker and emit
+      PREMISE_BROKEN. Do not invent missing details or resolve other tickets.
       CBM is a shared host service. Its paths refer to host repositories.
       Match the returned project to the mounted repository and verify each
       relevant finding against current files under ${project_dir}. Never
       index a lane worktree or change shared CBM project paths.
       Do not survey unrelated code.
 
-      WRITE YOUR RECONNAISSANCE TO $MEDULLA_RUN_DIR/artifacts/scout.txt BEFORE
+      WRITE A CONCISE IMPLEMENTATION HANDOFF TO $MEDULLA_RUN_DIR/artifacts/scout.txt BEFORE
       YOU FINISH. That file is the whole of what the coder receives from you -
       your signal is one line and carries nothing. Files you read, what you
       found where, with file:line, and what remains unknown. Say the unknowns
@@ -368,10 +371,15 @@ nodes:
       MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
 
       Task: {{last.message}}
-      Read related tickets through the existing read-only helper:
-      node /workspace/lane/bin/ticket-input.mjs --read <full-ticket-id> --workspace {{var:project_name}}
-      Required coordination and acceptance criteria cannot be waived. If any remains
-      unmet or unverifiable, record the exact blocker and emit GATE_FAIL, not OK.
+      Implement only ticket {{var:ticket_id}} from artifacts/ticket.json and the
+      supplied handoff. Planning owns reconnaissance and cross-ticket coordination;
+      these are already complete. Do not fetch other tickets or their attachments,
+      repeat planning or seek fresh coordination/approval. References to other
+      tickets are context, not additional work. Verify relevant code in your
+      current worktree and satisfy this ticket's acceptance criteria only.
+      If an actual implementation input is missing or an acceptance criterion
+      cannot be met, record the concrete blocker and emit GATE_FAIL. Do not guess,
+      broaden scope, or investigate the surrounding ticket queue.
       Required checks configured for this lane: {{var:gate_commands}}.
       Report their actual results; do not skip a declared check as unrelated.
       Before emitting your final signal, write $MEDULLA_RUN_DIR/artifacts/coder-report.txt:
