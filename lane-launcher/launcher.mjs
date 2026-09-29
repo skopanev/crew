@@ -6,6 +6,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {nextTicket, credentials} from './ntk.mjs';
 import {save, read, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
+import {scopeDirectory, runScope, validateId} from './scope.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
@@ -13,14 +14,15 @@ const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !
 const tones = {red: 31, yellow: '1;33', description: 33, available: '1;32', accent: '1;36', line: 36};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
-export const usage = 'dolber.sh [--config <file>] [--once | --dry-run]';
-export function configFrom(file, env = process.env, {dryRun = false} = {}) {
+export const usage = 'dolber.sh [--id <dispatcher-id>] [--config <file>] [--once | --dry-run]';
+export function configFrom(file, env = process.env, {dryRun = false, id} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
     preferTags: [], readOnlyRepos: [],
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
   if (dryRun) config.launchLanes = false;
+  config.id = validateId(id ?? config.id);
   // The terminal running dolber owns the destination workspace.
   config.herdrWorkspace = env.HERDR_WORKSPACE_ID || config.herdrWorkspace;
   for (const field of config.launchLanes ? ['workspace', 'project', 'herdrWorkspace'] : ['workspace']) {
@@ -47,6 +49,8 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
   }
   if (config.project != null && typeof config.project !== 'string') throw new Error('project must be a string or null');
+  // A stable dispatcher identity owns its lock, reservations and containers.
+  config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (!config.launchLanes) return config;
   if (!Array.isArray(config.gateCommands) || !config.gateCommands.length ||
       config.gateCommands.some(check => typeof check !== 'string' || !check.trim())) {
@@ -63,14 +67,9 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   return config;
 }
 
-export function dockerLanes(output) {
+export function dockerLanes(output, config) {
   return output.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => {
-    const labels = Object.fromEntries((row.Labels || '').split(',').filter(Boolean).map(label => {
-      const at = label.indexOf('='); return [label.slice(0, at), label.slice(at + 1)];
-    }));
-    row.runFolder = labels['medulla.runs_under'];
-    return labels['medulla.workflow'] === 'lane' ||
-      (!labels['medulla.workflow'] && (row.Names || '').startsWith('medulla-'));
+    return row.workflow === 'lane' && runScope(row.runFolder) === config.id;
   });
 }
 
@@ -85,7 +84,8 @@ export function activeCount(config, containers, panes) {
     const worker = fs.existsSync(workerFile) ? read(workerFile) : null;
     const containerRunning = containers.some(container => container.runFolder === run.runFolder);
     if (containerRunning) continue; // Already counted by Docker.
-    if (panes && run.pane && !panes.has(run.pane) && (!worker || !alive(worker.pid))) {
+    if (panes && run.config?.herdrWorkspace === config.herdrWorkspace &&
+        run.pane && !panes.has(run.pane) && (!worker || !alive(worker.pid))) {
       save(path.join(dir, 'result.json'), {status: 'interrupted', finishedAt: new Date().toISOString(),
         error: 'Herdr pane and worker disappeared; inspect lane artifacts before reopening the ticket'});
       continue;
@@ -97,7 +97,10 @@ export function activeCount(config, containers, panes) {
 }
 
 function snapshots(config) {
-  const containers = dockerLanes(command('docker', ['ps', '--format', '{{json .}}']));
+  // Read labels individually: Docker's comma-joined .Labels corrupts paths
+  // containing commas. JSON quoting also preserves spaces and escapes.
+  const format = '{"workflow":{{json (.Label "medulla.workflow")}},"runFolder":{{json (.Label "medulla.runs_under")}}}';
+  const containers = dockerLanes(command('docker', ['ps', '--format', format]), config);
   if (!config.launchLanes) return {containers, panes: null};
   const result = herdr(config, ['pane', 'list', '--workspace', config.herdrWorkspace]);
   if (!Array.isArray(result?.panes)) throw new Error('Herdr returned no pane list; refusing to assume free capacity');
@@ -152,15 +155,16 @@ export async function tick(config) {
 }
 
 export async function main(argv) {
-  let file = path.join(here, 'dolber.json'), mode = 'loop';
+  let file = path.join(here, 'dolber.json'), mode = 'loop', id;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--config' && argv[i + 1]) file = path.resolve(argv[++i]);
+    else if (argv[i] === '--id' && argv[i + 1]) id = argv[++i];
     else if (['--once', '--dry-run'].includes(argv[i]) && mode === 'loop') mode = argv[i].slice(2);
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber.example.json')} to this path and fill in workspace.`);
-  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
+  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', id});
   fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   preflight(config);
   const lock = path.join(config.stateDir, 'dispatcher.lock');

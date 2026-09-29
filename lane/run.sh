@@ -3,6 +3,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
+              --dispatcher-id <dolber id>
               --cbm-store <dir> --gate-command <shell command> [...]
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--planning-result <result.json> --planning-task <task-id>]
@@ -15,6 +16,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               never the directory itself, and refuses to start if the copy does
               not open and answer.
   --module    ticket module; read from ntk when omitted
+  --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.
   --planning-result  completed planning receipt; requires a fresh live Joppa
                      chain and age below 24h before this lane may start.
   --planning-task    local Task id in that plan; repository/module must match.
@@ -42,20 +44,10 @@ requested_runs_folder="${LANE_RUNS_FOLDER:-}"
 [ -f "$WORKFLOW_DIR/local.env" ] && . "$WORKFLOW_DIR/local.env" || true
 # Вне дерева инструментов: этого требует --cwd-ro.
 RUNS_FOLDER="${requested_runs_folder:-${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}}"
-mkdir -p "$RUNS_FOLDER"
-# ФИЗИЧЕСКИЙ ПУТЬ, А НЕ ЧЕРЕЗ СИМЛИНК. Медулла монтирует каталог прогонов по
-# разрешённому пути, и если ~/.medulla - симлинк, внутри контейнера он лежит
-# под другим именем. LANE_WT_ROOT уезжал со старым: узел получал
-# "mkdir: cannot create directory /Users: Permission denied".
-RUNS_FOLDER="$(cd "$RUNS_FOLDER" && pwd -P)"
-# ДЕРЕВЬЯ ВНЕ РЕПОЗИТОРИЯ: внутри его собственные проверки сканировали их как
-# свой исходник и валили КАЖДЫЙ коммит в том чекауте, не только наш.
-WT_ROOT="$RUNS_FOLDER/worktrees"
-mkdir -p "$WT_ROOT"
 # ОДИН уровень: лишний отдал бы в /workspace весь каталог проектов.
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src=""
+ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src="" dispatcher_id=""
 planning_result="" planning_task=""
 also=()
 gate_commands=()
@@ -63,6 +55,7 @@ passthrough=()
 while (( $# )); do
   case "$1" in
     --ticket-id) ticket="${2:-}"; shift 2 ;;
+    --dispatcher-id) dispatcher_id="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     # Ровно ОДИН: на этом держатся и проверка посадки, и проверка модуля.
     --mount-rw)
@@ -73,6 +66,7 @@ while (( $# )); do
     --module) module="${2:-}"; shift 2 ;;
     --planning-result) planning_result="${2:-}"; shift 2 ;;
     --planning-task) planning_task="${2:-}"; shift 2 ;;
+    --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-store) cbm_src="${2:-}"; shift 2 ;;
@@ -91,6 +85,7 @@ fi
 [[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
 [[ -n "$cbm_src" ]] || { say "run.sh: --cbm-store is required"; usage; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
+[[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
 for command in "${gate_commands[@]}"; do
   [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
 done
@@ -166,6 +161,16 @@ planning_admission() {
 # Reject stale plans before container/index preparation. Check again immediately
 # before Medulla, since setup itself can cross the expiry boundary.
 planning_admission
+
+# Docker's medulla.runs_under label carries the stable dispatcher identity,
+# including manual launches with --dispatcher-id.
+RUNS_FOLDER="$(node "$TOOLING_ROOT/lane-launcher/scope.mjs" "$RUNS_FOLDER" "$dispatcher_id")"
+mkdir -p "$RUNS_FOLDER"
+# Resolve symlinks before passing the directory to Docker and to workflow nodes.
+RUNS_FOLDER="$(cd "$RUNS_FOLDER" && pwd -P)"
+# Worktrees stay outside the tooling repository mounted read-only.
+WT_ROOT="$RUNS_FOLDER/worktrees"
+mkdir -p "$WT_ROOT"
 
 mounts=(--mount-rw "$repo")
 

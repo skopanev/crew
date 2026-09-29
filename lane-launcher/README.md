@@ -5,16 +5,19 @@ Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla and jq on
 ```bash
 cp -n lane-launcher/dolber.example.json lane-launcher/dolber.json
 # Edit lane-launcher/dolber.json, then run:
-./lane-launcher/dolber.sh --dry-run
-./lane-launcher/dolber.sh
+./lane-launcher/dolber.sh --id my-project --dry-run
+./lane-launcher/dolber.sh --id my-project
 ```
 
 `dolber.sh` reads **`dolber.json` beside the script**, regardless of the current directory. Settings are loaded once at startup; restart the dispatcher after editing them. An explicit `--config <file>` can select a different configuration.
+
+`--id` overrides `id` in the configuration. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Changing tags or moving the terminal does not change dispatcher identity.
 
 `dolber.json` is local and ignored by Git, including its `workspace` setting. Only the empty configuration template `dolber.example.json` belongs in the repository.
 
 | Setting | Meaning |
 | --- | --- |
+| `id` | Required stable dispatcher ID; `--id` overrides it. Case-insensitive, normalized to lowercase. 1–64 letters, digits, dots, underscores or hyphens, starting with a letter/digit |
 | `workspace`, `project` | NTK workspace and project to search |
 | `tags` | Tag filters, for example `["crew", "backend"]`; `[]` means no tag filter |
 | `strict` | `false` matches tag substrings case-insensitively; `true` requires exact tags. All tag filters are required in either mode |
@@ -29,7 +32,7 @@ cp -n lane-launcher/dolber.example.json lane-launcher/dolber.json
 
 The supplied file uses required tag filter `agent-ready`, `strict: false`, preferred tags `kyc`, `ceo60`, `kyt`, and a 60-second pause between iterations. NTK independently requires the ticket's status to be `open`; do not add `open` as a tag to express this status. Preferred tags match exactly, including case, and affect ordering after NTK urgency and dependency ranking.
 
-The supplied file leaves workspace/project, local paths and checks empty. In preview mode (`launchLanes: false`), only workspace, NTK authentication and Docker are required; an empty project means all projects in that workspace. Preview does not need Herdr, Medulla, repository paths or gate commands. Fill in the project, paths and checks before enabling actual launches. Herdr then uses the current terminal's workspace automatically. Advanced overrides `herdrWorkspace`, `herdr` and `stateDir` may also be set in the JSON. Credentials remain in the NTK credentials file or environment.
+The supplied file leaves workspace/project, local paths and checks empty. In preview mode (`launchLanes: false`), only id, workspace, NTK authentication and Docker are required; an empty project means all projects in that workspace. Preview does not need Herdr, Medulla, repository paths or gate commands. Fill in the project, paths and checks before enabling actual launches. Herdr then uses the current terminal's workspace automatically. Advanced overrides `herdrWorkspace`, `herdr` and `stateDir` may also be set in the JSON. Credentials remain in the NTK credentials file or environment.
 
 Preview output has this shape (the ID below is an example):
 
@@ -53,13 +56,13 @@ Failure handling requires a confirmed claim receipt for this ticket, workspace a
 
 NTK requires `force: true` for `in_progress → blocked`; the workflow uses it only in failure handling. Normal `to_test` updates omit force. A blocked ticket stays out of the queue until an operator investigates the saved failure, fixes the cause, and explicitly reopens it. To retry after that review, run `./lane-launcher/ntk-status TICKET_ID -W WORKSPACE -s open --force`. This is a manual recovery action; the polling loop never performs it.
 
-Each lane opens in a separate tab in the current Herdr workspace without stealing focus. For testing, `closeTabOnExit: false` keeps the tab open after success or failure so its logs remain visible. A finished lane frees capacity even while its tab stays open. Set `closeTabOnExit: true` to close its pane automatically on exit. The tab contains only that pane. Logs and results remain in `~/.medulla/lane-launcher/runs/<run-id>/`; a process exit code is not proof of successful landing — inspect the lane artifacts for its outcome. Ctrl+C in the dispatcher stops polling; existing lanes continue.
+Each lane opens in a separate tab in the current Herdr workspace without stealing focus. For testing, `closeTabOnExit: false` keeps the tab open after success or failure so its logs remain visible. A finished lane frees capacity even while its tab stays open. Set `closeTabOnExit: true` to close its pane automatically on exit. The tab contains only that pane. Logs and results remain in `~/.medulla/lane-launcher/crew-dispatchers/<id>/runs/<run-id>/`; a process exit code is not proof of successful landing — inspect the lane artifacts for its outcome. Ctrl+C in the dispatcher stops polling; existing lanes continue.
 
 The current terminal's `HERDR_WORKSPACE_ID` takes precedence over a configured workspace override. Herdr creates the tab and runs `worker.mjs` in its pane; the worker runs the existing `lane/run.sh`, whose workflow selects the Equill Medulla roles. Live output appears in that tab: cyan marks stage starts, yellow marks stage transitions and startup messages, green marks successful terminal transitions, and red marks failed terminal transitions. Existing engine colors are preserved. `output.log` keeps the original lane output, without added display colors.
 
 Use `--dry-run` for one preview iteration: check configuration and Docker, then show the selected ticket if capacity is available. This flag overrides `launchLanes: true` without editing the configuration; it never claims a ticket, changes NTK, opens a Herdr tab or starts a lane. It requires only the preview settings and tools. Use `--once` for one iteration respecting `launchLanes` in the configuration. Without either flag, the dispatcher loops until Ctrl+C.
 
-Capacity includes Docker lane containers and pending launcher reservations. Docker/Herdr inspection errors prevent launches. Use the same `stateDir` for all dispatcher invocations: its lock prevents duplicate dispatchers. Manual launches must respect the same limit; a separate manual start can race the dispatcher. After a hard crash, inspect `dispatcher.lock/owner.json` and remove the lock only once that PID has stopped. An uncertain tab creation keeps its reservation until inspected; it does not silently free capacity.
+Capacity includes only Docker lane containers and pending reservations belonging to the selected dispatcher ID. Container membership uses the existing `medulla.workflow=lane` and `medulla.runs_under` labels: the run path contains `crew-dispatchers/<id>/`. Other IDs, other workflows and legacy containers without a dispatcher identity are excluded. Stop or finish old unscoped lanes before switching their dispatcher to this version; their historical files are retained. Docker/Herdr inspection errors prevent launches. Use the same `stateDir` for all dispatcher invocations: locks are under `crew-dispatchers/<id>/dispatcher.lock`, so the same ID cannot run twice while different IDs can run concurrently. Manual `lane/run.sh` launches require `--dispatcher-id <id>` and become visible to that dispatcher through their container label. Manual launches must respect the same limit; a separate manual start can race the dispatcher. After a hard crash, inspect `dispatcher.lock/owner.json` and remove the lock only once that PID has stopped. An uncertain tab creation keeps its reservation until inspected; it does not silently free capacity.
 
 ## Status-only CLI
 

@@ -4,7 +4,7 @@
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
 ```
-run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <репозиторий> --cbm-store <индекс> --gate-command '<проверка>' --ssh-dir <каталог ключа>
+run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --mount-rw <репозиторий> --cbm-store <индекс> --gate-command '<проверка>' --ssh-dir <каталог ключа>
 ```
 
 ## Граф
@@ -104,7 +104,7 @@ broker; `codex-home.sh` не копирует и не заменяет его `a
 
 ## Прогоны
 
-`~/.medulla/lane-runs/` — вне дерева репозитория, иначе `--cwd-ro` не даст
+`~/.medulla/lane-runs/crew-dispatchers/<dolber-id>/` — вне дерева репозитория, иначе `--cwd-ro` не даст
 писать. Медулла пишет туда всё сама: журнал, отрендеренные промпты, потоки
 ответов. Своего только `artifacts/`: вердикты панели, история раундов, тексты
 исходов прогона.
