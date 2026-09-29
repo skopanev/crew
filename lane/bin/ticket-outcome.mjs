@@ -45,9 +45,9 @@ async function recordFindings() {
       workspace, project: source.project, ...(source.module ? {module: source.module} : {}),
       title: Array.from(`[FINIDING] ${source.title}`).slice(0, 256).join(''),
       status: 'blocked', deps: [id],
-      body: `Nonblocking review findings from ${id}.\n\n` +
-        'The complete findings, evidence and proposed fixes are in the finding-report.txt attachment.\n' +
-        `This ticket depends on ${id}. Review the findings before deciding on further work.`,
+      body: `Non-blocking findings from ${id}.\n` +
+        'See finding-report.txt for evidence and proposed fixes.\n' +
+        `Depends on ${id}. Review before scheduling.`,
     });
     if (typeof created?.id !== 'string' || !created.id) throw new Error('NTK returned no finding ticket ID');
     receipt.id = created.id;
