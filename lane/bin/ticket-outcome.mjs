@@ -43,7 +43,7 @@ async function recordFindings() {
     fs.writeFileSync(receiptFile, JSON.stringify(receipt) + '\n', {flag: 'wx'});
     const created = await request('POST', '/v1/tickets', {}, {
       workspace, project: source.project, ...(source.module ? {module: source.module} : {}),
-      title: 'Findings',
+      title: Array.from(`[FINIDING] ${source.title}`).slice(0, 256).join(''),
       status: 'blocked', deps: [id],
       body: `Non-blocking findings from ${id}.\n` +
         'See finding-report.txt for evidence and proposed fixes.\n' +
