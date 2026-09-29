@@ -325,8 +325,8 @@ nodes:
       effort: high
       slug: codereview
       task: Naming, duplication, dead code, and anything that SAYS one thing and DOES another - stale comments, misleading names, tests that assert nothing.
-    - harness: opencode
-      model: zai-coding-plan/glm-5.3
+    - harness: claude-code
+      model: claude-sonnet-5
       effort: high
       slug: security
       task: 'Untrusted input, permissions and secrets: what reaches this code, who is allowed to, and what leaks if it fails.'
