@@ -106,11 +106,13 @@ verify findings against the actual mounted repository or ticket worktree.
 OpenCode and AGY review the contract, code and verification results without
 separate CBM configuration.
 
-Related tickets are readable without an NTK CLI or MCP:
-`node /workspace/lane/bin/ticket-input.mjs --read <ticket-id> --workspace <workspace>`.
-This prints the ticket over the existing HTTP client and never changes status or
-replaces the current ticket artifact. Mandatory coordination cannot be waived:
-missing inputs stop discovery with `PREMISE_BROKEN` or implementation with `GATE_FAIL`.
+Lane executes one prepared ticket. Planning owns reconnaissance, decomposition
+and cross-ticket coordination, completed before dispatch. Agents do not fetch
+other tickets or their attachments, traverse dependencies, or seek fresh approval.
+The local preflight uses scoped CBM and current code to locate the implementation
+and necessary checks. The coder implements only this ticket's acceptance criteria.
+Missing implementation inputs or contradictions in current code stop the lane
+with an exact blocker; they do not trigger another planning pass.
 
 NTK MCP не используется: после захвата shell сохраняет полный тикет в
 `artifacts/ticket.json`; захват, чтение и обновление исхода идут через HTTP. Авторизацию Codex обслуживает
