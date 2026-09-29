@@ -30,10 +30,18 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `limit`, `intervalSeconds` | Maximum active lanes and polling interval; defaults are 1 and 60 seconds |
 | `launchLanes` | **Defaults to false:** show the selected ticket without launching a lane or creating a Herdr tab |
 | `closeTabOnExit` | **Defaults to false:** keep the tab open after completion for inspection; set true to close it automatically |
-| `repo`, `sshDir` | Absolute paths for the lane repository and Git key directory |
+| `repo`, `sshDir` | Absolute paths for the primary Git checkout and Git key directory |
+| `sourceRoot` | Optional absolute path to the entire source workspace, mounted read-only |
 | `cbmMcpCommand` | Absolute path to an existing Python stdio connector to the shared host CBM service; for example, the connector already used by a workspace box |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `gateCommands` | Required check commands run against the lane's candidate |
+
+Source files, including the selected repository, are mounted read-only. The lane
+creates a normal Git worktree in its run directory and writes there. The selected
+repository's `.git` is mounted separately with write access for worktree registration,
+commits and fetches. It is shared Git metadata, not another repository or clone.
+Sibling repositories under `sourceRoot` are linked beside the worktree so relative
+cross-repository references remain readable. Startup does not fetch those siblings.
 
 The supplied file uses required tag filter `agent-ready`, `strict: false`, preferred tags `kyc`, `ceo60`, `kyt`, and a 60-second pause between iterations. NTK independently requires the ticket's status to be `open`; do not add `open` as a tag to express this status. Preferred tags match exactly, including case, and affect ordering after NTK urgency and dependency ranking.
 
