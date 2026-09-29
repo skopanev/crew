@@ -3,7 +3,8 @@
 # Образец рядом: lane/local.env.example
 **/local.env
 **/*.local.*
-/lane-launcher/dolber.json
+/lane-launcher/*.json
+!/lane-launcher/*.example.json
 **/.env
 **/.env.*
 !**/*.example
