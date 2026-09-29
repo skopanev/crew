@@ -358,9 +358,11 @@ nodes:
          Review git diff --cached and any ticket commits above origin/<target_branch>
          (.ntkrc target_branch, default: develop). Check relevant code and test results
          without editing the worktree.
-      2. Ask: can these AC be met more simply and efficiently, without brittle
-         workarounds, while preserving reliability and the ability to extend the
-         solution in the future? Propose concrete improvements with reasons.
+      2. Challenge the approach: does this solve the underlying problem, or prop up
+         a flawed design with another workaround? Should the task be solved differently?
+         Compare a concrete alternative against the AC, simplicity, efficiency,
+         reliability and future extensibility. Ground any recommendation in code
+         evidence: identify the flaw and explain why the alternative is better.
       3. Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
          ## FINDINGS
          One finding per line, highest severity first:
