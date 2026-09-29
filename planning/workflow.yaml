@@ -4,7 +4,8 @@ timeout: 1800
 defaults:
   timeout: 60
 vars:
-  PLANNING_MODEL: gpt-6-astra
+  RESEARCH_MODEL: gpt-6-astra
+  DESIGN_MODEL: claude-opus-5
   PLANNING_PYTHON: python3
 nodes:
   prepare:
@@ -29,9 +30,9 @@ nodes:
         question: Reconcile the AC with its Domain, Capability, Requirement, owner decisions, supplied Equill knowledge and repository documentation. Identify missing decisions and contradictions; do not invent policy or broaden scope.
       - slug: external
         question: Decide whether external research is needed. If needed, consult primary documentation for the actual project versions and explain applicability. If unnecessary, return not_needed with the concrete reason. Never invent sources.
-    agent: &reader
+    agent:
       harness: codex
-      model: '{{var:PLANNING_MODEL}}'
+      model: '{{var:RESEARCH_MODEL}}'
       effort: high
       sandbox: read-only
       args:
@@ -71,7 +72,15 @@ nodes:
   design:
     timeout: 300
     env: *agent_environment
-    agent: *reader
+    agent:
+      harness: claude-code
+      model: '{{var:DESIGN_MODEL}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - --strict-mcp-config
+        - --mcp-config
+        - '{"mcpServers":{}}'
     prompt: |
       {{file:prompts/design.md}}
       Mandatory Equill contract:
@@ -96,12 +105,25 @@ nodes:
     min_success: 3
     inputs:
       - slug: necessity
+        harness: codex
+        model: gpt-6-astra
+        flag: --ignore-user-config
         question: Is this change necessary for the agreed outcome? Is existing behavior sufficient? Does the plan add unrequested scope? Respect confirmed owner decisions and surface contradictions without cancelling them yourself.
       - slug: simplicity
+        harness: agy
+        model: Gemini 3.1 Pro (High)
         question: Could the same outcome be achieved more simply and efficiently? Identify concrete reuse or smaller alternatives and their trade-offs. Reject speculative abstractions; do not demand a redesign based only on taste.
       - slug: correctness
+        harness: opencode
+        model: zai-coding-plan/glm-5.3
         question: Is the plan executable within its declared modules and interfaces? Are prerequisites sufficient and checks capable of proving the AC? Check failure cases, assumptions and compatibility with current source.
-    agent: *reader
+    agent:
+      harness: '{{input.harness}}'
+      model: '{{input.model}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - '{{input.flag:-}}'
     prompt: |
       {{file:prompts/critic.md}}
       Mandatory Equill contract:

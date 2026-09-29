@@ -38,7 +38,7 @@ class WorkflowTests(unittest.TestCase):
         self.input.write_text(json.dumps(self.assignment))
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for name in ("codex", "fake-equill", "fake-cbm"):
+        for name in ("codex", "claude", "agy", "opencode", "fake-equill", "fake-cbm"):
             script = self.bin / name
             script.write_text((PLANNING / "tests/fake_tools.py").read_text())
             script.chmod(0o755)
@@ -48,7 +48,10 @@ class WorkflowTests(unittest.TestCase):
         self.env = {**os.environ, **self.joppa.env, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "MEDULLA_BIN": executable, "PLANNING_TEST_ROOT": str(self.root),
                     "EQUILL_BIN": str(self.bin / "fake-equill"), "CBM_BIN": str(self.bin / "fake-cbm"),
-                    "MEDULLA_STREAM": "0", "MEDULLA_RETRY_DELAY_S": "0"}
+                    "MEDULLA_STREAM": "0", "MEDULLA_RETRY_DELAY_S": "0",
+                    # Fake providers need no host AGY trust; native adapters are
+                    # still exercised, but no real account/agent is invoked.
+                    "MEDULLA_DOCKER": "1"}
 
     def execute(self, case="ready", dry=False):
         command = [sys.executable, str(PLANNING / "launch.py"), "--input", str(self.input),
@@ -77,6 +80,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(result[level]["text"].strip(), self.assignment[level]["text"])
         self.assertEqual(len(result["reviews"]), 3)
         events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
+        used = {e["slug"]: (e["binary"], e["model"]) for e in events if e["kind"] == "start"}
+        self.assertEqual(used["design"], ("claude", "claude-opus-5"))
+        self.assertEqual(used["necessity"], ("codex", "gpt-6-astra"))
+        self.assertEqual(used["simplicity"], ("agy", "Gemini 3.1 Pro (High)"))
+        self.assertEqual(used["correctness"], ("opencode", "zai-coding-plan/glm-5.3"))
+        self.assertEqual(len({v["reviewer"]["harness"] for v in result["reviews"].values()}), 3)
         for group in (("code", "knowledge", "external"), ("necessity", "simplicity", "correctness")):
             starts = [e["time"] for e in events if e["kind"] == "start" and e["slug"] in group]
             ends = [e["time"] for e in events if e["kind"] == "end" and e["slug"] in group]
