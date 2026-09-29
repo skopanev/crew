@@ -12,7 +12,7 @@
   "limit": 1,
   "intervalSeconds": 60,
   "repo": "",
-  "cbmStore": "",
+  "cbmMcpCommand": "",
   "sshDir": "",
   "readOnlyRepos": [],
   "gateCommands": []

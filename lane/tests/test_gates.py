@@ -171,9 +171,10 @@ class GateTests(unittest.TestCase):
 
     def test_launcher_refuses_missing_checks_before_reading_queue(self):
         self.env["LANE_RUNS_FOLDER"] = str(self.root / "launcher-runs")
+        (self.root / "shared-cbm.py").write_text("# fixture connector\n")
         result = subprocess.run(["bash", str(LANE / "run.sh"), "--ticket-id", "fixture",
                                  "--project", "fixture", "--mount-rw", str(self.repo),
-                                 "--cbm-store", str(self.root / "cache")],
+                                 "--cbm-mcp-command", str(self.root / "shared-cbm.py")],
                                 env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
         self.assertIn("--gate-command is required before claiming work", result.stderr)

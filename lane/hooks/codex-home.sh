@@ -25,14 +25,15 @@ jq '{hooks}' "$settings" \
 # У кодекса нет своего процессора rtk, но вход PreToolUse у него того же вида,
 # что у claude - tool_name и tool_input, - поэтому годится процессор claude.
 
-# MCP: только локальный CBM, как в mcp.json для Claude. NTK читает shell.
-# ОКРУЖЕНИЕ СЕРВЕРАМ НАДО ОТДАТЬ ЯВНО. Кодекс запускает MCP-сервер сам и не
-# передаёт ему переменные узла: в прогоне eead888a search_code и search_graph
-# отработали, но оба вернули "project not found or not indexed" - сервер
-# стартовал без CBM_CACHE_DIR и не нашёл хранилища. У claude того же не
-# случилось, потому что он отдаёт серверу своё окружение целиком.
-cat > "$home/config.toml" <<TOML
-[mcp_servers.codebase-memory]
-command = "/usr/local/bin/codebase-memory-mcp"
-env = { CBM_CACHE_DIR = "${CBM_CACHE_DIR:-}", CBM_ALLOWED_ROOT = "${CBM_ALLOWED_ROOT:-/workspace}" }
-TOML
+# Both harnesses use the same stdio connector to the shared host CBM.
+# JSON quoting is also valid for these TOML string values.
+python3 - "$home" <<'PYCONFIG'
+import json, os, pathlib, sys
+home = pathlib.Path(sys.argv[1])
+connector = os.environ['CBM_MCP_COMMAND']
+server = {"command": "python3", "args": [connector]}
+(home / 'config.toml').write_text(
+    '[mcp_servers.codebase-memory]\ncommand = "python3"\nargs = ' +
+    json.dumps([connector]) + '\n')
+(home / 'mcp.json').write_text(json.dumps({"mcpServers": {"codebase-memory": server}}))
+PYCONFIG

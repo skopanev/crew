@@ -30,7 +30,8 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `limit`, `intervalSeconds` | Maximum active lanes and polling interval; defaults are 1 and 60 seconds |
 | `launchLanes` | **Defaults to false:** show the selected ticket without launching a lane or creating a Herdr tab |
 | `closeTabOnExit` | **Defaults to false:** keep the tab open after completion for inspection; set true to close it automatically |
-| `repo`, `cbmStore`, `sshDir` | Absolute paths for the lane's repository, codebase index and Git key directory |
+| `repo`, `sshDir` | Absolute paths for the lane repository and Git key directory |
+| `cbmMcpCommand` | Absolute path to an existing Python stdio connector to the shared host CBM service; for example, the connector already used by a workspace box |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `gateCommands` | Required check commands run against the lane's candidate |
 

@@ -14,8 +14,8 @@ RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "$arch" in arm64|aarch64) echo arm64 ;; amd64|x86_64) echo amd64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac > /tmp/arch
 
-# git и ssh нужны посадке, python3 - движку, jq - хукам, sqlite3 - проверке
-# индекса перед стартом: копия базы открывается и отвечает, а не просто лежит.
+# git и ssh нужны посадке, python3 - движку, jq - хукам.
+# CBM lives on the host; the container only needs Python for its connector.
 # gcc с заголовками - ЛИНКЕР ДЛЯ RUST, и без него полоса такой репозиторий не
 # проверяет. Сам тулчейн в образ не кладём: он приезжает с хоста оверлеем
 # медуллы (~/.cargo и ~/.rustup симлинками в ~/.medulla/container/), и тогда
@@ -28,7 +28,7 @@ RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
 # может, и пошёл качать rustup внутрь контейнера - гигабайт на каждый прогон.
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
-      ca-certificates curl git openssh-client python3 python3-venv jq sqlite3 ripgrep unzip less procps \
+      ca-certificates curl git openssh-client python3 python3-venv jq ripgrep unzip less procps \
       gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
@@ -69,14 +69,7 @@ ENV MEDULLA_UPGRADE_ON_START=0
 RUN npm i -g --silent "@anthropic-ai/claude-code@stable" "@openai/codex@latest" "opencode-ai@latest"
 
 # ── ИНСТРУМЕНТЫ ──────────────────────────────────────────────────────────────
-# CBM: предполёт по графу кода. Работает НАТИВНО, а не через мост к хосту -
-# полоса получает сам граф, а не отчёт о нём.
-RUN a="$(cat /tmp/arch)"; set -eux; \
-    curl -fsSL "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/codebase-memory-mcp-linux-${a}.tar.gz" \
-      -o /tmp/cbm.tgz \
- && tar -xzf /tmp/cbm.tgz -C /tmp \
- && install -m 755 "$(find /tmp -maxdepth 2 -type f -name codebase-memory-mcp | head -1)" /usr/local/bin/codebase-memory-mcp \
- && rm -rf /tmp/cbm.tgz
+# CBM is supplied as a stdio connector to the shared host service.
 
 # RTK: переписывает команды оболочки в компактный эквивалент. Замер на хосте -
 # 123 тысячи команд, сэкономлено 66.9% вывода. Кодер делает по три десятка
