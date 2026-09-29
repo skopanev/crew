@@ -358,10 +358,9 @@ nodes:
          Review git diff --cached and any ticket commits above origin/<target_branch>
          (.ntkrc target_branch, default: develop). Check relevant code and test results
          without editing the worktree.
-      2. Ask: is this the minimum sufficient scope to meet the ticket's AC?
-         Can the solution be extended through clear boundaries without workarounds
-         or redesigning its foundations? Which changes, abstractions or speculative
-         features can be removed? Report concrete simplifications and their reasons.
+      2. Ask: can these AC be met more simply and efficiently, without brittle
+         workarounds, while preserving reliability and the ability to extend the
+         solution in the future? Propose concrete improvements with reasons.
       3. Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
          ## FINDINGS
          One finding per line, highest severity first:
