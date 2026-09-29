@@ -6,7 +6,8 @@ import path from 'node:path';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {activeCount, dockerLanes} from '../launcher.mjs';
+import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
+import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read} from '../runtime.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
@@ -60,7 +61,7 @@ console.log(JSON.stringify({result}));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const config = {workspace: 'test', project: 'project', tags: ['crew'], strict: true,
+  const config = {id: 'test-project', workspace: 'test', project: 'project', tags: ['crew'], strict: true,
     launchLanes, repo: path.join(root, 'repo'),
     cbmStore: path.join(root, 'cbm'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
     stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
@@ -71,7 +72,7 @@ console.log(JSON.stringify({result}));
     TEST_EVENTS: events, TEST_PANES: panes, TEST_DOCKER: docker,
     TEST_DOCKER_FAILURE: dockerFailure ? '1' : '0', NTK_CONFIG: path.join(root, 'absent'),
     NTK_URL: `http://127.0.0.1:${server.address().port}`, NTK_KEY: 'fixture-key'};
-  return {root, config, configFile, env, calls, events, docker, bins,
+  return {root, config, stateDir: scopeDirectory(config.stateDir, config.id), configFile, env, calls, events, docker, bins,
     run: () => execute(launcher, ['--config', configFile, '--once'], env)};
 }
 
@@ -96,10 +97,58 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
 });
 test('existing external Docker lane prevents a queue read', async t => {
   const f = await setup(t);
-  fs.writeFileSync(f.docker, JSON.stringify({Names: 'medulla-existing', Labels: 'medulla.workflow=lane'}));
+  fs.writeFileSync(f.docker, JSON.stringify({workflow: 'lane', runFolder: scopeDirectory('/manual, runs', f.config.id)}));
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.equal(f.calls.length, 0);
+});
+test('another dispatcher and unscoped containers do not occupy this dispatcher', async t => {
+  const f = await setup(t);
+  fs.writeFileSync(f.docker, [
+    {workflow: 'lane', runFolder: scopeDirectory('/manual', f.config.id + '-other')},
+    {workflow: 'lane', runFolder: ''},
+    {workflow: '', runFolder: ''},
+    {workflow: 'planning', runFolder: scopeDirectory('/manual', f.config.id)},
+  ].map(row => JSON.stringify(row)).join('\n'));
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.equal(f.calls.length, 1);
+});
+test('--id overrides config and isolates reservations and locks in the same state root', async t => {
+  const f = await setup(t);
+  assert.equal((await f.run()).code, 0);
+  fs.mkdirSync(path.join(f.stateDir, 'dispatcher.lock'));
+  const result = await execute(launcher, ['--config', f.configFile, '--id', 'other-project', '--once'], f.env);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.equal(f.calls.length, 2);
+  const other = configFrom(f.configFile, f.env, {id: 'other-project'});
+  const [runId] = fs.readdirSync(path.join(other.stateDir, 'runs'));
+  const run = read(path.join(other.stateDir, 'runs', runId, 'launch.json'));
+  assert.equal(run.args[run.args.indexOf('--dispatcher-id') + 1], 'other-project');
+  assert.equal(laneRunFolder(run.runFolder, 'other-project'), run.runFolder);
+  assert.ok(fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
+});
+test('completed lane frees capacity even when its Herdr tab remains', async t => {
+  const f = await setup(t);
+  assert.equal((await f.run()).code, 0);
+  const [runId] = fs.readdirSync(path.join(f.stateDir, 'runs'));
+  save(path.join(f.stateDir, 'runs', runId, 'result.json'), {status: 'exited', code: 0});
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.equal(f.calls.length, 2);
+});
+test('dispatcher IDs are stable path-safe identities, including manual lanes', () => {
+  assert.equal(validateId('Project-Backend'), 'project-backend');
+  for (const id of ['', '../other', 'a/b', 'a,b', 'has space', 'a'.repeat(65), undefined]) {
+    assert.throws(() => validateId(id), /needs id/);
+  }
+  const folder = laneRunFolder('/manual/runs', 'project-backend');
+  assert.equal(folder, '/manual/runs/crew-dispatchers/project-backend');
+  assert.equal(laneRunFolder(folder, 'project-backend'), folder);
+  assert.throws(() => laneRunFolder(folder, 'another'), /another dispatcher/);
 });
 test('Docker failure fails closed before any queue read', async t => {
   const f = await setup(t, {dockerFailure: true});
@@ -116,7 +165,7 @@ test('empty queue leaves Herdr tabs unchanged', async t => {
 });
 test('lock refuses a second dispatcher before it selects work', async t => {
   const f = await setup(t);
-  fs.mkdirSync(path.join(f.config.stateDir, 'dispatcher.lock'), {recursive: true});
+  fs.mkdirSync(path.join(f.stateDir, 'dispatcher.lock'), {recursive: true});
   const result = await f.run();
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Dispatcher lock exists/);
@@ -124,18 +173,18 @@ test('lock refuses a second dispatcher before it selects work', async t => {
 });
 test('Docker and its pending reservation count as one lane', async t => {
   const f = await setup(t);
-  const dir = path.join(f.config.stateDir, 'runs', 'test');
+  const dir = path.join(f.stateDir, 'runs', 'test');
   fs.mkdirSync(dir, {recursive: true});
-  save(path.join(dir, 'launch.json'), {runFolder: '/fixture/run', pane: 'test-pane'});
-  const containers = dockerLanes(JSON.stringify({Names: 'medulla-one',
-    Labels: 'medulla.workflow=lane,medulla.runs_under=/fixture/run'}));
-  assert.equal(activeCount(f.config, containers, new Set(['test-pane'])), 1);
+  const runFolder = path.join(f.stateDir, 'runs/test/lane');
+  save(path.join(dir, 'launch.json'), {runFolder, pane: 'test-pane'});
+  const containers = dockerLanes(JSON.stringify({workflow: 'lane', runFolder}), f.config);
+  assert.equal(activeCount({...f.config, stateDir: f.stateDir}, containers, new Set(['test-pane'])), 1);
 });
 test('dolber.sh reads adjacent dolber.json from another cwd and only previews with configured filters', async t => {
   const f = await setup(t, {launchLanes: false});
   const folder = path.join(f.root, 'dolber folder');
   fs.mkdirSync(folder);
-  for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs']) {
+  for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs']) {
     fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(folder, file));
   }
   const config = {...f.config, tags: ['open', 'agent-ready'], strict: false,
@@ -160,7 +209,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   assert.equal(query.searchParams.has('project'), false);
   assert.equal(f.calls.length, 1);
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
-  assert.deepEqual(fs.readdirSync(path.join(f.config.stateDir, 'runs')), []);
+  assert.deepEqual(fs.readdirSync(path.join(f.stateDir, 'runs')), []);
 });
 test('--dry-run overrides live config, previews once and never calls Herdr or claims work', async t => {
   const f = await setup(t);
@@ -178,7 +227,7 @@ test('--dry-run overrides live config, previews once and never calls Herdr or cl
   assert.equal(query.pathname, '/v1/tickets/next');
   assert.equal(query.searchParams.get('dry_run'), 'true');
   assert.ok(!fs.existsSync(f.events));
-  assert.deepEqual(fs.readdirSync(path.join(f.config.stateDir, 'runs')), []);
+  assert.deepEqual(fs.readdirSync(path.join(f.stateDir, 'runs')), []);
   assert.equal(fs.readFileSync(f.configFile, 'utf8'), before);
 });
 test('--dry-run exits with an error when Docker cannot be inspected', async t => {
@@ -210,7 +259,7 @@ test('preview loop repeats after its interval and Ctrl+C releases the dispatcher
   assert.equal(code, 0, errors);
   assert.equal(f.calls.length, 2);
   assert.ok(!fs.existsSync(f.events));
-  assert.ok(!fs.existsSync(path.join(f.config.stateDir, 'dispatcher.lock')));
+  assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
 for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
   test(`worker saves exit ${exitCode}; closeTabOnExit=${closeTabOnExit}`, async t => {

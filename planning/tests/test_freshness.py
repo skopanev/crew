@@ -117,6 +117,7 @@ class AdmissionTests(unittest.TestCase):
             (tooling / "lane").mkdir(parents=True)
             (tooling / "lane-launcher").mkdir()
             shutil.copy(crew / "lane/run.sh", tooling / "lane/run.sh")
+            shutil.copy(crew / "lane-launcher/scope.mjs", tooling / "lane-launcher/scope.mjs")
             (tooling / "planning").symlink_to(crew / "planning", target_is_directory=True)
             (tooling / "lane-launcher/ntk.mjs").write_text('export async function getTicket() { return {module:"src"}; }\n')
             repo = root / "repo"
@@ -147,6 +148,7 @@ class AdmissionTests(unittest.TestCase):
                    "LANE_RUNS_FOLDER": str(root / "runs"), "MEDULLA_BRIDGE": str(bridge),
                    "TEST_RECEIPT": str(receipt), "LAUNCH_MARKER": str(marker)}
             command = ["bash", str(tooling / "lane/run.sh"), "--ticket-id", "test-ticket", "--project", "test",
+                       "--dispatcher-id", "fixture",
                        "--mount-rw", str(repo), "--cbm-store", str(cbm), "--gate-command", "true",
                        "--planning-result", str(receipt), "--planning-task", "one"]
             for scenario, code in (("expired", 3), ("read_error", 2), ("expired_during_setup", 3), ("fresh", 0)):
