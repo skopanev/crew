@@ -2,7 +2,8 @@
 export function formatLaneLine(line, color) {
   if (!color || line.includes('\x1b[')) return line;
   let tone;
-  if (/^\[lane\] (?:FAILED|STOPPED)\b/.test(line)) tone = '1;31';
+  if (/^\[(?:lane|medulla)\]/.test(line) && /\btimeout\b|__timeout__|\brc=124\b/i.test(line)) tone = '1;31';
+  else if (/^\[lane\] (?:FAILED|STOPPED)\b/.test(line)) tone = '1;31';
   else if (/^\[lane\] EXIT\b/.test(line)) tone = '1;32';
   else if (/^\[lane\] START\b/.test(line)) tone = '1;36';
   else if (/^\[medulla\]/.test(line) && /\bstep \d+ \|/.test(line)) {

@@ -6,6 +6,7 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr} from './runtime.mjs';
 import {formatLaneLine} from './lane-log.mjs';
+import {notifyCompletion} from '../notify.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -30,6 +31,7 @@ process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
 let result;
+let artifacts = null;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
@@ -58,8 +60,8 @@ try {
   if (result.status !== 'exited') {
     try {
       // Only inspect run artifacts, never recurse into retained worktrees.
-      const root = path.join(run.runFolder, 'lane');
-      const artifacts = fs.existsSync(root) ? fs.readdirSync(root)
+      const root = run.runFolder;
+      artifacts = fs.existsSync(root) ? fs.readdirSync(root)
         .map(name => path.join(root, name, 'artifacts'))
         .filter(folder => fs.existsSync(path.join(folder, 'failure.txt')))
         .sort((a, b) => fs.statSync(path.join(b, 'failure.txt')).mtimeMs - fs.statSync(path.join(a, 'failure.txt')).mtimeMs)[0] : null;
@@ -77,6 +79,15 @@ try {
   }
   // Record completion first: closing this pane can terminate this process immediately.
   save(path.join(dir, 'result.json'), {...result, finishedAt: new Date().toISOString()});
+  try {
+    if (notifyCompletion(run, result, artifacts)) {
+      announce('[lane] Notification queued for messenger');
+    }
+  } catch (error) {
+    // Notification delivery does not change the ticket outcome or occupy a lane slot.
+    save(path.join(dir, 'notification-error.json'), {error: error.message});
+    announce(`[lane] Notification failed: ${error.message}`);
+  }
   fs.closeSync(log);
   if (run.config.closeTabOnExit === true) {
     try { herdr(run.config, ['pane', 'close', run.pane]); }

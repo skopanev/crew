@@ -6,6 +6,7 @@
   "strict": false,
   "launchLanes": false,
   "closeTabOnExit": false,
+  "notify": null,
   "preferTags": ["kyc", "ceo60", "kyt"],
   "module": null,
   "assignee": null,

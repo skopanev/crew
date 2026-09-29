@@ -12,6 +12,28 @@ import {save, read} from '../runtime.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+test('worker records completion before notifying; bus failure preserves lane outcome', async t => {
+  const f = await setup(t);
+  fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 0\n', {mode: 0o755});
+  fs.writeFileSync(path.join(f.bins, 'agentbus'), `#!${process.execPath}
+import fs from 'node:fs';
+if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(99);
+fs.writeFileSync(process.env.TEST_NOTIFY, JSON.stringify(process.argv.slice(2)));
+console.error('fixture delivery failure');
+process.exit(1);
+`, {mode: 0o755});
+  const dir = path.join(f.root, 'worker');
+  fs.mkdirSync(dir);
+  const file = path.join(dir, 'launch.json');
+  save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture', from: 'crew-fixture'}},
+    ticket: 'T1', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
+  const sent = path.join(dir, 'sent.json');
+  const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json'), TEST_NOTIFY: sent});
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(read(path.join(dir, 'result.json')).code, 0);
+  assert.match(read(sent).at(-1), /^CREW READY \| T1 \|/);
+  assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
+});
 function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [script, ...args], {env, cwd});
@@ -94,7 +116,7 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   assert.ok(events.find(args => args[1] === 'run')[3].includes('worker.mjs'));
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /lanes 1 of 1/);
+  assert.match(result.stdout, /Running lanes 1 of 1/);
   assert.equal(f.calls.length, 1);
 });
 test('existing external Docker lane prevents a queue read', async t => {
@@ -114,7 +136,7 @@ test('another dispatcher and unscoped containers do not occupy this dispatcher',
   ].map(row => JSON.stringify(row)).join('\n'));
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.match(result.stdout, /Running lanes 0 of 1/);
   assert.equal(f.calls.length, 1);
 });
 test('config IDs isolate reservations and locks in the same state root', async t => {
@@ -125,7 +147,7 @@ test('config IDs isolate reservations and locks in the same state root', async t
   save(otherFile, {...f.config, id: 'other-project'});
   const result = await execute(launcher, ['--config', otherFile, '--once'], f.env);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.match(result.stdout, /Running lanes 0 of 1/);
   assert.equal(f.calls.length, 2);
   const other = configFrom(otherFile, f.env);
   const [runId] = fs.readdirSync(path.join(other.stateDir, 'runs'));
@@ -141,7 +163,7 @@ test('completed lane frees capacity even when its Herdr tab remains', async t =>
   save(path.join(f.stateDir, 'runs', runId, 'result.json'), {status: 'exited', code: 0});
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /lanes 0 of 1/);
+  assert.match(result.stdout, /Running lanes 0 of 1/);
   assert.equal(f.calls.length, 2);
 });
 test('dispatcher IDs are stable path-safe identities, including manual lanes', () => {
@@ -200,11 +222,11 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
     {bin: 'bash', cwd: f.root});
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
-  assert.equal(lines[0], 'lanes 0 of 1');
+  assert.equal(lines[0], 'Running lanes 0 of 1');
   assert.equal(lines[1], 'checking params:');
   assert.equal(lines[2], '  tags: open, agent-ready');
   assert.equal(lines[3], '  prefer: KYC → ceo60 → KYT');
-  assert.equal(lines[4], 'Запускаю lane на тикет id: T1 (preview: запуск отключён)');
+  assert.equal(lines[4], 'Starting new one with ticket: T1 (preview: запуск отключён)');
   const query = new URL(f.calls[0].url, 'http://fixture');
   assert.equal(query.searchParams.get('tag'), 'open,agent-ready');
   assert.equal(query.searchParams.get('prefer'), 'KYC,ceo60,KYT');
@@ -278,7 +300,7 @@ for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
     save(path.join(artifacts, 'gates/check/receipt.json'), {checks: [
       {command: 'bun run docs:links', exit_code: 1, log: '/fixture/gates/1.log'}]});
     const file = path.join(dir, 'launch.json');
-    save(file, {config: {...f.config, closeTabOnExit}, args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: dir});
+    save(file, {config: {...f.config, closeTabOnExit}, args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: path.join(dir, 'lane')});
     const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json')});
     assert.equal(result.code, 0, result.stderr);
     assert.equal(read(path.join(dir, 'result.json')).code, exitCode);

@@ -97,16 +97,22 @@ if [[ -n "$source_root" ]]; then
   also+=("$source_root")
 fi
 
-# Remove empty mountpoints left by interrupted runs; never hide existing files.
-_point="$TOOLING_ROOT/$(basename "$repo")"
-if [[ -d "$_point" && -z "$(ls -A "$_point" 2>/dev/null)" ]]; then
-  rmdir "$_point" 2>/dev/null || true
-fi
-if [[ -e "$_point" ]]; then
-  say "run.sh: $_point exists, and the mount would hide it inside"
-  say "        the container. Rename one of the two, or mount from elsewhere."
-  exit 2
-fi
+# Empty host mountpoints are shared by concurrent lane containers.
+check_mountpoint() {
+  local point="$TOOLING_ROOT/$(basename "$1")" entries
+  if [[ -L "$point" || ( -e "$point" && ! -d "$point" ) ]]; then
+    say "run.sh: $point is not an empty directory; refusing to hide it"
+    return 2
+  fi
+  if [[ -d "$point" ]]; then
+    entries="$(ls -A "$point")" || return 2
+    if [[ -n "$entries" ]]; then
+      say "run.sh: $point contains files; refusing to hide them"
+      return 2
+    fi
+  fi
+}
+check_mountpoint "$repo"
 
 if ! ticket_json="$(node --input-type=module -e '
   import {pathToFileURL} from "node:url";
@@ -171,15 +177,8 @@ mounts=(--mount "$repo" --mount-rw "$repo/.git")
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
-  base="$(basename "$extra")"
   [[ "$extra" != "$repo" ]] || continue
-  if [[ -d "$TOOLING_ROOT/$base" && -z "$(ls -A "$TOOLING_ROOT/$base" 2>/dev/null)" ]]; then
-    rmdir "$TOOLING_ROOT/$base" 2>/dev/null || true
-  fi
-  if [[ -e "$TOOLING_ROOT/$base" ]]; then
-    say "run.sh: $TOOLING_ROOT/$base exists; --mount-ro $extra would hide it inside"
-    exit 2
-  fi
+  check_mountpoint "$extra"
   mounts+=(--mount "$extra")
 done
 git_ssh=""
@@ -194,17 +193,15 @@ else
   say "        put the lane's deploy key there (and nothing else), or pass --ssh-dir"
 fi
 
-made=()
 cleanup() {
-  local d
   [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
-  for d in "${made[@]:-}"; do [[ -n "$d" ]] && rmdir "$d" 2>/dev/null || true; done
 }
 trap cleanup EXIT
 for m in "$repo" "$ssh_dir" ${also[@]+"${also[@]}"}; do
   point="$TOOLING_ROOT/$(basename "$m")"
   [[ " ${mounts[*]} " == *" $m "* ]] || continue
-  [[ -e "$point" ]] || { mkdir -p "$point" && made+=("$point"); }
+  check_mountpoint "$m"
+  mkdir -p "$point"
 done
 
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
