@@ -10,11 +10,16 @@ from test_failure_outcome import shell_body
 
 
 class SuccessOutcomeTests(unittest.TestCase):
-    def run_success(self, signal, *, bus_installed=False, report_unwritable=False):
+    def run_success(self, signal, *, bus_installed=False, report_unwritable=False, findings_fail=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             commands = root / "bin"
             commands.mkdir()
+            node = commands / "node"
+            node.write_text('#!/bin/sh\n[ "$2" = findings ] || exit 99\n'
+                            'if [ "$FINDINGS_FAIL" = 1 ]; then echo "NTK unavailable" >&2; exit 1; fi\n'
+                            'echo "NTK findings: fixture-finding (created blocked; depends on fixture-task)"\n')
+            node.chmod(0o755)
             if bus_installed:
                 bus = commands / "agentbus"
                 bus.write_text('#!/bin/sh\ntouch "$BUS_CALLED"\nexit 99\n')
@@ -30,6 +35,7 @@ class SuccessOutcomeTests(unittest.TestCase):
                        MEDULLA_RUN_DIR=str(root / "run"),
                        MEDULLA_LAST_SIGNAL=signal,
                        MEDULLA_LAST_MESSAGE="landed deadbeef on develop",
+                       TOOLING_ROOT=str(root), FINDINGS_FAIL="1" if findings_fail else "0",
                        ticket_id="fixture-task", BUS_CALLED=str(root / "bus-called"))
             result = subprocess.run(
                 ["bash", "-c", shell_body("notify_success")],
@@ -45,7 +51,7 @@ class SuccessOutcomeTests(unittest.TestCase):
                 result, report = self.run_success("LANDED", bus_installed=installed)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("deadbeef on develop", report)
-                self.assertIn("Неблокирующих находок 2", report)
+                self.assertIn("NTK findings: fixture-finding", report)
                 self.assertEqual(result.stdout, report)
 
     def test_landing_with_failed_state_write_cannot_report_success(self):
@@ -57,6 +63,13 @@ class SuccessOutcomeTests(unittest.TestCase):
         result, report = self.run_success("LANDED", report_unwritable=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(report)
+
+    def test_findings_failure_preserves_landing_and_reports_only_publication_failure(self):
+        result, report = self.run_success("LANDED", findings_fail=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("deadbeef on develop", report)
+        self.assertIn("Findings publication failed: NTK unavailable", report)
+        self.assertIn("Source ticket remains to_test", report)
 
 
 if __name__ == "__main__":

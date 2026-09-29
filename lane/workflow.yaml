@@ -576,6 +576,7 @@ nodes:
       printf '%s\n' "$msg" >&2
   notify_success:
     env:
+      TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_name: '{{var:project_name}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
@@ -594,7 +595,16 @@ nodes:
       grep -h -E '^- (MED|LOW) ' "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null \
         | sort -u > "$followups" || true
       n_follow="$(wc -l < "$followups" 2>/dev/null | tr -d ' ')"
-      [ "${n_follow:-0}" -gt 0 ] && msg="${msg} Неблокирующих находок ${n_follow}, они в artifacts/followups.txt."
+      if [ "${n_follow:-0}" -gt 0 ]; then
+        if finding="$(node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" findings 2>&1)"; then
+          msg="${msg} ${finding}"
+        else
+          printf '%s\nFindings publication failed: %s\nSource ticket remains to_test; retry reporting only.\n' \
+            "$msg" "$finding" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
+          cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
+          exit 1
+        fi
+      fi
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt" || exit 1
       printf '%s\n' "$msg"
   git_fix:

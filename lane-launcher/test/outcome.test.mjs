@@ -44,6 +44,7 @@ test('no confirmed claim means failure without any NTK request', async t => {
   const f = await fixture(t, () => assert.fail('must not contact NTK'), {claimed: false});
   assert.equal((await f.run('blocked')).code, 1);
   assert.equal((await f.run('to-test')).code, 1);
+  assert.equal((await f.run('findings')).code, 1);
   assert.equal(f.calls.length, 0);
 });
 test('a claim from another run cannot authorize ticket writes', async t => {
@@ -53,6 +54,7 @@ test('a claim from another run cannot authorize ticket writes', async t => {
   fs.writeFileSync(file, JSON.stringify({...claim, run_dir: '/another-run'}));
   assert.equal((await f.run('blocked')).code, 1);
   assert.equal((await f.run('to-test')).code, 1);
+  assert.equal((await f.run('findings')).code, 1);
   assert.equal(f.calls.length, 0);
 });
 for (const failures of [0, 2, 3]) {
@@ -115,4 +117,82 @@ test('failed report upload is an error and does not undo blocked or lose the loc
   assert.match(result.stderr, /failure report/);
   assert.equal(f.calls[0].method, 'PATCH');
   assert.match(fs.readFileSync(path.join(f.artifacts, 'ntk-failure-report.txt'), 'utf8'), /Actual failure/);
+});
+
+test('empty findings create no ticket', async t => {
+  const f = await fixture(t, () => assert.fail('must not contact NTK'));
+  fs.writeFileSync(path.join(f.artifacts, 'followups.txt'), '\n');
+  assert.equal((await f.run('findings')).code, 0);
+});
+
+for (const failUpload of [false, true]) {
+  test(`findings are blocked dependents with full attachment; retry reuses ticket (upload failure: ${failUpload})`, async t => {
+    let creates = 0, uploads = 0;
+    const f = await fixture(t, (req, res, raw, calls, base) => {
+      if (req.method === 'GET') {
+        assert.equal(req.url, '/v1/tickets/T1?workspace=test');
+        res.end(JSON.stringify({ticket: {id: 'T1', title: 'Source title', status: 'to_test',
+          project: 'app', module: 'app/core', tags: ['agent-ready']}}));
+      } else if (req.url === '/v1/tickets') {
+        creates++;
+        const body = JSON.parse(raw);
+        assert.equal(body.title, '[FINIDING] Source title');
+        assert.equal(body.workspace, 'test');
+        assert.equal(body.project, 'app');
+        assert.equal(body.module, 'app/core');
+        assert.equal(body.status, 'blocked');
+        assert.deepEqual(body.deps, ['T1']);
+        assert.equal(body.tags, undefined);
+        assert.equal(body.skip_search, undefined);
+        assert.ok(body.body.length < 2000);
+        assert.ok(!body.body.includes('x'.repeat(2000)));
+        res.end('{"id":"app-finding","status":"blocked"}');
+      } else if (req.url === '/v1/tickets/app-finding/attachments') {
+        assert.ok(JSON.parse(raw).size_bytes > 5000);
+        res.end(JSON.stringify({url: base + '/upload', object_key: 'findings/report'}));
+      } else if (req.url === '/upload') {
+        uploads++;
+        assert.equal(req.headers.authorization, undefined);
+        assert.match(raw, /MED - reuse/);
+        assert.match(raw, /LOW - naming/);
+        assert.match(raw, /Landed SHA: deadbeef/);
+        assert.ok(raw.includes('x'.repeat(5000)));
+        res.writeHead(failUpload && uploads === 1 ? 503 : 200);
+        res.end();
+      } else {
+        assert.equal(req.url, '/v1/tickets/app-finding/attachments/commit');
+        res.end('{"ticket":"app-finding"}');
+      }
+    });
+    fs.writeFileSync(path.join(f.artifacts, 'followups.txt'), '- MED - reuse - file.ts:2 - impact - FIX: reuse\n');
+    fs.writeFileSync(path.join(f.artifacts, 'architecture.md'), '- LOW - naming\n' + 'x'.repeat(5000));
+    fs.writeFileSync(path.join(f.artifacts, 'landing.txt'), 'Landed SHA: deadbeef\n');
+    const first = await f.run('findings');
+    assert.equal(first.code, failUpload ? 1 : 0, first.stderr);
+    const retry = await f.run('findings');
+    assert.equal(retry.code, 0, retry.stderr);
+    assert.equal(creates, 1);
+    assert.equal(uploads, failUpload ? 2 : 1);
+    assert.equal(f.calls.filter(c => c.method === 'PATCH').length, 0);
+    assert.match(retry.stdout, /app-finding/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'finding-ticket.json'))).attached, true);
+  });
+}
+
+test('uncertain creation is retained and never blindly repeated', async t => {
+  const f = await fixture(t, (req, res) => {
+    if (req.method === 'GET') {
+      res.end('{"ticket":{"id":"T1","status":"to_test","title":"Source","project":"app"}}');
+    } else {
+      assert.equal(req.url, '/v1/tickets');
+      res.destroy();
+    }
+  });
+  fs.writeFileSync(path.join(f.artifacts, 'followups.txt'), '- MED - finding\n');
+  assert.equal((await f.run('findings')).code, 1);
+  const retry = await f.run('findings');
+  assert.equal(retry.code, 1);
+  assert.match(retry.stderr, /creation is unconfirmed/);
+  assert.equal(f.calls.filter(c => c.method === 'POST').length, 1);
+  assert.match(fs.readFileSync(path.join(f.artifacts, 'finding-report.txt'), 'utf8'), /MED - finding/);
 });
