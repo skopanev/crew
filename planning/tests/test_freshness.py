@@ -125,9 +125,6 @@ class AdmissionTests(unittest.TestCase):
             cbm = root / "cbm"
             cbm.mkdir()
             bridge = root / "bridge"
-            (bridge / "equill").mkdir(parents=True)
-            (bridge / "equill/bridge.pid").write_text(str(os.getpid()))
-            (bridge / "equill/bridge.identity").write_text("lane:" + str(os.getpid()))
             binary = root / "bin"
             binary.mkdir()
             result = deepcopy(self.result)
@@ -139,13 +136,26 @@ class AdmissionTests(unittest.TestCase):
             result["input_digest"] = digest(source)
             # Test-only container probe can mutate the receipt after the first
             # admission, proving that the second check guards actual execution.
-            (binary / "docker").write_text("#!/usr/bin/env python3\nimport os,json,pathlib,datetime\np=pathlib.Path(os.environ['TEST_RECEIPT'])\nif os.environ.get('EXPIRE_DURING_SETUP'):\n d=json.loads(p.read_text()); d['completed_at']=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=1)).isoformat(); p.write_text(json.dumps(d))\n")
+            (binary / "docker").write_text("""#!/usr/bin/env python3
+import os,json,pathlib,datetime
+# The first probe is reached only after the CBM clone succeeds with an absent
+# bridge parent. Supply a test bridge identity for subsequent launch stages.
+bridge = pathlib.Path(os.environ['MEDULLA_BRIDGE']) / 'equill'
+bridge.mkdir(parents=True, exist_ok=True)
+pid = os.environ['TEST_BRIDGE_PID']
+(bridge / 'bridge.pid').write_text(pid)
+(bridge / 'bridge.identity').write_text('lane:' + pid)
+p = pathlib.Path(os.environ['TEST_RECEIPT'])
+if os.environ.get('EXPIRE_DURING_SETUP'):
+ d=json.loads(p.read_text()); d['completed_at']=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=1)).isoformat(); p.write_text(json.dumps(d))
+""")
             (binary / "medulla").write_text("#!/usr/bin/env python3\nimport os,pathlib\nassert not os.environ.get('JOPPA_TOKEN') and not os.environ.get('JOPPA_TOKEN_FILE')\npathlib.Path(os.environ['LAUNCH_MARKER']).write_text('launched')\n")
             for name in ("docker", "medulla"):
                 (binary / name).chmod(0o755)
             marker = root / "launched"
             env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
                    "LANE_RUNS_FOLDER": str(root / "runs"), "MEDULLA_BRIDGE": str(bridge),
+                   "TEST_BRIDGE_PID": str(os.getpid()),
                    "TEST_RECEIPT": str(receipt), "LAUNCH_MARKER": str(marker)}
             command = ["bash", str(tooling / "lane/run.sh"), "--ticket-id", "test-ticket", "--project", "test",
                        "--dispatcher-id", "fixture",
