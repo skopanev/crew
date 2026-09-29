@@ -358,7 +358,10 @@ nodes:
          Review git diff --cached and any ticket commits above origin/<target_branch>
          (.ntkrc target_branch, default: develop). Check relevant code and test results
          without editing the worktree.
-      2. Identify workarounds. Propose simpler, reliable alternatives. Compare them by AC, simplicity, and extensibility. Cite code defects. Explain the advantage.
+      2. Check the implementation against the ticket's AC and specified approach.
+         Report concrete defects and needless complexity in this diff.
+         Classify optional improvements as MED or LOW. Reserve HIGH for defects
+         that violate the AC, correctness, security or reliability.
       3. Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
          ## FINDINGS
          One finding per line, highest severity first:
