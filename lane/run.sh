@@ -225,6 +225,11 @@ for m in "$repo" "$ssh_dir" ${also[@]+"${also[@]}"}; do
 done
 
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
+if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
+  say "run.sh: Docker image $MEDULLA_IMAGE is unavailable; refusing before the claim."
+  say "        Build the lane image from the Crew repository before retrying."
+  exit 2
+fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
 
@@ -323,7 +328,7 @@ if (( cbm_ok )); then
              --mode files 2>/dev/null | grep -qE "\"total_grep_matches\":[1-9]" \
              || { say "index unusable for $pr"; ok=0; }
          done
-         [ "$ok" = 1 ]' 2>/dev/null; then
+         [ "$ok" = 1 ]'; then
     for m in ${cbm_pending_marks:-}; do printf '%s' "${m#*=}" > "$cbm_marks/${m%%=*}"; done
     say "run.sh: codebase memory on ($cbm_clone)"
   else
