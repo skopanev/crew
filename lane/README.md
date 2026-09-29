@@ -65,7 +65,7 @@ Git tree и SHA кандидата, версии оболочки/Git/Python и 
 
 Процесс приезжает из Equill: каждая агентная нода в `pre:` тянет контекст по
 СВОЕЙ роли и процессу прогона в файл и читает его первым делом. Файлом, а не
-хуком — хуки читает только claude-code, а панель ходит на codex, opencode и agy.
+хуком — хуки читает только claude-code, а панель ходит на codex, claude-code и agy.
 
 Роли: исполнитель и починка конфликта — `crew-lane-coder`, панель — `crew-lane-qa`.
 
@@ -103,7 +103,7 @@ must succeed from the container before claiming a ticket.
 Codex and Claude receive generated configurations in `/tmp/codex-home` that
 point to this connector. CBM paths describe host repositories; agents must
 verify findings against the actual mounted repository or ticket worktree.
-OpenCode and AGY review the contract, code and verification results without
+Claude Sonnet and AGY review the contract, code and verification results without
 separate CBM configuration.
 
 Lane executes one prepared ticket. Planning owns reconnaissance, decomposition
