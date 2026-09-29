@@ -142,52 +142,21 @@ nodes:
       # лечится контрактом-файлом из ntk_claim, а не опасным флагом.
       args: [-s, read-only]
     prompt: |
-      Planning owns reconnaissance, decomposition and cross-ticket coordination.
-      These are completed upstream before dispatch. Execute only ticket {{var:ticket_id}}.
-      Do not repeat planning, triage, ownership negotiation or dependency research.
-      Do not fetch other tickets or their attachments, follow chains of references,
-      or request fresh approval. Treat coordination instructions in the ticket as
-      upstream work already completed, not as steps to repeat inside this lane.
-
-      YOUR CONTRACT - role, ordered steps, rules - is at
-      $MEDULLA_RUN_DIR/artifacts/scout-contract.txt. Read it first; it is what
-      you are held to, and it is not repeated here. If that file is absent the
-      contract did not build: say so plainly in your report and work from this
-      prompt alone - do not invent the missing rules.
-
-      Read the full ticket at $MEDULLA_RUN_DIR/artifacts/ticket.json, including
-      its description, acceptance criteria and module. Use only this ticket's
-      supplied inputs and, when necessary, its own attachments. References to other
-      tickets provide attribution; they are not instructions to expand this task.
-      Ticket module: {{var:module_name}}
-      CBM project verified by startup: {{var:CBM_PROJECT}}
-      Use that exact CBM project. If it is absent, match the repository with
-      list_projects; never guess or query an unrelated project to satisfy a rule.
-      Read the contract and ticket before selecting CBM queries. Shell reads of
-      these inputs are allowed. Run scoped search_code and search_graph, and check
-      SIMILAR_TO before proposing new code. Cite the results. If an initial query
-      used the wrong scope, discard it and complete the correctly scoped preflight;
-      a corrected query order is not an irreversible ticket blocker.
-
-      Limit this stage to locating the existing implementation, checking this
-      ticket against current code and identifying the files and checks it needs.
-      If a concrete implementation input is missing, current code contradicts
-      the ticket, or scoped CBM is unavailable, record that exact blocker and emit
-      PREMISE_BROKEN. Do not invent missing details or resolve other tickets.
-      CBM is a shared host service. Its paths refer to host repositories.
-      Match the returned project to the mounted repository and verify each
-      relevant finding against current files under ${project_dir}. Never
-      index a lane worktree or change shared CBM project paths.
-      Do not survey unrelated code.
-
-      WRITE A CONCISE IMPLEMENTATION HANDOFF TO $MEDULLA_RUN_DIR/artifacts/scout.txt BEFORE
-      YOU FINISH. That file is the whole of what the coder receives from you -
-      your signal is one line and carries nothing. Files you read, what you
-      found where, with file:line, and what remains unknown. Say the unknowns
-      plainly: the coder is told to trust this file, so a guess written as a
-      finding costs more than a gap named as one.
-
-      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+      Ticket {{var:ticket_id}} has completed reconnaissance and coordination.
+      1. Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt and
+         $MEDULLA_RUN_DIR/artifacts/ticket.json. Use this ticket's inputs and AC.
+      2. Run search_code and search_graph in CBM project {{var:CBM_PROJECT}},
+         scoped to module {{var:module_name}}. Check SIMILAR_TO before proposing
+         a new function or module. Use the existing shared index.
+      3. Verify relevant results against files under {{var:project_dir}} and read
+         their applicable repository instructions. Identify existing code to reuse
+         and the checks needed for this ticket.
+      4. Write a short $MEDULLA_RUN_DIR/artifacts/scout.txt: files to change,
+         verified findings, reuse, checks and concrete implementation blockers.
+      5. Emit OK when implementation can proceed. If blocked, state the missing
+         input or source contradiction and emit PREMISE_BROKEN. Emit DUPLICATE
+         if already implemented, or OUT_OF_MODULE if the task requires changes
+         outside {{var:module_name}}.
 
   create_worktree:
     env:
@@ -368,23 +337,19 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
+      Ticket {{var:ticket_id}} has completed reconnaissance and coordination.
+      Current handoff: {{last.message}}
+      1. Read $MEDULLA_RUN_DIR/artifacts/ticket.json and
+         $MEDULLA_RUN_DIR/artifacts/scout.txt. Implement only this ticket's AC.
+      2. Verify the relevant code in your worktree. Make the smallest sufficient
+         change within module {{var:module_name}}, reusing existing code.
+      3. Run the ticket's relevant tests and configured checks:
+         {{var:gate_commands}}. Check each AC against the result.
+      4. Write $MEDULLA_RUN_DIR/artifacts/coder-report.txt with changed files,
+         check results, AC coverage and any concrete blocker.
+      5. Emit OK when the AC and checks pass. Otherwise emit GATE_FAIL with
+         the exact unmet criterion or missing implementation input.
 
-      Task: {{last.message}}
-      Implement only ticket {{var:ticket_id}} from artifacts/ticket.json and the
-      supplied handoff. Planning owns reconnaissance and cross-ticket coordination;
-      these are already complete. Do not fetch other tickets or their attachments,
-      repeat planning or seek fresh coordination/approval. References to other
-      tickets are context, not additional work. Verify relevant code in your
-      current worktree and satisfy this ticket's acceptance criteria only.
-      If an actual implementation input is missing or an acceptance criterion
-      cannot be met, record the concrete blocker and emit GATE_FAIL. Do not guess,
-      broaden scope, or investigate the surrounding ticket queue.
-      Required checks configured for this lane: {{var:gate_commands}}.
-      Report their actual results; do not skip a declared check as unrelated.
-      Before emitting your final signal, write $MEDULLA_RUN_DIR/artifacts/coder-report.txt:
-      what you attempted, changed files, checks and their results, and any exact blocker
-      with evidence and what must change to unblock the ticket. Do not create new tickets.
   prepare_review:
     env:
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
