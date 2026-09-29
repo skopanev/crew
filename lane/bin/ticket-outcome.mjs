@@ -2,6 +2,7 @@
 // Internal lane completion, not a general ticket CLI.
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {updateStatus, attachReport, getTicket, request} from '../../lane-launcher/ntk.mjs';
 
 const {ticket_id: id, project_name: workspace, MEDULLA_RUN_DIR: runDir} = process.env;
@@ -16,14 +17,24 @@ function requireClaim() {
 }
 
 async function recordFindings() {
-  const findings = fs.readFileSync(path.join(artifacts, 'followups.txt'), 'utf8').trim();
-  if (!findings) return;
-  const receiptFile = path.join(artifacts, 'finding-ticket.json');
-  const reportFile = path.join(artifacts, 'finding-report.txt');
+  const findings = [...new Set(fs.readFileSync(path.join(artifacts, 'followups.txt'), 'utf8')
+    .split('\n').map(line => line.trim()).filter(line => /^- (MED|LOW)\s/.test(line)))];
+  const errors = [];
+  for (const finding of findings) {
+    try { await recordFinding(finding); }
+    catch (error) { errors.push(error.message); }
+  }
+  if (errors.length) throw new Error(errors.join('\n'));
+}
+
+async function recordFinding(finding) {
+  const key = createHash('sha256').update(finding).digest('hex');
+  const receiptFile = path.join(artifacts, `finding-${key}.json`);
+  const reportFile = path.join(artifacts, `finding-${key}.txt`);
   let receipt;
   if (fs.existsSync(receiptFile)) {
     receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
-    if (receipt.source !== id || receipt.workspace !== workspace || !receipt.id) {
+    if (receipt.source !== id || receipt.workspace !== workspace || receipt.finding !== finding || !receipt.id) {
       throw new Error(`Finding ticket creation is unconfirmed; check NTK and ${receiptFile} before retrying`);
     }
   } else {
@@ -31,7 +42,7 @@ async function recordFindings() {
     if (source.id.toLowerCase() !== id.toLowerCase() || source.status !== 'to_test' || !source.project) {
       throw new Error('Findings require the source ticket in to_test with a project');
     }
-    const sections = [`Review findings from ${id}\nWorkspace: ${workspace}\nRun: ${runDir}`, findings];
+    const sections = [`Review finding from ${id}\nWorkspace: ${workspace}\nRun: ${runDir}`, finding];
     for (const name of ['landing.txt', 'architecture.md', 'security.md', 'codereview.md']) {
       const file = path.join(artifacts, name);
       if (fs.existsSync(file)) sections.push(`--- ${name} ---\n${fs.readFileSync(file, 'utf8')}`);
@@ -39,13 +50,15 @@ async function recordFindings() {
     fs.writeFileSync(reportFile, sections.join('\n\n') + '\n');
     // NTK create has no idempotency key. Mark the attempt before sending it;
     // an uncertain response must not trigger a second ticket on resume.
-    receipt = {source: id, workspace};
+    receipt = {source: id, workspace, finding};
     fs.writeFileSync(receiptFile, JSON.stringify(receipt) + '\n', {flag: 'wx'});
+    const summary = finding.replace(/^- (MED|LOW)\s+-?\s*/, '').split(' - ')[0];
     const created = await request('POST', '/v1/tickets', {}, {
       workspace, project: source.project, ...(source.module ? {module: source.module} : {}),
-      title: Array.from(`[FINIDING] ${source.title}`).slice(0, 256).join(''),
+      title: Array.from(`[FINIDING] ${summary}`).slice(0, 256).join(''),
       status: 'blocked', deps: [id],
-      body: `Non-blocking findings from ${id}.\n` +
+      tags: [...new Set([...(source.tags || []), 'findings'])],
+      body: `Non-blocking finding from ${id}.\n\n${Array.from(finding).slice(0, 1400).join('')}\n\n` +
         'See finding-report.txt for evidence and proposed fixes.\n' +
         `Depends on ${id}. Review before scheduling.`,
     });

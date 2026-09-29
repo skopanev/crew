@@ -132,17 +132,17 @@ for (const failUpload of [false, true]) {
       if (req.method === 'GET') {
         assert.equal(req.url, '/v1/tickets/T1?workspace=test');
         res.end(JSON.stringify({ticket: {id: 'T1', title: 'Source title', status: 'to_test',
-          project: 'app', module: 'app/core', tags: ['agent-ready']}}));
+          project: 'app', module: 'app/core', tags: ['agent-ready', 'bug', 'findings']}}));
       } else if (req.url === '/v1/tickets') {
         creates++;
         const body = JSON.parse(raw);
-        assert.equal(body.title, '[FINIDING] Source title');
+        assert.equal(body.title, '[FINIDING] reuse');
         assert.equal(body.workspace, 'test');
         assert.equal(body.project, 'app');
         assert.equal(body.module, 'app/core');
         assert.equal(body.status, 'blocked');
         assert.deepEqual(body.deps, ['T1']);
-        assert.equal(body.tags, undefined);
+        assert.deepEqual(body.tags, ['agent-ready', 'bug', 'findings']);
         assert.equal(body.skip_search, undefined);
         assert.ok(body.body.length < 2000);
         assert.ok(!body.body.includes('x'.repeat(2000)));
@@ -175,7 +175,8 @@ for (const failUpload of [false, true]) {
     assert.equal(uploads, failUpload ? 2 : 1);
     assert.equal(f.calls.filter(c => c.method === 'PATCH').length, 0);
     assert.match(retry.stdout, /app-finding/);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'finding-ticket.json'))).attached, true);
+    const receipt = fs.readdirSync(f.artifacts).find(name => /^finding-.*\.json$/.test(name));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.artifacts, receipt))).attached, true);
   });
 }
 
@@ -194,5 +195,45 @@ test('uncertain creation is retained and never blindly repeated', async t => {
   assert.equal(retry.code, 1);
   assert.match(retry.stderr, /creation is unconfirmed/);
   assert.equal(f.calls.filter(c => c.method === 'POST').length, 1);
-  assert.match(fs.readFileSync(path.join(f.artifacts, 'finding-report.txt'), 'utf8'), /MED - finding/);
+  const report = fs.readdirSync(f.artifacts).find(name => /^finding-.*\.txt$/.test(name));
+  assert.match(fs.readFileSync(path.join(f.artifacts, report), 'utf8'), /MED - finding/);
+});
+
+test('ten findings create ten dependent tickets; duplicates and reordered retries create none', async t => {
+  const created = [];
+  let attached = 0;
+  const f = await fixture(t, (req, res, raw, calls, base) => {
+    if (req.method === 'GET') {
+      res.end('{"ticket":{"id":"T1","status":"to_test","title":"Source","project":"app"}}');
+    } else if (req.url === '/v1/tickets') {
+      const body = JSON.parse(raw);
+      assert.equal(body.status, 'blocked');
+      assert.deepEqual(body.deps, ['T1']);
+      assert.deepEqual(body.tags, ['findings']);
+      assert.match(body.body, /Non-blocking finding from T1/);
+      created.push(body.title);
+      res.end(JSON.stringify({id: `app-finding-${created.length}`, status: 'blocked'}));
+    } else if (req.url.endsWith('/attachments')) {
+      res.end(JSON.stringify({url: base + '/upload', object_key: 'finding/report'}));
+    } else if (req.url === '/upload') {
+      assert.match(raw, /Review finding from T1/);
+      res.end();
+    } else {
+      assert.match(req.url, /^\/v1\/tickets\/app-finding-\d+\/attachments\/commit$/);
+      attached++;
+      res.end('{}');
+    }
+  });
+  const findings = Array.from({length: 10}, (_, i) => `- MED - Finding ${i} - f.ts:${i} - impact - FIX: remedy`);
+  const file = path.join(f.artifacts, 'followups.txt');
+  fs.writeFileSync(file, [...findings, findings[0]].join('\n'));
+  const first = await f.run('findings');
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(created.length, 10);
+  assert.equal(new Set(created).size, 10);
+  assert.equal(attached, 10);
+  const calls = f.calls.length;
+  fs.writeFileSync(file, findings.reverse().join('\n'));
+  assert.equal((await f.run('findings')).code, 0);
+  assert.equal(f.calls.length, calls);
 });

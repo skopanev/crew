@@ -580,7 +580,7 @@ nodes:
       project_name: '{{var:project_name}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 120
+    timeout: 1800
     on_signal:
       # Ошибка сохранения отчёта требует разбора уже состоявшейся посадки.
       __failed__: __exit_fail__
