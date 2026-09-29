@@ -137,7 +137,9 @@ class AdmissionTests(unittest.TestCase):
             # Test-only container probe can mutate the receipt after the first
             # admission, proving that the second check guards actual execution.
             (binary / "docker").write_text("""#!/usr/bin/env python3
-import os,json,pathlib,datetime
+import os,json,pathlib,datetime,sys
+if sys.argv[1:3] == ['image', 'inspect']:
+ sys.exit(1 if os.environ.get('MISSING_IMAGE') else 0)
 # The first probe is reached only after the CBM clone succeeds with an absent
 # bridge parent. Supply a test bridge identity for subsequent launch stages.
 bridge = pathlib.Path(os.environ['MEDULLA_BRIDGE']) / 'equill'
@@ -161,15 +163,19 @@ if os.environ.get('EXPIRE_DURING_SETUP'):
                        "--dispatcher-id", "fixture",
                        "--mount-rw", str(repo), "--cbm-store", str(cbm), "--gate-command", "true",
                        "--planning-result", str(receipt), "--planning-task", "one"]
-            for scenario, code in (("expired", 3), ("read_error", 2), ("expired_during_setup", 3), ("fresh", 0)):
+            for scenario, code in (("expired", 3), ("read_error", 2), ("missing_image", 2), ("expired_during_setup", 3), ("fresh", 0)):
                 with self.subTest(scenario=scenario):
                     result["completed_at"] = (datetime.now(timezone.utc) - timedelta(days=1 if scenario == "expired" else 0)).isoformat()
                     receipt.write_text(json.dumps(result))
                     self.peer.status = 503 if scenario == "read_error" else 200
-                    proc = subprocess.run(command, env={**env, "EXPIRE_DURING_SETUP": "1" if scenario == "expired_during_setup" else ""},
+                    proc = subprocess.run(command, env={**env, "EXPIRE_DURING_SETUP": "1" if scenario == "expired_during_setup" else "",
+                                                        "MISSING_IMAGE": "1" if scenario == "missing_image" else ""},
                                           capture_output=True, text=True, timeout=20)
                     self.assertEqual(proc.returncode, code, proc.stdout + proc.stderr)
                     self.assertEqual(marker.exists(), scenario == "fresh", proc.stdout + proc.stderr)
+                    if scenario == "missing_image":
+                        self.assertIn("Docker image", proc.stderr)
+                        self.assertNotIn("no usable codebase index", proc.stderr)
 
 
 if __name__ == "__main__":
