@@ -1,0 +1,14 @@
+{
+  "workspace": "crew",
+  "domain": {"id": "replace-with-current-domain-id", "text": "Deliver agreed product changes reliably through automated workflows."},
+  "capability": {"id": "replace-with-current-capability-id", "text": "Schedule executable work within the configured concurrency limit."},
+  "requirement": {"id": "replace-with-current-requirement-id", "revision": 1, "text": "The dispatcher respects the configured lane limit."},
+  "ac": {"id": "replace-with-current-ac-id", "text": "An active reservation occupies a lane slot until its outcome is known."},
+  "decisions": ["Unknown launches retain their slot; do not start replacement work automatically."],
+  "repositories": [{
+    "id": "crew",
+    "path": "/absolute/path/to/crew",
+    "cbm_project": "exact-name-returned-by-list_projects",
+    "modules": [{"name": "lane-launcher", "path": "lane-launcher"}]
+  }]
+}

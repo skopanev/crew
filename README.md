@@ -16,6 +16,10 @@ git_landing ← expert_review_synthesis ← expert_review ← prepare_review
 
 ## Что где
 
+Отдельный workflow [planning](planning/README.md) готовит один AC перед
+реализацией: параллельная разведка → план → независимые критики → план для lane.
+Проверка графа: `sh planning/run.sh --input planning/input.example.json --dry-run`.
+
 ```
 lane/workflow.yaml   граф
 lane/run.sh          хост → контейнер: монтирования, мосты, клон индекса
