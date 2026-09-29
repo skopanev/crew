@@ -115,7 +115,7 @@ Missing implementation inputs or contradictions in current code stop the lane
 with an exact blocker; they do not trigger another planning pass.
 
 After a successful landing and `to_test`, nonblocking review findings create one
-`[FINIDING] <source title>` ticket in the same project/module, with status `blocked`
+`Findings` ticket in the same project/module, with status `blocked`
 and a dependency on the source ticket. Its body is short; `finding-report.txt`
 contains the full findings and reviewer reports. No findings means no new ticket.
 Closing the source does not reopen the finding: it stays `blocked` until explicitly

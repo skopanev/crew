@@ -136,7 +136,7 @@ for (const failUpload of [false, true]) {
       } else if (req.url === '/v1/tickets') {
         creates++;
         const body = JSON.parse(raw);
-        assert.equal(body.title, '[FINIDING] Source title');
+        assert.equal(body.title, 'Findings');
         assert.equal(body.workspace, 'test');
         assert.equal(body.project, 'app');
         assert.equal(body.module, 'app/core');
