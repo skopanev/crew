@@ -1,0 +1,132 @@
+version: '2'
+start: prepare
+timeout: 1800
+defaults:
+  timeout: 60
+vars:
+  PLANNING_MODEL: gpt-6-astra
+  PLANNING_PYTHON: python3
+nodes:
+  prepare:
+    timeout: 180
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" prepare'
+    on_signal:
+      PREPARED: research
+      BLOCKED: __exit_fail__
+      __failed__: failed
+      __default__: failed
+  research:
+    timeout: 300
+    env: &agent_environment
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+    max_parallel: 3
+    min_success: 3
+    inputs:
+      - slug: code
+        question: Inspect existing code and history with CBM. Find reuse and SIMILAR_TO candidates, verify them in the current worktree, inspect relevant Git changes, and identify the smallest change surface. Never index or start a watcher.
+      - slug: knowledge
+        question: Reconcile the AC with its Domain, Capability, Requirement, owner decisions, supplied Equill knowledge and repository documentation. Identify missing decisions and contradictions; do not invent policy or broaden scope.
+      - slug: external
+        question: Decide whether external research is needed. If needed, consult primary documentation for the actual project versions and explain applicability. If unnecessary, return not_needed with the concrete reason. Never invent sources.
+    agent: &reader
+      harness: codex
+      model: '{{var:PLANNING_MODEL}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - --ignore-user-config
+        - -c
+        - 'mcp_servers.codebase-memory.command={{var:CBM_BIN_TOML}}'
+        - -c
+        - 'mcp_servers.codebase-memory.env.CBM_CACHE_DIR={{var:CBM_CACHE_DIR_TOML}}'
+        - -c
+        - 'mcp_servers.codebase-memory.env.CBM_ALLOWED_ROOT={{var:CBM_ALLOWED_ROOT_TOML}}'
+        - -c
+        - 'mcp_servers.codebase-memory.enabled_tools=["list_projects","search_graph","search_code","get_code_snippet","query_graph","trace_path","get_graph_schema","get_architecture","index_status","check_index_coverage"]'
+        - -c
+        - 'mcp_servers.codebase-memory.required=true'
+        - -c
+        - 'web_search="live"'
+    prompt: |
+      {{file:prompts/research.md}}
+      Mandatory Equill contract:
+      {{var:researcher_contract}}
+      Assignment: {{var:assignment}}
+      Recent Git history: {{var:source_history}}
+      Applicable Equill knowledge: {{var:knowledge}}
+      Your independent branch: {{input.slug}}
+      Your question: {{input.question}}
+    post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture research'
+    on_signal:
+      __done__: research_join
+      __failed__: failed
+      __empty__: failed
+  research_join:
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" research_join'
+    on_signal:
+      RESEARCHED: design
+      BLOCKED: __exit_fail__
+      __failed__: failed
+  design:
+    timeout: 300
+    env: *agent_environment
+    agent: *reader
+    prompt: |
+      {{file:prompts/design.md}}
+      Mandatory Equill contract:
+      {{var:designer_contract}}
+      Assignment: {{var:assignment}}
+      Research: {{var:research}}
+    post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture plan'
+    on_signal:
+      PLANNED: review_input
+      __failed__: failed
+      __default__: failed
+  review_input:
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" review_input'
+    on_signal:
+      REVIEW: critics
+      BLOCKED: __exit_fail__
+      __failed__: failed
+  critics:
+    timeout: 300
+    env: *agent_environment
+    max_parallel: 3
+    min_success: 3
+    inputs:
+      - slug: necessity
+        question: Is this change necessary for the agreed outcome? Is existing behavior sufficient? Does the plan add unrequested scope? Respect confirmed owner decisions and surface contradictions without cancelling them yourself.
+      - slug: simplicity
+        question: Could the same outcome be achieved more simply and efficiently? Identify concrete reuse or smaller alternatives and their trade-offs. Reject speculative abstractions; do not demand a redesign based only on taste.
+      - slug: correctness
+        question: Is the plan executable within its declared modules and interfaces? Are prerequisites sufficient and checks capable of proving the AC? Check failure cases, assumptions and compatibility with current source.
+    agent: *reader
+    prompt: |
+      {{file:prompts/critic.md}}
+      Mandatory Equill contract:
+      {{var:critic_contract}}
+      Assignment: {{var:assignment}}
+      Research: {{var:research}}
+      Frozen plan: {{var:plan}}
+      Plan digest: {{var:plan_digest}}
+      Your independent perspective: {{input.slug}}
+      Your question: {{input.question}}
+    post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture critic'
+    on_signal:
+      __done__: finish
+      __failed__: failed
+      __empty__: failed
+  finish:
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" finish'
+    on_signal:
+      READY: __exit_ok__
+      BLOCKED: __exit_fail__
+      __failed__: failed
+      __default__: failed
+  failed:
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" fail'
+    on_signal:
+      BLOCKED: __exit_fail__
+      __failed__: __exit_fail__
+      __default__: __exit_fail__

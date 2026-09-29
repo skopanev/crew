@@ -5,6 +5,7 @@ usage() {
 usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               --cbm-store <dir> --gate-command <shell command> [...]
               [--module <module>] [--mount-ro <repo>]... [--ssh-dir <dir>]
+              [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
   --mount-rw  the git repository the ticket is implemented in. EXACTLY ONE:
@@ -14,6 +15,9 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --mount-rw <repo>
               never the directory itself, and refuses to start if the copy does
               not open and answer.
   --module    ticket module; read from ntk when omitted
+  --planning-result  completed planning receipt; requires a fresh live Joppa
+                     chain and age below 24h before this lane may start.
+  --planning-task    local Task id in that plan; repository/module must match.
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
@@ -52,6 +56,7 @@ mkdir -p "$WT_ROOT"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" repo="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_src=""
+planning_result="" planning_task=""
 also=()
 gate_commands=()
 passthrough=()
@@ -66,6 +71,8 @@ while (( $# )); do
                           exit 2; }
       repo="${2:-}"; shift 2 ;;
     --module) module="${2:-}"; shift 2 ;;
+    --planning-result) planning_result="${2:-}"; shift 2 ;;
+    --planning-task) planning_task="${2:-}"; shift 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-store) cbm_src="${2:-}"; shift 2 ;;
@@ -74,6 +81,11 @@ while (( $# )); do
     *) passthrough+=("$1"); shift ;;
   esac
 done
+if [[ -n "$planning_result" || -n "$planning_task" ]]; then
+  [[ -n "$planning_result" && -n "$planning_task" ]] || {
+    say "run.sh: --planning-result and --planning-task must be supplied together"; exit 2; }
+  planning_result="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$planning_result")"
+fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$repo"    ]] || { say "run.sh: --mount-rw is required"; usage; }
@@ -145,6 +157,15 @@ if [[ -z "$module" ]]; then
   say "        Set the module on the ticket, then run this again."
   exit 2
 fi
+
+planning_admission() {
+  [[ -n "$planning_result" ]] || return 0
+  python3 "$TOOLING_ROOT/planning/admit.py" --result "$planning_result" \
+    --task "$planning_task" --repository "$repo" --module "$module"
+}
+# Reject stale plans before container/index preparation. Check again immediately
+# before Medulla, since setup itself can cross the expiry boundary.
+planning_admission
 
 mounts=(--mount-rw "$repo")
 
@@ -385,6 +406,9 @@ else
 fi
 
 cd "$TOOLING_ROOT"
+planning_admission
+# Admission's service identity belongs to the host check, not lane agents.
+unset JOPPA_TOKEN JOPPA_TOKEN_FILE
 # --cwd-ro: иначе агент правит свой же workflow.yaml, хук памяти и скрипт
 # посадки - не прошедший панель может отредактировать правила панели.
 # Рабочий репозиторий - отдельное монтирование, остаётся записываемым.
