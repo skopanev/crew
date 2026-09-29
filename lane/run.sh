@@ -297,6 +297,7 @@ medulla \
   --runs-folder "$RUNS_FOLDER" \
   "${mounts[@]}" \
   --var "CBM_MCP_COMMAND=$cbm_connector" \
+  --var "CBM_PROJECT=$cbm_project" \
   --var "ticket_id=$ticket" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
