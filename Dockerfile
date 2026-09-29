@@ -137,6 +137,7 @@ ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
 # Файл монтирует медулла при запуске, поэтому его здесь нет и быть не должно.
 COPY --chown=medulla:medulla lane/bin/entrypoint.sh /usr/local/bin/lane-entrypoint.sh
 USER root
-RUN chmod 755 /usr/local/bin/lane-entrypoint.sh
+RUN chmod 755 /usr/local/bin/lane-entrypoint.sh \
+ && ln -s /home/medulla/.bun/bin/bun /usr/local/bin/bun
 USER medulla
 ENTRYPOINT ["/usr/local/bin/lane-entrypoint.sh"]

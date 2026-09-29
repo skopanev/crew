@@ -9,6 +9,7 @@ vars:
   gate_commands: '[]'
   repository_git_dir: ''
   source_root: ''
+  CBM_PROJECT: ''
   TOOLING_ROOT: /workspace
   LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 nodes:
@@ -151,11 +152,25 @@ nodes:
       its description, acceptance criteria and module. Read referenced NTK tickets with:
       node /workspace/lane/bin/ticket-input.mjs --read <full-ticket-id> --workspace {{var:project_name}}
       This is read-only HTTP access; no ntk CLI or NTK MCP is needed.
-      If a mandatory input, required coordination, or CBM preflight is unavailable,
-      record the exact blocker and emit PREMISE_BROKEN. Never waive a prerequisite
-      or emit OK while it remains unmet.
-      Run the CBM preflight now: search_code and search_graph, once each, before
-      any Bash; check SIMILAR_TO before writing anything new. Cite both.
+      Ticket module: {{var:module_name}}
+      CBM project verified by startup: {{var:CBM_PROJECT}}
+      Use that exact CBM project. If it is absent, match the repository with
+      list_projects; never guess or query an unrelated project to satisfy a rule.
+      Read the contract and ticket before selecting CBM queries. Shell reads of
+      these inputs are allowed. Run scoped search_code and search_graph, and check
+      SIMILAR_TO before proposing new code. Cite the results. If an initial query
+      used the wrong scope, discard it and complete the correctly scoped preflight;
+      a corrected query order is not an irreversible ticket blocker.
+
+      Verify required wording alignment against current referenced tickets and
+      attachments, and cite the matching requirements or exact conflict. Do not
+      invent a fresh human approval or handoff requirement when the ticket asks
+      for consistent wording. An open, unassigned related ticket alone does not
+      establish a competing writer. Preserve explicit ownership/handoff conditions
+      where the inputs actually require them; never waive an unresolved conflict.
+      If a mandatory input, explicit coordination condition, or correctly scoped
+      CBM preflight is still unavailable, record the exact unmet requirement and
+      emit PREMISE_BROKEN. Never emit OK while a real prerequisite remains unmet.
       CBM is a shared host service. Its paths refer to host repositories.
       Match the returned project to the mounted repository and verify each
       relevant finding against current files under ${project_dir}. Never
