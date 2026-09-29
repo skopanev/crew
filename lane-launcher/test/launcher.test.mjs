@@ -115,15 +115,17 @@ test('another dispatcher and unscoped containers do not occupy this dispatcher',
   assert.match(result.stdout, /lanes 0 of 1/);
   assert.equal(f.calls.length, 1);
 });
-test('--id overrides config and isolates reservations and locks in the same state root', async t => {
+test('config IDs isolate reservations and locks in the same state root', async t => {
   const f = await setup(t);
   assert.equal((await f.run()).code, 0);
   fs.mkdirSync(path.join(f.stateDir, 'dispatcher.lock'));
-  const result = await execute(launcher, ['--config', f.configFile, '--id', 'other-project', '--once'], f.env);
+  const otherFile = path.join(f.root, 'other.json');
+  save(otherFile, {...f.config, id: 'other-project'});
+  const result = await execute(launcher, ['--config', otherFile, '--once'], f.env);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /lanes 0 of 1/);
   assert.equal(f.calls.length, 2);
-  const other = configFrom(f.configFile, f.env, {id: 'other-project'});
+  const other = configFrom(otherFile, f.env);
   const [runId] = fs.readdirSync(path.join(other.stateDir, 'runs'));
   const run = read(path.join(other.stateDir, 'runs', runId, 'launch.json'));
   assert.equal(run.args[run.args.indexOf('--dispatcher-id') + 1], 'other-project');
