@@ -16,7 +16,8 @@ def main():
     parser.add_argument("--cbm-root", default=os.environ.get("CBM_ALLOWED_ROOT"))
     parser.add_argument("--equill-store", default=os.environ.get("EQUILL_STORE"))
     parser.add_argument("--runs-folder", default=str(Path.home() / ".medulla/planning-runs"))
-    parser.add_argument("--model", default="gpt-6-astra")
+    parser.add_argument("--research-model", default="gpt-6-astra", help="Codex model for research")
+    parser.add_argument("--design-model", default="claude-opus-5", help="Claude model for plan design; critics are configured individually in workflow.yaml")
     args = parser.parse_args()
     source = Path(args.input).expanduser().resolve()
     data = validate_input(read(source))
@@ -29,10 +30,10 @@ def main():
     if not args.dry_run:
         for key in ("cbm_store", "cbm_root", "equill_store"):
             require(getattr(args, key), f"--{key.replace('_', '-')} is required")
-        for binary in (os.environ.get("EQUILL_BIN", "equill"), os.environ.get("CBM_BIN", "codebase-memory-mcp"), "codex", "git"):
+        for binary in (os.environ.get("EQUILL_BIN", "equill"), os.environ.get("CBM_BIN", "codebase-memory-mcp"), "codex", "claude", "agy", "opencode", "git"):
             require(shutil.which(binary), f"required executable missing: {binary}")
     variables = {
-        "PLANNING_INPUT": str(source), "PLANNING_MODEL": args.model,
+        "PLANNING_INPUT": str(source), "RESEARCH_MODEL": args.research_model, "DESIGN_MODEL": args.design_model,
         "CBM_CACHE_DIR": args.cbm_store or "", "CBM_ALLOWED_ROOT": args.cbm_root or "",
         "CBM_BIN": shutil.which(os.environ.get("CBM_BIN", "codebase-memory-mcp")) or "codebase-memory-mcp",
         "EQUILL_STORE": args.equill_store or "", "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),

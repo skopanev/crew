@@ -14,7 +14,14 @@ root = Path(os.environ["PLANNING_TEST_ROOT"])
 
 def event(kind, slug):
     with (root / "events.jsonl").open("a") as file:
-        file.write(json.dumps({"kind": kind, "slug": slug, "time": time.monotonic()}) + "\n")
+        model = None
+        for index, arg in enumerate(sys.argv[:-1]):
+            value = sys.argv[index + 1]
+            if arg in ("--model", "-m"):
+                model = value
+            elif arg == "-c" and value.startswith("model="):
+                model = json.loads(value.split("=", 1)[1])
+        file.write(json.dumps({"kind": kind, "slug": slug, "time": time.monotonic(), "binary": name, "model": model}) + "\n")
 
 
 if name == "fake-equill":
@@ -46,9 +53,17 @@ elif name == "fake-cbm":
         print(json.dumps({"projects": [{"name": "test-project"}], "has_more": False}))
 else:
     assert not os.environ.get("JOPPA_TOKEN") and not os.environ.get("JOPPA_TOKEN_FILE"), "Joppa credential exposed to agent"
-    assert "--ignore-user-config" in sys.argv and "read-only" in sys.argv
+    if name == "codex":
+        assert "--ignore-user-config" in sys.argv and "read-only" in sys.argv
+    elif name == "claude":
+        assert sys.argv[sys.argv.index("--permission-mode") + 1] == "plan"
+        assert "--strict-mcp-config" in sys.argv
+    elif name == "agy":
+        assert sys.argv[sys.argv.index("--mode") + 1] == "plan"
+    elif name == "opencode":
+        assert json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])["permission"]["bash"] == "deny"
     assert not any("{{" in arg for arg in sys.argv), "unresolved agent argument"
-    prompt = sys.stdin.read()
+    prompt = sys.argv[sys.argv.index("--print") + 1] if name == "agy" else sys.stdin.read()
     assert '"domain"' in prompt and "Reliable delivery" in prompt
     assert '"capability"' in prompt and "Bounded work scheduling" in prompt
     role_input = json.loads(os.environ.get("MEDULLA_INPUT", "{}"))
@@ -114,5 +129,13 @@ else:
                  or case == "malformed_research" and slug == "code"
                  or case == "malformed_critic" and slug == "correctness")
     message = "invalid JSON" if malformed else json.dumps(result)
-    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": message}}))
+    if name == "codex":
+        output = {"type": "item.completed", "item": {"type": "agent_message", "text": message}}
+    elif name == "claude":
+        output = {"type": "result", "is_error": False, "result": message}
+    elif name == "agy":
+        output = {"event": "result", "result": {"status": "SUCCESS", "response": message}}
+    else:
+        output = {"type": "text", "part": {"messageID": "final", "text": message}}
+    print(json.dumps(output))
     event("end", slug)

@@ -603,6 +603,14 @@ Three proposed critic responsibilities cover distinct questions:
 | Simplicity and efficiency | Can existing code or a smaller approach achieve the same outcome? What concrete trade-off justifies the selected design? |
 | Correctness and verification | Do the interfaces, dependencies, failure cases, and checks make the plan executable and its outcome demonstrable? |
 
+The owner explicitly rejected using one model for every participant. The current
+workflow uses Claude Opus for plan design and three different critic families:
+GPT through Codex, Gemini through AGY, and GLM through OpenCode, matching the
+existing lane's reviewer pool. Research remains on Codex. Each critic keeps its
+own session and verdict; there is no fallback that silently turns the panel into
+multiple copies of one model. This diversifies reviewers without claiming that
+model diversity itself proves the plan correct.
+
 Critics receive the same plan and evidence, record their initial findings
 independently, and then resolve substantive objections. Findings must cite
 evidence; reviewer preference alone cannot force redesign. Critics can surface

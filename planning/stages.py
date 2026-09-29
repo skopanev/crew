@@ -9,6 +9,7 @@ from common import digest, fingerprint, read, require, run, signal, validate_inp
 from contracts import ROLES, load_contract
 import validation
 from freshness import snapshot, hydrate, utc_now
+from responses import final_response
 
 
 def artifacts():
@@ -81,14 +82,7 @@ def body_result():
             continue
         if isinstance(event, dict):
             events.append(event)
-    messages = [e["item"].get("text", "") for e in events if e.get("type") == "item.completed" and e.get("item", {}).get("type") == "agent_message"]
-    require(messages, "no completed agent response")
-    # Only the final agent message can establish delivery; never scan tool output.
-    message = messages[-1].strip()
-    if message.startswith("```json\n") and message.endswith("```"):
-        message = message[8:-3].strip()
-    result = json.loads(message)
-    require(isinstance(result, dict), "agent response must be one JSON object")
+    result = final_response(events, os.environ["MEDULLA_HARNESS"])
     return result, events
 
 
@@ -117,8 +111,11 @@ def capture(kind):
         write(target / "plan.json", result)
         signal("PLANNED", "Structured implementation plan validated")
     elif kind == "critic":
-        slug = json.loads(os.environ["MEDULLA_INPUT"])["slug"]
+        seat = json.loads(os.environ["MEDULLA_INPUT"])
+        slug = seat["slug"]
+        require(os.environ["MEDULLA_HARNESS"] == seat["harness"], "critic harness differs from its assigned seat")
         validation.critique(result, digest(read(target / "plan.json")))
+        result["reviewer"] = {"harness": seat["harness"], "model": seat["model"]}
         write(target / f"critic-{slug}.json", result)
 
 
