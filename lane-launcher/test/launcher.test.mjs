@@ -220,7 +220,7 @@ test('--dry-run overrides live config, previews once and never calls Herdr or cl
   fs.rmSync(path.join(f.bins, 'medulla'));
   fs.rmSync(path.join(f.bins, 'jq'));
   const result = await execute(fileURLToPath(new URL('../dolber.sh', import.meta.url)),
-    ['--config', f.configFile, '--dry-run'], f.env, {bin: 'sh'});
+    [path.basename(f.configFile), '--dry-run'], f.env, {bin: 'sh', cwd: f.root});
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /T1 \(preview: запуск отключён\)/);
   assert.doesNotMatch(result.stdout, /pause /);

@@ -3,17 +3,21 @@
 Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla and jq on the host, plus the Crew image. The lane invokes the status script by its path inside the mounted Crew checkout, so it does not require a globally installed `ntk-status` or an image rebuild just to obtain this script.
 
 ```bash
-cp -n lane-launcher/dolber.example.json lane-launcher/dolber.json
-# Edit lane-launcher/dolber.json, then run:
-./lane-launcher/dolber.sh --dry-run
-./lane-launcher/dolber.sh
+cp -n lane-launcher/dolber.example.json lane-launcher/project.json
+# Edit lane-launcher/project.json, then run:
+./lane-launcher/dolber.sh lane-launcher/project.json --dry-run
+./lane-launcher/dolber.sh lane-launcher/project.json
 ```
 
-`dolber.sh` reads **`dolber.json` beside the script**, regardless of the current directory. Settings are loaded once at startup; restart the dispatcher after editing them. An explicit `--config <file>` can select a different configuration.
+Pass a JSON configuration file as the first argument; relative paths resolve from
+the current directory. `--config <file>` is equivalent. Without a file argument,
+`dolber.sh` reads **`dolber.json` beside the script**, regardless of the current
+directory. Settings are loaded once at startup; restart after editing them.
 
-Set `id` in `dolber.json`. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Changing tags or moving the terminal does not change dispatcher identity.
+Set `id` in the selected JSON config. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Changing tags or moving the terminal does not change dispatcher identity.
 
-`dolber.json` is local and ignored by Git, including its `workspace` setting. Only the empty configuration template `dolber.example.json` belongs in the repository.
+Local JSON configs directly under `lane-launcher/` are ignored by Git, including
+their `workspace` settings. Only `*.example.json` templates belong in the repository.
 
 | Setting | Meaning |
 | --- | --- |

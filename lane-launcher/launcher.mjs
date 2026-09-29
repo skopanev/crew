@@ -14,7 +14,7 @@ const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !
 const tones = {red: 31, yellow: '1;33', description: 33, available: '1;32', accent: '1;36', line: 36};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
-export const usage = 'dolber.sh [--config <file>] [--once | --dry-run]';
+export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
 export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
     preferTags: [], readOnlyRepos: [],
@@ -155,9 +155,14 @@ export async function tick(config) {
 }
 
 export async function main(argv) {
-  let file = path.join(here, 'dolber.json'), mode = 'loop';
+  let file = path.join(here, 'dolber.json'), mode = 'loop', selectedConfig = false;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--config' && argv[i + 1]) file = path.resolve(argv[++i]);
+    if (argv[i] === '--config' && argv[i + 1] && !argv[i + 1].startsWith('-') && !selectedConfig) {
+      file = path.resolve(argv[++i]); selectedConfig = true;
+    }
+    else if (!argv[i].startsWith('-') && !selectedConfig) {
+      file = path.resolve(argv[i]); selectedConfig = true;
+    }
     else if (['--once', '--dry-run'].includes(argv[i]) && mode === 'loop') mode = argv[i].slice(2);
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
