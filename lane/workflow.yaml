@@ -31,6 +31,7 @@ nodes:
     on_signal:
       CLAIM_REFUSED: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: cbm_discovery
     shell: |
       set -euo pipefail
@@ -116,6 +117,7 @@ nodes:
       PREMISE_BROKEN: notify_failure
       OUT_OF_MODULE: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     agent:
       harness: codex
@@ -144,7 +146,12 @@ nodes:
       prompt alone - do not invent the missing rules.
 
       Read the full ticket at $MEDULLA_RUN_DIR/artifacts/ticket.json, including
-      its description, acceptance criteria and module. NTK MCP is not provided.
+      its description, acceptance criteria and module. Read referenced NTK tickets with:
+      node /workspace/lane/bin/ticket-input.mjs --read <full-ticket-id> --workspace {{var:project_name}}
+      This is read-only HTTP access; no ntk CLI or NTK MCP is needed.
+      If a mandatory input, required coordination, or CBM preflight is unavailable,
+      record the exact blocker and emit PREMISE_BROKEN. Never waive a prerequisite
+      or emit OK while it remains unmet.
       Run the CBM preflight now: search_code and search_graph, once each, before
       any Bash; check SIMILAR_TO before writing anything new. Cite both.
       CBM is a shared host service. Its paths refer to host repositories.
@@ -181,6 +188,7 @@ nodes:
       NO_TARGET_BRANCH: notify_failure
       BRANCH_HAS_WORK: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     shell: |
       set -euo pipefail
@@ -335,6 +343,7 @@ nodes:
       OK: prepare_review
       GATE_FAIL: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     agent:
       harness: claude-code
@@ -358,6 +367,12 @@ nodes:
       MANDATORY: Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.
 
       Task: {{last.message}}
+      Read related tickets through the existing read-only helper:
+      node /workspace/lane/bin/ticket-input.mjs --read <full-ticket-id> --workspace {{var:project_name}}
+      Required coordination and acceptance criteria cannot be waived. If any remains
+      unmet or unverifiable, record the exact blocker and emit GATE_FAIL, not OK.
+      Required checks configured for this lane: {{var:gate_commands}}.
+      Report their actual results; do not skip a declared check as unrelated.
       Before emitting your final signal, write $MEDULLA_RUN_DIR/artifacts/coder-report.txt:
       what you attempted, changed files, checks and their results, and any exact blocker
       with evidence and what must change to unblock the ticket. Do not create new tickets.
@@ -381,6 +396,7 @@ nodes:
       GATE_FAIL: notify_failure
       NOTHING_DONE: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     shell: |
       set -euo pipefail
@@ -518,6 +534,7 @@ nodes:
     on_signal:
       __done__: expert_review_synthesis
       __failed__: expert_review_synthesis
+      __timeout__: expert_review_synthesis
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -569,6 +586,7 @@ nodes:
       CLEAR: git_landing
       REJECT: reject_gate
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     shell: |
       python3 - <<'PY'
@@ -632,6 +650,7 @@ nodes:
       CONFLICT: git_fix
       REBASED: prepare_review
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: cleanup
     shell: |
       set -euo pipefail
@@ -711,6 +730,7 @@ nodes:
       LANDED: notify_success
       LANDED_TICKET_STUCK: __exit_fail__
       __failed__: __exit_fail__
+      __timeout__: __exit_fail__
       __default__: __exit_fail__
     shell: |
       set -euo pipefail
@@ -743,6 +763,7 @@ nodes:
     timeout: 180
     on_signal:
       __failed__: __exit_fail__
+      __timeout__: __exit_fail__
       __default__: __exit_fail__
     shell: |
       msg="lane stopped on ${MEDULLA_LAST_NODE:-?} (${MEDULLA_LAST_SIGNAL:-none}) for ${ticket_id}. ${MEDULLA_LAST_MESSAGE:-}"
@@ -807,6 +828,7 @@ nodes:
     on_signal:
       # Ошибка сохранения отчёта требует разбора уже состоявшейся посадки.
       __failed__: __exit_fail__
+      __timeout__: __exit_fail__
       __default__: __exit_ok__
     shell: |
       [ "${MEDULLA_LAST_SIGNAL:-}" = "LANDED" ] || { echo "Success requires LANDED and confirmed to_test" >&2; exit 1; }
@@ -850,6 +872,7 @@ nodes:
       OK: prepare_review
       GATE_FAIL: notify_failure
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     agent:
       harness: claude-code
@@ -877,6 +900,7 @@ nodes:
       TOO_MANY_ROUNDS: notify_failure
       PANEL_REJECTED: implement_code
       __failed__: notify_failure
+      __timeout__: notify_failure
       __default__: notify_failure
     shell: |
       set -euo pipefail

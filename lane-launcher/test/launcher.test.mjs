@@ -272,12 +272,19 @@ for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
     fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\nprintf 'lane-output\\n'\nexit ${exitCode}\n`, {mode: 0o755});
     const dir = path.join(f.root, 'worker');
     fs.mkdirSync(dir);
+    const artifacts = path.join(dir, 'lane/fixture/artifacts');
+    fs.mkdirSync(path.join(artifacts, 'gates/check'), {recursive: true});
+    fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'candidate checks failed');
+    save(path.join(artifacts, 'gates/check/receipt.json'), {checks: [
+      {command: 'bun run docs:links', exit_code: 1, log: '/fixture/gates/1.log'}]});
     const file = path.join(dir, 'launch.json');
     save(file, {config: {...f.config, closeTabOnExit}, args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: dir});
     const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json')});
     assert.equal(result.code, 0, result.stderr);
     assert.equal(read(path.join(dir, 'result.json')).code, exitCode);
     assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /lane-output/);
+    if (exitCode) assert.match(result.stdout, /FAILED check: bun run docs:links · exit 1/);
+    else assert.doesNotMatch(result.stdout, /FAILED check:/);
     const events = fs.existsSync(f.events)
       ? fs.readFileSync(f.events, 'utf8').trim().split('\n').map(JSON.parse) : [];
     assert.deepEqual(events, closeTabOnExit ? [['pane', 'close', 'owned-pane']] : []);

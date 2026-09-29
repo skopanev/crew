@@ -3,21 +3,11 @@
   "autoUpdatesChannel": "stable",
   "disableAutoUpdates": true,
   "includeCoAuthoredBy": false,
-  "sandbox": {
-    "filesystem": {
-      "allowWrite": [
-        "~/.cache/skk-cbm"
-      ]
-    }
-  },
   "permissions": {
     "defaultMode": "auto",
     "allow": [
       "Bash(*git *)",
       "Bash(*bun *)",
-      "Bash(*ntk *)",
-      "Bash(*agentbus *)",
-      "Bash(*medulla *)",
       "Bash(*grep *)",
       "Bash(*cd *)",
       "Bash(*echo *)",
@@ -26,10 +16,6 @@
       "Bash(*bash -n *)"
     ],
     "deny": [
-      "mcp__ntk__ntk_update",
-      "mcp__ntk__ntk_close",
-      "mcp__ntk__ntk_create",
-      "mcp__ntk__ntk_rm",
       "Bash(*git push*)",
       "Bash(*git push --force*)",
       "Bash(*git push -f *)",
@@ -59,8 +45,7 @@
       "Bash(*tofu*force-unlock*)",
       "Bash(*tofu*login*)",
       "Bash(*tofu*logout*)",
-      "Bash(*terraform *)",
-      "mcp__agentbus__topics_prune"
+      "Bash(*terraform *)"
     ]
   },
   "env": {

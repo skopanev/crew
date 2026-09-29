@@ -55,6 +55,26 @@ try {
   result = {status: 'failed', error: error.message};
 } finally {
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
+  if (result.status !== 'exited') {
+    try {
+      // Only inspect run artifacts, never recurse into retained worktrees.
+      const root = path.join(run.runFolder, 'lane');
+      const artifacts = fs.existsSync(root) ? fs.readdirSync(root)
+        .map(name => path.join(root, name, 'artifacts'))
+        .filter(folder => fs.existsSync(path.join(folder, 'failure.txt')))
+        .sort((a, b) => fs.statSync(path.join(b, 'failure.txt')).mtimeMs - fs.statSync(path.join(a, 'failure.txt')).mtimeMs)[0] : null;
+      if (artifacts) {
+        announce(`[lane] ${fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8').trim()}`);
+        const gates = path.join(artifacts, 'gates');
+        const receipts = fs.existsSync(gates) ? fs.readdirSync(gates)
+          .map(name => path.join(gates, name, 'receipt.json')).filter(file => fs.existsSync(file))
+          .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs) : [];
+        for (const check of (receipts[0] ? read(receipts[0]).checks : []) || []) {
+          if (check.exit_code !== 0) announce(`[lane] FAILED check: ${check.command} · exit ${check.exit_code} · log: ${check.log}`);
+        }
+      }
+    } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }
+  }
   // Record completion first: closing this pane can terminate this process immediately.
   save(path.join(dir, 'result.json'), {...result, finishedAt: new Date().toISOString()});
   fs.closeSync(log);
