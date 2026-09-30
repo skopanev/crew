@@ -134,7 +134,7 @@ worktree="$source_root/.worktrees/$ticket"
 [[ ! -L "$source_root/.worktrees" && ! -L "$worktree" ]] || {
   say "run.sh: worktree path is a symlink; startup refused"; exit 2; }
 if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
-  say "run.sh: retained worktree at $worktree; inspect it before retrying"; exit 2
+  say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73
 fi
 LANE_WORKTREE="/workspace/$ticket"
 

@@ -30,6 +30,7 @@ export function completionEvent(run, result, artifacts) {
   const event = {event: result.code === 0 ? 'READY' : 'FAILED', id: run.ticket,
     summary: result.code === 0 ? 'Ticket ready for test' : 'Lane failed; inspect the report',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
+  if (result.blocked) return {...event, event: 'BLOCKED', summary: result.error};
   if (result.code === 0 || !artifacts) return event;
   const failure = path.join(artifacts, 'failure.txt');
   const detail = fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : '';

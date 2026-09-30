@@ -60,7 +60,7 @@ function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
     child.on('close', code => resolve({code, stdout, stderr}));
   });
 }
-async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false} = {}) {
+async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, reportUploadFailure = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
@@ -103,7 +103,8 @@ console.log(JSON.stringify({result}));
   const server = http.createServer(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
-    calls.push({method: req.method, url: req.url, body: body ? JSON.parse(body) : null});
+    calls.push({method: req.method, url: req.url,
+      body: body ? (req.headers['content-type']?.startsWith('application/json') ? JSON.parse(body) : body) : null});
     fs.appendFileSync(requests, `${req.method} ${req.url}\n`);
     if (empty) { res.writeHead(204); res.end(); }
     else if (req.url.startsWith('/v1/tickets/T1/start') && claimRefused) {
@@ -112,6 +113,12 @@ console.log(JSON.stringify({result}));
     else if (req.url.startsWith('/v1/tickets/T1/start')) {
       ticketStatus = 'in_progress';
       res.end('{"id":"T1","status":"in_progress","claimed":true}');
+    }
+    else if (req.url === '/v1/tickets/T1/attachments') {
+      res.end(JSON.stringify({url: `http://127.0.0.1:${server.address().port}/startup-upload`, object_key: 'startup/report'}));
+    }
+    else if (req.url === '/startup-upload') {
+      res.writeHead(reportUploadFailure ? 503 : 200); res.end();
     }
     else if (req.method === 'GET') res.end(JSON.stringify({ticket: {id: 'T1', status: ticketStatus}}));
     else if (req.method === 'PATCH') {
@@ -194,6 +201,40 @@ test('worker startup failure reopens; adopted workflow failure and changed ticke
     if (scenario === 'done') assert.match(result.reopenError, /Ticket changed/);
   }
 });
+for (const scenario of ['blocked', 'upload-failed', 'done', 'unclaimed', 'adopted', 'unrelated-code']) {
+  test(`preexisting worktree startup: ${scenario}`, async t => {
+    const f = await setup(t, {reportUploadFailure: scenario === 'upload-failed'});
+    assert.equal((await f.run()).code, 0);
+    const dir = runState(f), file = path.join(dir, 'launch.json'), run = read(file);
+    const reason = 'WORKTREE PREEXISTED: /fixture/.worktrees/T1; retained unchanged; inspect before retrying';
+    fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\necho 'run.sh: ${scenario === 'unrelated-code' ? 'unrelated failure' : reason}' >&2\nexit 73\n`, {mode: 0o755});
+    if (scenario === 'done') f.setStatus('done');
+    if (scenario === 'unclaimed') { delete run.claim; save(file, run); }
+    if (scenario === 'adopted') {
+      const artifacts = path.join(run.runFolder, 'fixture', 'artifacts');
+      fs.mkdirSync(artifacts, {recursive: true});
+      save(path.join(artifacts, 'claim.json'), {...run.claim, run_dir: path.dirname(artifacts)});
+    }
+    const output = await execute(worker, [file], f.env);
+    const result = read(path.join(dir, 'result.json'));
+    const blocked = scenario === 'blocked' || scenario === 'upload-failed';
+    assert.equal(result.blocked === true, blocked);
+    assert.equal(result.reopened === true, scenario === 'unrelated-code');
+    const patches = f.calls.filter(call => call.method === 'PATCH');
+    assert.equal(patches.length, blocked || scenario === 'unrelated-code' ? 1 : 0);
+    if (blocked) {
+      assert.equal(patches[0].body.status, 'blocked');
+      assert.equal(result.error, reason);
+      assert.match(output.stdout, /T1 blocked: WORKTREE PREEXISTED/);
+      assert.match(fs.readFileSync(path.join(dir, 'startup-failure.txt'), 'utf8'), /Worktree and branches were not modified/);
+      const upload = f.calls.find(call => call.url === '/startup-upload');
+      assert.ok(upload.body.includes(reason));
+      assert.equal(f.calls.some(call => call.url.endsWith('/attachments/commit')), scenario === 'blocked');
+      assert.equal(Boolean(result.reportError), scenario === 'upload-failed');
+    }
+    if (scenario === 'done') assert.match(result.blockError, /Ticket changed/);
+  });
+}
 test('existing external Docker lane prevents a queue read', async t => {
   const f = await setup(t);
   fs.writeFileSync(f.docker, JSON.stringify({workflow: 'lane', runFolder: scopeDirectory('/manual, runs', f.config.id)}));
