@@ -1,148 +1,70 @@
-# crew
+# Crew
 
-Автономная полоса: один тикет от захвата до посадки, внутри контейнера.
+Medulla workflows for preparing and implementing tickets.
 
-Это `medulla`-воркфлоу из тринадцати узлов. Четыре из них — агенты, остальные
-девять детерминированные: оболочка, а не модель. Граница проведена намеренно —
-всё, что можно решить кодом, решается кодом.
+## Workflows
 
-```
-ntk_claim → cbm_discovery → create_worktree → implement_code
-                                                    ↓
-git_landing ← expert_review_synthesis ← expert_review ← prepare_review
-     ↓
-  cleanup → notify_success
-```
+- [Planning](planning/README.md): prepare one acceptance criterion, resolve questions,
+  and produce scoped tasks with implementation instructions and checks.
+- [Lane](lane/README.md): implement one prepared NTK ticket, check it, review it,
+  land it, and set `to_test`. A workflow failure sets `blocked` with a report.
+- [Dolber](lane-launcher/README.md): select open tickets and launch lanes within
+  the configured dispatcher limit.
 
-## Что где
+## Configuration
 
-Отдельный workflow [planning](planning/README.md) готовит один AC перед
-реализацией: параллельная разведка → план → независимые критики → план для lane.
-Проверка графа: `sh planning/run.sh --input planning/input.example.json --dry-run`.
+Pass a local JSON file to Dolber. Start from
+[lane-launcher/dolber.example.json](lane-launcher/dolber.example.json).
+Local configuration files are ignored by Git.
 
-```
-lane/workflow.yaml   граф
-lane/run.sh          хост → контейнер: монтирования, мосты, клон индекса
-lane/hooks/          доставка контракта и памяти агенту
-lane/bin/land.sh     посадка; отказывает по условиям, форс невозможен
-roles/               контракты ролей для Equill
-Dockerfile           образ
+```sh
+sh lane-launcher/dolber.sh /path/to/config.json --dry-run
+sh lane-launcher/dolber.sh /path/to/config.json --once
 ```
 
-## Как это устроено
+`--dry-run` previews one selection without claiming or opening a tab.
+`--once` starts at most one lane when `launchLanes` is true. Without either flag,
+Dolber repeats at the configured interval until Ctrl+C.
 
-**Контракт агента живёт не в промптах, а в Equill.** Роль, шаги и признак
-завершения приходят на `SessionStart` через хук. Промпты узлов поэтому
-крошечные: у кодера 23 символа, у `git_fix` 17.
+The config supplies the NTK workspace, tags, preferred tags, source root,
+shared CBM connector, Git key directory, checks, dispatcher ID, and lane limit.
+The ticket module identifies its repository under the source root.
+Each repository must explicitly set `target_branch` in `.ntkrc`.
 
-**Узел не выпускается без сигнала.** На `Stop` хук читает расшифровку: есть
-тег — пропускает, нет — возвращает `decision: block` и требование, взятое
-полем `ends_when` из записи процесса. Это не украшение: узел, отработавший
-двенадцать минут и забывший тег, теряет всю работу.
+## Runtime
 
-**Важное говорится рядом с делом, а не на старте.** Контракт приезжает один
-раз, а к концу работы он на другом конце расшифровки. Поэтому требование
-повторяется в момент решения — это единственное, что сработало по замеру.
+The entire source root is read-only. Each ticket has a writable private checkout
+at `<source-root>/.worktrees/<ticket>` with its own `.git`. Run artifacts are
+stored separately. Retained work is never reset by a new launch.
 
-**Панель ревью — три места на разных харнессах.** `codex`, `claude-code`, `agy`
-смотрят один и тот же замороженный снимок. Вердикт собирается по именам
-сигналов, а не по прозе.
+All lanes use the shared host CBM service. Crew does not copy databases, start
+CBM daemons, or index worktrees. Equill supplies role contracts and memory.
+`roles/*.jsonl` are recovery snapshots; the live Equill store is authoritative.
+Do not import a stale snapshot over that store.
 
-**Работа переживает падение.** Дерево живёт вне контейнера и вне репозитория:
-внутри репозитория его сканируют собственные проверки проекта.
+Dolber atomically claims a ticket before opening its Herdr tab. Startup failure
+returns the confirmed claim to `open`. Once the workflow adopts the claim,
+failure sets `blocked` and attaches details. An unconfirmed claim changes no
+status. An uncertain dispatch keeps its reservation for inspection.
 
-## Что нужно снаружи
+Landing uses native repository hooks and a normal push. It refuses dirty work,
+failed checks, an unreviewed tree, or a target ahead of the candidate. Setting
+`to_test` is retried up to three times. A status failure after landing preserves
+its SHA and does not rerun implementation or set the landed ticket to `blocked`.
 
-| инструмент | зачем | обязателен |
-|---|---|---|
-| `medulla` | движок | да |
-| `equill` | контракты и память | да |
-| `ntk-status` | обновление статуса и атомарный захват через HTTP | да |
-| `codebase-memory` | предполёт по коду | нет, узел снимается |
-| `rtk` | сжатие вывода оболочки | нет |
+Each nonblocking review finding creates a `[FINIDING] <summary>` ticket:
+`blocked`, dependent on the source, with all source tags plus `findings` and
+an attached report. It does not trigger another implementation round.
 
-## Установка
+## Build and checks
 
 ```sh
 docker build --build-arg USER_UID=$(id -u) -t medulla-crew:latest .
-equill record --store <store> roles/crew-lane-records.jsonl
+medulla -w lane --validate
+node --test lane-launcher/test/*.test.mjs
+python3 -m unittest discover -s lane/tests -v
 ```
 
-`USER_UID` обязателен: репозитории монтируются с хоста, и git внутри откажется
-работать с деревом, принадлежащим другому пользователю — `dubious ownership`.
-
-**`roles/crew-lane-records.jsonl` — снимок, а не источник правды.** Источник —
-живой стор Equill. В снимке только СВОИ записи полосы: три процесса и
-тринадцать шагов. Три общие записи с `role: null` в него намеренно не
-включены — они принадлежат флоту, приезжают в контракт сами и на пустом сторе
-должны быть заведены отдельно:
-
-| id | что |
-|---|---|
-| `01a0e300-a12d-7793-8544-ce52735562d8` | Use English. Russian allowed with Owner. |
-| `01a0e300-fab8-7b80-9c77-a0204ae68a7c` | Do we really need this? Do not overengineer. |
-| `01a08301-e796-7e73-a230-c76574191ec8` | Report verified facts; mark unsupported claims `UNKNOWN`. |
- Снимок нужен для установки с нуля и для восстановления;
-`equill record` на РАБОЧИЙ стор откатит контракты до состояния файла. Так уже
-было: файл отставал от стора на два шага QA, и его заливка сняла бы с ревью
-требование прочесать всю поверхность за один проход. Перед импортом поверх
-работающего стора сверьте снимок с выдачей `equill context`; расходится —
-сначала обновите снимок, а не стор.
-
-Локальные пути — в `lane/local.env`, образец рядом: `local.env.example`.
-AgentBus в lane не используется. Исход и причина отказа сохраняются в каталоге
-прогона; после отказа оператор разбирает причину и продолжает с исправлениями.
-
-## Запуск
-
-Исходники задаются одним `--source-root`. Ничего не ищется по каталогам.
-
-```sh
-./lane/run.sh \
-  --ticket-id <id> --project <workspace> --dispatcher-id <dolber-id> \
-  --source-root <workspace>   `# весь каталог исходников, только чтение` \
-  --mount-ro  <lib>           `# на чтение, повторяемо` \
-  --mount-ro  <docs> \
-  --cbm-mcp-command <file>    `# connector to shared host CBM` \
-  --gate-command '<check>'    `# проверка из корня репозитория; повторяемо` \
-  --ssh-dir   <dir>
-```
-
-`--cbm-mcp-command` points to the existing Python stdio connector for the
-shared host CBM service. Every lane uses that service; no database copy or
-local daemon is created. A failed startup connection returns a dispatcher claim to open.
-
-Весь `--source-root` вместе с каноническим `.git` монтируется только на чтение.
-Репозиторий тикета — первый компонент его NTK-модуля внутри `--source-root`;
-ни таблицы проектов, ни флага, подменяющего репозиторий, нет. На запись
-монтируется только `<source-root>/.worktrees/<ticket>`: отдельный клон со
-своим `.git`. Прежние `--repo` и `--mount-rw` удалены и отклоняются.
-Внешние репозитории, которые полосе нужно ЧИТАТЬ, перечисляются через
-`--mount-ro`.
-
-Раньше `run.sh` сам сканировал соседние каталоги и монтировал всё, что похоже
-на репозиторий. Это зависело от того, как на машине разложены папки: репа,
-положенная в общую свалку, тянула за собой всё окружение и фетчила каждую.
-Теперь ничего не угадывается.
-
-## Сигналы и маршруты
-
-Имена сигналов в `on_signal` перечисляются полностью, даже когда все ведут в
-одно место и кажется, что `__default__` их покроет. Он не покрывает: сигнал
-без маршрута движок считает несигналом вовсе, и `MEDULLA_LAST_SIGNAL`
-становится `__default__`. Узел отказа сохраняет это имя для разбора.
-Отказ до подтверждённого захвата завершает прогон ошибкой без изменения тикета.
-Startup failure after a dispatcher claim returns the ticket to open. Once the workflow adopts the claim, failure sets blocked and attaches the report.
-После посадки перевод в to_test выполняется максимум три раза; если не удалось,
-прогон падает, сохранив SHA посадки, без повторной реализации и перевода в blocked.
-
-## Чего здесь нет
-
-Триажа. Полоса берёт тикет, делает его и кладёт в `blocked` с причиной, если
-не вышло. Резать и переформулировать задачу — работа снаружи, узла под неё
-здесь нет и не будет. Неблокирующие находки панели сводятся в
-`artifacts/followups.txt` прогона и тикетами не заводятся.
-
-Измерения размера правки. Контракт говорит «наименьшая полная область», и
-никто этого не проверяет — кап назван и не обеспечен. Это известная дыра, а не
-недосмотр.
+The image provides the engine, agent harnesses, and repository check tools.
+Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
+must be available. Project source refresh belongs to the project's preflight.

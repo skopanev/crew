@@ -25,7 +25,7 @@ class McpSetupTests(unittest.TestCase):
                         env=dict(os.environ, bridge_dir=str(root)), capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0 if identity == f'lane:{os.getpid()}' else 2)
                     if result.returncode:
-                        self.assertIn('refusing before claim', result.stdout)
+                        self.assertIn('startup refused', result.stdout)
 
     def test_harnesses_share_cbm_connector_and_preserve_broker_auth(self):
         with tempfile.TemporaryDirectory() as directory:
