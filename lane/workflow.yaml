@@ -233,18 +233,12 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
+      Follow your Equill contract.
       Current handoff: {{last.message}}
-      1. Get your ticket from NTK:
-         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
-         Read $MEDULLA_RUN_DIR/artifacts/scout.txt. Implement only this ticket's AC.
-      2. Verify the relevant code in your worktree. Make the smallest sufficient
-         change within module {{var:module_name}}, reusing existing code.
-      3. Run the ticket's relevant tests and configured checks:
-         {{var:gate_commands}}. Check each AC against the result.
-      4. Write $MEDULLA_RUN_DIR/artifacts/coder-report.txt with changed files,
-         check results, AC coverage and any concrete blocker.
-      5. Emit OK when the AC and checks pass. Otherwise emit GATE_FAIL with
-         the exact unmet criterion or missing implementation input.
+      Ticket {{var:ticket_id}} in workspace {{var:project_name}}:
+        rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
+      Read $MEDULLA_RUN_DIR/artifacts/scout.txt.
+      Configured checks: {{var:gate_commands}}.
 
   prepare_review:
     env:
@@ -290,11 +284,12 @@ nodes:
         if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
              --profile agent.context.target --role crew-lane-qa --process crew-lane-qa \
              --coordinate rules=none --json 2>"$qa.err" \
-           | jq -r '.content // empty' > "$qa.tmp" && [ -s "$qa.tmp" ]; then
+           | jq -er '.content | select(type == "string" and test("\\S"))' > "$qa.tmp"; then
           mv "$qa.tmp" "$qa"
         else
           rm -f "$qa.tmp" "$qa"
-          echo "контракт QA не собрался ($(head -1 "$qa.err" 2>/dev/null)) - панель пойдёт на одном промпте" >&2
+          echo "QA contract unavailable: $(head -1 "$qa.err" 2>/dev/null)" >&2
+          exit 1
         fi
         rm -f "$qa.err"
       fi
@@ -311,17 +306,14 @@ nodes:
       model: gpt-6-astra
       effort: high
       slug: architecture
-      task: Does this change fit the contracts and boundaries the system already has? Name every place it diverges, and what it should have done instead.
     - harness: agy
       model: Gemini 3.1 Pro (High)
       effort: high
       slug: codereview
-      task: Naming, duplication, dead code, and anything that SAYS one thing and DOES another - stale comments, misleading names, tests that assert nothing.
     - harness: claude-code
       model: claude-sonnet-5
       effort: high
       slug: security
-      task: 'Untrusted input, permissions and secrets: what reaches this code, who is allowed to, and what leaks if it fails.'
     env:
       CODEX_HOME: /tmp/codex-home
       EQUILL_ROLE: crew-lane-qa
@@ -343,26 +335,15 @@ nodes:
       args:
       - '{{input.flag:-}}'
     prompt: |
-      Review ticket {{var:ticket_id}} in {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}.
-      Focus: {{input.task}}
-      1. Read $MEDULLA_RUN_DIR/artifacts/qa-contract.txt and
-         $MEDULLA_RUN_DIR/artifacts/coder-report.txt.
-         Review git diff --cached and any ticket commits above origin/<target_branch>
-         (.ntkrc target_branch, default: develop). Check relevant code and test results
-         without editing the worktree.
-      2. Check the implementation against the ticket's AC and specified approach.
-         Report concrete defects and needless complexity in this diff.
-         Classify optional improvements as MED or LOW. Reserve HIGH for defects
-         that violate the AC, correctness, security or reliability.
-      3. Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
-         ## FINDINGS
-         One finding per line, highest severity first:
-         - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <proposed change and reason>
-         HIGH blocks landing; MED is follow-up work; LOW is informational.
-         Use FIX: unknown - <evidence needed> when the remedy is unclear.
-         Write NONE if there are no findings. End with COVERAGE: <checked; not checked>.
-      4. Emit REJECT for a blocker, otherwise CLEAR, with a short reason:
-         <signal:REJECT>reason</signal:REJECT> or <signal:CLEAR>result</signal:CLEAR>.
+      Read $MEDULLA_RUN_DIR/artifacts/qa-contract.txt and execute its steps.
+      Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
+      Worktree: {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}.
+      Input: $MEDULLA_RUN_DIR/artifacts/coder-report.txt; git diff --cached;
+      ticket commits above origin/<target_branch> (.ntkrc, default: develop).
+      Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
+      ## FINDINGS
+      - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
+      Or NONE. End with COVERAGE: <checked; not checked>.
 
   expert_review_synthesis:
     timeout: 60
