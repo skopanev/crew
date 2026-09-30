@@ -7,7 +7,6 @@ vars:
   REJECT_ROUNDS: '3'
   ticket_title: ''
   gate_commands: '[]'
-  repository_git_dir: ''
   source_root: ''
   CBM_PROJECT: ''
   TOOLING_ROOT: /workspace
@@ -111,7 +110,6 @@ nodes:
 
   create_worktree:
     env:
-      repository_git_dir: '{{var:repository_git_dir}}'
       source_root: '{{var:source_root}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
@@ -128,51 +126,54 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
-      cd "${project_dir}"
-      # Source files stay read-only. Git's metadata has its own writable mount.
-      repo_git() { git --git-dir="${repository_git_dir:-$project_dir/.git}" --work-tree="$project_dir" "$@"; }
-      if [ -z "${GIT_SSH_COMMAND:-}" ] && repo_git remote get-url origin | grep -q '^ssh://\|^git@'; then
+      # Every Git write belongs to this checkout, including objects and refs.
+      if [ -n "$(ls -A "${LANE_WORKTREE}")" ]; then
+        echo "<signal:BRANCH_HAS_WORK>checkout retained at ${LANE_WORKTREE}; inspect before retrying</signal:BRANCH_HAS_WORK>"
+        exit 0
+      fi
+      origin="$(git -C "$project_dir" remote get-url origin)"
+      if [ -z "${GIT_SSH_COMMAND:-}" ] && printf '%s' "$origin" | grep -q '^ssh://\|^git@'; then
         echo "<signal:NO_GIT_KEY>origin is ssh and no key was mounted; launch with --ssh-dir</signal:NO_GIT_KEY>"
         exit 0
       fi
-      # A bounded fetch reports its own error before the node timeout.
-      out="$(timeout 120 git --git-dir="${repository_git_dir:-$project_dir/.git}" fetch origin 2>&1)" && rc=0 || rc=$?
+      # No shared objects, hardlinks, worktree registration or canonical Git writes.
+      git clone --no-hardlinks --no-checkout "$project_dir" "$LANE_WORKTREE"
+      cd "$LANE_WORKTREE"
+      git remote set-url origin "$origin"
+      out="$(timeout 120 git fetch origin 2>&1)" && rc=0 || rc=$?
       if [ "$rc" -ne 0 ]; then
-        [ "$rc" -ne 124 ] || out="did not finish in 120s - unreachable host, or a key waiting on a passphrase"
+        [ "$rc" -ne 124 ] || out="did not finish in 120s"
         echo "<signal:FETCH_FAILED>git fetch origin exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:FETCH_FAILED>"
         exit 0
       fi
-      target=$(jq -r '.target_branch // "develop"' .ntkrc 2>/dev/null || echo develop)
-      # Validate the target before creating its worktree.
-      if ! repo_git rev-parse --verify --quiet "refs/remotes/origin/${target}" >/dev/null; then
-        echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after a successful fetch. .ntkrc says target_branch=${target}</signal:NO_TARGET_BRANCH>"
+      target=$(jq -r '.target_branch // "develop"' "$project_dir/.ntkrc" 2>/dev/null || echo develop)
+      if ! git rev-parse --verify --quiet "refs/remotes/origin/${target}" >/dev/null; then
+        echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after fetch</signal:NO_TARGET_BRANCH>"
         exit 0
       fi
-      # Preserve registrations and saved branches from earlier runs.
-      if repo_git rev-parse --verify --quiet "refs/heads/ticket-${ticket_id}" >/dev/null; then
-        n="$(repo_git rev-list --count "origin/${target}..ticket-${ticket_id}" 2>/dev/null || echo 0)"
-        [ "${n:-0}" -eq 0 ] || {
-          last="$(repo_git log -1 --format='%h %s' "ticket-${ticket_id}" 2>/dev/null || echo '?')"
-          echo "<signal:BRANCH_HAS_WORK>ticket-${ticket_id} carries ${n} commit(s) not on ${target}, last: ${last}. A previous run broke - crashed, rejected by the panel, or failed to land. Look before rerunning.</signal:BRANCH_HAS_WORK>"
-          exit 0; }
+      git checkout -B "ticket-${ticket_id}" "origin/${target}"
+      # Use repository setup when present; otherwise bind its tracked hooks locally.
+      if [ -f scripts/install-git-hooks.sh ]; then
+        bash scripts/install-git-hooks.sh
+      elif [ -d .githooks ]; then
+        for hook in .githooks/*; do
+          [ -f "$hook" ] || continue
+          name="$(basename "$hook")"
+          printf '#!/usr/bin/env bash\nexec bash "$(git rev-parse --show-toplevel)/.githooks/%s" "$@"\n' "$name" > ".git/hooks/$name"
+          chmod +x ".git/hooks/$name"
+        done
+      elif grep -qE '^[[:space:]]*hooksPath[[:space:]]*=' "$project_dir/.git/config"; then
+        echo "Source uses external hooks; no tracked .githooks in candidate" >&2
+        exit 1
       fi
-      # Keep the worktree in the persistent host run directory.
-      mkdir -p "${LANE_WT_ROOT}"
-      repo_git worktree add -B "ticket-${ticket_id}" "${LANE_WT_ROOT}/wt-${ticket_id}" "origin/${target}" >/dev/null
-      # Keep sibling repository links resolvable from the isolated worktree.
-      for sibling in "${source_root:-/workspace}"/*; do
-        [ -d "$sibling/.git" ] || continue
-        link="${LANE_WT_ROOT}/$(basename "$sibling")"
-        [ -e "$link" ] || [ -L "$link" ] || ln -s "$sibling" "$link"
-      done
       # Repository setup and Git hooks need Bun on PATH.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       # A repository may own dependency setup through .ntkrc preflight.
       deps=""
       pf="$(jq -r '.preflight // empty' "${project_dir}/.ntkrc" 2>/dev/null || true)"
       if [ -n "$pf" ]; then
-        if [ -x "${LANE_WT_ROOT}/wt-${ticket_id}/$pf" ]; then
-          if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 600 "./$pf" \
+        if [ -x "${LANE_WORKTREE}/$pf" ]; then
+          if (cd "${LANE_WORKTREE}" && timeout 600 "./$pf" \
                 > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
             deps=" Repository preflight ($pf) ran."
           else
@@ -182,9 +183,9 @@ nodes:
           deps=" NOTE: .ntkrc names preflight $pf and it is not executable here."
         fi
       # Объявил предполёт - он и отвечает за зависимости; нашей установки нет.
-      elif [ -f "${LANE_WT_ROOT}/wt-${ticket_id}/package.json" ] && command -v bun >/dev/null 2>&1; then
+      elif [ -f "${LANE_WORKTREE}/package.json" ] && command -v bun >/dev/null 2>&1; then
         # Keep installation failure details for the coder.
-        if (cd "${LANE_WT_ROOT}/wt-${ticket_id}" && timeout 240 bun install --frozen-lockfile \
+        if (cd "${LANE_WORKTREE}" && timeout 240 bun install --frozen-lockfile \
               > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
           deps=" Dependencies are installed."
         else
@@ -197,7 +198,7 @@ nodes:
         printf 'РАЗВЕДЧИК НЕ ОСТАВИЛ ОТЧЁТА. Всё, что от него есть:\n%s\n' \
           "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
       fi
-      echo "<signal:READY>Worktree: ${LANE_WT_ROOT}/wt-${ticket_id}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}</signal:READY>"
+      echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}</signal:READY>"
 
   implement_code:
     timeout: 7200   # writing the code
@@ -212,7 +213,7 @@ nodes:
       EQUILL_MODULE: '{{var:module_name}}'
       EQUILL_PHASE: unit
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
-      LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
+      LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
       OK: prepare_review
       GATE_FAIL: notify_failure
@@ -259,7 +260,7 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
-      cd "${LANE_WT_ROOT}/wt-${ticket_id}"
+      cd "${LANE_WORKTREE}"
       git add -A
       # Landing must commit the exact tree reviewed by the panel.
       tree="$(git write-tree)"
@@ -337,7 +338,7 @@ nodes:
     prompt: |
       Read $MEDULLA_RUN_DIR/artifacts/qa-contract.txt and execute its steps.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
-      Worktree: {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}.
+      Worktree: {{var:LANE_WORKTREE}}.
       Input: $MEDULLA_RUN_DIR/artifacts/coder-report.txt; git diff --cached;
       ticket commits above origin/<target_branch> (.ntkrc, default: develop).
       Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
@@ -419,7 +420,7 @@ nodes:
       __default__: cleanup
     shell: |
       set -euo pipefail
-      cd "${LANE_WT_ROOT}/wt-${ticket_id}" || {
+      cd "${LANE_WORKTREE}" || {
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
       target=$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)
 
@@ -472,7 +473,6 @@ nodes:
       [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"
   cleanup:
     env:
-      repository_git_dir: '{{var:repository_git_dir}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
@@ -487,12 +487,11 @@ nodes:
     shell: |
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
-      head_sha="$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" rev-parse HEAD)"
+      head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
       target="$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)"
       cd "${project_dir}"
       printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
-      # Report a worktree that could not be removed.
-      git --git-dir="${repository_git_dir:-$project_dir/.git}" worktree remove "${LANE_WT_ROOT}/wt-${ticket_id}" --force 2>/dev/null || left=" (дерево осталось: ${LANE_WT_ROOT}/wt-${ticket_id})"
+      # Keep the private checkout as evidence; canonical Git metadata stays read-only.
       # Код сел — это правда. Тикет, застрявший в работе, иначе никто не заметит.
       if ! node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" to-test; then
         printf 'LANDED_TICKET_STUCK: %s landed at %s on %s; to_test failed after up to 3 attempts. See to-test-errors.txt. Do not rerun implementation.\n' \
@@ -501,7 +500,7 @@ nodes:
         exit 1
       fi
       printf '<signal:LANDED>сел %s на %s%s</signal:LANDED>\n' \
-        "$head_sha" "$target" "${left:-}"
+        "$head_sha" "$target" " (checkout retained: ${LANE_WORKTREE})"
   notify_failure:
     env:
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
@@ -529,15 +528,15 @@ nodes:
       # Save unfinished changes on the ticket branch; the host worktree also persists.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
-      if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WT_ROOT}/wt-${ticket_id}" ]; then
-        if [ -n "$(git -C "${LANE_WT_ROOT}/wt-${ticket_id}" status --porcelain 2>/dev/null)" ]; then
+      if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WORKTREE}" ]; then
+        if [ -n "$(git -C "${LANE_WORKTREE}" status --porcelain 2>/dev/null)" ]; then
           # Recovery commits bypass hooks and stay local; landing still runs hooks.
-          if git -C "${LANE_WT_ROOT}/wt-${ticket_id}" add -A 2>&1 \
-             && git -C "${LANE_WT_ROOT}/wt-${ticket_id}" -c user.name=lane -c user.email=lane@local \
+          if git -C "${LANE_WORKTREE}" add -A 2>&1 \
+             && git -C "${LANE_WORKTREE}" -c user.name=lane -c user.email=lane@local \
                     commit -q --no-verify -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
             saved=" Работа сохранена коммитом в ветке ticket-${ticket_id}."
           else
-            saved=" Recovery commit failed; worktree retained at ${LANE_WT_ROOT}/wt-${ticket_id}."
+            saved=" Recovery commit failed; worktree retained at ${LANE_WORKTREE}."
           fi
         else
           saved=" Сохранять нечего: дерево чистое."
@@ -598,7 +597,7 @@ nodes:
       EQUILL_MODULE: '{{var:module_name}}'
       EQUILL_PHASE: land
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
-      LANE_WORKTREE: '{{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}'
+      LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
       OK: prepare_review
       GATE_FAIL: notify_failure
@@ -619,7 +618,7 @@ nodes:
     prompt: |
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
-      1. In {{var:LANE_WT_ROOT}}/wt-{{var:ticket_id}}, read target_branch from
+      1. In {{var:LANE_WORKTREE}}, read target_branch from
          {{var:project_dir}}/.ntkrc (default: develop). The failed rebase was aborted;
          restart git rebase onto origin/<target_branch>.
       2. Resolve conflicts preserving the ticket's AC and target-branch changes,

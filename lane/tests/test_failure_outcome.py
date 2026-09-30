@@ -51,7 +51,7 @@ class FailureOutcomeTests(unittest.TestCase):
                 "PATH": f"{commands}:/usr/bin:/bin",
                 "TOOLING_ROOT": str(root),
                 "MEDULLA_RUN_DIR": str(root / "run"),
-                "LANE_WT_ROOT": str(root / "worktrees"),
+                "LANE_WORKTREE": str(root / "worktree"),
                 "MEDULLA_LAST_NODE": "implement_code",
                 "MEDULLA_LAST_MESSAGE": "candidate checks did not complete",
                 "ticket_id": "fixture-task",

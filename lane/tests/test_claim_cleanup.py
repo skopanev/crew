@@ -69,7 +69,7 @@ class ClaimCleanupTests(unittest.TestCase):
                     file.chmod(0o755)
                 env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'],
                            TOOLING_ROOT=d, project_dir=d, ticket_id='T1', project_name='test',
-                           MEDULLA_RUN_DIR=str(root / 'run'), LANE_WT_ROOT=str(root / 'wt'), RESULT_RC=str(rc))
+                           MEDULLA_RUN_DIR=str(root / 'run'), LANE_WORKTREE=str(root / 'wt'), RESULT_RC=str(rc))
                 result = subprocess.run(['bash', '-c', shell_body('cleanup')], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, rc, result.stderr)
                 self.assertIn('Landed SHA: abcdef123456', (root / 'run/artifacts/landing.txt').read_text())

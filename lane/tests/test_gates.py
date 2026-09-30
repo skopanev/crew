@@ -150,7 +150,7 @@ class GateTests(unittest.TestCase):
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
-                        TOOLING_ROOT=str(LANE.parent), LANE_WT_ROOT=str(worktrees),
+                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo),
                         project_name="fixture", ticket_title="fixture")
         result = subprocess.run(["bash", "-c", shell_body("git_landing")],
                                 cwd=self.repo, env=self.env, capture_output=True,
@@ -189,7 +189,7 @@ class GateTests(unittest.TestCase):
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
-                        TOOLING_ROOT=str(LANE.parent), LANE_WT_ROOT=str(worktrees))
+                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo))
         for content, rc in (("", 0), (" \n", 0), ("fixture QA contract", 1),
                             ("fixture QA contract", 0)):
             with self.subTest(content=content, rc=rc):

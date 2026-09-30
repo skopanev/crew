@@ -32,7 +32,7 @@ export function herdr(config, args) {
   return reply.result;
 }
 export function laneArgs(config, ticket) {
-  return ['--ticket-id', ticket, '--project', config.workspace, '--repo', config.repo,
+  return ['--ticket-id', ticket, '--project', config.workspace, ...(config.repo ? ['--repo', config.repo] : []),
     '--dispatcher-id', config.id,
     '--cbm-mcp-command', config.cbmMcpCommand, '--ssh-dir', config.sshDir,
     ...(config.sourceRoot ? ['--source-root', config.sourceRoot] : []),
