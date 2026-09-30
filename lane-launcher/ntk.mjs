@@ -57,12 +57,13 @@ export async function getTicket(id, workspace) {
 }
 export const nextTicket = query => request('POST', '/v1/tickets/next', {...query, dry_run: true});
 export const claimTicket = (id, workspace) => request('POST', `${ticketRoute(id)}/start`, {workspace});
-export function updateStatus({id, workspace, status, force}) {
+export function updateStatus({id, workspace, status, force, tagEdits}) {
   if (status === 'in_progress') throw new Error('Use claimTicket to enter in_progress atomically');
-  return request('PATCH', ticketRoute(id), {}, {workspace, status, ...(force ? {force: true} : {})});
+  return request('PATCH', ticketRoute(id), {}, {workspace, status, ...(force ? {force: true} : {}),
+    ...(tagEdits ? {tag_edits: tagEdits} : {})});
 }
 
-async function settleStartupClaim(claim, status) {
+async function settleStartupClaim(claim, status, tagEdits) {
   if (claim?.claimed !== true || claim.status !== 'in_progress' || !claim.id || !claim.workspace) {
     throw new Error('No confirmed startup claim; ticket unchanged');
   }
@@ -70,10 +71,10 @@ async function settleStartupClaim(claim, status) {
   if (ticket.status !== 'in_progress' || ticket.id.toLowerCase() !== claim.id.toLowerCase()) {
     throw new Error('Ticket changed after claim; ticket unchanged');
   }
-  return updateStatus({id: claim.id, workspace: claim.workspace, status, force: true});
+  return updateStatus({id: claim.id, workspace: claim.workspace, status, force: true, tagEdits});
 }
 export const reopenStartupClaim = claim => settleStartupClaim(claim, 'open');
-export const blockStartupClaim = claim => settleStartupClaim(claim, 'blocked');
+export const blockStartupClaim = claim => settleStartupClaim(claim, 'blocked', ['+worktree_preexistited']);
 
 export async function attachReport(id, workspace, filename, content) {
   const bytes = Buffer.from(content, 'utf8');
