@@ -29,6 +29,10 @@ class LaunchMountTests(unittest.TestCase):
             (tooling / 'lane-launcher/ntk.mjs').write_text(
                 'export async function getTicket(id) { return {id, module: process.env.TEST_MODULE}; }\n')
             (root / 'connector.py').write_text('# fixture connector\n')
+            (tooling / 'lane-launcher/safe-sync.py').write_text(
+                'import json,os,sys\n'
+                'open(os.environ["TEST_SYNC"],"w").write(json.dumps(sys.argv[1:]))\n'
+                'sys.exit(int(os.environ.get("TEST_SYNC_FAILURE","0")))\n')
             (bridge / 'bridge.pid').write_text(str(os.getpid()))
             (bridge / 'bridge.identity').write_text(f'lane:{os.getpid()}')
             for name, script in {
@@ -42,7 +46,7 @@ class LaunchMountTests(unittest.TestCase):
             output = root / 'args.json'
             env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'],
                        MEDULLA_BRIDGE=str(root / 'bridge'), LANE_RUNS_FOLDER=str(root / 'runs'),
-                       TEST_ARGS=str(output))
+                       TEST_ARGS=str(output), TEST_SYNC=str(root / 'sync.json'))
             args = ['bash', str(tooling / 'lane/run.sh'), '--project', 'fixture',
                     '--source-root', str(sources), '--dispatcher-id', 'fixture',
                     '--cbm-mcp-command', str(root / 'connector.py'), '--gate-command', 'fixture-check']
@@ -62,6 +66,24 @@ class LaunchMountTests(unittest.TestCase):
                     self.assertIn(f'LANE_WORKTREE=/workspace/{ticket}', launch)
                     self.assertIn(f'CBM_PROJECT={str(sources / repo).lstrip("/").replace("/", "-")}', launch)
                     self.assertNotIn('repository_git_dir=/workspace/.git', launch)
+                    synced = json.loads((root / 'sync.json').read_text())
+                    self.assertEqual(synced[0], str(sources))
+                    self.assertEqual(synced[2], env.get('MEDULLA_IMAGE', 'medulla-crew:latest'))
+            # A startup sync failure never reaches Medulla or creates a checkout.
+            output.unlink()
+            env['TEST_SYNC_FAILURE'] = '2'
+            result = subprocess.run(args + ['--ticket-id', 'sync-failed'], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(output.exists())
+            self.assertFalse((sources / '.worktrees/sync-failed').exists())
+            env.pop('TEST_SYNC_FAILURE')
+            # --dry-run still probes CBM but never invokes source/index mutation.
+            (root / 'sync.json').unlink()
+            result = subprocess.run(args + ['--ticket-id', 'preview', '--dry-run'], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / 'sync.json').exists())
             # Existing work belongs to its owner: refusal must happen before Medulla.
             retained = sources / '.worktrees/app-ticket/keep.txt'
             retained.write_text('saved work\n')

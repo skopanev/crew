@@ -205,12 +205,18 @@ cbm_connector="$cbm_connector_dir/mcp.py"
 cp "$cbm_command" "$cbm_connector"
 chmod 600 "$cbm_connector"
 cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"
-if ! docker run --rm --entrypoint python3 \
-     -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
-     -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
-     "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"; then
-  say "run.sh: shared CBM is unavailable; startup refused."
-  exit 2
+# Read-only Medulla checks do not update canonical sources or CBM.
+sync_sources=true
+for arg in ${passthrough[@]+"${passthrough[@]}"}; do
+  case "$arg" in --dry-run|--validate|--graph) sync_sources=false ;; esac
+done
+if $sync_sources; then
+  python3 "$TOOLING_ROOT/lane-launcher/safe-sync.py" "$source_root" "$cbm_connector" "$MEDULLA_IMAGE"
+else
+  docker run --rm --entrypoint python3 \
+    -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
+    -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
+    "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"
 fi
 say "run.sh: shared codebase memory connected"
 
