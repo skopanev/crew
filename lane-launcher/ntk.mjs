@@ -56,6 +56,11 @@ export async function getTicket(id, workspace) {
   return response.ticket;
 }
 export const nextTicket = query => request('POST', '/v1/tickets/next', {...query, dry_run: true});
+export async function countTickets(query) {
+  const result = await request('GET', '/v1/tickets', {...query, all: true, count: true});
+  if (!Number.isSafeInteger(result?.count) || result.count < 0) throw new Error('NTK returned no valid ticket count');
+  return result.count;
+}
 export const claimTicket = (id, workspace) => request('POST', `${ticketRoute(id)}/start`, {workspace});
 export function updateStatus({id, workspace, status, force, tagEdits}) {
   if (status === 'in_progress') throw new Error('Use claimTicket to enter in_progress atomically');
