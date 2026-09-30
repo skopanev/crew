@@ -30,9 +30,14 @@ def shell_body(node):
 
 
 class FailureOutcomeTests(unittest.TestCase):
-    def run_failure(self, signal, *, update_fails=False, inherited_want=None, claimed=True):
+    def run_failure(self, signal, *, update_fails=False, inherited_want=None, claimed=True,
+                    empty_worktree=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            if empty_worktree:
+                (root / 'worktree').mkdir()
+                subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+                (root / 'parent.txt').write_text('parent source must remain untouched\n')
             commands = root / "lane-launcher"
             commands.mkdir()
             scripts = {
@@ -79,6 +84,13 @@ class FailureOutcomeTests(unittest.TestCase):
             log = root / "status.log"
             updates = log.read_text().splitlines() if log.exists() else []
             report = (root / "run/artifacts/failure.txt").read_text()
+            if empty_worktree:
+                staged = subprocess.check_output(
+                    ['git', '-C', str(root), 'diff', '--cached', '--name-only'], text=True)
+                self.assertEqual(staged, '', 'failure handler staged the parent repository')
+                head = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
+                                      capture_output=True)
+                self.assertNotEqual(head.returncode, 0, 'failure handler committed in the parent')
             return updates, report
 
     def test_failed_or_unknown_outcome_never_reopens_work(self):
@@ -112,6 +124,11 @@ class FailureOutcomeTests(unittest.TestCase):
         updates, report = self.run_failure('__failed__', claimed=False)
         self.assertEqual(updates, [])
         self.assertIn('No confirmed claim', report)
+
+    def test_scout_failure_before_clone_does_not_recover_parent_repository(self):
+        updates, report = self.run_failure('PREMISE_BROKEN', empty_worktree=True)
+        self.assertEqual(updates, ['blocked'])
+        self.assertNotIn('Recovery commit', report)
 
 
 if __name__ == "__main__":
