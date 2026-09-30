@@ -7,7 +7,7 @@ vars:
   REJECT_ROUNDS: '3'
   ticket_title: ''
   gate_commands: '[]'
-  source_root: ''
+  LAUNCH_CLAIM: ''
   CBM_PROJECT: ''
   TOOLING_ROOT: /workspace
   LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -24,6 +24,7 @@ nodes:
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
       ticket_id: '{{var:ticket_id}}'
+      LAUNCH_CLAIM: '{{var:LAUNCH_CLAIM}}'
     timeout: 120
     on_signal:
       CLAIM_REFUSED: notify_failure
@@ -34,6 +35,22 @@ nodes:
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       rm -f "$MEDULLA_RUN_DIR/artifacts/claim.json"
+      # Adopt the launcher claim; standalone runs claim once here.
+      claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
+      if [ -n "${LAUNCH_CLAIM:-}" ]; then
+        printf '%s\n' "$LAUNCH_CLAIM" > "$claim.raw"
+      elif ! bash "${TOOLING_ROOT}/lane-launcher/ntk-status" "${ticket_id}" -W "${project_name}" -s in_progress --claim > "$claim.raw" 2> "$claim.err"; then
+        cat "$claim.err" >&2
+        echo "<signal:CLAIM_REFUSED>claim not confirmed for ${ticket_id}; see artifacts/claim.json.err. Ticket unchanged by failure handling.</signal:CLAIM_REFUSED>"
+        exit 0
+      fi
+      jq -e --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
+        select(.claimed == true and .status == "in_progress" and
+          (.id | ascii_downcase) == ($id | ascii_downcase) and
+          (.workspace == null or .workspace == $ws)) |
+        . + {workspace: $ws, run_dir: $run}
+      ' "$claim.raw" > "$claim.tmp"
+      mv "$claim.tmp" "$claim"
       cd "${project_dir}"
       bash "${TOOLING_ROOT}/lane/hooks/inject.sh" \
         /tmp/lane-settings.json \
@@ -44,19 +61,6 @@ nodes:
       # Generate Codex hooks and MCP configuration.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
-      # The server claims atomically; the launcher's queue preview never claims.
-      claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
-      if ! bash "${TOOLING_ROOT}/lane-launcher/ntk-status" "${ticket_id}" -W "${project_name}" -s in_progress --claim > "$claim.raw" 2> "$claim.err"; then
-        cat "$claim.err" >&2
-        echo "<signal:CLAIM_REFUSED>claim not confirmed for ${ticket_id}; see artifacts/claim.json.err. Ticket unchanged by failure handling.</signal:CLAIM_REFUSED>"
-        exit 0
-      fi
-      jq -e --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
-        select(.claimed == true and .status == "in_progress" and
-          (.id | ascii_downcase) == ($id | ascii_downcase)) |
-        . + {workspace: $ws, run_dir: $run}
-      ' "$claim.raw" > "$claim.tmp"
-      mv "$claim.tmp" "$claim"
       # Full ticket body and acceptance criteria, read by shell over HTTP.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       # Publish only a complete, nonempty Equill contract.
@@ -110,7 +114,6 @@ nodes:
 
   create_worktree:
     env:
-      source_root: '{{var:source_root}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'

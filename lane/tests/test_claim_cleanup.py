@@ -10,11 +10,13 @@ from test_failure_outcome import shell_body
 
 class ClaimCleanupTests(unittest.TestCase):
     def test_claim_receipt_requires_a_confirmed_response(self):
-        for response, rc, contract in [('{"id":"T1","status":"in_progress","claimed":true}', 0, 'fixture contract'),
+        for response, rc, contract, transferred in [(*case, False) for case in [('{"id":"T1","status":"in_progress","claimed":true}', 0, 'fixture contract'),
                                       ('{"id":"T1","status":"in_progress","claimed":true}', 0, ''),
                                       ('{"id":"T1","status":"open","claimed":false}', 0, 'fixture contract'),
                                       ('{"id":"OTHER","status":"in_progress","claimed":true}', 0, 'fixture contract'),
-                                      ('', 1, 'fixture contract')]:
+                                      ('', 1, 'fixture contract')]] + [
+                ('{"id":"T1","status":"in_progress","claimed":true,"workspace":"test"}', 0, 'fixture contract', True),
+                ('{"id":"T1","status":"in_progress","claimed":true,"workspace":"other"}', 0, 'fixture contract', True)]:
             with self.subTest(response=response, rc=rc, contract=contract), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 (root / 'lane/hooks').mkdir(parents=True)
@@ -23,7 +25,7 @@ class ClaimCleanupTests(unittest.TestCase):
                 (root / 'bin').mkdir()
                 (root / 'lane/hooks/inject.sh').write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
                 (root / 'lane/hooks/codex-home.sh').write_text('exit 0\n')
-                (root / 'lane-launcher/ntk-status').write_text('printf "%s" "$RESPONSE"\nexit "$RESPONSE_RC"\n')
+                (root / 'lane-launcher/ntk-status').write_text('touch "$TOOLING_ROOT/start-called"\nprintf "%s" "$RESPONSE"\nexit "$RESPONSE_RC"\n')
                 (root / 'lane-launcher/ntk.mjs').write_text(
                     'export async function getTicket(id) { return {id, body: "fixture acceptance"}; }\n')
                 helper = Path(__file__).resolve().parents[1] / 'bin/ticket-input.mjs'
@@ -33,12 +35,14 @@ class ClaimCleanupTests(unittest.TestCase):
                 equill.chmod(0o755)
                 env = dict(os.environ, TOOLING_ROOT=d, project_dir=d, ticket_id='T1', project_name='test',
                            MEDULLA_RUN_DIR=str(root / 'run'), RESPONSE=response, RESPONSE_RC=str(rc),
+                           LAUNCH_CLAIM=response if transferred else '',
                            CONTRACT_RESPONSE=json.dumps({'content': contract}),
                            PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'])
                 body = shell_body('ntk_claim').replace('/tmp/', d + '/')
                 result = subprocess.run(['bash', '-c', body], env=env, capture_output=True, text=True)
                 receipt = root / 'run/artifacts/claim.json'
-                if response and json.loads(response).get('claimed') and 'OTHER' not in response:
+                self.assertEqual((root / 'start-called').exists(), not transferred)
+                if response and json.loads(response).get('claimed') and 'OTHER' not in response and json.loads(response).get('workspace', 'test') == 'test':
                     self.assertEqual(result.returncode, 0 if contract else 1, result.stderr)
                     if not contract:
                         self.assertIn('Scout contract unavailable', result.stderr)

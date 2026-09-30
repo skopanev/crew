@@ -233,21 +233,6 @@ if ! docker run --rm --entrypoint python3 \
 fi
 say "run.sh: shared codebase memory connected"
 
-# Report missing build tools, checking both the image and Medulla's overlay.
-lang_probe() {
-  local marker="$1" tool="$2" what="$3"
-  [[ -e "$repo/$marker" ]] || return 0
-  [[ -e "${MEDULLA_HOME:-$HOME/.medulla}/container/bin/$tool" ]] && return 0
-  docker run --rm --entrypoint sh "$MEDULLA_IMAGE" -c "command -v $tool" >/dev/null 2>&1 && return 0
-  say "run.sh: $marker есть, а $tool ни в образе, ни в оверлее - $what проверить нечем."
-  say "        Кодер напишет правку, но тесты не прогонит: контракт требует"
-  say "        OK только после прохождения тестов, и он это честно сообщит."
-}
-lang_probe Cargo.toml       cargo   "Rust"
-lang_probe go.mod           go      "Go"
-lang_probe pyproject.toml   python3 "Python"
-lang_probe build.gradle.kts gradle  "Kotlin/JVM"
-
 bridge_dir="$MEDULLA_BRIDGE/equill"
 mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
 if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
@@ -303,10 +288,10 @@ medulla \
   --var "CBM_MCP_COMMAND=$cbm_connector" \
   --var "CBM_PROJECT=$cbm_project" \
   --var "ticket_id=$ticket" \
+  --var "LAUNCH_CLAIM=${LANE_CLAIM_JSON:-}" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
-  --var "source_root=$source_root_in" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
   --var "GIT_SSH_COMMAND=$git_ssh" \

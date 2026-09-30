@@ -110,7 +110,7 @@ AgentBus в lane не используется. Исход и причина о�
 
 `--cbm-mcp-command` points to the existing Python stdio connector for the
 shared host CBM service. Every lane uses that service; no database copy or
-local daemon is created. A failed connection stops the lane before claim.
+local daemon is created. A failed startup connection returns a dispatcher claim to open.
 
 Весь `--source-root` вместе с каноническим `.git` монтируется только на чтение.
 Репозиторий тикета — первый компонент его NTK-модуля внутри `--source-root`;
@@ -132,7 +132,7 @@ local daemon is created. A failed connection stops the lane before claim.
 без маршрута движок считает несигналом вовсе, и `MEDULLA_LAST_SIGNAL`
 становится `__default__`. Узел отказа сохраняет это имя для разбора.
 Отказ до подтверждённого захвата завершает прогон ошибкой без изменения тикета.
-После захвата отказ переводит тикет в blocked и прикрепляет отчёт с деталями.
+Startup failure after a dispatcher claim returns the ticket to open. Once the workflow adopts the claim, failure sets blocked and attaches the report.
 После посадки перевод в to_test выполняется максимум три раза; если не удалось,
 прогон падает, сохранив SHA посадки, без повторной реализации и перевода в blocked.
 
