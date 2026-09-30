@@ -22,6 +22,8 @@ class LaunchMountTests(unittest.TestCase):
             for folder in (tooling / 'lane', tooling / 'lane-launcher', bins, bridge,
                            sources / 'app/.git', sources / 'infra/.git'):
                 folder.mkdir(parents=True)
+            for repo in ('app', 'infra'):
+                (sources / repo / '.ntkrc').write_text('{"target_branch":"main"}\n')
             shutil.copy(CREW / 'lane/run.sh', tooling / 'lane/run.sh')
             shutil.copy(CREW / 'lane-launcher/scope.mjs', tooling / 'lane-launcher/scope.mjs')
             (tooling / 'lane-launcher/ntk.mjs').write_text(
@@ -71,3 +73,20 @@ class LaunchMountTests(unittest.TestCase):
             self.assertIn('retained worktree', result.stderr)
             self.assertEqual(retained.read_text(), 'saved work\n')
             self.assertFalse(output.exists())
+            # The landing target has no default: refuse before claim or Medulla.
+            env['TEST_MODULE'] = 'infra/src/module'
+            ntkrc = sources / 'infra/.ntkrc'
+            for content in (None, '{}', '{"target_branch":""}', '{"target_branch":7}',
+                            '{"target_branch":"-main"}', '{"target_branch":"a..b"}',
+                            '{"target_branch":"HEAD"}', 'not json'):
+                with self.subTest(ntkrc=content):
+                    if content is None:
+                        ntkrc.unlink(missing_ok=True)
+                    else:
+                        ntkrc.write_text(content)
+                    result = subprocess.run(args + ['--ticket-id', 'target-ticket'], env=env,
+                                            capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn('must set target_branch to a legal branch name', result.stderr)
+                    self.assertFalse(output.exists())
+                    self.assertFalse((sources / '.worktrees/target-ticket').exists())

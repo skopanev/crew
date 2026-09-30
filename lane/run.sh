@@ -142,6 +142,10 @@ repo="$source_root/$component"
 [[ -d "$repo/.git" ]] || { say "run.sh: ticket module has no source checkout: $repo"; exit 2; }
 repo="$(cd "$repo" && pwd -P)"
 [[ "$repo" == "$source_root/"* ]] || { say "run.sh: module escapes --source-root"; exit 2; }
+# Landing targets come only from the repository's .ntkrc; there is no default.
+target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$repo/.ntkrc" 2>/dev/null)" \
+  && [[ "$target" != -* && "$target" != HEAD ]] && git check-ref-format "refs/heads/$target" || {
+  say "run.sh: $repo/.ntkrc must set target_branch to a legal branch name"; exit 2; }
 source_root_in="/workspace/$(basename "$source_root")"
 project_dir="$source_root_in/${repo#"$source_root/"}"
 worktree="$source_root/.worktrees/$ticket"
