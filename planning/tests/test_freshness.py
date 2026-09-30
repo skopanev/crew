@@ -119,7 +119,7 @@ class AdmissionTests(unittest.TestCase):
             shutil.copy(crew / "lane/run.sh", tooling / "lane/run.sh")
             shutil.copy(crew / "lane-launcher/scope.mjs", tooling / "lane-launcher/scope.mjs")
             (tooling / "planning").symlink_to(crew / "planning", target_is_directory=True)
-            (tooling / "lane-launcher/ntk.mjs").write_text('export async function getTicket() { return {module:"src"}; }\n')
+            (tooling / "lane-launcher/ntk.mjs").write_text('export async function getTicket() { return {module:"repo/src"}; }\n')
             repo = root / "repo"
             (repo / ".git").mkdir(parents=True)
             cbm = root / "cbm-mcp.py"
@@ -128,7 +128,7 @@ class AdmissionTests(unittest.TestCase):
             binary = root / "bin"
             binary.mkdir()
             result = deepcopy(self.result)
-            result["plan"] = {"tasks": [{"id": "one", "repository": "test", "module": "src"}]}
+            result["plan"] = {"tasks": [{"id": "one", "repository": "test", "module": "repo/src"}]}
             result["plan_digest"] = digest(result["plan"])
             receipt = root / "result.json"
             source = {"repositories": [{"id": "test", "path": str(repo)}]}
@@ -161,7 +161,7 @@ if os.environ.get('EXPIRE_DURING_SETUP'):
                    "TEST_RECEIPT": str(receipt), "LAUNCH_MARKER": str(marker)}
             command = ["bash", str(tooling / "lane/run.sh"), "--ticket-id", "test-ticket", "--project", "test",
                        "--dispatcher-id", "fixture",
-                       "--mount-rw", str(repo), "--cbm-mcp-command", str(cbm), "--gate-command", "true",
+                       "--source-root", str(root), "--cbm-mcp-command", str(cbm), "--gate-command", "true",
                        "--planning-result", str(receipt), "--planning-task", "one"]
             for scenario, code in (("expired", 3), ("read_error", 2), ("missing_image", 2), ("expired_during_setup", 3), ("fresh", 0)):
                 with self.subTest(scenario=scenario):

@@ -139,5 +139,21 @@ COPY --chown=medulla:medulla lane/bin/entrypoint.sh /usr/local/bin/lane-entrypoi
 USER root
 RUN chmod 755 /usr/local/bin/lane-entrypoint.sh \
  && ln -s /home/medulla/.bun/bin/bun /usr/local/bin/bun
+# Repository lint uses these tools; install once rather than during a lane.
+RUN set -eux; a="$(cat /tmp/arch)"; \
+    case "$a" in \
+      arm64) tofu_sha=e573979ba68a17fe7b881752051a694a7efcd970e39521f6a25775197861ed4d; \
+             leaks_arch=arm64; leaks_sha=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;; \
+      amd64) tofu_sha=5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8; \
+             leaks_arch=x64; leaks_sha=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;; \
+    esac; \
+    curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_${a}.zip" -o /tmp/tofu.zip; \
+    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${leaks_arch}.tar.gz" -o /tmp/gitleaks.tgz; \
+    printf '%s  /tmp/tofu.zip\n%s  /tmp/gitleaks.tgz\n' "$tofu_sha" "$leaks_sha" | sha256sum -c -; \
+    mkdir /tmp/lane-tools; \
+    unzip -q /tmp/tofu.zip -d /tmp/lane-tools; \
+    tar -xzf /tmp/gitleaks.tgz -C /tmp/lane-tools; \
+    install -m 755 /tmp/lane-tools/tofu /tmp/lane-tools/gitleaks /usr/local/bin/; \
+    rm -rf /tmp/lane-tools /tmp/tofu.zip /tmp/gitleaks.tgz
 USER medulla
 ENTRYPOINT ["/usr/local/bin/lane-entrypoint.sh"]
