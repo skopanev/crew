@@ -5,6 +5,7 @@ import json
 import runpy
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 session = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'lane/bridge/cbm-probe.py'))['session']
@@ -26,9 +27,12 @@ def tool(call, tool_name, **arguments):
 
 
 def sync(repo, call):
+    started = time.monotonic()
     print(f'[sync] waiting for {repo.name}', flush=True)
     with (repo / '.git/sync.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        git_started = time.monotonic()
+        waited = git_started - started
         target = json.loads((repo / '.ntkrc').read_text()).get('target_branch')
         if not isinstance(target, str) or not target or target.startswith('-') or target == 'HEAD':
             raise RuntimeError(f'{repo}/.ntkrc must set target_branch')
@@ -53,7 +57,10 @@ def sync(repo, call):
         if sha != git(repo, 'rev-parse', f'origin/{target}'):
             raise RuntimeError(f'{repo} is ahead of origin/{target}; startup refused')
         project = str(repo).lstrip('/').replace('/', '-')
-        print(f'[sync] {repo.name} {target} {sha[:12]}; updating shared CBM', flush=True)
+        cbm_started = time.monotonic()
+        print(f'[sync] {repo.name} {target} {sha[:12]}; '
+              f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
+              'updating shared CBM', flush=True)
         result = tool(call, 'index_repository', repo_path=str(repo), name=project,
                       mode='moderate', persistence=False)
         if result.get('status') != 'indexed' or result.get('project') != project:
@@ -61,9 +68,11 @@ def sync(repo, call):
         status = tool(call, 'index_status', project=project, format='json')
         if status.get('status') != 'ready' or status.get('root_path') != str(repo):
             raise RuntimeError(f'CBM is not ready for {repo.name}: {status}')
+        cbm_elapsed = time.monotonic() - cbm_started
         if git(repo, 'rev-parse', 'HEAD') != sha or git(repo, 'status', '--porcelain'):
             raise RuntimeError(f'{repo} changed during CBM refresh; startup refused')
-        print(f'[sync] {repo.name}: Git and shared CBM ready', flush=True)
+        print(f'[sync] {repo.name}: Git and shared CBM ready · '
+              f'CBM {cbm_elapsed:.1f}s · total {time.monotonic() - started:.1f}s', flush=True)
 
 
 def main(root, connector, image=None):
