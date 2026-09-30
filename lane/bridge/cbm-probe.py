@@ -14,7 +14,8 @@ from pathlib import Path
 def session(connector, image=None):
     command = [sys.executable, connector]
     if image:
-        directory = str(Path(connector).resolve().parent)
+        connector = str(Path(connector).resolve(strict=True))
+        directory = str(Path(connector).parent)
         command = ['docker', 'run', '--rm', '-i', '--entrypoint', 'python3',
                    '-v', f'{directory}:{directory}:ro', image, connector]
     process = subprocess.Popen(command, stdin=subprocess.PIPE,
