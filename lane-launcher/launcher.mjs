@@ -25,7 +25,7 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   config.id = validateId(config.id);
   // The terminal running dolber owns the destination workspace.
   config.herdrWorkspace = env.HERDR_WORKSPACE_ID || config.herdrWorkspace;
-  for (const field of config.launchLanes ? ['workspace', 'project', 'herdrWorkspace'] : ['workspace']) {
+  for (const field of config.launchLanes ? ['workspace', 'herdrWorkspace'] : ['workspace']) {
     if (typeof config[field] !== 'string' || !config[field].trim()) throw new Error(`Config needs ${field}`);
   }
   for (const field of ['tags', 'preferTags']) {
@@ -48,7 +48,6 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   for (const field of ['limit', 'intervalSeconds']) {
     if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
   }
-  if (config.project != null && typeof config.project !== 'string') throw new Error('project must be a string or null');
   // A stable dispatcher identity owns its lock, reservations and containers.
   config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (!config.launchLanes) return config;
@@ -126,7 +125,7 @@ export async function tick(config) {
   divider();
   console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   if (active >= config.limit) return;
-  const query = {workspace: config.workspace, project: config.project || undefined,
+  const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
     prefer: config.preferTags.length ? config.preferTags.join(',') : undefined,
     module: config.module ?? undefined, assignee: config.assignee ?? undefined,
