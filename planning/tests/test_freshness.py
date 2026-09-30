@@ -122,6 +122,7 @@ class AdmissionTests(unittest.TestCase):
             (tooling / "lane-launcher/ntk.mjs").write_text('export async function getTicket() { return {module:"repo/src"}; }\n')
             repo = root / "repo"
             (repo / ".git").mkdir(parents=True)
+            (repo / ".ntkrc").write_text('{"target_branch":"develop"}\n')
             cbm = root / "cbm-mcp.py"
             cbm.write_text("# shared connector fixture\n")
             bridge = root / "bridge"

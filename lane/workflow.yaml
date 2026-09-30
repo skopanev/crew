@@ -146,7 +146,7 @@ nodes:
         echo "<signal:FETCH_FAILED>git fetch origin exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:FETCH_FAILED>"
         exit 0
       fi
-      target=$(jq -r '.target_branch // "develop"' "$project_dir/.ntkrc" 2>/dev/null || echo develop)
+      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$project_dir/.ntkrc")"
       if ! git rev-parse --verify --quiet "refs/remotes/origin/${target}" >/dev/null; then
         echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after fetch</signal:NO_TARGET_BRANCH>"
         exit 0
@@ -266,7 +266,7 @@ nodes:
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
       # A resolved rebase may have commits to land with an empty index.
-      target=$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)
+      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
       if git diff --cached --quiet "$base" -- 2>/dev/null \
          && [ -z "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ]; then
         echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
@@ -340,7 +340,7 @@ nodes:
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
       Worktree: {{var:LANE_WORKTREE}}.
       Input: $MEDULLA_RUN_DIR/artifacts/coder-report.txt; git diff --cached;
-      ticket commits above origin/<target_branch> (.ntkrc, default: develop).
+      ticket commits above origin/<target_branch> (.ntkrc).
       Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
@@ -422,7 +422,7 @@ nodes:
       set -euo pipefail
       cd "${LANE_WORKTREE}" || {
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
-      target=$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)
+      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
 
       # Verify the reviewed snapshot before committing.
       snap="$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
@@ -488,7 +488,7 @@ nodes:
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
-      target="$(jq -r '.target_branch // "develop"' "${project_dir}/.ntkrc" 2>/dev/null || echo develop)"
+      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
       cd "${project_dir}"
       printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
       # Keep the private checkout as evidence; canonical Git metadata stays read-only.
@@ -619,7 +619,7 @@ nodes:
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
       1. In {{var:LANE_WORKTREE}}, read target_branch from
-         {{var:project_dir}}/.ntkrc (default: develop). The failed rebase was aborted;
+         {{var:project_dir}}/.ntkrc. The failed rebase was aborted;
          restart git rebase onto origin/<target_branch>.
       2. Resolve conflicts preserving the ticket's AC and target-branch changes,
          stage resolved files and complete the rebase.

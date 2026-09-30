@@ -28,6 +28,7 @@ class GateTests(unittest.TestCase):
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
         (self.repo / "code.txt").write_text("original\n")
+        (self.repo / ".ntkrc").write_text('{"target_branch":"develop"}\n')
         self.git("add", ".")
         self.git("commit", "-qm", "initial")
         (self.repo / "code.txt").write_text("candidate\n")
