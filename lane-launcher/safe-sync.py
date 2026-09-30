@@ -5,8 +5,6 @@ import json
 import runpy
 import subprocess
 import sys
-import time
-from datetime import datetime
 from pathlib import Path
 
 session = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'lane/bridge/cbm-probe.py'))['session']
@@ -40,30 +38,29 @@ def sync(repo, call):
         git(repo, 'fetch', 'origin', f'refs/heads/{target}:refs/remotes/origin/{target}')
         # Detached HEAD is safe only when it is already part of the target history.
         git(repo, 'merge-base', '--is-ancestor', 'HEAD', f'origin/{target}')
-        if subprocess.run(['git', '-C', str(repo), 'show-ref', '--verify', '--quiet',
-                           f'refs/heads/{target}']).returncode == 0:
-            git(repo, 'checkout', target)
-        else:
-            git(repo, 'checkout', '-b', target, f'origin/{target}')
+        current = git(repo, 'branch', '--show-current')
+        if current and current != target:
+            has_local = subprocess.run(
+                ['git', '-C', str(repo), 'show-ref', '--verify', '--quiet',
+                 f'refs/heads/{target}']).returncode == 0
+            if has_local:
+                git(repo, 'merge-base', '--is-ancestor', target, f'origin/{target}')
+                git(repo, 'checkout', target)
+            else:
+                git(repo, 'checkout', '-b', target, f'origin/{target}')
         git(repo, 'merge', '--ff-only', f'origin/{target}')
         sha = git(repo, 'rev-parse', 'HEAD')
         if sha != git(repo, 'rev-parse', f'origin/{target}'):
             raise RuntimeError(f'{repo} is ahead of origin/{target}; startup refused')
         project = str(repo).lstrip('/').replace('/', '-')
-        # CBM indexed_at has second precision; the requested build must be newer.
-        requested = int(time.time())
-        time.sleep(max(0, requested + 1 - time.time()))
         print(f'[sync] {repo.name} {target} {sha[:12]}; updating shared CBM', flush=True)
-        tool(call, 'index_repository', repo_path=str(repo), name=project, mode='moderate', persistence=False)
-        deadline = time.monotonic() + 600
-        while True:
-            status = tool(call, 'index_status', project=project, format='json')
-            indexed = datetime.fromisoformat((status.get('indexed_at') or '1970-01-01T00:00:00Z').replace('Z', '+00:00')).timestamp()
-            if status.get('status') == 'ready' and indexed > requested:
-                break
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f'CBM refresh timed out for {repo.name}')
-            time.sleep(1)
+        result = tool(call, 'index_repository', repo_path=str(repo), name=project,
+                      mode='moderate', persistence=False)
+        if result.get('status') != 'indexed' or result.get('project') != project:
+            raise RuntimeError(f'CBM did not complete indexing {repo.name}: {result}')
+        status = tool(call, 'index_status', project=project, format='json')
+        if status.get('status') != 'ready' or status.get('root_path') != str(repo):
+            raise RuntimeError(f'CBM is not ready for {repo.name}: {status}')
         if git(repo, 'rev-parse', 'HEAD') != sha or git(repo, 'status', '--porcelain'):
             raise RuntimeError(f'{repo} changed during CBM refresh; startup refused')
         print(f'[sync] {repo.name}: Git and shared CBM ready', flush=True)
