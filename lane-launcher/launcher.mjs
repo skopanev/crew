@@ -224,10 +224,22 @@ export async function main(argv) {
         console.error(paint('red', error.message));
       }
       if (mode !== 'loop' || stopped) break;
-      console.log(`pause ${config.intervalSeconds}s · Ctrl+C to stop\n`);
+      if (!process.stdout.isTTY) console.log(`pause ${config.intervalSeconds}s · Ctrl+C to stop\n`);
       await new Promise(resolve => {
-        const timer = setTimeout(resolve, config.intervalSeconds * 1000);
-        wake = () => { clearTimeout(timer); resolve(); };
+        const deadline = performance.now() + config.intervalSeconds * 1000;
+        const draw = () => {
+          const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
+          const time = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+          process.stdout.write(`\r\x1b[2KNext check in ${paint('accent', time)} · Ctrl+C to stop`);
+        };
+        const ticker = process.stdout.isTTY ? setInterval(draw, 1000) : null;
+        const timer = setTimeout(() => wake(), config.intervalSeconds * 1000);
+        wake = () => {
+          clearTimeout(timer); clearInterval(ticker);
+          if (process.stdout.isTTY) process.stdout.write('\r\x1b[2K\n');
+          resolve();
+        };
+        if (process.stdout.isTTY) draw();
         if (stopped) wake();
       });
     } while (!stopped);

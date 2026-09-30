@@ -436,6 +436,34 @@ test('preview loop repeats after its interval and Ctrl+C releases the dispatcher
   assert.ok(!fs.existsSync(f.events));
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
+test('terminal countdown ticks in place and Ctrl+C during the pause releases the lock', async t => {
+  const f = await setup(t, {launchLanes: false});
+  save(f.configFile, {...f.config, intervalSeconds: 2});
+  const tty = path.join(f.root, 'tty.cjs');
+  fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
+  const child = spawn(process.execPath, ['--require', tty, launcher, '--config', f.configFile],
+    {env: {...f.env, FORCE_COLOR: '0'}});
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let output = '', errors = '', signalled = false;
+  child.stdout.on('data', data => {
+    output += data;
+    if (!signalled && output.includes('Next check in 00:01')) {
+      signalled = true; child.kill('SIGINT');
+    }
+  });
+  child.stderr.on('data', data => errors += data);
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('countdown did not stop')); }, 5000);
+    child.once('close', code => { clearTimeout(timer); resolve(code); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+  assert.equal(code, 0, errors);
+  assert.ok(output.includes('\r\x1b[2KNext check in 00:02'));
+  assert.ok(output.includes('\r\x1b[2KNext check in 00:01'));
+  assert.ok(output.includes('\r\x1b[2K\nstopped'));
+  assert.equal(queueReads(f), 1);
+  assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
+});
 for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
   test(`worker saves exit ${exitCode}; closeTabOnExit=${closeTabOnExit}`, async t => {
     const f = await setup(t);
