@@ -37,8 +37,9 @@ The entire source root is read-only. Each ticket has a writable private checkout
 at `<source-root>/.worktrees/<ticket>` with its own `.git`. Run artifacts are
 stored separately. Retained work is never reset by a new launch.
 
-All lanes use the shared host CBM service. Crew does not copy databases, start
-CBM daemons, or index worktrees. Equill supplies role contracts and memory.
+All lanes access shared host CBM storage through the configured connector. Crew
+does not copy databases, start CBM daemons, or index worktrees. Equill supplies
+role contracts and memory.
 `roles/*.jsonl` are recovery snapshots; the live Equill store is authoritative.
 Do not import a stale snapshot over that store.
 
@@ -67,4 +68,8 @@ python3 -m unittest discover -s lane/tests -v
 
 The image provides the engine, agent harnesses, and repository check tools.
 Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
-must be available. Project source refresh belongs to the project's preflight.
+must be available. Startup runs `lane-launcher/safe-sync.py`: each immediate
+canonical repository with `.ntkrc` is locked, fetched, fast-forwarded to its
+configured branch, and reindexed through the shared CBM connector. The lock is
+held until CBM is ready with an `indexed_at` newer than the refresh request.
+Dirty or diverged sources stop startup. Dry runs do not refresh sources or CBM.

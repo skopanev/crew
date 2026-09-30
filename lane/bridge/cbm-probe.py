@@ -6,10 +6,18 @@ import select
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 
-def probe(connector, projects):
-    process = subprocess.Popen([sys.executable, connector], stdin=subprocess.PIPE,
+@contextmanager
+def session(connector, image=None):
+    command = [sys.executable, connector]
+    if image:
+        directory = str(Path(connector).resolve().parent)
+        command = ['docker', 'run', '--rm', '-i', '--entrypoint', 'python3',
+                   '-v', f'{directory}:{directory}:ro', image, connector]
+    process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE)
     buffer = b""
     request_id = 0
@@ -18,11 +26,11 @@ def probe(connector, projects):
         process.stdin.write(json.dumps({"jsonrpc": "2.0", **message}).encode() + b"\n")
         process.stdin.flush()
 
-    def call(method, params):
+    def call(method, params, timeout=30):
         nonlocal buffer, request_id
         request_id += 1
         send({"id": request_id, "method": method, "params": params})
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + timeout
         while True:
             if b"\n" not in buffer:
                 remaining = deadline - time.monotonic()
@@ -47,14 +55,7 @@ def probe(connector, projects):
         call("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
                             "clientInfo": {"name": "crew-lane-preflight", "version": "1"}})
         send({"method": "notifications/initialized"})
-        available = {tool["name"] for tool in call("tools/list", {}).get("tools", [])}
-        missing = {"search_code", "search_graph"} - available
-        if missing:
-            raise RuntimeError(f"shared CBM lacks tools: {', '.join(sorted(missing))}")
-        for project in projects:
-            call("tools/call", {"name": "search_code", "arguments": {
-                "project": project, "pattern": "import", "mode": "files", "max_results": 1}})
-            print(f"shared CBM: {project} responds; search_code and search_graph available")
+        yield call
     finally:
         process.stdin.close()
         process.terminate()
@@ -64,6 +65,18 @@ def probe(connector, projects):
             process.kill()
             process.wait()
         process.stdout.close()
+
+
+def probe(connector, projects):
+    with session(connector) as call:
+        available = {tool["name"] for tool in call("tools/list", {}).get("tools", [])}
+        missing = {"search_code", "search_graph"} - available
+        if missing:
+            raise RuntimeError(f"shared CBM lacks tools: {', '.join(sorted(missing))}")
+        for project in projects:
+            call("tools/call", {"name": "search_code", "arguments": {
+                "project": project, "pattern": "import", "mode": "files", "max_results": 1}})
+            print(f"shared CBM: {project} responds; search_code and search_graph available")
 
 
 if __name__ == "__main__":
