@@ -107,8 +107,9 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   assert.equal(f.calls.length, 1);
   const query = new URL(f.calls[0].url, 'http://fixture');
   assert.equal(query.pathname, '/v1/tickets/next');
-  for (const [key, value] of Object.entries({workspace: 'test', project: 'project', tag: 'crew',
+  for (const [key, value] of Object.entries({workspace: 'test', tag: 'crew',
     dry_run: 'true', has_module: 'true', strict: 'true'})) assert.equal(query.searchParams.get(key), value);
+  assert.equal(query.searchParams.has('project'), false);
   const events = fs.readFileSync(f.events, 'utf8').trim().split('\n').map(JSON.parse);
   const create = events.find(args => args[1] === 'create');
   assert.deepEqual(create.slice(0, 4), ['tab', 'create', '--workspace', 'workspace']);
