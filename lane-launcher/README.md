@@ -67,6 +67,8 @@ The selected ticket ID is bold cyan, followed by its title in yellow without bol
 
 The dispatcher waits 60 seconds after each iteration and continues until Ctrl+C, with a default limit of one lane. JavaScript calls `POST /v1/tickets/next?dry_run=true` to preview an **open** ticket matching the configured filters, with a module and satisfied dependencies. With actual launches enabled, the dispatcher atomically claims it through `POST /v1/tickets/<id>/start` before opening a tab. The lane adopts that confirmed receipt without claiming again. A preview does not claim work. Each tick starts at most one lane.
 
+In a terminal, the pause is a single updating line: `Next check in 00:59 · Ctrl+C to stop`, with the remaining time in bold cyan. Redirected output keeps a single static `pause 60s` line. Ctrl+C clears the countdown and stops waiting immediately.
+
 A refused claim opens no tab and changes no ticket status. A confirmed startup failure returns an `in_progress` ticket to `open`. After the workflow adopts the claim, its failures produce `blocked` with a report. An uncertain worker launch retains the claim and reservation for inspection.
 
 Failure handling requires a confirmed claim receipt for this ticket, workspace and run. Without it, the lane fails without changing NTK. After a confirmed claim, failure handling attaches a report with the available LLM explanations and check evidence to the blocked ticket. After landing, the internal completion helper tries `to_test` at most three times with a one-second pause between attempts. If all attempts fail, the lane exits with an error and preserves the landed SHA in `artifacts/landing.txt`; recover the ticket status without rerunning implementation.
