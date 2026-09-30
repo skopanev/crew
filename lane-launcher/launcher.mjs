@@ -44,6 +44,7 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     }
   }
   if ('tag' in config) throw new Error('Use tags: ["crew"] in dolber.json instead of tag');
+  if (config.repo) throw new Error('repo was removed; set sourceRoot to the source workspace');
   if (typeof config.stateDir !== 'string' || !path.isAbsolute(config.stateDir)) throw new Error('stateDir must be absolute');
   for (const field of ['limit', 'intervalSeconds']) {
     if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
@@ -56,9 +57,8 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');
   }
   if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
-  if (!config.sourceRoot && !config.repo) throw new Error('Config needs sourceRoot or repo');
-  for (const dir of [...(config.repo ? [config.repo] : []), config.sshDir, ...config.readOnlyRepos,
-    ...(config.sourceRoot ? [config.sourceRoot] : [])]) {
+  if (!config.sourceRoot) throw new Error('Config needs sourceRoot: the source workspace');
+  for (const dir of [config.sourceRoot, config.sshDir, ...config.readOnlyRepos]) {
     if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
       throw new Error(`Directory must exist and be absolute: ${dir}`);
     }
@@ -66,10 +66,6 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   if (typeof config.cbmMcpCommand !== 'string' || !path.isAbsolute(config.cbmMcpCommand) ||
       !fs.statSync(config.cbmMcpCommand).isFile()) {
     throw new Error('Config needs cbmMcpCommand: absolute path to the shared CBM connector');
-  }
-  if (config.repo) {
-    if (!fs.existsSync(path.join(config.repo, '.git'))) throw new Error('repo must be a Git checkout');
-    config.repo = fs.realpathSync(config.repo);
   }
   return config;
 }

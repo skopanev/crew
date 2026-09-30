@@ -12,15 +12,16 @@ import {save, read, laneArgs} from '../runtime.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
-test('sourceRoot config needs no fixed repository and passes no repo override', async t => {
+test('launches require sourceRoot and pass no repository override', async t => {
   const f = await setup(t);
-  const config = {...f.config, sourceRoot: path.join(f.root, 'repo')};
-  delete config.repo;
-  save(f.configFile, config);
-  const loaded = configFrom(f.configFile, f.env);
-  const args = laneArgs(loaded, 'T1');
-  assert.ok(args.includes('--source-root'));
-  assert.ok(!args.includes('--repo'));
+  const args = laneArgs(configFrom(f.configFile, f.env), 'T1');
+  assert.equal(args[args.indexOf('--source-root') + 1], f.config.sourceRoot);
+  assert.ok(!args.includes('--repo') && !args.includes('--mount-rw'));
+  const {sourceRoot, ...missing} = f.config;
+  save(f.configFile, missing);
+  assert.throws(() => configFrom(f.configFile, f.env), /needs sourceRoot/);
+  save(f.configFile, {...f.config, repo: path.join(f.root, 'sources/repo')});
+  assert.throws(() => configFrom(f.configFile, f.env), /repo was removed/);
 });
 test('worker records completion before notifying; bus failure preserves lane outcome', async t => {
   const f = await setup(t);
@@ -59,7 +60,7 @@ async function setup(t, {empty = false, dockerFailure = false, launchLanes = tru
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
   fs.writeFileSync(path.join(root, 'cbm-mcp.py'), '# connector fixture\n');
-  for (const dir of [bins, path.join(root, 'repo/.git'), path.join(root, 'ssh')]) {
+  for (const dir of [bins, path.join(root, 'sources/repo/.git'), path.join(root, 'ssh')]) {
     fs.mkdirSync(dir, {recursive: true});
   }
   const events = path.join(root, 'events.jsonl'), panes = path.join(root, 'panes.json');
@@ -96,7 +97,7 @@ console.log(JSON.stringify({result}));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const config = {id: 'test-project', workspace: 'test', project: 'project', tags: ['crew'], strict: true,
-    launchLanes, repo: path.join(root, 'repo'),
+    launchLanes, sourceRoot: path.join(root, 'sources'),
     cbmMcpCommand: path.join(root, 'cbm-mcp.py'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
     stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
   const configFile = path.join(root, 'config.json');
@@ -226,7 +227,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   }
   const config = {...f.config, tags: ['open', 'agent-ready'], strict: false,
     preferTags: ['KYC', 'ceo60', 'KYT'], intervalSeconds: 60,
-    project: '', repo: '', cbmMcpCommand: '', sshDir: '', gateCommands: []};
+    project: '', sourceRoot: '', cbmMcpCommand: '', sshDir: '', gateCommands: []};
   delete config.launchLanes; // Omission must also default to preview.
   save(path.join(folder, 'dolber.json'), config);
   const result = await execute(path.join(folder, 'dolber.sh'), ['--once'], f.env,
@@ -250,7 +251,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
 });
 test('--dry-run overrides live config, previews once and never calls Herdr or claims work', async t => {
   const f = await setup(t);
-  save(f.configFile, {...f.config, project: '', repo: '', cbmMcpCommand: '', sshDir: '', gateCommands: []});
+  save(f.configFile, {...f.config, project: '', sourceRoot: '', cbmMcpCommand: '', sshDir: '', gateCommands: []});
   const before = fs.readFileSync(f.configFile, 'utf8');
   fs.rmSync(path.join(f.bins, 'medulla'));
   fs.rmSync(path.join(f.bins, 'jq'));

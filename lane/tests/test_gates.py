@@ -173,11 +173,22 @@ class GateTests(unittest.TestCase):
         self.env["LANE_RUNS_FOLDER"] = str(self.root / "launcher-runs")
         (self.root / "shared-cbm.py").write_text("# fixture connector\n")
         result = subprocess.run(["bash", str(LANE / "run.sh"), "--ticket-id", "fixture",
-                                 "--project", "fixture", "--mount-rw", str(self.repo),
+                                 "--project", "fixture", "--source-root", str(self.root),
                                  "--cbm-mcp-command", str(self.root / "shared-cbm.py")],
                                 env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
         self.assertIn("--gate-command is required before claiming work", result.stderr)
+
+    def test_launcher_rejects_removed_repository_flags(self):
+        # Passthrough would otherwise hand Medulla a writable source mount.
+        for flag in ("--repo", "--mount-rw", f"--mount-rw={self.repo}"):
+            with self.subTest(flag=flag):
+                args = [flag] if "=" in flag else [flag, str(self.repo)]
+                result = subprocess.run(["bash", str(LANE / "run.sh"), "--ticket-id", "fixture",
+                                         *args], env=self.env, capture_output=True,
+                                        text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("was removed; use --source-root", result.stderr)
 
     def test_review_requires_nonempty_equill_contract(self):
         bins = self.root / "bin"
