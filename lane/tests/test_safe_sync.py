@@ -32,9 +32,8 @@ class SafeSyncTests(unittest.TestCase):
         self.git('clone', '-b', 'main', str(self.origin), str(self.repo))
         self.events = self.root / 'events'
         self.connector = self.root / 'connector.py'
-        self.connector.write_text('''import datetime,fcntl,json,os,pathlib,sys
-poll = 0
-repo = pathlib.Path(os.environ['SYNC_REPO'])
+        self.connector.write_text('''import fcntl,json,os,pathlib,sys,time
+repo = pathlib.Path(os.environ['SYNC_REPO']).resolve()
 for line in sys.stdin:
  r = json.loads(line)
  if 'id' not in r: continue
@@ -46,16 +45,13 @@ for line in sys.stdin:
    except BlockingIOError: pass
    else: raise RuntimeError('sync released its lock before CBM completed')
   if name == 'index_repository':
-   poll = 0
    with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('start\\n')
-   result = {'status':'queued'}
+   time.sleep(0.1)
+   result = {'status':os.environ.get('SYNC_INDEX_RESULT','indexed'), 'project':r['params']['arguments']['name']}
   else:
-   poll += 1
-   ready = poll >= 3
-   result = {'status':'ready' if poll != 2 else 'indexing',
-             'indexed_at':datetime.datetime.now(datetime.timezone.utc).isoformat() if ready else '2000-01-01T00:00:00Z'}
-   if ready:
-    with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('done\\n')
+   result = {'status':os.environ.get('SYNC_INDEX_STATUS','ready'),
+             'root_path':str(repo), 'indexed_at':'2000-01-01T00:00:00Z'}
+   with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('done\\n')
   result = {'structuredContent':result}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 ''')
@@ -73,7 +69,7 @@ for line in sys.stdin:
         return subprocess.Popen([sys.executable, str(SCRIPT), str(self.source), str(self.connector)],
                                 env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-    def test_detached_checkout_fast_forwards_and_waits_for_new_ready_index(self):
+    def test_detached_checkout_fast_forwards_and_accepts_completed_unchanged_index(self):
         self.git('-C', str(self.repo), 'checkout', '--detach')
         (self.seed / 'file.txt').write_text('after\n')
         self.commit(self.seed, 'remote change')
@@ -82,7 +78,7 @@ for line in sys.stdin:
         out, err = child.communicate(timeout=15)
         self.assertEqual(child.returncode, 0, err)
         self.assertEqual((self.repo / 'file.txt').read_text(), 'after\n')
-        self.assertEqual(self.git('-C', str(self.repo), 'branch', '--show-current'), 'main')
+        self.assertEqual(self.git('-C', str(self.repo), 'branch', '--show-current'), '')
         self.assertEqual(self.git('-C', str(self.repo), 'rev-parse', 'HEAD'),
                          self.git('-C', str(self.seed), 'rev-parse', 'HEAD'))
         self.assertEqual(self.events.read_text(), 'start\ndone\n')
@@ -113,6 +109,33 @@ for line in sys.stdin:
             _, err = child.communicate(timeout=20)
             self.assertEqual(child.returncode, 0, err)
         self.assertEqual(self.events.read_text(), 'start\ndone\nstart\ndone\n')
+
+    def test_detached_checkout_preserves_unrelated_divergent_local_target(self):
+        base = self.git('-C', str(self.repo), 'rev-parse', 'HEAD')
+        (self.repo / 'file.txt').write_text('local branch commit\n')
+        self.commit(self.repo, 'local branch only')
+        local = self.git('-C', str(self.repo), 'rev-parse', 'main')
+        self.git('-C', str(self.repo), 'checkout', '--detach', base)
+        (self.seed / 'file.txt').write_text('remote branch commit\n')
+        self.commit(self.seed, 'remote only')
+        self.git('-C', str(self.seed), 'push', 'origin', 'main')
+        child = self.launch()
+        _, err = child.communicate(timeout=15)
+        self.assertEqual(child.returncode, 0, err)
+        self.assertEqual(self.git('-C', str(self.repo), 'branch', '--show-current'), '')
+        self.assertEqual(self.git('-C', str(self.repo), 'rev-parse', 'main'), local)
+        self.assertEqual(self.git('-C', str(self.repo), 'rev-parse', 'HEAD'),
+                         self.git('-C', str(self.seed), 'rev-parse', 'HEAD'))
+
+    def test_unfinished_index_is_refused(self):
+        for key, value in [('SYNC_INDEX_RESULT', 'queued'), ('SYNC_INDEX_STATUS', 'indexing')]:
+            with self.subTest(key=key):
+                self.env[key] = value
+                child = self.launch()
+                _, err = child.communicate(timeout=10)
+                self.assertEqual(child.returncode, 2, err)
+                self.assertIn('CBM', err)
+                del self.env[key]
 
 
 if __name__ == '__main__':
