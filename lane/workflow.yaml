@@ -531,7 +531,7 @@ nodes:
       # Save unfinished changes on the ticket branch; the host worktree also persists.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
-      if [ "${MEDULLA_LAST_SIGNAL:-}" != "CLAIM_REFUSED" ] && [ -d "${LANE_WORKTREE}" ]; then
+      if [ -d "${LANE_WORKTREE}/.git" ]; then
         if [ -n "$(git -C "${LANE_WORKTREE}" status --porcelain 2>/dev/null)" ]; then
           # Recovery commits bypass hooks and stay local; landing still runs hooks.
           if git -C "${LANE_WORKTREE}" add -A 2>&1 \
