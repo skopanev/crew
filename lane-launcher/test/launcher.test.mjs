@@ -223,7 +223,8 @@ for (const scenario of ['blocked', 'upload-failed', 'done', 'unclaimed', 'adopte
     const patches = f.calls.filter(call => call.method === 'PATCH');
     assert.equal(patches.length, blocked || scenario === 'unrelated-code' ? 1 : 0);
     if (blocked) {
-      assert.equal(patches[0].body.status, 'blocked');
+      assert.deepEqual(patches[0].body, {workspace: 'test', status: 'blocked', force: true,
+        tag_edits: ['+worktree_preexistited']});
       assert.equal(result.error, reason);
       assert.match(output.stdout, /T1 blocked: WORKTREE PREEXISTED/);
       assert.match(fs.readFileSync(path.join(dir, 'startup-failure.txt'), 'utf8'), /Worktree and branches were not modified/);
