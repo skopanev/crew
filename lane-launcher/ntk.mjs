@@ -62,6 +62,17 @@ export function updateStatus({id, workspace, status, force}) {
   return request('PATCH', ticketRoute(id), {}, {workspace, status, ...(force ? {force: true} : {})});
 }
 
+export async function reopenStartupClaim(claim) {
+  if (claim?.claimed !== true || claim.status !== 'in_progress' || !claim.id || !claim.workspace) {
+    throw new Error('No confirmed startup claim; ticket unchanged');
+  }
+  const ticket = await getTicket(claim.id, claim.workspace);
+  if (ticket.status !== 'in_progress' || ticket.id.toLowerCase() !== claim.id.toLowerCase()) {
+    throw new Error('Ticket changed after claim; ticket unchanged');
+  }
+  return updateStatus({id: claim.id, workspace: claim.workspace, status: 'open', force: true});
+}
+
 export async function attachReport(id, workspace, filename, content) {
   const bytes = Buffer.from(content, 'utf8');
   const content_type = 'text/plain; charset=utf-8';

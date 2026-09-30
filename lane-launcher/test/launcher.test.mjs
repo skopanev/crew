@@ -45,6 +45,11 @@ process.exit(1);
   assert.match(read(sent).at(-1), /^CREW READY \| T1 \|/);
   assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
 });
+const queueReads = f => f.calls.filter(call => call.url.startsWith('/v1/tickets/next')).length;
+const runState = f => {
+  const [runId] = fs.readdirSync(path.join(f.stateDir, 'runs'));
+  return path.join(f.stateDir, 'runs', runId);
+};
 function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [script, ...args], {env, cwd});
@@ -55,7 +60,7 @@ function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
     child.on('close', code => resolve({code, stdout, stderr}));
   });
 }
-async function setup(t, {empty = false, dockerFailure = false, launchLanes = true} = {}) {
+async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
@@ -73,6 +78,9 @@ fs.appendFileSync(process.env.TEST_EVENTS, JSON.stringify(args) + '\\n');
 const panes = JSON.parse(fs.readFileSync(process.env.TEST_PANES));
 let result = {};
 if (args[0] === 'tab' && args[1] === 'create') {
+  // A tab may open only for a ticket this dispatcher already claimed.
+  if (!fs.readFileSync(process.env.TEST_REQUESTS, 'utf8').includes('/start')) process.exit(3);
+  if (process.env.TEST_CREATE_FAILURE === '1') process.exit(1);
   panes.push({pane_id: 'test-pane'});
   fs.writeFileSync(process.env.TEST_PANES, JSON.stringify(panes));
   result = {root_pane: {pane_id: 'test-pane'}};
@@ -81,6 +89,7 @@ if (args[1] === 'list') result = {panes};
 if (args[1] === 'close' && process.env.TEST_RESULT) {
   if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(2);
 }
+if (args[1] === 'run' && process.env.TEST_RUN_FAILURE === '1') process.exit(1);
 if (args[0] === 'pane' && ['run', 'close'].includes(args[1])) process.exit(0);
 console.log(JSON.stringify({result}));
 `, {mode: 0o755});
@@ -88,10 +97,27 @@ console.log(JSON.stringify({result}));
   for (const bin of ['medulla', 'jq']) fs.writeFileSync(path.join(bins, bin), '#!/bin/sh\nexit 0\n', {mode: 0o755});
   const docker = path.join(root, 'docker.jsonl');
   fs.writeFileSync(docker, '');
-  const calls = [];
-  const server = http.createServer((req, res) => {
-    calls.push({method: req.method, url: req.url});
+  const calls = [], requests = path.join(root, 'requests.log');
+  let ticketStatus = 'open';
+  fs.writeFileSync(requests, '');
+  const server = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    calls.push({method: req.method, url: req.url, body: body ? JSON.parse(body) : null});
+    fs.appendFileSync(requests, `${req.method} ${req.url}\n`);
     if (empty) { res.writeHead(204); res.end(); }
+    else if (req.url.startsWith('/v1/tickets/T1/start') && claimRefused) {
+      res.writeHead(409); res.end('{"error":"fixture conflict"}');
+    }
+    else if (req.url.startsWith('/v1/tickets/T1/start')) {
+      ticketStatus = 'in_progress';
+      res.end('{"id":"T1","status":"in_progress","claimed":true}');
+    }
+    else if (req.method === 'GET') res.end(JSON.stringify({ticket: {id: 'T1', status: ticketStatus}}));
+    else if (req.method === 'PATCH') {
+      ticketStatus = JSON.parse(body).status;
+      res.end(JSON.stringify({id: 'T1', status: ticketStatus}));
+    }
     else res.end('{"id":"T1","status":"open","claimed":false}');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -104,10 +130,11 @@ console.log(JSON.stringify({result}));
   save(configFile, config);
   const env = {...process.env, PATH: `${bins}:${process.env.PATH}`,
     HERDR_WORKSPACE_ID: 'workspace',
-    TEST_EVENTS: events, TEST_PANES: panes, TEST_DOCKER: docker,
+    TEST_EVENTS: events, TEST_PANES: panes, TEST_DOCKER: docker, TEST_REQUESTS: requests,
     TEST_DOCKER_FAILURE: dockerFailure ? '1' : '0', NTK_CONFIG: path.join(root, 'absent'),
     NTK_URL: `http://127.0.0.1:${server.address().port}`, NTK_KEY: 'fixture-key'};
   return {root, config, stateDir: scopeDirectory(config.stateDir, config.id), configFile, env, calls, events, docker, bins,
+    setStatus: value => { ticketStatus = value; },
     run: () => execute(launcher, ['--config', configFile, '--once'], env)};
 }
 
@@ -115,7 +142,7 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   const f = await setup(t);
   let result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(f.calls.length, 1);
+  assert.equal(queueReads(f), 1);
   const query = new URL(f.calls[0].url, 'http://fixture');
   assert.equal(query.pathname, '/v1/tickets/next');
   for (const [key, value] of Object.entries({workspace: 'test', tag: 'crew',
@@ -129,7 +156,43 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
-  assert.equal(f.calls.length, 1);
+  assert.equal(queueReads(f), 1);
+});
+test('claim refusal opens no tab and does not modify the ticket', async t => {
+  const f = await setup(t, {claimRefused: true});
+  assert.equal((await f.run()).code, 1);
+  assert.equal(read(path.join(runState(f), 'result.json')).status, 'claim-refused');
+  assert.ok(!f.calls.some(call => call.method === 'PATCH'));
+  assert.ok(!fs.readFileSync(f.events, 'utf8').includes('create'));
+});
+test('tab creation failure reopens the confirmed claim', async t => {
+  const f = await setup(t);
+  f.env.TEST_CREATE_FAILURE = '1';
+  const result = await f.run();
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /reopened/);
+  assert.deepEqual(f.calls.find(call => call.method === 'PATCH').body,
+    {workspace: 'test', status: 'open', force: true});
+  assert.equal(read(path.join(runState(f), 'result.json')).reopened, true);
+});
+test('worker startup failure reopens; adopted workflow failure and changed tickets do not', async t => {
+  for (const scenario of ['startup', 'adopted', 'done']) {
+    const f = await setup(t);
+    assert.equal((await f.run()).code, 0);
+    const dir = runState(f), run = read(path.join(dir, 'launch.json'));
+    fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 2\n', {mode: 0o755});
+    if (scenario === 'adopted') {
+      const artifacts = path.join(run.runFolder, 'fixture', 'artifacts');
+      fs.mkdirSync(artifacts, {recursive: true});
+      save(path.join(artifacts, 'claim.json'), {...run.claim, run_dir: path.dirname(artifacts)});
+    }
+    if (scenario === 'done') f.setStatus('done');
+    await execute(worker, [path.join(dir, 'launch.json')], f.env);
+    const result = read(path.join(dir, 'result.json'));
+    assert.equal(result.reopened === true, scenario === 'startup', scenario);
+    assert.equal(f.calls.some(call => call.method === 'PATCH'), scenario === 'startup', scenario);
+    if (scenario === 'done') assert.match(result.reopenError, /Ticket changed/);
+  }
 });
 test('existing external Docker lane prevents a queue read', async t => {
   const f = await setup(t);
@@ -149,7 +212,7 @@ test('another dispatcher and unscoped containers do not occupy this dispatcher',
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 0 of 1/);
-  assert.equal(f.calls.length, 1);
+  assert.equal(queueReads(f), 1);
 });
 test('config IDs isolate reservations and locks in the same state root', async t => {
   const f = await setup(t);
@@ -160,7 +223,7 @@ test('config IDs isolate reservations and locks in the same state root', async t
   const result = await execute(launcher, ['--config', otherFile, '--once'], f.env);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 0 of 1/);
-  assert.equal(f.calls.length, 2);
+  assert.equal(queueReads(f), 2);
   const other = configFrom(otherFile, f.env);
   const [runId] = fs.readdirSync(path.join(other.stateDir, 'runs'));
   const run = read(path.join(other.stateDir, 'runs', runId, 'launch.json'));
@@ -176,7 +239,7 @@ test('completed lane frees capacity even when its Herdr tab remains', async t =>
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 0 of 1/);
-  assert.equal(f.calls.length, 2);
+  assert.equal(queueReads(f), 2);
 });
 test('dispatcher IDs are stable path-safe identities, including manual lanes', () => {
   assert.equal(validateId('Project-Backend'), 'project-backend');

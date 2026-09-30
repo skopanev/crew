@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {nextTicket, credentials} from './ntk.mjs';
+import {nextTicket, credentials, claimTicket, reopenStartupClaim} from './ntk.mjs';
 import {save, read, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
 import {scopeDirectory, runScope, validateId} from './scope.mjs';
 
@@ -146,11 +146,39 @@ export async function tick(config) {
     runFolder, args: laneArgs(config, candidate.id), createdAt: new Date().toISOString()};
   const stateFile = path.join(dir, 'launch.json');
   save(stateFile, run);
-  // Commit reservation before opening a tab. Unknown launch outcomes keep the slot occupied.
-  const result = herdr(config, ['tab', 'create', '--workspace', config.herdrWorkspace,
-    '--cwd', path.dirname(here), '--label', `lane:${candidate.id}`, '--no-focus']);
+  // Commit reservation before claiming. Unknown claim or launch outcomes keep the slot occupied.
+  let claimed;
+  try { claimed = await claimTicket(candidate.id, config.workspace); }
+  catch (error) {
+    // An HTTP refusal is definite: nothing was claimed, so the slot is free.
+    if (!/^NTK HTTP 4\d\d/.test(error.message)) throw new Error(`${error.message}; reservation retained at ${dir}`);
+    save(path.join(dir, 'result.json'), {status: 'claim-refused', error: error.message, finishedAt: new Date().toISOString()});
+    throw new Error(`claim refused for ${candidate.id}: ${error.message}`);
+  }
+  if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
+      String(claimed.id).toLowerCase() !== candidate.id.toLowerCase()) {
+    save(path.join(dir, 'result.json'), {status: 'claim-refused', finishedAt: new Date().toISOString()});
+    throw new Error(`NTK did not confirm claim for ${candidate.id}; ticket unchanged`);
+  }
+  run.claim = {...claimed, workspace: config.workspace};
+  save(stateFile, run);
+  let result;
+  try {
+    result = herdr(config, ['tab', 'create', '--workspace', config.herdrWorkspace,
+      '--cwd', path.dirname(here), '--label', `lane:${candidate.id}`, '--no-focus']);
+  } catch (error) {
+    // No worker was dispatched, even if the tab response was lost.
+    await reopenStartupClaim(run.claim);
+    save(path.join(dir, 'result.json'), {status: 'failed', error: error.message, reopened: true,
+      finishedAt: new Date().toISOString()});
+    throw new Error(`Herdr could not open a tab: ${error.message}; ${candidate.id} reopened`);
+  }
   run.pane = result?.root_pane?.pane_id;
-  if (!run.pane) throw new Error(`Herdr did not return a pane; reservation retained at ${dir}`);
+  if (!run.pane) {
+    await reopenStartupClaim(run.claim);
+    save(path.join(dir, 'result.json'), {status: 'failed', reopened: true, finishedAt: new Date().toISOString()});
+    throw new Error(`Herdr returned no pane; ${candidate.id} reopened`);
+  }
   save(stateFile, run);
   herdr(config, ['pane', 'run', run.pane,
     `${quote(process.execPath)} ${quote(path.join(here, 'worker.mjs'))} ${quote(stateFile)}`]);

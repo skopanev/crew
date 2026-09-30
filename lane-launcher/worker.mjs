@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr} from './runtime.mjs';
+import {reopenStartupClaim} from './ntk.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -37,7 +38,8 @@ try {
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
-    env: {...process.env, LANE_RUNS_FOLDER: run.runFolder}, detached: true,
+    env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
+      ...(run.claim ? {LANE_CLAIM_JSON: JSON.stringify(run.claim)} : {})}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
     // Keep original bytes on disk; presentation colors apply only to the tab.
@@ -57,6 +59,25 @@ try {
   result = {status: 'failed', error: error.message};
 } finally {
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
+  if (result.status !== 'exited' && run.claim) {
+    const adopted = fs.existsSync(run.runFolder) && fs.readdirSync(run.runFolder).some(name => {
+      try {
+        const claim = read(path.join(run.runFolder, name, 'artifacts/claim.json'));
+        return claim.claimed === true && claim.status === 'in_progress' && claim.workspace === run.workspace &&
+          String(claim.id).toLowerCase() === String(run.ticket).toLowerCase();
+      } catch { return false; }
+    });
+    if (!adopted) {
+      try {
+        await reopenStartupClaim(run.claim);
+        result.reopened = true;
+        announce(`[lane] ${run.ticket} reopened: startup failed`);
+      } catch (error) {
+        result.reopenError = error.message;
+        announce(`[lane] Cannot reopen ${run.ticket}: ${error.message}`);
+      }
+    }
+  }
   if (result.status !== 'exited') {
     try {
       // Only inspect run artifacts, never recurse into retained worktrees.
