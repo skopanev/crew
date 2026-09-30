@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr} from './runtime.mjs';
-import {reopenStartupClaim} from './ntk.mjs';
+import {reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -68,13 +68,31 @@ try {
       } catch { return false; }
     });
     if (!adopted) {
+      const preexisting = result.code === 73 && fs.readFileSync(path.join(dir, 'output.log'), 'utf8')
+        .match(/^run\.sh: WORKTREE PREEXISTED: [^\r\n]+/m)?.[0];
       try {
-        await reopenStartupClaim(run.claim);
-        result.reopened = true;
-        announce(`[lane] ${run.ticket} reopened: startup failed`);
+        if (preexisting) {
+          await blockStartupClaim(run.claim);
+          result.blocked = true;
+          result.error = preexisting.replace(/^run\.sh: /, '');
+          announce(`[lane] ${run.ticket} blocked: ${result.error}`);
+          const report = `Ticket: ${run.ticket}\n${result.error}\nLane did not start. Worktree and branches were not modified.\n`;
+          try {
+            fs.writeFileSync(path.join(dir, 'startup-failure.txt'), report, {mode: 0o600});
+            await attachReport(run.ticket, run.workspace, `lane-startup-failure-${path.basename(dir)}.txt`, report);
+          }
+          catch (error) {
+            result.reportError = error.message;
+            announce(`[lane] Ticket blocked; cannot attach startup report: ${error.message}`);
+          }
+        } else {
+          await reopenStartupClaim(run.claim);
+          result.reopened = true;
+          announce(`[lane] ${run.ticket} reopened: startup failed`);
+        }
       } catch (error) {
-        result.reopenError = error.message;
-        announce(`[lane] Cannot reopen ${run.ticket}: ${error.message}`);
+        result[preexisting ? 'blockError' : 'reopenError'] = error.message;
+        announce(`[lane] Cannot ${preexisting ? 'block' : 'reopen'} ${run.ticket}: ${error.message}`);
       }
     }
   }

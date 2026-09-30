@@ -25,6 +25,12 @@ test('disabled notifications skip artifact reads; send errors are not swallowed'
     throw new Error('bus unavailable');
   }), /bus unavailable/);
 });
+test('preflight blocker notification includes the worktree reason without workflow artifacts', () => {
+  const event = completionEvent({ticket: 'T1', runFolder: '/fixture/lane'},
+    {code: 73, blocked: true, error: 'WORKTREE PREEXISTED: /fixture/.worktrees/T1'}, null);
+  assert.equal(event.event, 'BLOCKED');
+  assert.equal(event.summary, 'WORKTREE PREEXISTED: /fixture/.worktrees/T1');
+});
 test('completion distinguishes terminal timeouts from recovered ones', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-notify-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
