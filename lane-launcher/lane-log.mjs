@@ -1,8 +1,8 @@
 // Highlight engine events without treating every stderr line as an error.
 export function formatLaneLine(line, color) {
   if (!color || line.includes('\x1b[')) return line;
-  if (/^\[lane\] .* blocked: WORKTREE PREEXISTED:/.test(line)) {
-    return line.replace('blocked: WORKTREE PREEXISTED:', '\x1b[1;31mblocked: WORKTREE PREEXISTED:\x1b[0m');
+  if (/^\[lane\] \S+ blocked:/.test(line)) {
+    return line.replace('blocked:', '\x1b[1;31mblocked:\x1b[0m');
   }
   let tone;
   if (/^\[(?:lane|medulla)\]/.test(line) && /\btimeout\b|__timeout__|\brc=124\b/i.test(line)) tone = '1;31';
