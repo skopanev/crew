@@ -8,10 +8,20 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
-import {save, read} from '../runtime.mjs';
+import {save, read, laneArgs} from '../runtime.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+test('sourceRoot config needs no fixed repository and passes no repo override', async t => {
+  const f = await setup(t);
+  const config = {...f.config, sourceRoot: path.join(f.root, 'repo')};
+  delete config.repo;
+  save(f.configFile, config);
+  const loaded = configFrom(f.configFile, f.env);
+  const args = laneArgs(loaded, 'T1');
+  assert.ok(args.includes('--source-root'));
+  assert.ok(!args.includes('--repo'));
+});
 test('worker records completion before notifying; bus failure preserves lane outcome', async t => {
   const f = await setup(t);
   fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 0\n', {mode: 0o755});

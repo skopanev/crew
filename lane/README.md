@@ -8,11 +8,15 @@ read-only repositories are mounted as they are; startup never fetches them.
 `--dangerously-skip-permissions`. Контейнер — единственная граница.
 
 ```
-run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --repo <repository> --source-root <source-workspace> --cbm-mcp-command <shared-connector.py> --gate-command '<check>' --ssh-dir <key-directory>
+run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --source-root <source-workspace> --cbm-mcp-command <shared-connector.py> --gate-command '<check>' --ssh-dir <key-directory>
 ```
 
-Sources are read-only. Only the run directory (including the ticket worktree)
-and the selected repository's Git metadata are writable. No repository is copied.
+The entire source workspace, including canonical `.git` directories, is read-only.
+The ticket module names its source repository. The lane creates a private checkout
+at `<source-workspace>/.worktrees/<ticket>` with its own `.git`, mounted writable
+at `/workspace/<ticket>`. Git fetch, commits and landing write only there.
+Run artifacts are also writable. Completed and failed checkouts are retained;
+a new launch refuses an existing nonempty checkout before claiming the ticket.
 
 ## Граф
 

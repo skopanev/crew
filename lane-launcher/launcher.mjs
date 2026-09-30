@@ -56,7 +56,8 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');
   }
   if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
-  for (const dir of [config.repo, config.sshDir, ...config.readOnlyRepos,
+  if (!config.sourceRoot && !config.repo) throw new Error('Config needs sourceRoot or repo');
+  for (const dir of [...(config.repo ? [config.repo] : []), config.sshDir, ...config.readOnlyRepos,
     ...(config.sourceRoot ? [config.sourceRoot] : [])]) {
     if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
       throw new Error(`Directory must exist and be absolute: ${dir}`);
@@ -66,8 +67,10 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
       !fs.statSync(config.cbmMcpCommand).isFile()) {
     throw new Error('Config needs cbmMcpCommand: absolute path to the shared CBM connector');
   }
-  if (!fs.existsSync(path.join(config.repo, '.git'))) throw new Error('repo must be a Git checkout');
-  config.repo = fs.realpathSync(config.repo);
+  if (config.repo) {
+    if (!fs.existsSync(path.join(config.repo, '.git'))) throw new Error('repo must be a Git checkout');
+    config.repo = fs.realpathSync(config.repo);
+  }
   return config;
 }
 

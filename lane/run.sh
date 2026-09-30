@@ -2,17 +2,18 @@
 set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
-usage: run.sh --ticket-id <id> --project <ntk workspace> --repo <repo>
+usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspace>
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --gate-command <shell command> [...]
-              [--source-root <workspace>] [--module <module>]
+              [--repo <checkout>] [--module <module>]
               [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
-  --repo      primary Git checkout, mounted read-only. Only its Git metadata
-              and the ticket worktree are writable. --mount-rw is an old alias.
-  --source-root  entire source workspace to expose read-only.
+  --source-root  entire source workspace, mounted read-only. The ticket module
+                 names the source repository within it.
+  --repo      source checkout for manual launches without --source-root.
+              --mount-rw is an old alias; sources remain read-only.
   --cbm-mcp-command  existing Python stdio connector to the shared host CBM.
               The lane uses that service; it never copies or indexes a database.
   --module    ticket module; read from ntk when omitted
@@ -73,7 +74,8 @@ if [[ -n "$planning_result" || -n "$planning_task" ]]; then
 fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
-[[ -n "$repo"    ]] || { say "run.sh: --repo is required"; usage; }
+[[ -n "$source_root" || -n "$repo" ]] || { say "run.sh: --source-root or --repo is required"; usage; }
+[[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
 [[ -f "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an existing shared CBM connector"; exit 2; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
@@ -81,21 +83,6 @@ for command in "${gate_commands[@]}"; do
   [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
 done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
-
-[[ -d "$repo/.git" ]] || {
-  say "run.sh: --repo must be a primary checkout with a .git directory: $repo"
-  exit 2
-}
-repo="$(cd "$repo" && pwd -P)"
-project_dir="/workspace/$(basename "$repo")"
-source_root_in=""
-if [[ -n "$source_root" ]]; then
-  source_root="$(cd "$source_root" && pwd -P)"
-  source_root_in="/workspace/$(basename "$source_root")"
-  [[ "$repo" == "$source_root/"* ]] || {
-    say "run.sh: --repo must be inside --source-root"; exit 2; }
-  also+=("$source_root")
-fi
 
 # Empty host mountpoints are shared by concurrent lane containers.
 check_mountpoint() {
@@ -112,8 +99,6 @@ check_mountpoint() {
     fi
   fi
 }
-check_mountpoint "$repo"
-
 if ! ticket_json="$(node --input-type=module -e '
   import {pathToFileURL} from "node:url";
   const {getTicket} = await import(pathToFileURL(process.argv[1]));
@@ -150,6 +135,38 @@ if [[ -z "$module" ]]; then
   exit 2
 fi
 
+# The ticket declares its repository as the first component of its module.
+# No project filter, repository map or fallback to a different repository.
+source_root_in=""
+if [[ -n "$source_root" ]]; then
+  source_root="$(cd "$source_root" && pwd -P)"
+  component="${module%%/*}"
+  [[ "$component" != . && "$component" != .. && "$component" != "$module" ]] || {
+    say "run.sh: module must name a repository/path inside --source-root"; exit 2; }
+  declared="$source_root/$component"
+  [[ -d "$declared/.git" ]] || { say "run.sh: ticket module has no source checkout: $declared"; exit 2; }
+  declared="$(cd "$declared" && pwd -P)"
+  [[ "$declared" == "$source_root/"* ]] || { say "run.sh: module escapes --source-root"; exit 2; }
+  [[ -z "$repo" || "$(cd "$repo" && pwd -P)" == "$declared" ]] || {
+    say "run.sh: --repo disagrees with the ticket module"; exit 2; }
+  repo="$declared"
+  source_root_in="/workspace/$(basename "$source_root")"
+  project_dir="$source_root_in/${repo#"$source_root/"}"
+else
+  [[ -d "$repo/.git" ]] || { say "run.sh: --repo must be a primary Git checkout"; exit 2; }
+  repo="$(cd "$repo" && pwd -P)"
+  source_root="$(dirname "$repo")"
+  project_dir="/workspace/$(basename "$repo")"
+fi
+worktree="$source_root/.worktrees/$ticket"
+# Retained or foreign work must never be reset by a fresh dispatch.
+[[ ! -L "$source_root/.worktrees" && ! -L "$worktree" ]] || {
+  say "run.sh: worktree path is a symlink; refusing before claim"; exit 2; }
+if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
+  say "run.sh: retained worktree at $worktree; inspect it before retrying"; exit 2
+fi
+LANE_WORKTREE="/workspace/$ticket"
+
 planning_admission() {
   [[ -n "$planning_result" ]] || return 0
   python3 "$TOOLING_ROOT/planning/admit.py" --result "$planning_result" \
@@ -165,22 +182,23 @@ RUNS_FOLDER="$(node "$TOOLING_ROOT/lane-launcher/scope.mjs" "$RUNS_FOLDER" "$dis
 mkdir -p "$RUNS_FOLDER"
 # Resolve symlinks before passing the directory to Docker and to workflow nodes.
 RUNS_FOLDER="$(cd "$RUNS_FOLDER" && pwd -P)"
-# Worktrees stay outside the tooling repository mounted read-only.
-WT_ROOT="$RUNS_FOLDER/worktrees"
-mkdir -p "$WT_ROOT"
-say "run.sh: sources RO: ${source_root:-$repo}"
-say "run.sh: worktree RW: $WT_ROOT/wt-$ticket"
-say "run.sh: Git metadata RW: $repo/.git"
+if [[ -n "$source_root_in" ]]; then
+  say "run.sh: sources RO: $source_root"
+else
+  say "run.sh: sources RO: $repo"
+fi
+say "run.sh: worktree RW: $worktree (private .git)"
 
-mounts=(--mount "$repo" --mount-rw "$repo/.git")
-
+mounts=(--mount "$repo")
+[[ -z "$source_root_in" ]] || mounts=(--mount "$source_root")
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
-  [[ "$extra" != "$repo" ]] || continue
+  [[ "$extra" != "$source_root" && "$extra" != "$repo" ]] || continue
   check_mountpoint "$extra"
   mounts+=(--mount "$extra")
 done
+
 git_ssh=""
 # The Git key is visible to every node; prompt restrictions are not isolation.
 if [[ -f "$ssh_dir/id_ed25519" ]]; then
@@ -197,7 +215,7 @@ cleanup() {
   [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
 }
 trap cleanup EXIT
-for m in "$repo" "$ssh_dir" ${also[@]+"${also[@]}"}; do
+for m in "$repo" "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"}; do
   point="$TOOLING_ROOT/$(basename "$m")"
   [[ " ${mounts[*]} " == *" $m "* ]] || continue
   check_mountpoint "$m"
@@ -274,7 +292,7 @@ equill_vars=(
     --var "EQUILL_RULES=${EQUILL_RULES:-none}"
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
-    --var "LANE_WT_ROOT=$WT_ROOT"
+    --var "LANE_WORKTREE=$LANE_WORKTREE"
     --var "EQUILL_PROJECT=$project"
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
@@ -282,6 +300,10 @@ equill_vars=(
 )
 say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
+# Only this ticket directory is exposed with write access. Clone happens after claim.
+check_mountpoint "$worktree"
+mkdir -p "$worktree" "$TOOLING_ROOT/$ticket"
+mounts+=(--mount-rw "$worktree")
 cd "$TOOLING_ROOT"
 planning_admission
 # Admission's service identity belongs to the host check, not lane agents.
@@ -299,7 +321,6 @@ medulla \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
-  --var "repository_git_dir=/workspace/.git" \
   --var "source_root=$source_root_in" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \

@@ -18,11 +18,16 @@ class SourceMountTests(unittest.TestCase):
             sibling = root / 'sources/companion'
             tooling = root / 'tooling'
             runs = root / 'runs'
-            for folder in (repo, sibling / '.git', tooling / 'repo',
-                           tooling / 'sources', tooling / '.git', tooling / 'lane/bin', runs):
+            wt = root / 'sources/.worktrees/fixture'
+            for folder in (repo, sibling / '.git', tooling / 'fixture', wt,
+                           tooling / 'sources', tooling / 'lane/bin', runs):
                 folder.mkdir(parents=True, exist_ok=True)
             (repo / '.ntkrc').write_text('{"target_branch":"develop"}\n')
             (repo / 'README.md').write_text('original\n')
+            (repo / '.githooks').mkdir()
+            hook = repo / '.githooks/pre-commit'
+            hook.write_text('#!/bin/sh\necho ran >> "$MEDULLA_RUN_DIR/hook-ran"\n')
+            hook.chmod(0o755)
             (sibling / 'README.md').write_text('context\n')
             def git(*args):
                 return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
@@ -31,44 +36,46 @@ class SourceMountTests(unittest.TestCase):
             git('-c', 'user.name=fixture', '-c', 'user.email=fixture@local',
                 '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial')
             initial = git('rev-parse', 'HEAD')
-            git('remote', 'add', 'origin', '/workspace/repo')
+            git('remote', 'add', 'origin', '/workspace/sources/repo')
             (tooling / 'lane/bin/ticket-outcome.mjs').write_text(
                 '// Local stand-in: this test never contacts NTK.\nconsole.log("fixture status");\n')
             (runs / 'create.sh').write_text(shell_body('create_worktree'))
             (runs / 'cleanup.sh').write_text(shell_body('cleanup'))
             script = '''set -euo pipefail
 trap 'cat "$MEDULLA_RUN_DIR/"*.log 2>/dev/null || true' EXIT
-for source in /workspace/repo/README.md /workspace/sources/repo/README.md /workspace/sources/companion/README.md; do
+for source in /workspace/sources/repo/README.md /workspace/sources/companion/README.md /workspace/sources/repo/.git/config /workspace/sources/repo/.git/index; do
   if (printf forbidden >> "$source") 2>/dev/null; then
     echo "source is writable: $source"; exit 1
   fi
 done
 bash "$MEDULLA_RUN_DIR/create.sh" > "$MEDULLA_RUN_DIR/create.log"
 grep -q '<signal:READY>' "$MEDULLA_RUN_DIR/create.log"
-wt="$LANE_WT_ROOT/wt-$ticket_id"
-test "$(cat "$wt/../companion/README.md")" = context
+wt="$LANE_WORKTREE"
+test -d "$wt/.git"
+test "$(cat /workspace/sources/companion/README.md)" = context
 printf 'candidate\n' >> "$wt/README.md"
 git -C "$wt" add README.md
-git -C "$wt" -c user.name=fixture -c user.email=fixture@local -c core.hooksPath=/dev/null commit -qm candidate
+git -C "$wt" -c user.name=fixture -c user.email=fixture@local commit -qm candidate
+test "$(cat "$MEDULLA_RUN_DIR/hook-ran")" = ran
+saved="$(git -C "$wt" rev-parse HEAD)"
 test "$(git -C "$wt" rev-list --count origin/develop..HEAD)" = 1
-# A repeated start must preserve both the saved commit and its registration.
+# A repeated start must preserve the saved checkout.
 bash "$MEDULLA_RUN_DIR/create.sh" > "$MEDULLA_RUN_DIR/repeat.log"
 grep -q '<signal:BRANCH_HAS_WORK>' "$MEDULLA_RUN_DIR/repeat.log"
-git -C "$wt" rev-parse HEAD >/dev/null
+test "$(git -C "$wt" rev-parse HEAD)" = "$saved"
 bash "$MEDULLA_RUN_DIR/cleanup.sh"
-test ! -d "$wt"
-test "$(cat /workspace/repo/README.md)" = original
+test "$(git -C "$wt" rev-parse HEAD)" = "$saved"
+test "$(cat /workspace/sources/repo/README.md)" = original
 echo 'PASS: source writes denied; context readable; worktree commit and cleanup succeed'
 '''
-            env = dict(project_dir='/workspace/repo', repository_git_dir='/workspace/.git',
+            env = dict(project_dir='/workspace/sources/repo',
                        source_root='/workspace/sources', ticket_id='fixture', project_name='fixture',
                        TOOLING_ROOT='/workspace', MEDULLA_RUN_DIR=str(runs),
-                       LANE_WT_ROOT=str(runs / 'worktrees'))
+                       LANE_WORKTREE='/workspace/fixture')
             args = ['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'bash']
             for source, target, mode in ((tooling, '/workspace', 'ro'),
                                          (root / 'sources', '/workspace/sources', 'ro'),
-                                         (repo, '/workspace/repo', 'ro'),
-                                         (repo / '.git', '/workspace/.git', 'rw'),
+                                         (wt, '/workspace/fixture', 'rw'),
                                          (runs, str(runs), 'rw')):
                 args += ['-v', f'{source}:{target}:{mode}']
             for name, value in env.items():
