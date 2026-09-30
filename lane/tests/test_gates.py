@@ -179,6 +179,35 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--gate-command is required before claiming work", result.stderr)
 
+    def test_review_requires_nonempty_equill_contract(self):
+        bins = self.root / "bin"
+        bins.mkdir()
+        equill = bins / "equill"
+        equill.write_text('#!/bin/sh\nprintf "%s" "$QA_RESPONSE"\nexit "$QA_RC"\n')
+        equill.chmod(0o755)
+        worktrees = self.root / "worktrees"
+        worktrees.mkdir()
+        (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
+        self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
+                        TOOLING_ROOT=str(LANE.parent), LANE_WT_ROOT=str(worktrees))
+        for content, rc in (("", 0), (" \n", 0), ("fixture QA contract", 1),
+                            ("fixture QA contract", 0)):
+            with self.subTest(content=content, rc=rc):
+                self.env.update(QA_RESPONSE=json.dumps({"content": content}), QA_RC=str(rc))
+                result = subprocess.run(["bash", "-c", shell_body("prepare_review")],
+                                        cwd=self.repo, env=self.env, capture_output=True,
+                                        text=True, timeout=15)
+                contract = self.root / "run/artifacts/qa-contract.txt"
+                if content.strip() and rc == 0:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(contract.read_text().strip(), content)
+                    self.assertIn("<signal:SNAPSHOT>", result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("QA contract unavailable", result.stderr)
+                    self.assertFalse(contract.exists())
+                    self.assertNotIn("<signal:SNAPSHOT>", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
