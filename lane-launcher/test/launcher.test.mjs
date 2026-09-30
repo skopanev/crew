@@ -46,6 +46,8 @@ process.exit(1);
   assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
 });
 const queueReads = f => f.calls.filter(call => call.url.startsWith('/v1/tickets/next')).length;
+const countReads = f => f.calls.filter(call => call.method === 'GET' && call.url.startsWith('/v1/tickets?'));
+const queueQuery = f => new URL(f.calls.find(call => call.url.startsWith('/v1/tickets/next')).url, 'http://fixture');
 const runState = f => {
   const [runId] = fs.readdirSync(path.join(f.stateDir, 'runs'));
   return path.join(f.stateDir, 'runs', runId);
@@ -60,7 +62,7 @@ function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
     child.on('close', code => resolve({code, stdout, stderr}));
   });
 }
-async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, reportUploadFailure = false} = {}) {
+async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, reportUploadFailure = false, countFailure = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
@@ -106,7 +108,15 @@ console.log(JSON.stringify({result}));
     calls.push({method: req.method, url: req.url,
       body: body ? (req.headers['content-type']?.startsWith('application/json') ? JSON.parse(body) : body) : null});
     fs.appendFileSync(requests, `${req.method} ${req.url}\n`);
-    if (empty) { res.writeHead(204); res.end(); }
+    if (req.method === 'GET' && req.url.startsWith('/v1/tickets?')) {
+      const query = new URL(req.url, 'http://fixture');
+      assert.equal(query.searchParams.get('count'), 'true');
+      assert.equal(query.searchParams.get('all'), 'true');
+      res.writeHead(countFailure ? 503 : 200);
+      res.end(JSON.stringify(countFailure ? {error: 'count unavailable'} :
+        {count: empty ? 0 : query.searchParams.get('status') === 'open' ? 17 : 56}));
+    }
+    else if (empty) { res.writeHead(204); res.end(); }
     else if (req.url.startsWith('/v1/tickets/T1/start') && claimRefused) {
       res.writeHead(409); res.end('{"error":"fixture conflict"}');
     }
@@ -150,7 +160,7 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   let result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 1);
-  const query = new URL(f.calls[0].url, 'http://fixture');
+  const query = queueQuery(f);
   assert.equal(query.pathname, '/v1/tickets/next');
   for (const [key, value] of Object.entries({workspace: 'test', tag: 'crew',
     dry_run: 'true', has_module: 'true', strict: 'true'})) assert.equal(query.searchParams.get(key), value);
@@ -163,6 +173,7 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
+  assert.match(result.stdout, /Tickets with tags: 56 total · 17 open/);
   assert.equal(queueReads(f), 1);
 });
 test('claim refusal opens no tab and does not modify the ticket', async t => {
@@ -241,7 +252,9 @@ test('existing external Docker lane prevents a queue read', async t => {
   fs.writeFileSync(f.docker, JSON.stringify({workflow: 'lane', runFolder: scopeDirectory('/manual, runs', f.config.id)}));
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(f.calls.length, 0);
+  assert.equal(queueReads(f), 0);
+  assert.equal(countReads(f).length, 2);
+  assert.match(result.stdout, /Tickets with tags: 56 total · 17 open/);
 });
 test('another dispatcher and unscoped containers do not occupy this dispatcher', async t => {
   const f = await setup(t);
@@ -304,7 +317,17 @@ test('empty queue leaves Herdr tabs unchanged', async t => {
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /no open tickets/);
+  assert.match(result.stdout, /Tickets with tags: 0 total · 0 open/);
   assert.ok(!fs.readFileSync(f.events, 'utf8').includes('create'));
+});
+test('count failure reports unavailable and still dispatches the next ticket', async t => {
+  const f = await setup(t, {countFailure: true});
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /Tickets with tags: unavailable/);
+  assert.match(result.stdout, /Starting new one with ticket: T1/);
+  assert.equal(queueReads(f), 1);
+  assert.ok(f.calls.some(call => call.url.startsWith('/v1/tickets/T1/start')));
 });
 test('lock refuses a second dispatcher before it selects work', async t => {
   const f = await setup(t);
@@ -340,17 +363,26 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
   assert.equal(lines[0], 'Running lanes 0 of 1');
-  assert.equal(lines[1], 'checking params:');
-  assert.equal(lines[2], '  tags: open, agent-ready');
-  assert.equal(lines[3], '  prefer: KYC → ceo60 → KYT');
-  assert.equal(lines[4], 'Starting new one with ticket: T1 (preview: запуск отключён)');
-  const query = new URL(f.calls[0].url, 'http://fixture');
+  assert.equal(lines[1], 'Tickets with tags: 56 total · 17 open');
+  assert.equal(lines[2], 'checking params:');
+  assert.equal(lines[3], '  tags: open, agent-ready');
+  assert.equal(lines[4], '  prefer: KYC → ceo60 → KYT');
+  assert.equal(lines[5], 'Starting new one with ticket: T1 (preview: запуск отключён)');
+  const query = queueQuery(f);
   assert.equal(query.searchParams.get('tag'), 'open,agent-ready');
   assert.equal(query.searchParams.get('prefer'), 'KYC,ceo60,KYT');
   assert.equal(query.searchParams.get('strict'), 'false');
   assert.equal(query.searchParams.get('dry_run'), 'true');
   assert.equal(query.searchParams.has('project'), false);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 3);
+  for (const call of countReads(f)) {
+    const countQuery = new URL(call.url, 'http://fixture');
+    assert.equal(countQuery.searchParams.get('workspace'), 'test');
+    assert.equal(countQuery.searchParams.get('tag'), 'open,agent-ready');
+    assert.equal(countQuery.searchParams.get('strict'), 'false');
+    assert.equal(countQuery.searchParams.has('project'), false);
+    assert.equal(countQuery.searchParams.has('prefer'), false);
+  }
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
   assert.deepEqual(fs.readdirSync(path.join(f.stateDir, 'runs')), []);
 });
@@ -365,8 +397,8 @@ test('--dry-run overrides live config, previews once and never calls Herdr or cl
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /T1 \(preview: запуск отключён\)/);
   assert.doesNotMatch(result.stdout, /pause /);
-  assert.equal(f.calls.length, 1);
-  const query = new URL(f.calls[0].url, 'http://fixture');
+  assert.equal(f.calls.length, 3);
+  const query = queueQuery(f);
   assert.equal(query.pathname, '/v1/tickets/next');
   assert.equal(query.searchParams.get('dry_run'), 'true');
   assert.ok(!fs.existsSync(f.events));
@@ -400,7 +432,7 @@ test('preview loop repeats after its interval and Ctrl+C releases the dispatcher
     child.once('error', error => { clearTimeout(timer); reject(error); });
   });
   assert.equal(code, 0, errors);
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 6);
   assert.ok(!fs.existsSync(f.events));
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {nextTicket, credentials, claimTicket, reopenStartupClaim} from './ntk.mjs';
+import {nextTicket, countTickets, credentials, claimTicket, reopenStartupClaim} from './ntk.mjs';
 import {save, read, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
 import {scopeDirectory, runScope, validateId} from './scope.mjs';
 
@@ -122,6 +122,11 @@ export async function tick(config) {
   const active = activeCount(config, containers, panes);
   divider();
   console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  try {
+    const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
+    const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
+    console.log(`Tickets with tags: ${paint('accent', total)} total · ${paint('accent', open)} open`);
+  } catch (error) { console.error(paint('red', `Tickets with tags: unavailable (${error.message})`)); }
   if (active >= config.limit) return;
   const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
