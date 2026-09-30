@@ -112,10 +112,9 @@ function snapshots(config) {
 
 function preflight(config) {
   credentials();
-  for (const bin of config.launchLanes ? ['node', 'medulla', 'jq'] : ['node']) {
+  for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
   }
-  return snapshots(config);
 }
 
 export async function tick(config) {

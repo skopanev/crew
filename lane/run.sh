@@ -74,7 +74,7 @@ fi
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
 [[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
 [[ -f "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an existing shared CBM connector"; exit 2; }
-(( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required before claiming work"; usage; }
+(( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
 for command in "${gate_commands[@]}"; do
   [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
@@ -108,29 +108,10 @@ if ! ticket_json="$(node --input-type=module -e '
 fi
 # An explicit module asserts the ticket's module; it cannot replace it.
 stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
-if [[ -n "$module" ]]; then
-  if [[ -z "$stored" ]]; then
-    say "run.sh: ticket $ticket declares no module, and --module cannot supply one."
-    say "        Set the module on the ticket; the launcher only asserts it."
-    exit 2
-  fi
-  if [[ "$module" != "$stored" ]]; then
-    say "run.sh: --module disagrees with the ticket."
-    say "        ticket $ticket says: $stored"
-    say "        --module says:       $module"
-    say "        Refusing before any side effect. Fix the ticket or drop --module."
-    exit 2
-  fi
-  say "run.sh: module asserted: $stored"
-fi
+[[ -n "$stored" ]] || { say "run.sh: ticket $ticket declares no module; set it on the ticket"; exit 2; }
+[[ -z "$module" || "$module" == "$stored" ]] || {
+  say "run.sh: --module $module disagrees with ticket module $stored"; exit 2; }
 module="$stored"
-if [[ -z "$module" ]]; then
-  say "run.sh: ticket $ticket declares no module."
-  say "        A lane judges scope against the module and loads its contract by it;"
-  say "        with neither, it would work confidently against a boundary nobody drew."
-  say "        Set the module on the ticket, then run this again."
-  exit 2
-fi
 
 # The ticket declares its repository as the first component of its module.
 # No project filter, repository map or fallback to a different repository.
@@ -151,7 +132,7 @@ project_dir="$source_root_in/${repo#"$source_root/"}"
 worktree="$source_root/.worktrees/$ticket"
 # Retained or foreign work must never be reset by a fresh dispatch.
 [[ ! -L "$source_root/.worktrees" && ! -L "$worktree" ]] || {
-  say "run.sh: worktree path is a symlink; refusing before claim"; exit 2; }
+  say "run.sh: worktree path is a symlink; startup refused"; exit 2; }
 if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
   say "run.sh: retained worktree at $worktree; inspect it before retrying"; exit 2
 fi
@@ -209,7 +190,7 @@ done
 
 export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
 if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
-  say "run.sh: Docker image $MEDULLA_IMAGE is unavailable; refusing before the claim."
+  say "run.sh: Docker image $MEDULLA_IMAGE is unavailable; startup refused."
   say "        Build the lane image from the Crew repository before retrying."
   exit 2
 fi
@@ -228,7 +209,7 @@ if ! docker run --rm --entrypoint python3 \
      -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
      -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
      "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"; then
-  say "run.sh: shared CBM is unavailable; refusing before the claim."
+  say "run.sh: shared CBM is unavailable; startup refused."
   exit 2
 fi
 say "run.sh: shared codebase memory connected"
@@ -250,7 +231,7 @@ bridge_pid="$(cat "$bridge_dir/bridge.pid" 2>/dev/null || true)"
 if [[ -z "$bridge_pid" ]] || ! kill -0 "$bridge_pid" 2>/dev/null \
    || [[ "$(cat "$bridge_dir/bridge.identity" 2>/dev/null || true)" != "lane:$bridge_pid" ]]; then
   say "run.sh: Equill bridge is unavailable or predates the fixed lane identity."
-  say "        Stop the old bridge when unused, then retry; refusing before claim."
+  say "        Stop the old bridge when unused, then retry; startup refused."
   exit 2
 fi
 

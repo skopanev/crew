@@ -1,7 +1,6 @@
 {
   "id": "my-project",
   "workspace": "",
-  "project": "",
   "tags": ["agent-ready"],
   "strict": false,
   "launchLanes": false,

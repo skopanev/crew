@@ -178,7 +178,7 @@ class GateTests(unittest.TestCase):
                                  "--cbm-mcp-command", str(self.root / "shared-cbm.py")],
                                 env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("--gate-command is required before claiming work", result.stderr)
+        self.assertIn("--gate-command is required", result.stderr)
 
     def test_launcher_rejects_removed_repository_flags(self):
         # Passthrough would otherwise hand Medulla a writable source mount.

@@ -1,79 +1,32 @@
-# Самодостаточный образ полосы. Базы медуллы здесь НЕТ намеренно: наследование
-# от неё привязывало нас к чужому образу, который отстаёт молча - внутри
-# оказалась medulla 4.76.4 при 4.90 на хосте, разрыв в четырнадцать версий, и
-# все замеры о шаблонах и сигналах описывали не тот движок, который исполняет.
-# Здесь всё ставится явно и видно одним взглядом.
+# Lane runtime; CBM and Equill remain host services.
 FROM node:24-trixie-slim
 
 ARG TARGETARCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Архитектура определяется, а не предполагается: жёсткий arm64 ломал сборку на
-# обычном linux/amd64 либо клал внутрь двоичные файлы не той архитектуры.
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "$arch" in arm64|aarch64) echo arm64 ;; amd64|x86_64) echo amd64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac > /tmp/arch
 
-# git и ssh нужны посадке, python3 - движку, jq - хукам.
-# CBM lives on the host; the container only needs Python for its connector.
-# gcc с заголовками - ЛИНКЕР ДЛЯ RUST, и без него полоса такой репозиторий не
-# проверяет. Сам тулчейн в образ не кладём: он приезжает с хоста оверлеем
-# медуллы (~/.cargo и ~/.rustup симлинками в ~/.medulla/container/), и тогда
-# кодер компилирует ТЕМ ЖЕ rustc, что и человек, с уже прогретым кэшем крейтов.
-# А вот линковать нечем: rustc зовёт системный cc, и без него не собирается
-# даже cargo check - сборочные скрипты зависимостей (proc-macro2, quote, libc)
-# сами исполняемые, "No such file or directory (os error 2)" на каждом.
-# Замерено на ntk: с этой строкой cargo check 29s и cargo test 20 passed,
-# оба --offline. Без неё кодер честно доложил, что проверить компиляцией не
-# может, и пошёл качать rustup внутрь контейнера - гигабайт на каждый прогон.
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       ca-certificates curl git openssh-client python3 python3-venv jq ripgrep unzip less procps \
       gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# GIT ДОЛЖЕН ПРИНЯТЬ ПРИМОНТИРОВАННЫЕ РЕПОЗИТОРИИ. Docker Desktop отдаёт тома с
-# владельцем root, и git отказывается: "fatal: detected dubious ownership in
-# repository at /workspace/<repo>". Подгонка uid этого НЕ решает: владелец
-# внутри всё равно root.
-#
-# ФАЙЛОМ, А НЕ ПЕРЕМЕННЫМИ. Базовый образ медуллы нёс это в GIT_CONFIG_COUNT и
-# ключах, и мы сначала повторили - но окружение вычищают. Замер: проверяльщик
-# scripts/lib/shared-types-source.cli.ts СПЕЦИАЛЬНО удаляет
-# GIT_CONFIG_COUNT, чтобы "проба не наследовала git-контекст вызывающего", -
-# и вместе с ним исчезает всё наше доверие: линковка shared-types падает с
-# просьбой добавить safe.directory, установка не проходит, посадка встаёт на
-# pre-commit. Файл системной конфигурации так не отнимешь.
+# System Git trust survives repository hooks that clear Git environment variables.
 RUN git config --system --add safe.directory /workspace \
  && git config --system --add safe.directory '*'
 
-# ── ДВИЖОК ───────────────────────────────────────────────────────────────────
-# Ставится КОММИТОМ, а не "последним": последний выходит по нескольку раз в
-# день, и образ, собранный дважды подряд, оказывался разным. Коммит передаёт
-# build-image.sh, читая его с хоста - так снаружи и внутри работает один движок.
 RUN python3 -m venv /opt/medulla \
  && /opt/medulla/bin/pip install --no-cache-dir -q \
       "git+https://github.com/skopanev/medulla.git" \
  && ln -s /opt/medulla/bin/medulla /usr/local/bin/medulla
-# И ЗАПРЕТ САМООБНОВЛЕНИЯ. init-docker.sh, который монтирует медулла, на КАЖДОМ
-# старте тянет main и ставит его поверх - для образа с плавающей версией это
-# лечение, для нашего пина на коммит хоста это отмена пина: контейнер уехал бы
-# на HEAD, а проверка версий в run.sh отрабатывает ДО старта и этого не увидит.
-# Обновление приходит пересборкой, и только ей.
+# Update Medulla by rebuilding the image.
 ENV MEDULLA_UPGRADE_ON_START=0
 
-# ── ХАРНЕССЫ ─────────────────────────────────────────────────────────────────
-# Каналом, а не версией: claude - stable, тот же, что объявлен в настройках
-# полосы ("autoUpdatesChannel": "stable"). У codex канала stable нет, есть
-# latest и alpha.
 RUN npm i -g --silent "@anthropic-ai/claude-code@stable" "@openai/codex@latest" "opencode-ai@latest"
 
-# ── ИНСТРУМЕНТЫ ──────────────────────────────────────────────────────────────
-# CBM is supplied as a stdio connector to the shared host service.
-
-# RTK: переписывает команды оболочки в компактный эквивалент. Замер на хосте -
-# 123 тысячи команд, сэкономлено 66.9% вывода. Кодер делает по три десятка
-# вызовов за прогон, и это прямая экономия его контекста.
 RUN a="$(cat /tmp/arch)"; set -eux; \
     case "$a" in arm64) asset="rtk-aarch64-unknown-linux-gnu" ;; \
                  *)     asset="rtk-x86_64-unknown-linux-musl" ;; esac; \
@@ -83,63 +36,40 @@ RUN a="$(cat /tmp/arch)"; set -eux; \
  && install -m 755 "$(find /tmp -maxdepth 2 -type f -name rtk | head -1)" /usr/local/bin/rtk \
  && rm -rf /tmp/rtk.tgz
 
-# Status-only HTTP CLI, including atomic claim with --claim.
 COPY lane-launcher/ntk-status lane-launcher/ntk-status.mjs lane-launcher/ntk.mjs /usr/local/bin/
 RUN chmod 755 /usr/local/bin/ntk-status
 
-# ── ПРОСЛОЙКИ ────────────────────────────────────────────────────────────────
-# equill - бинарь macOS; внутри он может быть только клиентом моста к хосту.
 COPY lane/bridge/equill-shim.sh /usr/local/bin/equill
 RUN chmod 755 /usr/local/bin/equill
 
-# ПОЛЬЗОВАТЕЛЬ С UID ХОСТА, А НЕ С ПРОИЗВОЛЬНЫМ. Репозитории монтируются с
-# хоста, и git отказывается работать с чужим по владельцу деревом:
-# "fatal: detected dubious ownership in repository at /workspace/<repo>" - на
-# этом встал fetch, origin/<ветка> не появился, и узел доложил NO_TARGET_BRANCH.
-# Собирать так: docker build --build-arg USER_UID=$(id -u) -t medulla-crew .
-# Если uid уже занят (в node:24 это node с 1000), переименовываем существующего,
-# а не заводим второго - так же делает сама медулла в своём базовом образе.
+# Match the host UID for files written into mounted checkouts.
 ARG USER_UID=501
 RUN if getent passwd ${USER_UID} >/dev/null; then \
       existing="$(getent passwd ${USER_UID} | cut -d: -f1)"; \
       usermod -l medulla "$existing"; \
       usermod -d /home/medulla -m medulla; \
-      # usermod -l переименовывает ПОЛЬЗОВАТЕЛЯ, но не его группу: в node:24
-      # uid 1000 это node:node, и после переименования chown medulla:medulla
-      # падает на "invalid group". Видно только там, где uid хоста совпал с
-      # существующим - на маке с uid 501 срабатывает ветка useradd, которая
-      # заводит группу сама.
       groupmod -n medulla "$(id -gn medulla)" 2>/dev/null || true; \
     else \
       useradd -m -u ${USER_UID} -s /bin/bash medulla; \
     fi
 USER medulla
 
-# КАТАЛОГИ ДОМА СОЗДАЮТСЯ ЗАРАНЕЕ, И ЭТО НЕ КОСМЕТИКА. Медулла монтирует внутрь
-# отдельные ФАЙЛЫ - ~/.local/bin/claude, ~/.config/ntk и прочее, - а Docker
-# создаёт недостающие родительские каталоги от ROOT. После этого init-docker.sh
-# не может сделать mkdir $HOME/.local/share и раскладка учётных данных падает.
+# Create parents before Medulla mounts credentials and executables.
 RUN mkdir -p /home/medulla/.local/bin /home/medulla/.local/share \
              /home/medulla/.config /home/medulla/.cache /home/medulla/.medulla \
  && chown -R medulla:medulla /home/medulla
 
-# agy - третье место панели. Без него expert_review падал ЦЕЛИКОМ: два места
-# из трёх не стартовали ("binary not on PATH"), синтез не получал единогласия и
-# выдавал REJECT на каждом круге. Полоса сожгла три раунда работы кодера на
-# переделку того, что никто не смотрел, и ушла в TOO_MANY_ROUNDS.
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
-# Хуки репозиториев ходят через bun; без него посадка падала на pre-commit.
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/medulla/.bun/bin:/home/medulla/.local/bin:${PATH}"
 
-# ЦЕПЬЮ к /mnt/init-docker.sh, не заменой: он раскладывает учётные данные.
-# Файл монтирует медулла при запуске, поэтому его здесь нет и быть не должно.
+# Chain into Medulla credential setup.
 COPY --chown=medulla:medulla lane/bin/entrypoint.sh /usr/local/bin/lane-entrypoint.sh
 USER root
 RUN chmod 755 /usr/local/bin/lane-entrypoint.sh \
  && ln -s /home/medulla/.bun/bin/bun /usr/local/bin/bun
-# Repository lint uses these tools; install once rather than during a lane.
+# Repository checks use pinned OpenTofu and Gitleaks binaries.
 RUN set -eux; a="$(cat /tmp/arch)"; \
     case "$a" in \
       arm64) tofu_sha=e573979ba68a17fe7b881752051a694a7efcd970e39521f6a25775197861ed4d; \

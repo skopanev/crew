@@ -1,161 +1,106 @@
-# lane
+# Lane
 
-Configure Dolber in its selected `lane-launcher/*.json` file. `run.sh` receives
-those settings as arguments and does not load `lane/local.env`. Additional
-read-only repositories are mounted as they are; startup never fetches them.
+Implement one prepared NTK ticket, review it, land it, and set `to_test`.
 
-Ведёт один тикет от взятия до посадки внутри докера, под
-`--dangerously-skip-permissions`. Контейнер — единственная граница.
+## Launch
 
+Dolber reads a local JSON config and passes its settings to `run.sh`.
+Manual invocation uses the same settings:
+
+```sh
+./lane/run.sh \
+  --dispatcher-id <id> --ticket-id <ticket> --project <ntk-workspace> \
+  --source-root <source-workspace> --cbm-mcp-command <connector.py> \
+  --gate-command '<repository-check>' --ssh-dir <key-directory>
 ```
-run.sh --dispatcher-id <dolber-id> --ticket-id <id> --project <ntk workspace> --source-root <source-workspace> --cbm-mcp-command <shared-connector.py> --gate-command '<check>' --ssh-dir <key-directory>
-```
 
-The entire source workspace, including canonical `.git` directories, is read-only.
-The ticket module names its source repository. The lane creates a private checkout
-at `<source-workspace>/.worktrees/<ticket>` with its own `.git`, mounted writable
-at `/workspace/<ticket>`. Git fetch, commits and landing write only there.
-Run artifacts are also writable. Completed and failed checkouts are retained;
-a new launch refuses an existing nonempty checkout before claiming the ticket.
+Repeat `--gate-command` for additional checks and `--mount-ro` for additional
+read-only repositories. The repository comes from the first component of the
+ticket module. Its `.ntkrc.target_branch` is required; there is no branch default.
 
-## Граф
+The whole source workspace and canonical `.git` directories are read-only.
+The writable checkout is `<source-workspace>/.worktrees/<ticket>`, mounted at
+`/workspace/<ticket>`, with its own `.git`. Fetch, commits, and landing write
+there. Artifacts are writable separately. Existing nonempty checkouts are
+retained and rejected on a new launch.
 
-Смотреть командой, не по памяти — она рисует собранный файл:
+## Workflow
 
-```
+```sh
 medulla -w lane --graph
+medulla -w lane --validate
 ```
 
-Прямой путь: взять тикет, сделать ворктри, реализовать, панель из трёх
-ревьюеров, свести вердикты, посадить, убрать. Две петли: отказ панели
-возвращает к исполнителю до трёх раз; конфликт при посадке чинится и уходит
-**снова на панель** — сведённый код панель не видела.
+Claim → locate code with CBM → create checkout → implement → check → review
+with three agents → synthesize verdicts → land → cleanup → update status.
+Review blockers return to implementation for up to three rounds. Landing
+conflicts go through a fix and another check/review round.
 
-Всё, что пошло не так, идёт в `notify_failure`, всё, что получилось — в
-`notify_success`. Эти узлы сохраняют отчёт в `artifacts/failure.txt` или
-`artifacts/outcome.txt` и выводят его в поток прогона. Отказ завершает lane
-ошибкой; оператор разбирает причину и подхватывает работу с исправлениями.
-AgentBus для запуска и завершения lane не нужен.
+Dolber claims before opening the Herdr tab. The workflow adopts that receipt
+without a second claim; a manual lane claims at its first node. Startup failure
+returns a dispatcher claim to `open`. After adoption, workflow failure sets
+`blocked` and attaches the failure report. No confirmed claim means no status write.
+An uncertain claim or dispatch requires inspection before retrying.
 
-Optional progress notifications run on the host after lane completion. The
-`notify.mjs` script sends a single `CREW READY|FAILED|TIMEOUT` event through AgentBus
-to the configured messenger. No LLM is called by the script. The messenger delivers
-to its agreed Progress channel; queueing is not a Telegram delivery receipt.
-Configure `notify: {"to": "messenger-alias", "room": "conv.crew.notify", "from": "crew-notify-project"}`
-in the local Dolber JSON, or leave `notify` null to disable it. A notification
-failure is logged in `notification-error.json` and does not change the lane result.
+Checks run from the candidate repository before each review. Their commands,
+exit codes, tree/SHA, and log hashes are recorded under `artifacts/gates/`.
+Landing requires the checked and reviewed tree and runs native Git hooks.
+A moved target requires a rebase and another review; force push is unavailable.
 
-Manual use: `node notify.mjs config.json READY ticket-id "Ticket ready for test"`.
+After landing, `to_test` has three attempts with one-second pauses. Exhaustion
+fails the run and preserves `artifacts/landing.txt` and `to-test-errors.txt`.
+It does not reimplement or block an already landed ticket.
 
-## Правка
+Each nonblocking finding creates a `[FINIDING] <summary>` ticket in the same
+project/module, initially `blocked`, dependent on the source. It inherits all
+source tags plus `findings`; `finding-report.txt` carries the evidence. There
+is no count limit. Saved creation receipts prevent recreating a confirmed
+finding on an attachment retry. Finding publication failures leave the source
+in `to_test`.
 
-`workflow.yaml` правится напрямую. Проверка — `medulla -w workflow.yaml --validate`.
+## Agent context
 
-Переходы отказного узла проверяются без очереди и Docker:
-`python3 -m unittest discover -s lane/tests -v` (из корня Crew).
-Проверка исполняет настоящий shell узла с локальными заглушками внешних команд.
-До подтверждённого claim любой отказ завершает прогон ошибкой без изменения тикета.
-После claim обычные отказы переводят работу в blocked и прикрепляют полный отчёт
-к NTK: причина, отчёты LLM и ревью. Копия остаётся в artifacts/ntk-failure-report.txt.
-После посадки перевод в to_test делает до трёх попыток с паузой 1 секунду.
-После третьей ошибки — неуспешный выход; artifacts/landing.txt сохраняет SHA,
-artifacts/to-test-errors.txt — ошибки API. Код заново не выполняется, blocked
-не выставляется: требуется восстановить статус уже посаженной работы.
+Equill supplies contracts and memory. Each agent's `pre` step obtains its role
+context; hooks also deliver memory to Claude. Implementation uses
+`crew-lane-coder`; the review panel uses `crew-lane-qa`.
 
-Перед запуском оператор задаёт команды проверок через повторяемый
-`--gate-command`. Они выполняются из корня кандидата перед каждым ревью.
-Без команд запуск отказывает до чтения очереди. Код возврата, команда, cwd,
-Git tree и SHA кандидата, версии оболочки/Git/Python и SHA-256 логов сохраняются
-в `artifacts/gates/<id>/receipt.json`. Изменение кандидата или отказ проверки
-запрещает посадку; после чистого rebase lane снова идёт на проверки и ревью.
-Конкретные команды выбираются для репозитория; исключений для красных тестов нет.
-Артефакты локальные: серверная Attempt и защищённое хранилище доказательств
-ещё не подключены.
+Agents implement only the ticket's scope and acceptance criteria. CBM locates
+relevant code and checks; findings must be verified against the current source
+or checkout. Missing inputs stop the lane with a concrete blocker.
 
-## Промпты
+The shared host CBM connector is configured through `cbmMcpCommand`. No database
+copy, local daemon, or worktree indexing is created. Startup checks the connector
+from the container. Equill is accessed through the host bridge under the fixed
+`lane` identity, allowing only `context` and `search`.
 
-В промпте только то, чего контракт знать не может: координаты, где ворктри,
-чего нет в этом окружении, какой сигнал печатать, как прогон сюда попал.
+NTK reads, claim, status updates, and attachments use HTTP. Shell nodes retain
+`artifacts/ticket.json` for deterministic checks; agent prompts use the ticket
+reader. Codex credentials remain managed by its broker.
 
-Процесс приезжает из Equill: каждая агентная нода в `pre:` тянет контекст по
-СВОЕЙ роли и процессу прогона в файл и читает его первым делом. Файлом, а не
-хуком — хуки читает только claude-code, а панель ходит на codex, claude-code и agy.
+The container is the filesystem boundary. The Git key is readable by agents;
+prompt restrictions on pushing are not a security boundary.
 
-Роли: исполнитель и починка конфликта — `crew-lane-coder`, панель — `crew-lane-qa`.
+## Logs and notifications
 
-## Сигналы
+Run artifacts include failure details, coder reports, review verdicts, and
+landing evidence. The worker displays logs in the ticket's Herdr tab. By default
+the tab remains open after completion; `closeTabOnExit` controls closure.
 
-`<signal:ИМЯ>текст</signal:ИМЯ>`, с начала строки. У агентной ноды `__default__`
-означает, что модель не напечатала известного тега, `__failed__` — что она не
-дошла до ответа. У шелловой решает код возврата.
+Optional host notifications use `notify.mjs`, with no LLM invocation:
 
-Вердикт панелиста — это **имя сигнала**, а не слово в тексте: движок кладёт в
-сообщение тело сигнала, и панелист без тега приезжает пустым. Два разных
-вердикта в одной строке вердиктом не считаются.
+```sh
+node notify.mjs config.json READY ticket-id "Ticket ready for test"
+```
 
-Кап раундов проверяется **до** печати сигнала: движок маршрутизирует по первому
-известному, и лимит, напечатанный после, не читается вовсе.
+Configure `notify: {"to":"messenger-alias","room":"conv.crew.notify","from":"crew-notify-project"}`
+in Dolber JSON, or leave it null. AgentBus queueing is not a Telegram delivery
+receipt. Notification failure is recorded without changing the lane outcome.
 
-## Границы
+## Verify
 
-Ключ монтируется на запись, и он попадает в окружение каждого тела — движок
-кладёт туда все переменные прогона. Значит агент технически может запушить мимо
-панели; запрет `Bash(*git push*)` в настройках прикрывает случайность, но не
-является границей: сопоставление идёт по строке команды. Настоящая граница —
-разделение ключей, read-only в контейнер и запись на хосте. Помечено в `run.sh`.
+```sh
+python3 -m unittest discover -s lane/tests -v
+```
 
-`equill` в контейнере — клиент хостового моста. AgentBus в образ не входит,
-моста и настроек доставки у lane нет. Текущие настройки MCP лежат в `hooks/`.
-
-Lane uses the **shared host CBM service**, through the existing Python stdio
-connector configured as `cbmMcpCommand` in Dolber (`--cbm-mcp-command` for
-`run.sh`). The same connector can be used by every dispatcher. Only the small
-connector script is copied into the run environment; no database is copied,
-mounted, reindexed, or started by lane. A read-only MCP handshake and search
-must succeed from the container before claiming a ticket.
-
-Codex and Claude receive generated configurations in `/tmp/codex-home` that
-point to this connector. CBM paths describe host repositories; agents must
-verify findings against the actual mounted repository or ticket worktree.
-Claude Sonnet and AGY review the contract, code and verification results without
-separate CBM configuration.
-
-Lane executes one prepared ticket. Planning owns reconnaissance, decomposition
-and cross-ticket coordination, completed before dispatch. Agents do not fetch
-other tickets or their attachments, traverse dependencies, or seek fresh approval.
-The local preflight uses scoped CBM and current code to locate the implementation
-and necessary checks. The coder implements only this ticket's acceptance criteria.
-Missing implementation inputs or contradictions in current code stop the lane
-with an exact blocker; they do not trigger another planning pass.
-
-After a successful landing and `to_test`, each nonblocking review finding creates a
-`[FINIDING] <finding summary>` ticket in the same project/module, with status `blocked`
-and a dependency on the source ticket. Its body is short; `finding-report.txt`
-contains the full findings and reviewer reports. No findings means no new ticket.
-Each finding inherits all source tags and adds `findings`, without duplicates.
-Closing the source does not reopen the finding: it stays `blocked` until explicitly
-changed, and Dolber does not select it.
-There is no ticket-count limit. Exact duplicate lines are collapsed. The run saves
-each new ID in `artifacts/finding-<hash>.json`; retrying an attachment uses that
-ticket. An unconfirmed create stops that finding for inspection instead of risking
-a duplicate; other findings are still published. Reporting failures leave the source
-ticket in `to_test`.
-
-NTK MCP не используется: после захвата shell сохраняет полный тикет в
-`artifacts/ticket.json`; захват, чтение и обновление исхода идут через HTTP. Авторизацию Codex обслуживает
-broker; `codex-home.sh` не копирует и не заменяет его `auth.json`.
-
-Хостовый мост Equill всегда исполняет запросы как `lane` и разрешает только
-`context` и `search`. Перед claim проверяются PID и `bridge.identity`:
-старый мост без фиксированного актора нужно остановить, когда он не используется,
-и повторить запуск. Сам пусковик работающий мост не останавливает.
-
-Докера внутри тоже нет, поэтому тикет, чья приёмка требует интеграционных
-тестов, этой полосе не по силам.
-
-## Прогоны
-
-`~/.medulla/lane-runs/crew-dispatchers/<dolber-id>/` — вне дерева репозитория, иначе `--cwd-ro` не даст
-писать. Медулла пишет туда всё сама: журнал, отрендеренные промпты, потоки
-ответов. Своего только `artifacts/`: вердикты панели, история раундов, тексты
-исходов прогона.
+Tests execute workflow shell nodes with local stubs; they do not select real
+queue tickets. The container isolation test is opt-in.
