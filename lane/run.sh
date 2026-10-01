@@ -7,6 +7,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --cbm-mcp-command <file> --gate-command <shell command> [...]
               [--module <module>]
               [--mount-ro <repo>]... [--ssh-dir <dir>]
+              [--image <image>] [--docker-engine]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
@@ -15,6 +16,8 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --cbm-mcp-command  existing Python stdio connector to the shared host CBM.
               The lane uses that service; it never copies or indexes a database.
   --module    ticket module; read from ntk when omitted
+  --image     lane runtime image; defaults to medulla-crew:latest
+  --docker-engine  enable the broker box's private Docker engine for tests
   --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.
   --planning-result  completed planning receipt; requires a fresh live Joppa
                      chain and age below 24h before this lane may start.
@@ -40,7 +43,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
-planning_result="" planning_task=""
+planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 also=()
 gate_commands=()
 passthrough=()
@@ -60,6 +63,7 @@ while (( $# )); do
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
+    --image) image="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -204,7 +208,7 @@ for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"}; do
   mkdir -p "$point"
 done
 
-export MEDULLA_IMAGE="${MEDULLA_IMAGE:-medulla-crew:latest}"
+export MEDULLA_IMAGE="$image"
 if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
   say "run.sh: Docker image $MEDULLA_IMAGE is unavailable; startup refused."
   say "        Build the lane image from the Crew repository before retrying."

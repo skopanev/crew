@@ -35,6 +35,8 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `cbmMcpCommand` | Absolute path to an existing Python stdio connector to the shared host CBM service; for example, the connector already used by a workspace box |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `gateCommands` | Required check commands run against the lane's candidate |
+| `image` | Lane runtime image; defaults to `medulla-crew:latest` |
+| `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
 
 The entire `sourceRoot`, including canonical Git metadata, is read-only.
 The first component of the ticket's NTK module names its source repository

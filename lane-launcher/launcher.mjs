@@ -17,7 +17,7 @@ const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.st
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
 export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [],
+    preferTags: [], readOnlyRepos: [], image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
@@ -38,6 +38,10 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   if (typeof config.strict !== 'boolean') throw new Error('strict must be true or false');
   if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');
   if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
+  if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
+  if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
+    throw new Error('image must be a Docker image reference');
+  }
   for (const field of ['module', 'assignee']) {
     if (config[field] != null && (typeof config[field] !== 'string' || !config[field].trim())) {
       throw new Error(`${field} must be a nonempty string or null`);
@@ -114,6 +118,9 @@ function preflight(config) {
   credentials();
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
+  }
+  if (config.launchLanes && config.dockerEngine && !command('medulla', ['--help']).includes('--docker-engine')) {
+    throw new Error('dockerEngine requires Medulla with --docker-engine support; no ticket was claimed');
   }
 }
 
