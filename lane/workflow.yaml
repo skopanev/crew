@@ -27,13 +27,15 @@ nodes:
       LAUNCH_CLAIM: '{{var:LAUNCH_CLAIM}}'
     timeout: 120
     on_signal:
+      CLAIMED: cbm_discovery
       CLAIM_REFUSED: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
-      __default__: cbm_discovery
+      __default__: notify_failure
     shell: |
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
+      printf '<signal:var key=RUN_ARTIFACTS>%s/artifacts</signal:var>\n' "$MEDULLA_RUN_DIR"
       rm -f "$MEDULLA_RUN_DIR/artifacts/claim.json"
       # Adopt the launcher claim; standalone runs claim once here.
       claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
@@ -77,6 +79,7 @@ nodes:
         exit 1
       fi
       rm -f "$_sc.err"
+      echo '<signal:CLAIMED>ticket claim confirmed</signal:CLAIMED>'
   cbm_discovery:
     timeout: 900
     env:
@@ -104,7 +107,8 @@ nodes:
       effort: high
       args: [-s, read-only]
     prompt: |
-      Read $MEDULLA_RUN_DIR/artifacts/scout-contract.txt and execute its steps.
+      Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
+      Artifacts: {{var:RUN_ARTIFACTS}}.
       Ticket: {{var:ticket_id}}. NTK workspace: {{var:project_name}}.
       Module: {{var:module_name}}.
       Source checkout: {{var:project_dir}}.
@@ -242,7 +246,8 @@ nodes:
       Current handoff: {{last.message}}
       Ticket {{var:ticket_id}} in workspace {{var:project_name}}:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
-      Read $MEDULLA_RUN_DIR/artifacts/scout.txt.
+      Read {{var:RUN_ARTIFACTS}}/scout.txt.
+      Artifacts: {{var:RUN_ARTIFACTS}}.
       Configured checks: {{var:gate_commands}}.
 
   prepare_review:
@@ -340,12 +345,12 @@ nodes:
       args:
       - '{{input.flag:-}}'
     prompt: |
-      Read $MEDULLA_RUN_DIR/artifacts/qa-contract.txt and execute its steps.
+      Read {{var:RUN_ARTIFACTS}}/qa-contract.txt and execute its steps.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
       Worktree: {{var:LANE_WORKTREE}}.
-      Input: $MEDULLA_RUN_DIR/artifacts/coder-report.txt; git diff --cached;
+      Input: {{var:RUN_ARTIFACTS}}/coder-report.txt; git diff --cached;
       ticket commits above origin/<target_branch> (.ntkrc).
-      Write $MEDULLA_RUN_DIR/artifacts/{{input.slug}}.md:
+      Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
       Or NONE. End with COVERAGE: <checked; not checked>.
@@ -627,7 +632,7 @@ nodes:
          restart git rebase onto origin/<target_branch>.
       2. Resolve conflicts preserving the ticket's AC and target-branch changes,
          stage resolved files and complete the rebase.
-      3. Run relevant checks and write $MEDULLA_RUN_DIR/artifacts/git-fix-report.txt
+      3. Run relevant checks and write {{var:RUN_ARTIFACTS}}/git-fix-report.txt
          with resolved files, commands, results and any remaining blocker.
       4. Emit OK when resolved and checks pass; otherwise GATE_FAIL with the blocker.
 
