@@ -123,22 +123,23 @@ export async function tick(config) {
   divider();
   console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   const countFilter = `workspace=${config.workspace}, tags=${config.tags.join(',') || '(any)'}, strict=${config.strict}`;
-  try {
-    const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
-    const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
-    console.log(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open`);
-  } catch (error) { console.error(paint('red', `Tickets with tags [${countFilter}]: unavailable (${error.message})`)); }
-  if (active >= config.limit) return;
   const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
     prefer: config.preferTags.length ? config.preferTags.join(',') : undefined,
     module: config.module ?? undefined, assignee: config.assignee ?? undefined,
     strict: config.strict, has_module: true, dry_run: true};
+  const candidate = active < config.limit ? await nextTicket(query) : undefined;
+  try {
+    const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
+    const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
+    const ready = candidate === null ? '0' : candidate ? '≥1' : 'not checked (lane limit)';
+    console.log(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
+  } catch (error) { console.error(paint('red', `Tickets with tags [${countFilter}]: unavailable (${error.message})`)); }
+  if (active >= config.limit) return;
   console.log('checking params:');
   console.log(`  tags: ${config.tags.join(', ') || '(any)'}`);
   console.log(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
-  const candidate = await nextTicket(query);
-  if (!candidate) { console.log('no open tickets matching dolber.json filters'); return; }
+  if (!candidate) return;
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('NTK returned a ticket without an id');
   console.log(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
   if (candidate.title) console.log(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
