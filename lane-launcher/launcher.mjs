@@ -122,11 +122,12 @@ export async function tick(config) {
   const active = activeCount(config, containers, panes);
   divider();
   console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  const countFilter = `workspace=${config.workspace}, tags=${config.tags.join(',') || '(any)'}, strict=${config.strict}`;
   try {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
     const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
-    console.log(`Tickets with tags: ${paint('accent', total)} total · ${paint('accent', open)} open`);
-  } catch (error) { console.error(paint('red', `Tickets with tags: unavailable (${error.message})`)); }
+    console.log(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open`);
+  } catch (error) { console.error(paint('red', `Tickets with tags [${countFilter}]: unavailable (${error.message})`)); }
   if (active >= config.limit) return;
   const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
