@@ -52,7 +52,7 @@ Preview output has this shape (the ID below is an example):
 
 ```text
 Running lanes 0 of 1
-Tickets with tags [workspace=example, tags=agent-ready, strict=false]: 56 total · 17 open
+Tickets with tags [workspace=example, tags=agent-ready, strict=false]: 56 total · 17 open · ready to work: ≥1
 checking params:
   tags: agent-ready
   prefer: bug → kyc → ceo60 → kyt
@@ -61,7 +61,7 @@ checking params:
 
 Each tick counts all tickets and open tickets matching the workspace, tags and strict setting via NTK's count endpoint, including when all lane slots are occupied. Open tickets can still have unmet dependencies or no module; this count does not mean they can all be dispatched. If counting fails, selection continues and the count reads `unavailable`.
 
-Preview uses `next?dry_run=true` and read-only ticket counts. It never claims or updates a ticket, creates a tab, or starts a lane. If the limit is reached it prints the counts and waits for the next interval. If no ticket matches, it prints `no open tickets matching dolber.json filters` instead of an ID.
+Preview uses `next?dry_run=true` and read-only ticket counts. It never claims or updates a ticket, creates a tab, or starts a lane. A null preview means `ready to work: 0`; any remaining open tickets are marked `(blocked)` by dispatch conditions. A returned candidate means `ready to work: ≥1`: next returns one ticket, not a queue count. At the lane limit, readiness reads `not checked (lane limit)` and no preview is requested.
 
 The selected ticket ID is bold cyan, followed by its title in yellow without bold. The lane count is bold green while capacity is available, and bold yellow when the limit is full. One cyan horizontal line starts each iteration. Labels, filters, preview and pause use normal terminal brightness; no text is dimmed. Errors are red. Redirected logs remain plain text. Set `FORCE_COLOR=1` to force color or `NO_COLOR=1` to disable it.
 
