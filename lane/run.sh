@@ -117,8 +117,8 @@ module="$stored"
 # No project filter, repository map or fallback to a different repository.
 source_root="$(cd "$source_root" && pwd -P)"
 component="${module%%/*}"
-[[ "$component" != . && "$component" != .. && "$component" != "$module" ]] || {
-  say "run.sh: module must name a repository/path inside --source-root"; exit 2; }
+[[ -n "$component" && "$component" != . && "$component" != .. ]] || {
+  say "run.sh: module must name a repository or repository/path inside --source-root"; exit 2; }
 repo="$source_root/$component"
 [[ -d "$repo/.git" ]] || { say "run.sh: ticket module has no source checkout: $repo"; exit 2; }
 repo="$(cd "$repo" && pwd -P)"

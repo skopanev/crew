@@ -51,10 +51,11 @@ class LaunchMountTests(unittest.TestCase):
             args = ['bash', str(tooling / 'lane/run.sh'), '--project', 'fixture',
                     '--source-root', str(sources), '--dispatcher-id', 'fixture',
                     '--cbm-mcp-command', str(root / 'connector.py'), '--gate-command', 'fixture-check']
-            for repo in ('app', 'infra'):
-                with self.subTest(repo=repo):
-                    env['TEST_MODULE'] = f'{repo}/src/module'
-                    ticket = f'{repo}-ticket'
+            for repo, module in [('app', 'app/src/module'), ('infra', 'infra/src/module'),
+                                 ('app', 'app'), ('infra', 'infra')]:
+                with self.subTest(module=module):
+                    env['TEST_MODULE'] = module
+                    ticket = f'{repo}-ticket' if '/' in module else f'{repo}-root-ticket'
                     result = subprocess.run(args + ['--ticket-id', ticket], env=env,
                                             capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -70,8 +71,17 @@ class LaunchMountTests(unittest.TestCase):
                     synced = json.loads((root / 'sync.json').read_text())
                     self.assertEqual(synced[0], str(sources))
                     self.assertEqual(synced[2], env.get('MEDULLA_IMAGE', 'medulla-crew:latest'))
-            # A startup sync failure never reaches Medulla or creates a checkout.
             output.unlink()
+            for module in ('.', '..', './app', '../app', '/app'):
+                with self.subTest(invalid_module=module):
+                    env['TEST_MODULE'] = module
+                    result = subprocess.run(args + ['--ticket-id', 'invalid-module'], env=env,
+                                            capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('module must name a repository', result.stderr)
+                    self.assertFalse(output.exists())
+            # A startup sync failure never reaches Medulla or creates a checkout.
+            env['TEST_MODULE'] = 'infra/src/module'
             env['TEST_SYNC_FAILURE'] = '2'
             result = subprocess.run(args + ['--ticket-id', 'sync-failed'], env=env,
                                     capture_output=True, text=True, timeout=10)
