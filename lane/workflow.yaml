@@ -155,6 +155,7 @@ nodes:
         exit 0
       fi
       git checkout -B "ticket-${ticket_id}" "origin/${target}"
+      git rev-parse HEAD > .git/lane-base
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
         bash scripts/install-git-hooks.sh

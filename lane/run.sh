@@ -178,7 +178,23 @@ else
 fi
 
 cleanup() {
+  local code=$? base head changes
+  if [[ "$code" -ne 0 && "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
+    if [[ -z "$(ls -A "$worktree")" ]]; then
+      rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
+    elif [[ -d "$worktree/.git" && -f "$worktree/.git/lane-base" ]]; then
+      if base="$(cat "$worktree/.git/lane-base" 2>/dev/null)" \
+        && head="$(git --no-optional-locks -C "$worktree" rev-parse HEAD 2>/dev/null)" \
+        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
+        && [[ -n "$base" && "$head" == "$base" && -z "$changes" ]]; then
+        if rm -rf -- "$worktree"; then
+          printf 'run.sh: removed unchanged worktree: %s\r\n' "$worktree"
+        fi
+      fi
+    fi
+  fi
   [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
+  return "$code"
 }
 trap cleanup EXIT
 for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"}; do
@@ -259,7 +275,14 @@ say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
 # Only this ticket directory is exposed with write access. Clone happens after claim.
 check_mountpoint "$worktree"
-mkdir -p "$worktree" "$TOOLING_ROOT/$ticket"
+mkdir -p "$(dirname "$worktree")" "$TOOLING_ROOT/$ticket"
+worktree_created=false
+if mkdir "$worktree" 2>/dev/null; then
+  worktree_created=true
+elif [[ ! -d "$worktree" || -L "$worktree" || -n "$(ls -A "$worktree")" ]]; then
+  say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"
+  exit 73
+fi
 mounts+=(--mount-rw "$worktree")
 cd "$TOOLING_ROOT"
 planning_admission

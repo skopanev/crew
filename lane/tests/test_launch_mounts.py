@@ -38,7 +38,8 @@ class LaunchMountTests(unittest.TestCase):
             for name, script in {
                 'docker': '#!/bin/sh\nexit 0\n',
                 'medulla': '#!/usr/bin/env python3\nimport json,os,sys\n'
-                           'open(os.environ["TEST_ARGS"],"w").write(json.dumps(sys.argv[1:]))\n',
+                           'open(os.environ["TEST_ARGS"],"w").write(json.dumps(sys.argv[1:]))\n'
+                           'sys.exit(int(os.environ.get("TEST_MEDULLA_FAILURE","0")))\n',
             }.items():
                 file = bins / name
                 file.write_text(script)
@@ -78,6 +79,13 @@ class LaunchMountTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse((sources / '.worktrees/sync-failed').exists())
             env.pop('TEST_SYNC_FAILURE')
+            # A failed Medulla startup leaves no unused checkout behind.
+            env['TEST_MEDULLA_FAILURE'] = '2'
+            result = subprocess.run(args + ['--ticket-id', 'unused-tree'], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertFalse((sources / '.worktrees/unused-tree').exists())
+            env.pop('TEST_MEDULLA_FAILURE')
             # --dry-run still probes CBM but never invokes source/index mutation.
             (root / 'sync.json').unlink()
             result = subprocess.run(args + ['--ticket-id', 'preview', '--dry-run'], env=env,
@@ -91,8 +99,8 @@ class LaunchMountTests(unittest.TestCase):
             env['TEST_MODULE'] = 'app/src/module'
             result = subprocess.run(args + ['--ticket-id', 'app-ticket'], env=env,
                                     capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode, 2)
-            self.assertIn('retained worktree', result.stderr)
+            self.assertEqual(result.returncode, 73)
+            self.assertIn('WORKTREE PREEXISTED', result.stderr)
             self.assertEqual(retained.read_text(), 'saved work\n')
             self.assertFalse(output.exists())
             # The landing target has no default: refuse before claim or Medulla.
