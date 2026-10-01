@@ -46,6 +46,28 @@ process.exit(1);
   assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
 });
 const queueReads = f => f.calls.filter(call => call.url.startsWith('/v1/tickets/next')).length;
+for (const forceColor of ['0', '1']) {
+  test(`startup stderr reaches saved result and notification (color=${forceColor})`, async t => {
+    const f = await setup(t);
+    const reason = '[sync] shared CBM refused tools/call: index worker ended with exit_nonzero';
+    fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\nprintf '%s\\n\\n' '${reason}' >&2\nexit 2\n`, {mode: 0o755});
+    fs.writeFileSync(path.join(f.bins, 'agentbus'), `#!${process.execPath}
+import fs from 'node:fs';
+fs.writeFileSync(process.env.TEST_NOTIFY, JSON.stringify(process.argv.slice(2)));
+`, {mode: 0o755});
+    const dir = path.join(f.root, 'worker');
+    fs.mkdirSync(dir);
+    const file = path.join(dir, 'launch.json'), sent = path.join(dir, 'sent.json');
+    save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture'}},
+      ticket: 'T1', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
+    await execute(worker, [file], {...f.env, FORCE_COLOR: forceColor, NO_COLOR: undefined, TEST_NOTIFY: sent});
+    assert.equal(read(path.join(dir, 'result.json')).error, reason);
+    assert.ok(read(sent).at(-1).includes(`CREW FAILED | T1 | ${reason} |`));
+    assert.ok(fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes(reason + '\n\n'));
+    assert.ok(!fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes('\x1b['));
+    assert.equal(f.calls.length, 0);
+  });
+}
 const countReads = f => f.calls.filter(call => call.method === 'GET' && call.url.startsWith('/v1/tickets?'));
 const queueQuery = f => new URL(f.calls.find(call => call.url.startsWith('/v1/tickets/next')).url, 'http://fixture');
 const runState = f => {

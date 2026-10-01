@@ -21,7 +21,7 @@ function announce(message) {
 }
 save(path.join(dir, 'worker.json'), {pid: process.pid, startedAt: new Date().toISOString()});
 const script = fileURLToPath(new URL('../lane/run.sh', import.meta.url));
-let child, signal;
+let child, signal, lastStderr;
 const stop = value => {
   signal = value;
   if (child?.pid) {
@@ -44,17 +44,20 @@ try {
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
     // Keep original bytes on disk; presentation colors apply only to the tab.
     stream.on('data', data => fs.writeSync(log, data));
-    if (color) {
+    if (color || stream === child.stderr) {
       createInterface({input: stream, crlfDelay: Infinity}).on('line', line => {
-        target.write(formatLaneLine(line, true) + '\n');
+        if (stream === child.stderr && line.trim()) lastStderr = line;
+        if (color) target.write(formatLaneLine(line, true) + '\n');
       });
-    } else stream.on('data', data => target.write(data));
+    }
+    if (!color) stream.on('data', data => target.write(data));
   }
   const outcome = await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code, receivedSignal) => resolve({code, signal: receivedSignal || signal}));
   });
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
+  if (result.status === 'failed' && lastStderr) result.error = lastStderr;
 } catch (error) {
   result = {status: 'failed', error: error.message};
 } finally {
