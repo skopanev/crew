@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /mnt/init-docker.sh "$@"
+exec /usr/local/bin/broker-box-entry /mnt/init-docker.sh "$@"

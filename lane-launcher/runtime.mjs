@@ -34,6 +34,8 @@ export function herdr(config, args) {
 export function laneArgs(config, ticket) {
   return ['--ticket-id', ticket, '--project', config.workspace, '--source-root', config.sourceRoot,
     '--dispatcher-id', config.id,
+    '--image', config.image,
+    ...(config.dockerEngine ? ['--docker-engine'] : []),
     '--cbm-mcp-command', config.cbmMcpCommand, '--ssh-dir', config.sshDir,
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];

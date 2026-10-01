@@ -60,13 +60,16 @@ an attached report. It does not trigger another implementation round.
 ## Build and checks
 
 ```sh
+broker box build
 docker build --build-arg USER_UID=$(id -u) -t medulla-crew:latest .
 medulla -w lane --validate
 node --test lane-launcher/test/*.test.mjs
 python3 -m unittest discover -s lane/tests -v
 ```
 
-The image provides the engine, agent harnesses, and repository check tools.
+The image extends `broker-box` with Medulla and repository check tools.
+Each lane uses the broker's on-demand private Docker engine for integration tests.
+Its Docker storage is removed with the lane container. No host Docker socket is mounted.
 Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
 must be available. Startup runs `lane-launcher/safe-sync.py`: each immediate
 canonical repository with `.ntkrc` is locked, fetched, fast-forwarded to its

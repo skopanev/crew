@@ -88,6 +88,9 @@ reader. Codex credentials remain managed by its broker.
 The container is the filesystem boundary. The Git key is readable by agents;
 prompt restrictions on pushing are not a security boundary.
 
+Private-engine lanes are privileged, as broker boxes are. Read-only source mounts
+are not enforced against root inside a privileged container.
+
 ## Logs and notifications
 
 Run artifacts include failure details, coder reports, review verdicts, and

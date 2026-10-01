@@ -5,6 +5,8 @@
   "strict": false,
   "launchLanes": false,
   "closeTabOnExit": false,
+  "image": "medulla-crew:latest",
+  "dockerEngine": false,
   "notify": null,
   "preferTags": ["bug", "kyc", "ceo60", "kyt"],
   "module": null,

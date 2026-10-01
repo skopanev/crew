@@ -12,6 +12,27 @@ import {save, read, laneArgs} from '../runtime.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+test('runtime settings come from the selected config, without a broker profile', async t => {
+  const f = await setup(t);
+  save(f.configFile, {...f.config, image: 'crew-fixture:tests', dockerEngine: true});
+  const config = configFrom(f.configFile, f.env);
+  const args = laneArgs(config, 'T1');
+  assert.equal(args[args.indexOf('--image') + 1], 'crew-fixture:tests');
+  assert.ok(args.includes('--docker-engine'));
+  assert.ok(!args.includes('--box'));
+  assert.ok(!laneArgs({...config, dockerEngine: false}, 'T1').includes('--docker-engine'));
+  save(f.configFile, {...f.config, dockerEngine: 'true'});
+  assert.throws(() => configFrom(f.configFile, f.env), /dockerEngine must be/);
+});
+test('unsupported private Docker fails before reading or claiming a ticket', async t => {
+  const f = await setup(t);
+  save(f.configFile, {...f.config, dockerEngine: true});
+  const result = await execute(launcher, [f.configFile, '--once'], f.env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /requires Medulla with --docker-engine support/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(fs.existsSync(f.events), false);
+});
 test('launches require sourceRoot and pass no repository override', async t => {
   const f = await setup(t);
   const args = laneArgs(configFrom(f.configFile, f.env), 'T1');
