@@ -47,7 +47,11 @@ class ClaimCleanupTests(unittest.TestCase):
                     if not contract:
                         self.assertIn('Scout contract unavailable', result.stderr)
                         self.assertFalse((root / 'run/artifacts/scout-contract.txt').exists())
+                    else:
+                        self.assertIn('<signal:CLAIMED>', result.stdout)
                     claim = json.loads(receipt.read_text())
+                    self.assertIn(f'<signal:var key=RUN_ARTIFACTS>{root}/run/artifacts</signal:var>',
+                                  result.stdout)
                     self.assertEqual(claim['workspace'], 'test')
                     self.assertEqual(claim['run_dir'], str(root / 'run'))
                     ticket = json.loads((root / 'run/artifacts/ticket.json').read_text())
