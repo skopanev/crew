@@ -104,6 +104,7 @@ The CLI only changes status: `PATCH /v1/tickets/<id>` with `workspace`, `status`
 Set `notify.chatId` and optional `notify.threadId` in the local dispatcher config.
 Supply `TELEGRAM_BOT_TOKEN` in the environment, or point `notify.envFile` at an
 existing local env file containing that variable. Keep credentials out of Git.
+Replace legacy `notify.to`, `notify.room` and `notify.from` with these fields.
 No agent rewrites the message. Delivery failures are recorded without changing
 the ticket outcome.
 
