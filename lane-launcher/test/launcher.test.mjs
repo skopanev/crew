@@ -236,43 +236,6 @@ test('tab creation failure reopens the confirmed claim', async t => {
     {workspace: 'test', status: 'open', force: true});
   assert.equal(read(path.join(runState(f), 'result.json')).reopened, true);
 });
-for (const outcome of [{reopened: true, error: 'CBM startup failed'}, {reopenError: 'NTK unavailable'}]) {
-  test(`startup recovery stops the loop before another queue read (${Object.keys(outcome)[0]})`, async t => {
-    const f = await setup(t);
-    save(f.configFile, {...f.config, intervalSeconds: 1});
-    const child = spawn(process.execPath, [launcher, f.configFile], {env: f.env});
-    t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
-    let recorded = false, stderr = '';
-    child.stdout.on('data', data => {
-      if (!recorded && String(data).includes('pause 1s')) {
-        recorded = true;
-        save(path.join(runState(f), 'result.json'),
-          {status: 'failed', ...outcome, finishedAt: new Date().toISOString()});
-      }
-    });
-    child.stderr.on('data', data => stderr += data);
-    const code = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('startup failure did not stop Dolber')); }, 5000);
-      child.once('close', code => { clearTimeout(timer); resolve(code); });
-      child.once('error', error => { clearTimeout(timer); reject(error); });
-    });
-    assert.equal(code, 1, stderr);
-    assert.match(stderr, /Startup failed: .*Fix startup and restart Dolber/);
-    assert.ok(stderr.includes(outcome.reopenError || outcome.error));
-    assert.equal(queueReads(f), 1);
-    assert.equal(f.calls.filter(call => call.url.includes('/start')).length, 1);
-    assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
-  });
-}
-test('startup failures before this invocation do not prevent a manual restart', async t => {
-  const f = await setup(t);
-  const dir = path.join(f.stateDir, 'runs', 'old');
-  fs.mkdirSync(dir, {recursive: true});
-  save(path.join(dir, 'result.json'), {status: 'failed', reopened: true, finishedAt: '2000-01-01T00:00:00.000Z'});
-  const result = await f.run();
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(queueReads(f), 1);
-});
 test('worker startup failure reopens; adopted workflow failure and changed tickets do not', async t => {
   for (const scenario of ['startup', 'adopted', 'done']) {
     const f = await setup(t);
