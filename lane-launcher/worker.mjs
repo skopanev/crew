@@ -140,8 +140,8 @@ try {
   // Record completion first: closing this pane can terminate this process immediately.
   save(path.join(dir, 'result.json'), {...result, finishedAt: new Date().toISOString()});
   try {
-    if (notifyCompletion(run, result, artifacts)) {
-      announce('[lane] Notification queued for messenger');
+    if (await notifyCompletion(run, result, artifacts)) {
+      announce('[lane] Notification sent to channel');
     }
   } catch (error) {
     // Notification delivery does not change the ticket outcome or occupy a lane slot.

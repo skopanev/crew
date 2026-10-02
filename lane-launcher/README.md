@@ -98,6 +98,15 @@ Capacity includes only Docker lane containers and pending reservations belonging
 
 The CLI only changes status: `PATCH /v1/tickets/<id>` with `workspace`, `status` and optional explicit `force`. `--claim` is the atomic transition to `in_progress`: it uses the dedicated start endpoint and fails when another lane already owns the ticket or dependencies are unfinished. It cannot be combined with `--force`. Setting `in_progress` without `--claim` is rejected before a request: PATCH does not enforce the server's dependency guard. The lane's normal transition to `to_test` does not use force. The CLI prints JSON, exits nonzero on failure and never retries writes. Queue reads use the internal HTTP library. These scripts do not use MCP; agent MCP tools remain available inside the lane.
 
+## Notifications
+
+`notify.mjs` sends completion events directly through the Telegram Bot API.
+Set `notify.chatId` and optional `notify.threadId` in the local dispatcher config.
+Supply `TELEGRAM_BOT_TOKEN` in the environment, or point `notify.envFile` at an
+existing local env file containing that variable. Keep credentials out of Git.
+No agent rewrites the message. Delivery failures are recorded without changing
+the ticket outcome.
+
 Authentication uses `~/.config/ntk/config.json` (`url`, `key`) or `NTK_CONFIG`, `NTK_KEY`, `NTK_URL`. Requests go directly to the existing HTTP API over HTTPS. Medulla mounts the default NTK config directory into the lane container; an environment-only key or custom config path must also be made available inside the container. Keep credentials out of launcher config and workflow variables.
 
 ```bash
