@@ -4,16 +4,9 @@ Implement one prepared NTK ticket, review it, land it, and set `to_test`.
 
 ## Launch
 
-Dolber reads a local JSON config and passes its settings to `run.sh`.
-Manual invocation uses the same settings:
-
-```sh
-./lane/run.sh \
-  --dispatcher-id <id> --ticket-id <ticket> --project <ntk-workspace> \
-  --source-root <source-workspace> --cbm-mcp-command <host-cbm-executable> \
-  --cbm-cache-dir <shared-store> \
-  --gate-command '<repository-check>' --ssh-dir <key-directory>
-```
+Dolber reads a local JSON config and starts the host lane worker.
+The worker claims the ticket, then passes the confirmed receipt and config
+settings to `run.sh`. A direct `run.sh` call without that receipt is refused.
 
 Repeat `--gate-command` for additional checks and `--mount-ro` for additional
 read-only repositories. The repository comes from the first component of the
@@ -41,13 +34,14 @@ medulla -w lane --graph
 medulla -w lane --validate
 ```
 
-Claim → locate code with CBM → create checkout → implement → check → review
+Prepare → locate code with CBM → create checkout → implement → check → review
 with three agents → synthesize verdicts → land → cleanup → update status.
 Review blockers return to implementation for up to three rounds. Landing
 conflicts go through a fix and another check/review round.
 
 The worker claims in the Herdr tab before preflight or Docker. The workflow adopts that receipt
-without a second claim; a manual lane claims at its first node. Startup failure
+without a second claim. `run.sh` requires that confirmed host receipt before
+preflight or Docker; the container never claims. Startup failure
 returns a dispatcher claim to `open`. After adoption, workflow failure sets
 `blocked` and attaches the failure report. No confirmed claim means no status write.
 An uncertain claim or dispatch requires inspection before retrying.
