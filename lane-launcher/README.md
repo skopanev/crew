@@ -98,6 +98,13 @@ Capacity includes only Docker lane containers and pending reservations belonging
 
 The CLI only changes status: `PATCH /v1/tickets/<id>` with `workspace`, `status` and optional explicit `force`. `--claim` is the atomic transition to `in_progress`: it uses the dedicated start endpoint and fails when another lane already owns the ticket or dependencies are unfinished. It cannot be combined with `--force`. Setting `in_progress` without `--claim` is rejected before a request: PATCH does not enforce the server's dependency guard. The lane's normal transition to `to_test` does not use force. The CLI prints JSON, exits nonzero on failure and never retries writes. Queue reads use the internal HTTP library. These scripts do not use MCP; agent MCP tools remain available inside the lane.
 
+## Ticket tests
+
+For `DUPLICATE` verification, configure `testCommand` as runner arguments,
+for example `["bun", "run", "test"]`. Scout supplies existing test-file paths;
+it cannot replace the configured runner with arbitrary shell commands.
+The launcher rejects an empty runner before selecting or claiming a ticket.
+
 ## Notifications
 
 `notify.mjs` sends completion events directly through the Telegram Bot API.

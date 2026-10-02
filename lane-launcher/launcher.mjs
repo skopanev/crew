@@ -17,7 +17,7 @@ const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.st
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
 export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [], image: 'medulla-crew:latest', dockerEngine: false,
+    preferTags: [], readOnlyRepos: [], testCommand: [], image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
@@ -61,6 +61,9 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');
   }
   if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
+  if (!Array.isArray(config.testCommand) || !config.testCommand.length || config.testCommand.some(arg => typeof arg !== 'string' || !arg.trim())) {
+    throw new Error('Config needs testCommand: runner arguments, e.g. ["bun", "run", "test"]');
+  }
   if (!config.sourceRoot) throw new Error('Config needs sourceRoot: the source workspace');
   for (const dir of [config.sourceRoot, config.sshDir, config.cbmCacheDir, ...config.readOnlyRepos]) {
     if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {

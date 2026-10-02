@@ -37,6 +37,7 @@ export function laneArgs(config, ticket) {
     '--image', config.image,
     ...(config.dockerEngine ? ['--docker-engine'] : []),
     '--cbm-mcp-command', config.cbmMcpCommand, '--cbm-cache-dir', config.cbmCacheDir,
+    '--test-command', JSON.stringify(config.testCommand || []),
     '--ssh-dir', config.sshDir,
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];

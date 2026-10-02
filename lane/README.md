@@ -39,6 +39,14 @@ with three agents → synthesize verdicts → land → cleanup → update status
 Review blockers return to implementation for up to three rounds. Landing
 conflicts go through a fix and another check/review round.
 
+`DUPLICATE` verifies the existing implementation instead of stopping the lane.
+The scout lists existing test-file paths in `artifacts/ticket-checks.json`.
+Gates execute them through the configured `testCommand` argument array, plus
+configured checks. The panel maps all AC to existing code and executed tests.
+Passing checks and review set `to_test` without a new commit or push. Missing
+tests, failed checks, review blockers or a moved target stop with details.
+This path never returns to implementation.
+
 The worker claims in the Herdr tab before preflight or Docker. The workflow adopts that receipt
 without a second claim. `run.sh` requires that confirmed host receipt before
 preflight or Docker; the container never claims. Startup failure
@@ -102,9 +110,10 @@ Optional host notifications use `notify.mjs`, with no LLM invocation:
 node notify.mjs config.json READY ticket-id "Ticket ready for test"
 ```
 
-Configure `notify: {"to":"messenger-alias","room":"conv.crew.notify","from":"crew-notify-project"}`
-in Dolber JSON, or leave it null. AgentBus queueing is not a Telegram delivery
-receipt. Notification failure is recorded without changing the lane outcome.
+Configure `notify.chatId`, optional `notify.threadId`, and `notify.envFile`
+in Dolber JSON, or leave it null. `notify.mjs` sends directly to Telegram and
+requires a successful API response. Notification failure is recorded without
+changing the lane outcome.
 
 ## Verify
 
