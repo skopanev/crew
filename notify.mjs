@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
 const events = new Set(['READY', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
 
-export function notify(config, event, send = execFileSync) {
+export async function notify(config, event) {
   const route = config.notify;
   if (!route) return false;
-  if (!route.to || !route.room) throw new Error('notify needs to and room in config');
+  if (!route.chatId) throw new Error('notify needs chatId in config');
+  if (route.threadId !== undefined && (!Number.isSafeInteger(route.threadId) || route.threadId < 1)) {
+    throw new Error('notify threadId must be a positive integer');
+  }
   if (!events.has(event.event) || !event.id) throw new Error('notify needs a valid event and ticket ID');
   if (event.event === 'TIMEOUT' && (!event.node || !event.model)) {
     throw new Error('TIMEOUT needs node and model');
@@ -19,10 +21,24 @@ export function notify(config, event, send = execFileSync) {
     .filter(key => event[key] !== undefined)
     .map(key => `${key}=${clean(event[key])}`).join(' ') || '-';
   const message = `CREW ${event.event} | ${clean(event.id)} | ${clean(event.summary)} | ${details}`;
-  send('agentbus', ['send', route.room, '--to', route.to, '--fyi', message], {
-    encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'],
-    env: {...process.env, ...(route.from ? {AGENTBUS_FROM: route.from} : {})},
-  });
+  const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
+    fs.readFileSync(route.envFile, 'utf8').match(/^\s*TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
+      .replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+  if (!token) throw new Error('Telegram bot token missing: set TELEGRAM_BOT_TOKEN or notify.envFile');
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', signal: AbortSignal.timeout(15_000),
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({chat_id: route.chatId,
+        ...(route.threadId === undefined ? {} : {message_thread_id: route.threadId}), text: message}),
+    });
+    const reply = await response.json();
+    if (!response.ok || reply.ok !== true) {
+      throw new Error(`Telegram refused notification: ${reply.description || response.status}`);
+    }
+  } catch (error) {
+    throw new Error(String(error.message).replaceAll(token, '[redacted]'));
+  }
   return true;
 }
 
@@ -59,9 +75,9 @@ export function completionEvent(run, result, artifacts) {
   return {...event, summary: detail.split('\n')[0].slice(0, 300) || event.summary};
 }
 
-export function notifyCompletion(run, result, artifacts, send = execFileSync) {
+export async function notifyCompletion(run, result, artifacts) {
   if (!run.config.notify) return false;
-  return notify(run.config, completionEvent(run, result, artifacts), send);
+  return notify(run.config, completionEvent(run, result, artifacts));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
@@ -70,9 +86,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
     if (!configFile || !event || !id || !summary) {
       throw new Error('Usage: node notify.mjs config.json READY|FAILED|BLOCKED|TIMEOUT ticket-id "summary" [node model]');
     }
-    const sent = notify(JSON.parse(fs.readFileSync(configFile, 'utf8')), {event, id, summary, node, model});
+    const sent = await notify(JSON.parse(fs.readFileSync(configFile, 'utf8')), {event, id, summary, node, model});
     if (!sent) throw new Error('Notifications are not configured');
-    console.log('Notification queued for messenger');
+    console.log('Notification sent to channel');
   } catch (error) {
     console.error(`notify: ${error.message}`);
     process.exitCode = 1;
