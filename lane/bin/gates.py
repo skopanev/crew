@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import platform
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -31,6 +32,25 @@ def plan():
         not isinstance(command, str) or not command.strip() for command in commands
     ):
         raise ValueError("no valid gate commands declared by the launcher")
+    if os.environ.get("VERIFY_ONLY") == "true":
+        tests = json.loads((Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts/ticket-checks.json").read_text())
+        if not isinstance(tests, list) or not tests or any(
+            not isinstance(command, str) or not command.strip() for command in tests
+        ):
+            raise ValueError("verification requires test-file paths in ticket-checks.json")
+        runner = json.loads(os.environ.get("ticket_test_command", "[]"))
+        if not isinstance(runner, list) or not runner or any(
+            not isinstance(arg, str) or not arg.strip() for arg in runner
+        ):
+            raise ValueError("verification requires testCommand in dispatcher config")
+        root = Path.cwd().resolve()
+        paths = []
+        for test in tests:
+            path = Path(test)
+            if path.is_absolute() or not path.is_file() or not path.resolve().is_relative_to(root):
+                raise ValueError(f"test must be an existing file inside this checkout: {test}")
+            paths.append("./" + str(path.resolve().relative_to(root)))
+        commands = [shlex.join([*runner, *dict.fromkeys(paths)]), *commands]
     return commands
 
 

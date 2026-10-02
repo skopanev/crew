@@ -8,6 +8,9 @@ vars:
   ticket_title: ''
   gate_commands: '[]'
   LAUNCH_CLAIM: ''
+  VERIFY_ONLY: 'false'
+  ticket_test_command: '[]'
+  TICKET_CHECKS: '[]'
   CBM_PROJECT: ''
   TOOLING_ROOT: /workspace
   LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -89,7 +92,7 @@ nodes:
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
     on_signal:
       OK: create_worktree          # закрытый набор скаута: OK, DUPLICATE, OUT_OF_MODULE, PREMISE_BROKEN
-      DUPLICATE: notify_failure
+      DUPLICATE: create_worktree
       PREMISE_BROKEN: notify_failure
       OUT_OF_MODULE: notify_failure
       __failed__: notify_failure
@@ -99,6 +102,7 @@ nodes:
       harness: codex
       model: gpt-6-astra
       effort: high
+      sets: [TICKET_CHECKS]
       args: [-s, read-only]
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
@@ -112,12 +116,14 @@ nodes:
 
   create_worktree:
     env:
+      TICKET_CHECKS: '{{var:TICKET_CHECKS}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
     timeout: 900
     on_signal:
       READY: implement_code
+      VERIFY_EXISTING: prepare_review
       NO_GIT_KEY: notify_failure
       FETCH_FAILED: notify_failure
       NO_TARGET_BRANCH: notify_failure
@@ -200,6 +206,12 @@ nodes:
         printf 'РАЗВЕДЧИК НЕ ОСТАВИЛ ОТЧЁТА. Всё, что от него есть:\n%s\n' \
           "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
       fi
+      if [ "${MEDULLA_LAST_SIGNAL:-}" = "DUPLICATE" ]; then
+        printf '%s\n' "$TICKET_CHECKS" > "$MEDULLA_RUN_DIR/artifacts/ticket-checks.json"
+        echo '<signal:var key=VERIFY_ONLY>true</signal:var>'
+        echo "<signal:VERIFY_EXISTING>Check existing implementation at $(git rev-parse HEAD). ${deps:-}</signal:VERIFY_EXISTING>"
+        exit 0
+      fi
       echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}</signal:READY>"
 
   implement_code:
@@ -246,6 +258,8 @@ nodes:
 
   prepare_review:
     env:
+      VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
+      ticket_test_command: '{{var:ticket_test_command}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       gate_commands: '{{var:gate_commands}}'
       module_name: '{{var:module_name}}'
@@ -268,9 +282,13 @@ nodes:
       # Landing must commit the exact tree reviewed by the panel.
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
+      if [ "${VERIFY_ONLY}" = "true" ] && ! git diff --cached --quiet "$base"; then
+        echo '<signal:GATE_FAIL>verification checkout contains source changes</signal:GATE_FAIL>'
+        exit 0
+      fi
       # A resolved rebase may have commits to land with an empty index.
       target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
-      if git diff --cached --quiet "$base" -- 2>/dev/null \
+      if [ "${VERIFY_ONLY}" != "true" ] && git diff --cached --quiet "$base" -- 2>/dev/null \
          && [ -z "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ]; then
         echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
         exit 0
@@ -341,8 +359,10 @@ nodes:
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/qa-contract.txt and execute its steps.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
+      Workspace: {{var:project_name}}. Verification only: {{var:VERIFY_ONLY}}.
       Worktree: {{var:LANE_WORKTREE}}.
-      Input: {{var:RUN_ARTIFACTS}}/coder-report.txt; git diff --cached;
+      Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
+      {{var:RUN_ARTIFACTS}}/coder-report.txt if present; git diff --cached;
       ticket commits above origin/<target_branch> (.ntkrc).
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
@@ -405,6 +425,8 @@ nodes:
       PY
   git_landing:
     env:
+      VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
+      ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
       module_name: '{{var:module_name}}'
@@ -415,6 +437,7 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
     timeout: 600
     on_signal:
+      VERIFIED: cleanup
       LAND_FAILED: notify_failure
       CONFLICT: git_fix
       REBASED: prepare_review
@@ -440,6 +463,17 @@ nodes:
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
       python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
         echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
+
+      if [ "${VERIFY_ONLY}" = "true" ]; then
+        git diff --cached --quiet HEAD || {
+          echo '<signal:LAND_FAILED>verification changed source files</signal:LAND_FAILED>'; exit 0; }
+        git fetch origin
+        head="$(git rev-parse HEAD)"
+        [ "$head" = "$(sed -n 2p "$snap")" ] && [ "$head" = "$(git rev-parse "origin/${target}")" ] || {
+          echo '<signal:LAND_FAILED>target changed after verification; retry against the current target</signal:LAND_FAILED>'; exit 0; }
+        echo "<signal:VERIFIED>Existing implementation checked and reviewed at ${head} on ${target}; no commit or push.</signal:VERIFIED>"
+        exit 0
+      fi
 
       if ! git diff --cached --quiet; then
         # Repository commit hooks need Bun on PATH.
@@ -476,6 +510,7 @@ nodes:
       [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"
   cleanup:
     env:
+      VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
@@ -483,6 +518,7 @@ nodes:
     timeout: 180
     on_signal:
       LANDED: notify_success
+      VERIFIED: notify_success
       LANDED_TICKET_STUCK: __exit_fail__
       __failed__: __exit_fail__
       __timeout__: __exit_fail__
@@ -493,14 +529,23 @@ nodes:
       head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
       target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
       cd "${project_dir}"
-      printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
+      if [ "${VERIFY_ONLY}" = "true" ]; then
+        printf 'Ticket: %s\nVerified existing SHA: %s\nTarget: %s\nChecks and review passed; no commit or push.\n' \
+          "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/verification.txt"
+      else
+        printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
+      fi
       # Keep the private checkout as evidence; canonical Git metadata stays read-only.
       # Код сел — это правда. Тикет, застрявший в работе, иначе никто не заметит.
       if ! node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" to-test; then
-        printf 'LANDED_TICKET_STUCK: %s landed at %s on %s; to_test failed after up to 3 attempts. See to-test-errors.txt. Do not rerun implementation.\n' \
+        printf 'LANDED_TICKET_STUCK: %s checked at %s on %s; to_test failed after up to 3 attempts. See to-test-errors.txt. Do not rerun work.\n' \
           "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
         cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
         exit 1
+      fi
+      if [ "${VERIFY_ONLY}" = "true" ]; then
+        echo "<signal:VERIFIED>Existing implementation verified at ${head_sha}; ticket is to_test.</signal:VERIFIED>"
+        exit 0
       fi
       printf '<signal:LANDED>сел %s на %s%s</signal:LANDED>\n' \
         "$head_sha" "$target" " (checkout retained: ${LANE_WORKTREE})"
@@ -567,8 +612,11 @@ nodes:
       __timeout__: __exit_fail__
       __default__: __exit_ok__
     shell: |
-      [ "${MEDULLA_LAST_SIGNAL:-}" = "LANDED" ] || { echo "Success requires LANDED and confirmed to_test" >&2; exit 1; }
-      msg="${ticket_id} заленделся: ${MEDULLA_LAST_MESSAGE:-}"
+      case "${MEDULLA_LAST_SIGNAL:-}" in
+        LANDED) msg="${ticket_id} landed: ${MEDULLA_LAST_MESSAGE:-}" ;;
+        VERIFIED) msg="${ticket_id} verified: ${MEDULLA_LAST_MESSAGE:-}" ;;
+        *) echo 'Success requires LANDED or VERIFIED and confirmed to_test' >&2; exit 1 ;;
+      esac
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       # Retain nonblocking findings in the run artifacts.
       followups="$MEDULLA_RUN_DIR/artifacts/followups.txt"
@@ -633,8 +681,10 @@ nodes:
   reject_gate:
     env:
       REJECT_ROUNDS: '{{var:REJECT_ROUNDS}}'
+      VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
     timeout: 60
     on_signal:
+      VERIFICATION_FAILED: notify_failure
       TOO_MANY_ROUNDS: notify_failure
       PANEL_REJECTED: implement_code
       __failed__: notify_failure
@@ -642,6 +692,10 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
+      if [ "${VERIFY_ONLY}" = "true" ]; then
+        printf '<signal:VERIFICATION_FAILED>Existing implementation failed review: %s. See panel-findings.txt.</signal:VERIFICATION_FAILED>\n' "${MEDULLA_LAST_MESSAGE:-}"
+        exit 0
+      fi
       limit="${REJECT_ROUNDS:-3}"
       # Count review rounds since the last conflict fix.
       since="$(jq -r 'select(.node=="git_fix")|.step' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"

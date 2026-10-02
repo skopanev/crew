@@ -43,7 +43,7 @@ async function recordFinding(finding) {
       throw new Error('Findings require the source ticket in to_test with a project');
     }
     const sections = [`Review finding from ${id}\nWorkspace: ${workspace}\nRun: ${runDir}`, finding];
-    for (const name of ['landing.txt', 'architecture.md', 'security.md', 'codereview.md']) {
+    for (const name of ['landing.txt', 'verification.txt', 'architecture.md', 'security.md', 'codereview.md']) {
       const file = path.join(artifacts, name);
       if (fs.existsSync(file)) sections.push(`--- ${name} ---\n${fs.readFileSync(file, 'utf8')}`);
     }
@@ -97,7 +97,7 @@ async function main(mode) {
         if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
-    throw new Error('NTK to_test failed after 3 attempts; code already landed, do not rerun implementation');
+    throw new Error('NTK to_test failed after 3 attempts; checked code is already on target, do not rerun work');
   }
   if (mode !== 'blocked') throw new Error('Expected to-test, blocked or findings');
 

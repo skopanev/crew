@@ -6,6 +6,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
               --gate-command <shell command> [...]
+              --test-command '["runner", "args"]'
               [--module <module>]
               [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
@@ -26,6 +27,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --planning-task    local Task id in that plan; repository/module must match.
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
+  --test-command  required runner argument array for existing-code verification.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
@@ -46,6 +48,7 @@ TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
+test_command='[]'
 also=()
 gate_commands=()
 passthrough=()
@@ -66,6 +69,7 @@ while (( $# )); do
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
+    --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
@@ -88,6 +92,8 @@ for command in "${gate_commands[@]}"; do
   [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
 done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
+jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$test_command" >/dev/null || {
+  say 'run.sh: --test-command must be a nonempty JSON argument array'; exit 2; }
 
 # The host worker owns NTK claims; no Docker or preflight without its receipt.
 jq -e -s --arg id "$ticket" --arg ws "$project" '
@@ -318,6 +324,7 @@ medulla \
   --var "project_dir=$project_dir" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
+  --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   ${equill_vars[@]+"${equill_vars[@]}"} \
   ${passthrough[@]+"${passthrough[@]}"}
