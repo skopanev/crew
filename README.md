@@ -45,6 +45,17 @@ Lane and planning snapshots cover their six roles; the shared snapshot contains
 the common rules included in their contracts.
 Do not import a stale snapshot over that store.
 
+Enable the Crew pre-push hook in each checkout:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Before each push it exports these six live contracts and their shared rules.
+If snapshots change, the push stops: commit `roles/*.jsonl` and push again.
+An Equill error also stops the push. The store defaults to `~/.equill/dev`;
+override it with `EQUILL_STORE`. Run `python3 roles/export.py` to export manually.
+
 The worker atomically claims a ticket in its Herdr tab before preflight or Docker. Startup failure
 returns the confirmed claim to `open`. Once the workflow adopts the claim,
 failure sets `blocked` and attaches details. An unconfirmed claim changes no
