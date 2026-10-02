@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr} from './runtime.mjs';
-import {reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
+import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -31,11 +31,23 @@ const stop = value => {
 process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
-let result;
+let result, claimRefused = false;
 let artifacts = null;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
+  if (signal) throw new Error(`Startup interrupted by ${signal}`);
+  announce(`[lane] CLAIM ${run.ticket}`);
+  const claimed = run.claim || await claimTicket(run.ticket, run.workspace);
+  if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
+      String(claimed.id).toLowerCase() !== String(run.ticket).toLowerCase()) {
+    delete run.claim;
+    claimRefused = true;
+    throw new Error(`NTK did not confirm claim for ${run.ticket}`);
+  }
+  run.claim = {...claimed, workspace: run.workspace};
+  save(stateFile, run);
+  if (signal) throw new Error(`Startup interrupted by ${signal}`);
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
@@ -59,7 +71,12 @@ try {
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
   if (result.status === 'failed' && lastStderr) result.error = lastStderr;
 } catch (error) {
-  result = {status: 'failed', error: error.message};
+  const message = run.claim || signal ? error.message :
+    claimRefused || /^NTK HTTP 4\d\d/.test(error.message) ? `CLAIM_REFUSED: ${error.message}` :
+      `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in NTK before retrying`;
+  result = {status: 'failed', code: 2,
+    error: message};
+  process.exitCode = 2;
 } finally {
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
   if (result.status !== 'exited' && run.claim) {

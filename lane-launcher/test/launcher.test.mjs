@@ -58,7 +58,7 @@ process.exit(1);
   fs.mkdirSync(dir);
   const file = path.join(dir, 'launch.json');
   save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture', from: 'crew-fixture'}},
-    ticket: 'T1', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
+    ticket: 'T1', workspace: 'test', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
   const sent = path.join(dir, 'sent.json');
   const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json'), TEST_NOTIFY: sent});
   assert.equal(result.code, 0, result.stderr);
@@ -80,13 +80,13 @@ fs.writeFileSync(process.env.TEST_NOTIFY, JSON.stringify(process.argv.slice(2)))
     fs.mkdirSync(dir);
     const file = path.join(dir, 'launch.json'), sent = path.join(dir, 'sent.json');
     save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture'}},
-      ticket: 'T1', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
+      ticket: 'T1', workspace: 'test', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
     await execute(worker, [file], {...f.env, FORCE_COLOR: forceColor, NO_COLOR: undefined, TEST_NOTIFY: sent});
     assert.equal(read(path.join(dir, 'result.json')).error, reason);
     assert.ok(read(sent).at(-1).includes(`CREW FAILED | T1 | ${reason} |`));
     assert.ok(fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes(reason + '\n\n'));
     assert.ok(!fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes('\x1b['));
-    assert.equal(f.calls.length, 0);
+    assert.equal(f.calls.filter(call => call.url.includes('/start')).length, 1);
   });
 }
 const countReads = f => f.calls.filter(call => call.method === 'GET' && call.url.startsWith('/v1/tickets?'));
@@ -95,6 +95,13 @@ const runState = f => {
   const [runId] = fs.readdirSync(path.join(f.stateDir, 'runs'));
   return path.join(f.stateDir, 'runs', runId);
 };
+function existingClaim(f, dir) {
+  const file = path.join(dir, 'launch.json'), run = read(file);
+  run.claim = {id: 'T1', status: 'in_progress', claimed: true, workspace: 'test'};
+  save(file, run);
+  f.setStatus('in_progress');
+  return run;
+}
 function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [script, ...args], {env, cwd});
@@ -105,7 +112,7 @@ function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
     child.on('close', code => resolve({code, stdout, stderr}));
   });
 }
-async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, reportUploadFailure = false, countFailure = false, noReady = false} = {}) {
+async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, claimHttpStatus = 409, claimResponse, reportUploadFailure = false, countFailure = false, noReady = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
@@ -123,8 +130,7 @@ fs.appendFileSync(process.env.TEST_EVENTS, JSON.stringify(args) + '\\n');
 const panes = JSON.parse(fs.readFileSync(process.env.TEST_PANES));
 let result = {};
 if (args[0] === 'tab' && args[1] === 'create') {
-  // A tab may open only for a ticket this dispatcher already claimed.
-  if (!fs.readFileSync(process.env.TEST_REQUESTS, 'utf8').includes('/start')) process.exit(3);
+  fs.appendFileSync(process.env.TEST_REQUESTS, 'HERDR_TAB_CREATE\\n');
   if (process.env.TEST_CREATE_FAILURE === '1') process.exit(1);
   panes.push({pane_id: 'test-pane'});
   fs.writeFileSync(process.env.TEST_PANES, JSON.stringify(panes));
@@ -161,7 +167,10 @@ console.log(JSON.stringify({result}));
     }
     else if (empty || (noReady && req.url.startsWith('/v1/tickets/next'))) { res.writeHead(204); res.end(); }
     else if (req.url.startsWith('/v1/tickets/T1/start') && claimRefused) {
-      res.writeHead(409); res.end('{"error":"fixture conflict"}');
+      res.writeHead(claimHttpStatus); res.end('{"error":"fixture conflict"}');
+    }
+    else if (req.url.startsWith('/v1/tickets/T1/start') && claimResponse !== undefined) {
+      res.end(JSON.stringify(claimResponse));
     }
     else if (req.url.startsWith('/v1/tickets/T1/start')) {
       ticketStatus = 'in_progress';
@@ -219,28 +228,82 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 56 total · 17 open/);
   assert.equal(queueReads(f), 1);
 });
-test('claim refusal opens no tab and does not modify the ticket', async t => {
-  const f = await setup(t, {claimRefused: true});
-  assert.equal((await f.run()).code, 1);
-  assert.equal(read(path.join(runState(f), 'result.json')).status, 'claim-refused');
-  assert.ok(!f.calls.some(call => call.method === 'PATCH'));
-  assert.ok(!fs.readFileSync(f.events, 'utf8').includes('create'));
+for (const [options, expected] of [
+  [{claimRefused: true}, 'CLAIM_REFUSED'],
+  [{claimRefused: true, claimHttpStatus: 503}, 'CLAIM_UNCERTAIN'],
+  [{claimResponse: {id: 'T1', status: 'open', claimed: false}}, 'CLAIM_REFUSED'],
+  [{claimResponse: {id: 'T2', status: 'in_progress', claimed: true}}, 'CLAIM_REFUSED'],
+  [{claimResponse: {id: 'T1', status: 'open', claimed: true}}, 'CLAIM_REFUSED'],
+]) {
+  test(`claim refusal is visible in the tab without starting the lane: ${JSON.stringify(options)}`, async t => {
+    const f = await setup(t, options);
+    const started = path.join(f.root, 'bash-started');
+    assert.equal((await f.run()).code, 0);
+    fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\ntouch '${started}'\nexit 0\n`, {mode: 0o755});
+    assert.ok(fs.readFileSync(f.events, 'utf8').includes('create'));
+    assert.ok(!f.calls.some(call => call.url.includes('/start')));
+    const dir = runState(f);
+    const result = await execute(worker, [path.join(dir, 'launch.json')], f.env);
+    assert.equal(result.code, 2, result.stderr);
+    assert.ok(result.stdout.includes(expected));
+    if (expected === 'CLAIM_UNCERTAIN') assert.match(result.stdout, /check T1 in NTK before retrying/);
+    assert.equal(read(path.join(dir, 'result.json')).code, 2);
+    assert.equal(fs.existsSync(started), false);
+    assert.ok(!f.calls.some(call => call.method === 'PATCH'));
+  });
+}
+test('tab opens before claim and the lane starts only after confirmation', async t => {
+  const f = await setup(t);
+  assert.equal((await f.run()).code, 0);
+  fs.writeFileSync(path.join(f.bins, 'bash'), `#!${process.execPath}
+import fs from 'node:fs';
+const claim = JSON.parse(process.env.LANE_CLAIM_JSON);
+if (!claim.claimed || claim.status !== 'in_progress' || claim.id !== 'T1') process.exit(99);
+fs.appendFileSync(process.env.TEST_REQUESTS, 'BASH_START\\n');
+`, {mode: 0o755});
+  assert.ok(!f.calls.some(call => call.url.includes('/start')));
+  const dir = runState(f);
+  assert.equal((await execute(worker, [path.join(dir, 'launch.json')], f.env)).code, 0);
+  const events = fs.readFileSync(f.env.TEST_REQUESTS, 'utf8');
+  assert.ok(events.indexOf('HERDR_TAB_CREATE') < events.indexOf('POST /v1/tickets/T1/start'));
+  assert.ok(events.indexOf('POST /v1/tickets/T1/start') < events.indexOf('BASH_START'));
+  assert.equal(f.calls.filter(call => call.url.includes('/start')).length, 1);
+  assert.equal(read(path.join(dir, 'launch.json')).claim.claimed, true);
 });
-test('tab creation failure reopens the confirmed claim', async t => {
+test('cancellation before claim does not touch NTK or start the lane', async t => {
+  const f = await setup(t);
+  assert.equal((await f.run()).code, 0);
+  const started = path.join(f.root, 'bash-started');
+  fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\ntouch '${started}'\nexit 0\n`, {mode: 0o755});
+  const hook = path.join(f.root, 'cancel.cjs');
+  fs.writeFileSync(hook, `const fs = require('node:fs');
+const write = fs.writeSync;
+fs.writeSync = function(fd, text, ...args) {
+  const result = write.call(this, fd, text, ...args);
+  if (typeof text === 'string' && text.startsWith('[lane] START ')) process.emit('SIGTERM');
+  return result;
+};
+`);
+  const result = await execute('--require', [hook, worker, path.join(runState(f), 'launch.json')], f.env);
+  assert.equal(result.code, 2, result.stderr);
+  assert.match(result.stdout, /Startup interrupted by SIGTERM/);
+  assert.ok(!f.calls.some(call => call.url.includes('/start') || call.method === 'PATCH'));
+  assert.equal(fs.existsSync(started), false);
+});
+test('tab creation failure does not claim or modify the ticket', async t => {
   const f = await setup(t);
   f.env.TEST_CREATE_FAILURE = '1';
   const result = await f.run();
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /reopened/);
-  assert.deepEqual(f.calls.find(call => call.method === 'PATCH').body,
-    {workspace: 'test', status: 'open', force: true});
-  assert.equal(read(path.join(runState(f), 'result.json')).reopened, true);
+  assert.match(result.stderr, /no ticket was claimed/);
+  assert.ok(!f.calls.some(call => call.url.includes('/start') || call.method === 'PATCH'));
+  assert.equal(read(path.join(runState(f), 'result.json')).status, 'failed');
 });
 test('worker startup failure reopens; adopted workflow failure and changed tickets do not', async t => {
   for (const scenario of ['startup', 'adopted', 'done']) {
     const f = await setup(t);
     assert.equal((await f.run()).code, 0);
-    const dir = runState(f), run = read(path.join(dir, 'launch.json'));
+    const dir = runState(f), run = scenario === 'startup' ? read(path.join(dir, 'launch.json')) : existingClaim(f, dir);
     fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 2\n', {mode: 0o755});
     if (scenario === 'adopted') {
       const artifacts = path.join(run.runFolder, 'fixture', 'artifacts');
@@ -257,9 +320,10 @@ test('worker startup failure reopens; adopted workflow failure and changed ticke
 });
 for (const scenario of ['blocked', 'upload-failed', 'done', 'unclaimed', 'adopted', 'unrelated-code']) {
   test(`preexisting worktree startup: ${scenario}`, async t => {
-    const f = await setup(t, {reportUploadFailure: scenario === 'upload-failed'});
+    const f = await setup(t, {reportUploadFailure: scenario === 'upload-failed', claimRefused: scenario === 'unclaimed'});
     assert.equal((await f.run()).code, 0);
-    const dir = runState(f), file = path.join(dir, 'launch.json'), run = read(file);
+    const dir = runState(f), file = path.join(dir, 'launch.json');
+    const run = ['done', 'adopted'].includes(scenario) ? existingClaim(f, dir) : read(file);
     const reason = 'WORKTREE PREEXISTED: /fixture/.worktrees/T1; retained unchanged; inspect before retrying';
     fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\necho 'run.sh: ${scenario === 'unrelated-code' ? 'unrelated failure' : reason}' >&2\nexit 73\n`, {mode: 0o755});
     if (scenario === 'done') f.setStatus('done');
@@ -369,7 +433,7 @@ test('count failure reports unavailable and still dispatches the next ticket', a
   assert.match(result.stderr, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: unavailable/);
   assert.match(result.stdout, /Starting new one with ticket: T1/);
   assert.equal(queueReads(f), 1);
-  assert.ok(f.calls.some(call => call.url.startsWith('/v1/tickets/T1/start')));
+  assert.ok(!f.calls.some(call => call.url.startsWith('/v1/tickets/T1/start')));
 });
 test('open tickets with no NTK candidate show blocked and zero ready without claiming', async t => {
   const f = await setup(t, {noReady: true});
@@ -528,7 +592,8 @@ for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
     save(path.join(artifacts, 'gates/check/receipt.json'), {checks: [
       {command: 'bun run docs:links', exit_code: 1, log: '/fixture/gates/1.log'}]});
     const file = path.join(dir, 'launch.json');
-    save(file, {config: {...f.config, closeTabOnExit}, args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: path.join(dir, 'lane')});
+    save(file, {config: {...f.config, closeTabOnExit}, ticket: 'T1', workspace: 'test',
+      args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: path.join(dir, 'lane')});
     const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json')});
     assert.equal(result.code, 0, result.stderr);
     assert.equal(read(path.join(dir, 'result.json')).code, exitCode);
