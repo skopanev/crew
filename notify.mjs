@@ -22,7 +22,7 @@ export async function notify(config, event) {
     .map(key => `${key}=${clean(event[key])}`).join(' ') || '-';
   const message = `CREW ${event.event} | ${clean(event.id)} | ${clean(event.summary)} | ${details}`;
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
-    fs.readFileSync(route.envFile, 'utf8').match(/^\s*TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
+    fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
       .replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
   if (!token) throw new Error('Telegram bot token missing: set TELEGRAM_BOT_TOKEN or notify.envFile');
   try {
