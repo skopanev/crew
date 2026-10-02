@@ -528,7 +528,7 @@ nodes:
         cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
         exit 1
       fi
-      # Save unfinished changes on the ticket branch; the host worktree also persists.
+      # Recovery commits remain only in the private checkout until it is deleted.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
       if [ -d "${LANE_WORKTREE}/.git" ]; then
@@ -537,12 +537,12 @@ nodes:
           if git -C "${LANE_WORKTREE}" add -A 2>&1 \
              && git -C "${LANE_WORKTREE}" -c user.name=lane -c user.email=lane@local \
                     commit -q --no-verify -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
-            saved=" Работа сохранена коммитом в ветке ticket-${ticket_id}."
+            saved=" Local recovery commit $(git -C "${LANE_WORKTREE}" rev-parse --short HEAD) at ${LANE_WORKTREE}; not pushed, deleted with this checkout."
           else
             saved=" Recovery commit failed; worktree retained at ${LANE_WORKTREE}."
           fi
         else
-          saved=" Сохранять нечего: дерево чистое."
+          saved=" Worktree clean; no recovery commit created."
         fi
       fi
       msg="${msg}${saved}"
