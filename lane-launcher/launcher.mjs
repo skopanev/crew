@@ -124,6 +124,18 @@ function preflight(config) {
   }
 }
 
+function stopOnStartupFailure(config, startedAt) {
+  if (!config.launchLanes) return;
+  for (const dir of runDirectories(config.stateDir)) {
+    const file = path.join(dir, 'result.json');
+    if (!fs.existsSync(file)) continue;
+    const result = read(file);
+    if (!(result.reopened === true || result.reopenError) ||
+        !(Date.parse(result.finishedAt) >= Date.parse(startedAt))) continue;
+    throw new Error(`Startup failed: ${dir}; ${result.reopenError || result.error || 'ticket reopened'}. Fix startup and restart Dolber.`);
+  }
+}
+
 export async function tick(config) {
   const {containers, panes} = snapshots(config);
   const active = activeCount(config, containers, panes);
@@ -221,12 +233,14 @@ export async function main(argv) {
     if (error.code !== 'EEXIST') throw error;
     throw new Error(`Dispatcher lock exists: ${lock}. Check owner.json; remove only after its process has stopped.`);
   }
-  save(path.join(lock, 'owner.json'), {pid: process.pid, startedAt: new Date().toISOString()});
+  const startedAt = new Date().toISOString();
+  save(path.join(lock, 'owner.json'), {pid: process.pid, startedAt});
   let stopped = false, wake;
   const stop = () => { stopped = true; wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   try {
     do {
+      stopOnStartupFailure(config, startedAt);
       try { await tick(config); }
       catch (error) {
         if (mode !== 'loop') throw error;
