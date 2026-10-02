@@ -47,6 +47,7 @@ try {
   }
   run.claim = {...claimed, workspace: run.workspace};
   save(stateFile, run);
+  announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),

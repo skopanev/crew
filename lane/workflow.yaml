@@ -1,5 +1,5 @@
 version: '2'
-start: ntk_claim
+start: prepare
 timeout: 86400
 defaults:
   timeout: 300
@@ -12,7 +12,7 @@ vars:
   TOOLING_ROOT: /workspace
   LANE_PATH: /home/medulla/.bun/bin:/home/medulla/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 nodes:
-  ntk_claim:
+  prepare:
     env:
       # Equill requires the calling actor to assemble the contract.
       EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
@@ -27,8 +27,7 @@ nodes:
       LAUNCH_CLAIM: '{{var:LAUNCH_CLAIM}}'
     timeout: 120
     on_signal:
-      CLAIMED: cbm_discovery
-      CLAIM_REFUSED: notify_failure
+      READY: cbm_discovery
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -37,19 +36,14 @@ nodes:
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       printf '<signal:var key=RUN_ARTIFACTS>%s/artifacts</signal:var>\n' "$MEDULLA_RUN_DIR"
       rm -f "$MEDULLA_RUN_DIR/artifacts/claim.json"
-      # Adopt the launcher claim; standalone runs claim once here.
+      # Adopt the host worker's confirmed claim. Never claim from the container.
       claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
-      if [ -n "${LAUNCH_CLAIM:-}" ]; then
-        printf '%s\n' "$LAUNCH_CLAIM" > "$claim.raw"
-      elif ! bash "${TOOLING_ROOT}/lane-launcher/ntk-status" "${ticket_id}" -W "${project_name}" -s in_progress --claim > "$claim.raw" 2> "$claim.err"; then
-        cat "$claim.err" >&2
-        echo "<signal:CLAIM_REFUSED>claim not confirmed for ${ticket_id}; see artifacts/claim.json.err. Ticket unchanged by failure handling.</signal:CLAIM_REFUSED>"
-        exit 0
-      fi
-      jq -e --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
+      printf '%s\n' "$LAUNCH_CLAIM" > "$claim.raw"
+      jq -e -s --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
+        select(length == 1) | .[0] |
         select(.claimed == true and .status == "in_progress" and
           (.id | ascii_downcase) == ($id | ascii_downcase) and
-          (.workspace == null or .workspace == $ws)) |
+          .workspace == $ws) |
         . + {workspace: $ws, run_dir: $run}
       ' "$claim.raw" > "$claim.tmp"
       mv "$claim.tmp" "$claim"
@@ -79,7 +73,7 @@ nodes:
         exit 1
       fi
       rm -f "$_sc.err"
-      echo '<signal:CLAIMED>ticket claim confirmed</signal:CLAIMED>'
+      echo '<signal:READY>lane prepared</signal:READY>'
   cbm_discovery:
     timeout: 900
     env:

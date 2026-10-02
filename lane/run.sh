@@ -89,6 +89,13 @@ for command in "${gate_commands[@]}"; do
 done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
 
+# The host worker owns NTK claims; no Docker or preflight without its receipt.
+jq -e -s --arg id "$ticket" --arg ws "$project" '
+  length == 1 and (.[0] | .claimed == true and .status == "in_progress" and
+    .workspace == $ws and (.id | ascii_downcase) == ($id | ascii_downcase))
+' <<<"${LANE_CLAIM_JSON:-}" >/dev/null 2>&1 || {
+  say "run.sh: confirmed host claim required; start through the lane worker"; exit 2; }
+
 # Empty host mountpoints are shared by concurrent lane containers.
 check_mountpoint() {
   local point="$TOOLING_ROOT/$(basename "$1")" entries
