@@ -41,9 +41,11 @@ All lanes access shared host CBM storage through the configured connector. Crew
 does not copy databases, start CBM daemons, or index worktrees. Equill supplies
 role contracts and memory.
 `roles/*.jsonl` are recovery snapshots; the live Equill store is authoritative.
+Lane and planning snapshots cover their six roles; the shared snapshot contains
+the common rules included in their contracts.
 Do not import a stale snapshot over that store.
 
-Dolber atomically claims a ticket before opening its Herdr tab. Startup failure
+The worker atomically claims a ticket in its Herdr tab before preflight or Docker. Startup failure
 returns the confirmed claim to `open`. Once the workflow adopts the claim,
 failure sets `blocked` and attaches details. An unconfirmed claim changes no
 status. An uncertain dispatch keeps its reservation for inspection.
@@ -73,6 +75,7 @@ Its Docker storage is removed with the lane container. No host Docker socket is 
 Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
 must be available. Startup runs `lane-launcher/safe-sync.py`: each immediate
 canonical repository with `.ntkrc` is locked, fetched, fast-forwarded to its
-configured branch, and reindexed through the shared CBM connector. The lock is
-held until CBM is ready with an `indexed_at` newer than the refresh request.
+configured branch, and reindexed through the shared CBM connector. Up to four
+repositories refresh in parallel with separate MCP connections. Each repository
+lock is held until CBM reports ready for that canonical root.
 Dirty or diverged sources stop startup. Dry runs do not refresh sources or CBM.

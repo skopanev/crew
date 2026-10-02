@@ -26,11 +26,12 @@ there. Artifacts are writable separately. Existing nonempty checkouts are
 retained and rejected on a new launch.
 
 Startup uses Crew's `lane-launcher/safe-sync.py` for canonical repositories under
-the source root that have `.ntkrc`. A per-repository `flock` covers fetch,
+the source root that have `.ntkrc`. Up to four repositories refresh in parallel,
+each with its own MCP connection. A per-repository `flock` covers fetch,
 fast-forward, and shared CBM refresh. Detached HEAD is switched to the configured
 branch only when its commit is already in that branch's remote history. Local
 changes or divergence stop startup without discarding work. The lock is held
-until CBM reports `ready` and an `indexed_at` newer than the refresh request.
+until CBM reports `ready` for that canonical root.
 `--dry-run`, `--validate`, and `--graph` only probe the connection.
 
 ## Workflow
