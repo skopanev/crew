@@ -193,7 +193,7 @@ console.log(JSON.stringify({result}));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const config = {id: 'test-project', workspace: 'test', project: 'project', tags: ['crew'], strict: true,
     launchLanes, sourceRoot: path.join(root, 'sources'),
-    cbmMcpCommand: path.join(root, 'cbm-mcp.py'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
+    cbmMcpCommand: path.join(root, 'cbm-mcp.py'), cbmCacheDir: root, sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
     stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
   const configFile = path.join(root, 'config.json');
   save(configFile, config);

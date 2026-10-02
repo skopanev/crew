@@ -62,14 +62,14 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   }
   if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
   if (!config.sourceRoot) throw new Error('Config needs sourceRoot: the source workspace');
-  for (const dir of [config.sourceRoot, config.sshDir, ...config.readOnlyRepos]) {
+  for (const dir of [config.sourceRoot, config.sshDir, config.cbmCacheDir, ...config.readOnlyRepos]) {
     if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
       throw new Error(`Directory must exist and be absolute: ${dir}`);
     }
   }
   if (typeof config.cbmMcpCommand !== 'string' || !path.isAbsolute(config.cbmMcpCommand) ||
       !fs.statSync(config.cbmMcpCommand).isFile()) {
-    throw new Error('Config needs cbmMcpCommand: absolute path to the shared CBM connector');
+    throw new Error('Config needs cbmMcpCommand: absolute path to the native host CBM executable');
   }
   return config;
 }

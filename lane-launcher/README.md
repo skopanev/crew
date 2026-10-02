@@ -1,6 +1,6 @@
 # Lane launcher
 
-Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla and jq on the host, plus the Crew image. The lane invokes the status script by its path inside the mounted Crew checkout, so it does not require a globally installed `ntk-status` or an image rebuild just to obtain this script.
+Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla, jq, the installed broker and native CBM on the host, plus the Crew image. The lane invokes the status script by its path inside the mounted Crew checkout, so it does not require a globally installed `ntk-status` or an image rebuild just to obtain this script.
 
 ```bash
 cp -n lane-launcher/dolber.example.json lane-launcher/project.json
@@ -32,7 +32,8 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `closeTabOnExit` | **Defaults to false:** keep the tab open after completion for inspection; set true to close it automatically |
 | `sshDir` | Absolute path to the Git key directory |
 | `sourceRoot` | Required for launches: absolute path to the entire source workspace, mounted read-only |
-| `cbmMcpCommand` | Absolute path to an existing Python stdio connector to the shared host CBM service; for example, the connector already used by a workspace box |
+| `cbmMcpCommand` | Absolute path to the native host CBM executable. Broker creates a current bridge scoped to `sourceRoot` at each lane start; do not use a temporary box shim |
+| `cbmCacheDir` | Absolute path to the existing shared CBM store, matching the active CBM daemon. No store is created or copied |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `gateCommands` | Required check commands run against the lane's candidate |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |

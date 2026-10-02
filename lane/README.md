@@ -10,7 +10,8 @@ Manual invocation uses the same settings:
 ```sh
 ./lane/run.sh \
   --dispatcher-id <id> --ticket-id <ticket> --project <ntk-workspace> \
-  --source-root <source-workspace> --cbm-mcp-command <connector.py> \
+  --source-root <source-workspace> --cbm-mcp-command <host-cbm-executable> \
+  --cbm-cache-dir <shared-store> \
   --gate-command '<repository-check>' --ssh-dir <key-directory>
 ```
 
@@ -44,7 +45,7 @@ with three agents → synthesize verdicts → land → cleanup → update status
 Review blockers return to implementation for up to three rounds. Landing
 conflicts go through a fix and another check/review round.
 
-Dolber claims before opening the Herdr tab. The workflow adopts that receipt
+The worker claims in the Herdr tab before preflight or Docker. The workflow adopts that receipt
 without a second claim; a manual lane claims at its first node. Startup failure
 returns a dispatcher claim to `open`. After adoption, workflow failure sets
 `blocked` and attaches the failure report. No confirmed claim means no status write.
@@ -76,8 +77,11 @@ Agents implement only the ticket's scope and acceptance criteria. CBM locates
 relevant code and checks; findings must be verified against the current source
 or checkout. Missing inputs stop the lane with a concrete blocker.
 
-The shared host CBM connector is configured through `cbmMcpCommand`. No database
-copy, local daemon, or worktree indexing is created. Startup checks the connector
+The native host CBM executable is configured through `cbmMcpCommand`. Startup
+uses the installed broker's box bridge with `CBM_ALLOWED_ROOT=sourceRoot`
+and `CBM_CACHE_DIR=cbmCacheDir`;
+expired bridges are recreated. No database copy, extra CBM daemon, or worktree
+indexing is created. Startup checks the per-run connector
 from the container. Equill is accessed through the host bridge under the fixed
 `lane` identity, allowing only `context` and `search`.
 

@@ -15,6 +15,7 @@
   "intervalSeconds": 60,
   "sourceRoot": "",
   "cbmMcpCommand": "",
+  "cbmCacheDir": "",
   "sshDir": "",
   "readOnlyRepos": [],
   "gateCommands": []

@@ -4,7 +4,8 @@ usage() {
   cat >&2 <<'USAGE'
 usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspace>
               --dispatcher-id <dolber id>
-              --cbm-mcp-command <file> --gate-command <shell command> [...]
+              --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
+              --gate-command <shell command> [...]
               [--module <module>]
               [--mount-ro <repo>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
@@ -13,8 +14,9 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
 
   --source-root  entire source workspace, mounted read-only. The ticket module
                  names the source repository within it.
-  --cbm-mcp-command  existing Python stdio connector to the shared host CBM.
+  --cbm-mcp-command  native host CBM executable; broker bridges it for this lane.
               The lane uses that service; it never copies or indexes a database.
+  --cbm-cache-dir  existing shared CBM store, the same as the active daemon uses.
   --module    ticket module; read from ntk when omitted
   --image     lane runtime image; defaults to medulla-crew:latest
   --docker-engine  enable the broker box's private Docker engine for tests
@@ -42,7 +44,7 @@ say() { printf '%s\r\n' "$*" >&2; }
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
-ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" dispatcher_id=""
+ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 also=()
 gate_commands=()
@@ -62,6 +64,7 @@ while (( $# )); do
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
+    --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
@@ -77,7 +80,8 @@ fi
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
 [[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
-[[ -f "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an existing shared CBM connector"; exit 2; }
+[[ -x "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an executable host CBM server"; exit 2; }
+[[ -n "$cbm_cache" && -d "$cbm_cache" ]] || { say "run.sh: --cbm-cache-dir must name the existing shared CBM store"; exit 2; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
 for command in "${gate_commands[@]}"; do
@@ -217,12 +221,11 @@ fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
 
-# Copy only the small stdio connector so its credentials are available to
-# this container. Every connector talks to the same existing host service.
-# No database mount, clone, daemon, path rewrite, or indexing belongs here.
+# Broker supplies a current bridge, scoped to this source root, as for --box.
+# Only its small per-run connector enters the container; the database stays shared.
 cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
 cbm_connector="$cbm_connector_dir/mcp.py"
-cp "$cbm_command" "$cbm_connector"
+python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector"
 chmod 600 "$cbm_connector"
 cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"
 # Read-only Medulla checks do not update canonical sources or CBM.
