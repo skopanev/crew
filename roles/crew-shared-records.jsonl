@@ -1,0 +1,4 @@
+{"payload":{"do":"Report verified facts; mark unsupported claims `UNKNOWN`.","kind":"report","order":10,"project":null,"role":null},"type":"agent.role.v1"}
+{"payload":{"do":"Always ask yourself: 'Do we really need this? Can we do it simpler and more reliably?' Keep the solution extensible, minimal, and reliable. Do not overengineer.","kind":"work","order":20,"project":null,"role":null},"type":"agent.role.v1"}
+{"payload":{"do":"Use English. Russian allowed with Owner.","kind":"work","order":30,"project":null,"role":null},"type":"agent.role.v1"}
+{"payload":{"key":"tools.rtk","module":"tools","project":null,"role":null,"rule":"Prefix shell commands with `rtk`. Use `rtk proxy <command>` when unfiltered output is needed.","rules":null,"severity":"must"},"type":"agent.rule.v1"}
