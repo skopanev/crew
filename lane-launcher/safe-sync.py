@@ -6,6 +6,7 @@ import runpy
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 session = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'lane/bridge/cbm-probe.py'))['session']
@@ -81,9 +82,19 @@ def main(root, connector, image=None):
                    and (p / '.git').is_dir() and (p / '.ntkrc').is_file())
     if not repos:
         raise RuntimeError(f'No canonical repositories with .ntkrc under {root}')
-    with session(connector, image=image) as call:
-        for repo in repos:
+    def refresh(repo):
+        # Each worker owns its MCP stream and repository lock.
+        with session(connector, image=image) as call:
             sync(repo, call)
+    with ThreadPoolExecutor(max_workers=min(4, len(repos))) as pool:
+        futures = [(repo, pool.submit(refresh, repo)) for repo in repos]
+        failures = []
+        for repo, future in futures:
+            error = future.exception()
+            if error is not None:
+                failures.append(f'{repo.name}: {error}')
+    if failures:
+        raise RuntimeError('; '.join(failures))
 
 
 if __name__ == '__main__':
