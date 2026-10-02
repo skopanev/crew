@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 
 GROUPS = {
@@ -57,12 +58,22 @@ def export():
         target = DIRECTORY / f"crew-{group}-records.jsonl"
         content = "\n".join(lines) + "\n"
         if not target.exists() or target.read_text() != content:
-            target.write_text(content)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=DIRECTORY, delete=False) as temporary:
+                temporary_path = Path(temporary.name)
+                try:
+                    temporary.write(content)
+                    temporary.close()
+                    os.replace(temporary_path, target)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
         print(f"Equill: {target.name} · {len(lines)} records")
 
 
 if __name__ == "__main__":
     try:
         export()
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"Crew role export failed: {error.stderr.strip()[-300:] or error}")
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         sys.exit(f"Crew role export failed: {error}")
