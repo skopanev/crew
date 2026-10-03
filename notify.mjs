@@ -22,12 +22,14 @@ export async function notify(config, event) {
   const summary = String(event.summary ?? '')
     .replace(/[\r\x00-\x09\x0b-\x1f\x7f]/g, '')
     .replace(/;?\s*full output:[^\n]*/gi, '')
-    .replace(/^Lane exited [^\n]*$/gm, '').trim();
+    .replace(/^Lane exited [^\n]*$/gm, '')
+    .replace(/(^|[\s('"])\/[^\s;,'")]+/g, '$1')
+    .replace(/:\s*;/g, ';').replace(/ {2,}/g, ' ').trim();
   const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
-  const runId = clean(event.runId || event.id);
-  const message = [header, ticketLine, `Run: ${runId}`, stage, summary]
+  const reason = summary || (event.event === 'READY' ? '' : clean(event.signal) || 'Failure details are unavailable');
+  const message = [header, ticketLine, stage, reason && `Reason: ${reason}`]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
     fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
@@ -43,8 +45,7 @@ export async function notify(config, event) {
       await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end),
         ...(start === 0 ? {entities: [
           {type: 'bold', offset: 0, length: header.length},
-          {type: 'code', offset: header.length + 1 + 'Ticket: '.length, length: ticketId.length},
-          {type: 'code', offset: header.length + ticketLine.length + 2 + 'Run: '.length, length: runId.length},
+          {type: 'bold', offset: header.length + 1 + 'Ticket: '.length, length: ticketId.length},
         ]} : {})}));
       start = end;
     }

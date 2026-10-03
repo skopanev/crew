@@ -131,7 +131,8 @@ Set `notify.chatId` and optional `notify.threadId` in the local dispatcher confi
 Supply `TELEGRAM_BOT_TOKEN` in the environment, or point `notify.envFile` at an
 existing local env file containing that variable. Keep credentials out of Git.
 Replace legacy `notify.to`, `notify.room` and `notify.from` with these fields.
-Messages show a bold status with a green or red dot, the ticket ID, the full run ID, and an available failure reason.
+Messages show a bold status with a green or red dot, a bold ticket ID, and a `Reason:` line for failures.
+Messages omit the run ID and absolute file paths.
 Both IDs use code formatting for copying.
 No log files or exit-code/log-path metadata are sent to Telegram. Full logs remain
 in the run directory and NTK reports. No agent rewrites the message.
