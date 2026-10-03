@@ -67,13 +67,15 @@ export function createDashboard(config, paint) {
     runs = runDirectories(config.stateDir).flatMap(dir => {
       const run = optional(path.join(dir, 'launch.json'));
       return run ? [{dir, ...run}] : [];
-    }).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    });
   }
   function lines(left, stopped = false) {
     const width = Math.max(30, process.stdout.columns || 80);
     for (const run of runs) {
       if (!run.result) Object.assign(run, optional(path.join(run.dir, 'launch.json')));
     }
+    runs.sort((a, b) => Number(Boolean(a.result)) - Number(Boolean(b.result)) ||
+      Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const recent = runs.slice(0, 15);
     const statusWidth = Math.max(6, ...recent.map(run => statusFor(run).length));
     const stageWidth = 23;
