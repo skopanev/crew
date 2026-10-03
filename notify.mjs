@@ -17,10 +17,11 @@ export async function notify(config, event) {
   if (event.event === 'TIMEOUT' && (!event.node || !event.model)) {
     throw new Error('TIMEOUT needs node and model');
   }
-  const details = ['node', 'model', 'exit', 'log']
-    .filter(key => event[key] !== undefined)
-    .map(key => `${key}=${clean(event[key])}`).join(' ') || '-';
-  const message = `CREW ${event.event} | ${clean(event.id)} | ${clean(event.summary)} | ${details}`;
+  const stage = [event.node, event.signal, event.event === 'TIMEOUT' ? event.model : undefined]
+    .filter(Boolean).map(clean).join(' · ');
+  const summary = String(event.summary ?? '').replace(/[\r\x00-\x09\x0b-\x1f\x7f]/g, '').trim();
+  const message = [`${event.event} · ${clean(event.id)}`, stage, summary]
+    .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
     fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
       .replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
@@ -35,18 +36,10 @@ export async function notify(config, event) {
       await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end)}));
       start = end;
     }
-    if (event.document) {
-      const body = new FormData();
-      for (const [key, value] of Object.entries(destination)) body.append(key, String(value));
-      body.append('document', new Blob([fs.readFileSync(event.document)], {type: 'text/plain'}),
-        `${clean(event.id)}-${path.basename(event.document)}`);
-      await send('sendDocument', body);
-    }
-
     async function send(method, body) {
       const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
         method: 'POST', signal: AbortSignal.timeout(15_000),
-        ...(typeof body === 'string' ? {headers: {'Content-Type': 'application/json'}} : {}), body,
+        headers: {'Content-Type': 'application/json'}, body,
       });
       const reply = await response.json();
       if (!response.ok || reply.ok !== true) {
@@ -64,9 +57,22 @@ export function completionEvent(run, result, artifacts) {
     summary: result.code === 0 ? 'Ticket ready for test' : result.error || 'Lane failed; inspect the report',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
   if (result.blocked) return {...event, event: 'BLOCKED', summary: result.error};
-  if (result.code === 0 || !artifacts) return event;
+  if (result.code === 0) return event;
+  if (!artifacts) {
+    // Startup refusals have no Medulla journal. Keep the complete refusal lines.
+    if (fs.existsSync(event.log)) {
+      const reasons = fs.readFileSync(event.log, 'utf8').split('\n')
+        .filter(line => /^run\.sh: /.test(line) && !/^run\.sh: (sources RO:|worktree RW:|shared |memory on|removed )/.test(line));
+      if (reasons.length) return {...event, node: 'startup', summary: reasons.join('\n')};
+    }
+    return event;
+  }
   const failure = path.join(artifacts, 'failure.txt');
   const detail = fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : '';
+  const originFile = path.join(artifacts, 'origin.json');
+  const legacy = /^lane stopped on (\S+) \(([^)]+)\) for \S+\. ([\s\S]*)$/.exec(detail);
+  const origin = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8'))
+    : {node: legacy?.[1], signal: legacy?.[2], message: legacy?.[3] || detail};
   const runDir = path.dirname(artifacts);
   const journalFile = path.join(runDir, 'journal.jsonl');
   const journal = fs.existsSync(journalFile) ? fs.readFileSync(journalFile, 'utf8')
@@ -89,14 +95,13 @@ export function completionEvent(run, result, artifacts) {
         node: latest.name.replace(/^\d+-/, ''), model: row.model || row.input?.model || row.harness || 'unknown'};
     }
   }
-  return {...event, summary: detail || event.summary};
+  return {...event, node: origin.node, signal: origin.signal,
+    summary: origin.message || event.summary};
 }
 
 export async function notifyCompletion(run, result, artifacts) {
   if (!run.config.notify) return false;
-  const event = completionEvent(run, result, artifacts);
-  return notify(run.config, {...event,
-    ...(result.code === 0 ? {} : {document: event.log})});
+  return notify(run.config, completionEvent(run, result, artifacts));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {

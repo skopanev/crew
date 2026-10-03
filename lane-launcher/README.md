@@ -112,7 +112,10 @@ Set `notify.chatId` and optional `notify.threadId` in the local dispatcher confi
 Supply `TELEGRAM_BOT_TOKEN` in the environment, or point `notify.envFile` at an
 existing local env file containing that variable. Keep credentials out of Git.
 Replace legacy `notify.to`, `notify.room` and `notify.from` with these fields.
-No agent rewrites the message. Delivery failures are recorded without changing
+Messages contain the ticket ID, failed stage/signal and its original reason.
+No log files or exit-code/log-path metadata are sent to Telegram. Full logs remain
+in the run directory and NTK reports. No agent rewrites the message.
+Delivery failures are recorded without changing
 the ticket outcome.
 
 Authentication uses `~/.config/ntk/config.json` (`url`, `key`) or `NTK_CONFIG`, `NTK_KEY`, `NTK_URL`. Requests go directly to the existing HTTP API over HTTPS. Medulla mounts the default NTK config directory into the lane container; an environment-only key or custom config path must also be made available inside the container. Keep credentials out of launcher config and workflow variables.
