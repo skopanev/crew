@@ -63,8 +63,9 @@ export function createDashboard(config, paint) {
   }
   function lines(left, stopped = false) {
     const width = Math.max(30, process.stdout.columns || 80);
-    const ticketWidth = Math.max(8, width - 54);
-    const stageWidth = 23;
+    const ticketWidth = Math.min(Math.max(8, width - 54),
+      Math.max(6, ...runs.slice(0, 15).map(run => Array.from(plain(run.ticket)).length)));
+    const stageWidth = Math.max(23, width - ticketWidth - 31);
     for (const run of runs) {
       if (!run.result) Object.assign(run, optional(path.join(run.dir, 'launch.json')));
     }
