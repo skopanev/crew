@@ -67,8 +67,10 @@ Failed checks return to the coder through the existing review repair limit.
 Verification-only failures stop without implementation.
 Implementation is committed with native hooks before the configured checks and
 review. Checks can therefore produce receipts for the exact commit to be pushed.
-Landing requires that same commit and tree, and runs the native push hook.
-A moved target requires a rebase and another review; force push is unavailable.
+Landing verifies the checked commit and tree, and runs the native push hook.
+A clean rebase runs checks and returns to landing without another expert review.
+Conflict resolution or a coder repair requires checks and expert review again.
+Force push is unavailable.
 
 After landing, `to_test` has three attempts with one-second pauses. Exhaustion
 fails the run and preserves `artifacts/landing.txt` and `to-test-errors.txt`.

@@ -274,6 +274,7 @@ nodes:
     timeout: 3600
     on_signal:
       SNAPSHOT: expert_review
+      CHECKED: git_landing
       GATE_FAIL: reject_gate
       NOTHING_DONE: notify_failure
       __failed__: notify_failure
@@ -283,7 +284,7 @@ nodes:
       set -euo pipefail
       cd "${LANE_WORKTREE}"
       git add -A
-      # Landing must commit the exact tree reviewed by the panel.
+      # Freeze the candidate checked before landing.
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
       if [ "${VERIFY_ONLY}" = "true" ] && ! git diff --cached --quiet "$base"; then
@@ -315,6 +316,12 @@ nodes:
         echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
         exit 0
       fi
+      printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
+      receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
+      if [ "${MEDULLA_LAST_NODE:-}" = "git_landing" ] && [ "${MEDULLA_LAST_SIGNAL:-}" = "REBASED" ]; then
+        echo "<signal:CHECKED>Clean rebase checks passed; land the checked candidate.</signal:CHECKED>"
+        exit 0
+      fi
       # Share one Equill contract across all review harnesses and rounds.
       qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
       # Extract content and publish atomically after a successful read.
@@ -332,8 +339,6 @@ nodes:
         fi
         rm -f "$qa.err"
       fi
-      printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
-      receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
       echo "<signal:SNAPSHOT>snapshot: $tree. Declared checks passed on this tree; commands, exit codes and logs: $receipt</signal:SNAPSHOT>"
   expert_review:
     timeout: 1800
@@ -467,7 +472,7 @@ nodes:
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
       target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
 
-      # Push exactly the commit checked and reviewed by the panel.
+      # Push the checked candidate. A clean rebase retains the panel approval.
       snap="$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       [ -f "$snap" ] || { echo "<signal:LAND_FAILED>нет зафиксированного снимка панели</signal:LAND_FAILED>"; exit 0; }
       want_tree="$(sed -n 1p "$snap")"
@@ -511,7 +516,7 @@ nodes:
         git fetch origin
         if git rebase "origin/${target}" > "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt" 2>&1; then
           cat "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt"
-          echo "<signal:REBASED>target changed; rerun checks and review the rebased candidate</signal:REBASED>"
+          echo "<signal:REBASED>Clean rebase completed; rerun checks before landing.</signal:REBASED>"
           exit 0
         else
           cat "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt" >&2
