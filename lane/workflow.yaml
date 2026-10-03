@@ -374,8 +374,8 @@ nodes:
       Workspace: {{var:project_name}}. Verification only: {{var:VERIFY_ONLY}}.
       Worktree: {{var:LANE_WORKTREE}}.
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
-      {{var:RUN_ARTIFACTS}}/coder-report.txt if present; git diff --cached;
-      ticket commits above origin/<target_branch> (.ntkrc).
+      {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
+      git diff "origin/$(jq -er .target_branch .ntkrc)"...HEAD.
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
