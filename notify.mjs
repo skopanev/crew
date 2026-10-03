@@ -19,8 +19,13 @@ export async function notify(config, event) {
   }
   const stage = [event.node, event.signal, event.event === 'TIMEOUT' ? event.model : undefined]
     .filter(Boolean).map(clean).join(' · ');
-  const summary = String(event.summary ?? '').replace(/[\r\x00-\x09\x0b-\x1f\x7f]/g, '').trim();
-  const message = [`${event.event} · ${clean(event.id)}`, stage, summary]
+  const summary = String(event.summary ?? '')
+    .replace(/[\r\x00-\x09\x0b-\x1f\x7f]/g, '')
+    .replace(/;?\s*full output:[^\n]*/gi, '')
+    .replace(/^Lane exited [^\n]*$/gm, '').trim();
+  const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
+  const runId = clean(event.runId || event.id);
+  const message = [header, runId, stage, summary]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
     fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
@@ -33,7 +38,11 @@ export async function notify(config, event) {
     for (let start = 0; start < message.length;) {
       let end = Math.min(start + 4000, message.length);
       if (end < message.length && /[\uD800-\uDBFF]/.test(message[end - 1])) end--;
-      await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end)}));
+      await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end),
+        ...(start === 0 ? {entities: [
+          {type: 'bold', offset: 0, length: header.length},
+          {type: 'code', offset: header.length + 1, length: runId.length},
+        ]} : {})}));
       start = end;
     }
     async function send(method, body) {
@@ -54,7 +63,8 @@ export async function notify(config, event) {
 
 export function completionEvent(run, result, artifacts) {
   const event = {event: result.code === 0 ? 'READY' : 'FAILED', id: run.ticket,
-    summary: result.code === 0 ? 'Ticket ready for test' : result.error || 'Lane failed; inspect the report',
+    runId: path.basename(path.dirname(run.runFolder)),
+    summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
   if (result.blocked) return {...event, event: 'BLOCKED', summary: result.error};
   if (result.code === 0) return event;
