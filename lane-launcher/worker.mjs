@@ -21,7 +21,7 @@ function announce(message) {
 }
 save(path.join(dir, 'worker.json'), {pid: process.pid, startedAt: new Date().toISOString()});
 const script = fileURLToPath(new URL('../lane/run.sh', import.meta.url));
-let child, signal, lastStderr;
+let child, signal;
 const stop = value => {
   signal = value;
   if (child?.pid) {
@@ -59,7 +59,6 @@ try {
     stream.on('data', data => fs.writeSync(log, data));
     if (color || stream === child.stderr) {
       createInterface({input: stream, crlfDelay: Infinity}).on('line', line => {
-        if (stream === child.stderr && line.trim()) lastStderr = line;
         if (color) target.write(formatLaneLine(line, true) + '\n');
       });
     }
@@ -70,7 +69,7 @@ try {
     child.once('close', (code, receivedSignal) => resolve({code, signal: receivedSignal || signal}));
   });
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
-  if (result.status === 'failed' && lastStderr) result.error = lastStderr;
+  if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
   const message = run.claim || signal ? error.message :
     claimRefused || /^NTK HTTP 4\d\d/.test(error.message) ? `CLAIM_REFUSED: ${error.message}` :

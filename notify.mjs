@@ -26,15 +26,32 @@ export async function notify(config, event) {
       .replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
   if (!token) throw new Error('Telegram bot token missing: set TELEGRAM_BOT_TOKEN or notify.envFile');
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST', signal: AbortSignal.timeout(15_000),
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({chat_id: route.chatId,
-        ...(route.threadId === undefined ? {} : {message_thread_id: route.threadId}), text: message}),
-    });
-    const reply = await response.json();
-    if (!response.ok || reply.ok !== true) {
-      throw new Error(`Telegram refused notification: ${reply.description || response.status}`);
+    const destination = {chat_id: route.chatId,
+      ...(route.threadId === undefined ? {} : {message_thread_id: route.threadId})};
+    // Telegram limits each message; preserve every character across messages.
+    for (let start = 0; start < message.length;) {
+      let end = Math.min(start + 4000, message.length);
+      if (end < message.length && /[\uD800-\uDBFF]/.test(message[end - 1])) end--;
+      await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end)}));
+      start = end;
+    }
+    if (event.document) {
+      const body = new FormData();
+      for (const [key, value] of Object.entries(destination)) body.append(key, String(value));
+      body.append('document', new Blob([fs.readFileSync(event.document)], {type: 'text/plain'}),
+        `${clean(event.id)}-${path.basename(event.document)}`);
+      await send('sendDocument', body);
+    }
+
+    async function send(method, body) {
+      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST', signal: AbortSignal.timeout(15_000),
+        ...(typeof body === 'string' ? {headers: {'Content-Type': 'application/json'}} : {}), body,
+      });
+      const reply = await response.json();
+      if (!response.ok || reply.ok !== true) {
+        throw new Error(`Telegram refused notification: ${reply.description || response.status}`);
+      }
     }
   } catch (error) {
     throw new Error(String(error.message).replaceAll(token, '[redacted]'));
@@ -72,12 +89,14 @@ export function completionEvent(run, result, artifacts) {
         node: latest.name.replace(/^\d+-/, ''), model: row.model || row.input?.model || row.harness || 'unknown'};
     }
   }
-  return {...event, summary: detail.split('\n')[0].slice(0, 300) || event.summary};
+  return {...event, summary: detail || event.summary};
 }
 
 export async function notifyCompletion(run, result, artifacts) {
   if (!run.config.notify) return false;
-  return notify(run.config, completionEvent(run, result, artifacts));
+  const event = completionEvent(run, result, artifacts);
+  return notify(run.config, {...event,
+    ...(result.code === 0 ? {} : {document: event.log})});
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
