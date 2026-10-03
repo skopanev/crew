@@ -72,8 +72,8 @@ The dispatcher waits 60 seconds after each iteration and continues until Ctrl+C,
 
 In a terminal, the loop shows a live table of the latest 15 lane runs.
 Each row shows the status, ticket ID, Medulla stage, run ID, and time in `HH:MM:SS` format.
-`RUN ID` shows the first eight characters of the launch directory UUID.
-Find its log at `<stateDir>/crew-dispatchers/<id>/runs/<RUN-ID>*/output.log`.
+`RUN ID` shows the full launch directory UUID.
+Find its log at `<stateDir>/crew-dispatchers/<id>/runs/<RUN-ID>/output.log`.
 The stage comes from the existing Medulla journal. Failed rows show the recorded failure node when available.
 `READY` is green and means that the lane completed successfully for testing.
 Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
@@ -82,7 +82,7 @@ Finished rows use softer white text for the ticket ID, stage, and time.
 
 The table and countdown update every second without adding scrollback lines.
 Dispatcher errors remain in the normal terminal scrollback with their full text and a timestamp.
-Short terminal windows show fewer rows. The full run history remains on disk.
+Small terminal windows show fewer rows. Long rows wrap without shortening IDs. The full run history remains on disk.
 Ctrl+C restores the terminal and leaves one final table.
 
 `--once`, `--dry-run`, and redirected output keep the existing text output.
