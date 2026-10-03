@@ -74,11 +74,11 @@ In a terminal, the loop shows a live table of the latest 15 lane runs.
 Each row shows the status, ticket ID, Medulla stage, run ID, and time in `HH:MM:SS` format.
 `RUN ID` shows the full launch directory UUID.
 Find its log at `<stateDir>/crew-dispatchers/<id>/runs/<RUN-ID>/output.log`.
-The stage comes from the existing Medulla journal. Failed rows show the recorded failure node when available.
-`READY` is green and means that the lane completed successfully for testing.
-Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
+Active rows show the stage from the existing Medulla journal. Failed rows show the reason from the failure report or result.
+`READY` rows are green and show no stage. They mean that the lane completed successfully for testing.
+`BLOCKED` is yellow. Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
 Active rows show elapsed time. Finished rows show total time.
-Finished rows use softer white text for the ticket ID, stage, and time.
+Other finished rows use softer white text for the ticket ID, reason, and time.
 
 The table and countdown update every five seconds without adding scrollback lines.
 Dispatcher errors remain in the normal terminal scrollback with their full text and a timestamp.

@@ -219,7 +219,7 @@ cleanup() {
     elif [[ -d "$worktree/.git" && -f "$worktree/.git/lane-base" ]]; then
       if base="$(cat "$worktree/.git/lane-base" 2>/dev/null)" \
         && head="$(git --no-optional-locks -C "$worktree" rev-parse HEAD 2>/dev/null)" \
-        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
+        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
         && [[ -n "$base" && "$head" == "$base" && -z "$changes" ]]; then
         if rm -rf -- "$worktree"; then
           printf 'run.sh: removed unchanged worktree: %s\r\n' "$worktree"
