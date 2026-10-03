@@ -18,6 +18,9 @@ The writable checkout is `<source-workspace>/.worktrees/<ticket>`, mounted at
 there. Artifacts are writable separately. Existing nonempty checkouts are
 retained and rejected on a new launch.
 
+After success, the host removes the private checkout. Reports and logs remain in the run directory.
+Failed runs retain code changes. Empty or unchanged checkouts are removed.
+
 Startup uses Crew's `lane-launcher/safe-sync.py` for canonical repositories under
 the source root that have `.ntkrc`. Up to four repositories refresh in parallel,
 each with its own MCP connection. A per-repository `flock` covers fetch,

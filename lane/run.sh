@@ -199,10 +199,23 @@ else
 fi
 
 cleanup() {
-  local code=$? base head changes
-  if [[ "$code" -ne 0 && "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
+  local code=$? base head changes target
+  if [[ "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
     if [[ -z "$(ls -A "$worktree")" ]]; then
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
+    elif [[ "$code" -eq 0 ]]; then
+      if target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$worktree/.ntkrc" 2>/dev/null)" \
+        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
+        && [[ -z "$changes" ]] \
+        && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$target"; then
+        if rm -rf -- "$worktree"; then
+          printf 'run.sh: removed completed worktree: %s\r\n' "$worktree"
+        else
+          say "run.sh: cannot remove completed worktree: $worktree" >&2
+        fi
+      else
+        say "run.sh: retained worktree: clean landed state not confirmed at $worktree" >&2
+      fi
     elif [[ -d "$worktree/.git" && -f "$worktree/.git/lane-base" ]]; then
       if base="$(cat "$worktree/.git/lane-base" 2>/dev/null)" \
         && head="$(git --no-optional-locks -C "$worktree" rev-parse HEAD 2>/dev/null)" \
@@ -302,6 +315,9 @@ if mkdir "$worktree" 2>/dev/null; then
 elif [[ ! -d "$worktree" || -L "$worktree" || -n "$(ls -A "$worktree")" ]]; then
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"
   exit 73
+else
+  # This run owns the accepted empty directory.
+  worktree_created=true
 fi
 mounts+=(--mount-rw "$worktree")
 cd "$TOOLING_ROOT"

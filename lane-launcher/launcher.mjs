@@ -12,7 +12,7 @@ import {createDashboard} from './dashboard.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
   (process.stdout.isTTY || (process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== '0'));
-const tones = {red: 31, yellow: '1;33', description: 33, available: '1;32', accent: '1;36', line: 36};
+const tones = {red: 31, yellow: '1;33', description: 33, available: '1;32', accent: '1;36', line: 36, finished: 37};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
