@@ -99,7 +99,7 @@ export function createDashboard(config, paint) {
       const {result, worker} = run;
       const status = statusFor(run);
       const tone = status === 'READY' ? 'available' : result ? 'red' : 'yellow';
-      const stage = result ? (run.stage ||= stageFor(run)) : stageFor(run);
+      const stage = result ? (status === 'READY' ? (run.stage ||= stageFor(run)) : '') : stageFor(run);
       const runId = path.basename(run.dir);
       const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
       output.push(`${paint(status === 'LOST' ? 'red' : tone, status.padEnd(statusWidth))}  ${result ? paint('finished', details) : details}`);
