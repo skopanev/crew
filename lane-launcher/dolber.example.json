@@ -1,7 +1,7 @@
 {
   "id": "my-project",
   "workspace": "",
-  "tags": ["agent-ready"],
+  "tags": ["crew"],
   "strict": false,
   "launchLanes": false,
   "closeTabOnExit": false,
@@ -14,6 +14,7 @@
   "limit": 1,
   "intervalSeconds": 60,
   "sourceRoot": "",
+  "stateDir": "",
   "cbmMcpCommand": "",
   "cbmCacheDir": "",
   "sshDir": "",
