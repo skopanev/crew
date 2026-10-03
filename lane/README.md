@@ -59,6 +59,12 @@ An uncertain claim or dispatch requires inspection before retrying.
 
 Checks run from the candidate repository before each review. Their commands,
 exit codes, tree/SHA, and log hashes are recorded under `artifacts/gates/`.
+The coder runs ticket tests. `prepare_review` owns commits and configured checks.
+Reviewers read passing results instead of repeating checks on an unchanged tree.
+Duplicate configured commands run once. Configure native receipt validation before
+an expensive check. Rerun the check when its native receipt is missing or invalid.
+Failed checks return to the coder through the existing review repair limit.
+Verification-only failures stop without implementation.
 Implementation is committed with native hooks before the configured checks and
 review. Checks can therefore produce receipts for the exact commit to be pushed.
 Landing requires that same commit and tree, and runs the native push hook.

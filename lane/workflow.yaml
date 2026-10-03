@@ -256,7 +256,6 @@ nodes:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       Read {{var:RUN_ARTIFACTS}}/scout.txt.
       Artifacts: {{var:RUN_ARTIFACTS}}.
-      Configured checks: {{var:gate_commands}}.
 
   prepare_review:
     env:
@@ -273,7 +272,7 @@ nodes:
     timeout: 3600
     on_signal:
       SNAPSHOT: expert_review
-      GATE_FAIL: notify_failure
+      GATE_FAIL: reject_gate
       NOTHING_DONE: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
@@ -713,32 +712,32 @@ nodes:
     shell: |
       set -euo pipefail
       if [ "${VERIFY_ONLY}" = "true" ]; then
-        printf '<signal:VERIFICATION_FAILED>Existing implementation failed review: %s. See panel-findings.txt.</signal:VERIFICATION_FAILED>\n' "${MEDULLA_LAST_MESSAGE:-}"
+        printf '<signal:VERIFICATION_FAILED>Existing implementation failed checks or review: %s.</signal:VERIFICATION_FAILED>\n' "${MEDULLA_LAST_MESSAGE:-}"
         exit 0
       fi
       limit="${REJECT_ROUNDS:-3}"
-      # Count review rounds since the last conflict fix.
+      # Share the repair limit across failed checks and review rounds.
       since="$(jq -r 'select(.node=="git_fix")|.step' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
       since="${since:-0}"
-      done_rounds="$(jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
+      done_rounds="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
       done_rounds="${done_rounds:-0}"
-      finding="$(jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
+      finding="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
 
-      # В last.message помещается только последняя находка; остальные здесь.
+      # Preserve the full repair history for the coder.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       {
-        printf 'РАУНД %s ИЗ %s%s\n\nПОСЛЕДНЯЯ НАХОДКА:\n%s\n\nРАУНДЫ ПОСЛЕ ПОСЛЕДНЕЙ ПОЧИНКИ:\n' \
-          "$done_rounds" "$limit" "$([ "$since" -gt 0 ] && echo ' (счёт сброшен после сведения конфликта)')" "$finding"
-        jq -r --argjson s "$since" 'select(.signal=="REJECT" and (.step // 0) > $s)|"- "+.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true
+        printf 'Round %s of %s\n\nLatest blocker:\n%s\n\nRepair history:\n' \
+          "$done_rounds" "$limit" "$finding"
+        jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|"- "+.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true
       } > "$MEDULLA_RUN_DIR/artifacts/rejects.txt" 2>/dev/null || true
 
-      # Кап ДО первого сигнала: движок маршрутизирует по первому известному.
+      # Check the limit before emitting a repair signal.
       if [ "$done_rounds" -ge "$limit" ]; then
-        echo "<signal:TOO_MANY_ROUNDS>Review rejected ${done_rounds} times. Last review: ${finding}</signal:TOO_MANY_ROUNDS>"
+        echo "<signal:TOO_MANY_ROUNDS>Checks or review failed ${done_rounds} times. Latest blocker: ${finding}</signal:TOO_MANY_ROUNDS>"
         exit 0
       fi
 
       # Pass full review paths without excerpts.
-      reviews="$(ls "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null | tr '\n' ' ')"
-      printf '<signal:PANEL_REJECTED>Review round %s of %s. Blocker: %s. Read full reviews: %s. Resolve blocking findings. Verdict history: %s/artifacts/panel-findings.txt</signal:PANEL_REJECTED>\n' \
-        "$done_rounds" "$limit" "$finding" "${reviews:-нет}" "$MEDULLA_RUN_DIR"
+      reviews="$(ls "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null | tr '\n' ' ' || true)"
+      printf '<signal:PANEL_REJECTED>Repair round %s of %s. Blocker: %s. Read the named check logs and full reviews: %s. Resolve blocking findings. History: %s/artifacts/rejects.txt</signal:PANEL_REJECTED>\n' \
+        "$done_rounds" "$limit" "$finding" "${reviews:-none}" "$MEDULLA_RUN_DIR"
