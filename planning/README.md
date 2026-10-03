@@ -185,18 +185,8 @@ NTK-тикета с планом автоматически.
 
 ### Writing standard
 
-Planning and lane receive one shared writing rule from Equill: `writing.ste100`.
-Apply [ASD-STE100, Issue 9](https://www.asd-ste100.org/) to new goals, steps, tasks, acceptance checks, risks, and reviews.
-At least 80% of sentences in each text must comply.
-
-- Limit instructions to 20 words and descriptions to 25 words. Use one action per instruction.
-- Use active voice, simple tenses, imperative instructions, common words, and consistent terms.
-- Limit noun groups to three words. Avoid contractions, omitted words, and semicolons.
-- Limit each paragraph to one topic and six sentences. Use vertical lists for complex text.
-- Start warnings with a command or condition. Then state the risk.
-
-Preserve code, commands, identifiers, quotes, logs, and existing records.
-The workflow supplies these rules to the agents. It does not measure STE compliance.
+Planning and lane receive the shared Equill rule `writing.ste100` ([ASD-STE100, Issue 9](https://www.asd-ste100.org/)).
+The workflow does not measure compliance.
 
 ### Проверки
 
