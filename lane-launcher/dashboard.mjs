@@ -61,17 +61,19 @@ function statusFor({result, worker}) {
 }
 
 function reasonFor(run) {
+  let reason = String(run.result.error || `Exit ${run.result.code ?? '?'}`)
+    .replace(/;\s*full output:[^\n]*/g, '');
   try {
     const report = fs.readdirSync(run.runFolder).sort().reverse()
       .map(name => path.join(run.runFolder, name, 'artifacts/failure.txt'))
       .find(file => fs.existsSync(file));
-    if (report) return fs.readFileSync(report, 'utf8').trim()
+    if (report) reason = fs.readFileSync(report, 'utf8').trim()
       .replace(/^lane stopped on \S+ \([^)]+\) for \S+\.\s*/, '');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  return String(run.result.error || `Exit ${run.result.code ?? '?'}`)
-    .replace(/;\s*full output:[^\n]*/g, '');
+  return reason.replace(/(^|[\s('"])\/[^\s;,'")]+/g, '$1')
+    .replace(/:\s*;/g, ';').replace(/ {2,}/g, ' ').trim();
 }
 
 export function createDashboard(config, paint) {
@@ -114,7 +116,7 @@ export function createDashboard(config, paint) {
     for (const run of visible) {
       const {result, worker} = run;
       const status = statusFor(run);
-      const tone = status === 'READY' ? 'available' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'yellow';
+      const tone = status === 'READY' ? 'available' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'accent';
       const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       const runId = path.basename(run.dir);
       const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
