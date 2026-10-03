@@ -51,7 +51,7 @@ def plan():
                 raise ValueError(f"test must be an existing file inside this checkout: {test}")
             paths.append("./" + str(path.resolve().relative_to(root)))
         commands = [shlex.join([*runner, *dict.fromkeys(paths)]), *commands]
-    return commands
+    return list(dict.fromkeys(commands))
 
 
 def identity():
