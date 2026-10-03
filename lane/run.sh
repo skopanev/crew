@@ -283,6 +283,7 @@ if $sync_sources; then
   python3 "$TOOLING_ROOT/lane-launcher/safe-sync.py" "$source_root" "$cbm_connector" "$MEDULLA_IMAGE"
 else
   docker run --rm --entrypoint python3 \
+    --add-host=host.docker.internal:host-gateway \
     -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
     -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
     "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"

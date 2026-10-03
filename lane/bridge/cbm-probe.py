@@ -17,6 +17,7 @@ def session(connector, image=None):
         connector = str(Path(connector).resolve(strict=True))
         directory = str(Path(connector).parent)
         command = ['docker', 'run', '--rm', '-i', '--entrypoint', 'python3',
+                   '--add-host=host.docker.internal:host-gateway',
                    '-v', f'{directory}:{directory}:ro', image, connector]
     process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE)
