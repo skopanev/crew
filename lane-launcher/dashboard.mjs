@@ -76,7 +76,7 @@ export function createDashboard(config, paint) {
     }
     const recent = runs.slice(0, 15);
     const statusWidth = Math.max(6, ...recent.map(run => statusFor(run).length));
-    const stageWidth = 32;
+    const stageWidth = 23;
     const ticketWidth = Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length));
     const runWidth = Math.max(36, width - statusWidth - ticketWidth - stageWidth - 17);
     const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 16) / width);
