@@ -75,7 +75,7 @@ Each row shows the status, ticket ID, Medulla stage, run ID, and time in `HH:MM:
 `RUN ID` shows the full launch directory UUID.
 Find its log at `<stateDir>/crew-dispatchers/<id>/runs/<RUN-ID>/output.log`.
 Active rows show the stage from the existing Medulla journal. Failed rows show the reason from the failure report or result.
-`READY` rows are green and show no stage. They mean that the lane completed successfully for testing.
+`READY` rows are bright green and show no stage. They mean that the lane completed successfully for testing.
 `BLOCKED` is yellow. Failures and lost workers are red. `RUNNING` and `STARTING` are blue.
 Active rows show elapsed time. Finished rows show total time.
 Other finished rows use softer white text for the ticket ID, reason, and time.
