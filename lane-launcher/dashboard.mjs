@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import {readRun, alive, runDirectories} from './runtime.mjs';
 
@@ -23,6 +24,34 @@ const wrap = (value, width) => String(value).split(/\r?\n/).flatMap(line => {
   return lines;
 });
 
+function stageFor(run) {
+  try {
+    const dirs = fs.readdirSync(run.runFolder).sort().reverse();
+    const dir = dirs.map(name => path.join(run.runFolder, name))
+      .find(folder => fs.existsSync(path.join(folder, 'journal.jsonl')));
+    if (!dir) return 'startup';
+    const text = fs.readFileSync(path.join(dir, 'journal.jsonl'), 'utf8');
+    const lines = text.split('\n').slice(0, -1).filter(Boolean);
+    const row = lines.length ? JSON.parse(lines.at(-1)) : null;
+    if (row) {
+      if (run.result) {
+        const origin = path.join(dir, 'artifacts/origin.json');
+        if (run.result.code !== 0) {
+          if (fs.existsSync(origin)) return JSON.parse(fs.readFileSync(origin, 'utf8')).node || row.node;
+          return [...lines].reverse().map(line => JSON.parse(line))
+            .find(entry => entry.node && entry.node !== 'notify_failure')?.node || row.node;
+        }
+        return row.node;
+      }
+      return row.next && !row.next.startsWith('__') ? row.next : row.node;
+    }
+    return fs.readdirSync(path.join(dir, 'steps')).sort().at(-1)?.replace(/^\d+-/, '') || 'startup';
+  } catch (error) {
+    if (error.code === 'ENOENT') return 'startup';
+    throw error;
+  }
+}
+
 export function createDashboard(config, paint) {
   const state = {containers: [], counts: null, message: 'Checking tickets', error: null};
   let runs = [];
@@ -34,7 +63,8 @@ export function createDashboard(config, paint) {
   }
   function lines(left, stopped = false) {
     const width = Math.max(30, process.stdout.columns || 80);
-    const ticketWidth = Math.max(8, width - 31);
+    const ticketWidth = Math.max(8, width - 54);
+    const stageWidth = 23;
     for (const run of runs) {
       if (!run.result) Object.assign(run, optional(path.join(run.dir, 'launch.json')));
     }
@@ -48,7 +78,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.total} total · ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: checking',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `STATUS           ${'TICKET'.padEnd(ticketWidth)}  TIME`];
+      `${'STATUS'.padEnd(15)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE'.padEnd(stageWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Keep the table inside the terminal when its window is short.
     const visible = runs.slice(0, Math.min(15, Math.max(0, (process.stdout.rows || 24) - 8 - footer.length)));
@@ -60,7 +90,9 @@ export function createDashboard(config, paint) {
         result.error?.startsWith('CLAIM_UNCERTAIN:') ? 'CLAIM_UNCERTAIN' : 'FAILED' :
         worker ? alive(worker.pid) ? 'RUNNING' : 'LOST' : 'STARTING';
       const tone = status === 'READY' ? 'available' : result ? 'red' : 'yellow';
-      output.push(`${paint(status === 'LOST' ? 'red' : tone, status.padEnd(15))}  ${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`);
+      const stage = result ? (run.stage ||= stageFor(run)) : stageFor(run);
+      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
+      output.push(`${paint(status === 'LOST' ? 'red' : tone, status.padEnd(15))}  ${result ? paint('finished', details) : details}`);
     }
     if (!runs.length) output.push('No lane runs yet');
     output.push(...footer);

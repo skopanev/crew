@@ -71,10 +71,12 @@ The selected ticket ID is bold cyan, followed by its title in yellow without bol
 The dispatcher waits 60 seconds after each iteration and continues until Ctrl+C, with a default limit of one lane. JavaScript calls `POST /v1/tickets/next?dry_run=true` to preview an **open** ticket matching the configured filters, with a module and satisfied dependencies. With actual launches enabled, it opens a tab and starts the lane worker there. The worker atomically claims the ticket through `POST /v1/tickets/<id>/start` before preflight or Docker. The container workflow adopts that confirmed receipt without claiming again. A preview does not claim work. Each tick starts at most one lane.
 
 In a terminal, the loop shows a live table of the latest 15 lane runs.
-Each row shows the status, ticket ID, and time in `HH:MM:SS` format.
+Each row shows the status, ticket ID, Medulla stage, and time in `HH:MM:SS` format.
+The stage comes from the existing Medulla journal. Failed rows show the recorded failure node when available.
 `READY` is green and means that the lane completed successfully for testing.
 Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
 Active rows show elapsed time. Finished rows show total time.
+Finished rows use softer white text for the ticket ID, stage, and time.
 
 The table and countdown update every second without adding scrollback lines.
 Dispatcher errors remain in the normal terminal scrollback with their full text and a timestamp.

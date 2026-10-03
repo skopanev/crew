@@ -553,7 +553,7 @@ nodes:
       else
         printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
       fi
-      # Keep the private checkout as evidence; canonical Git metadata stays read-only.
+      # The host removes the private checkout after the workflow succeeds.
       # Код сел — это правда. Тикет, застрявший в работе, иначе никто не заметит.
       if ! node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" to-test; then
         printf 'LANDED_TICKET_STUCK: %s checked at %s on %s; to_test failed after up to 3 attempts. See to-test-errors.txt. Do not rerun work.\n' \
@@ -565,8 +565,7 @@ nodes:
         echo "<signal:VERIFIED>Existing implementation verified at ${head_sha}; ticket is to_test.</signal:VERIFIED>"
         exit 0
       fi
-      printf '<signal:LANDED>сел %s на %s%s</signal:LANDED>\n' \
-        "$head_sha" "$target" " (checkout retained: ${LANE_WORKTREE})"
+      printf '<signal:LANDED>Landed %s on %s.</signal:LANDED>\n' "$head_sha" "$target"
   notify_failure:
     env:
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
