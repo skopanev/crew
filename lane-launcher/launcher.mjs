@@ -153,7 +153,7 @@ export async function tick(config, display = null) {
     if (display) { display.counts = null; display.fail(message); }
     else console.error(paint('red', message));
   }
-  if (active >= config.limit) { if (display) display.message = 'Lane limit reached'; return; }
+  if (active >= config.limit) { if (display) display.message = ''; return; }
   if (!display) {
     print('checking params:');
     print(`  tags: ${config.tags.join(', ') || '(any)'}`);
