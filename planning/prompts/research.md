@@ -5,6 +5,8 @@ Use the registered CBM project names from the assignment. All inspected
 repositories are read-only. Do not change files, queues, requirements, or Git.
 Do not read other researchers' reports or any critic reports.
 
+Apply the supplied Equill writing rules to new prose in every output field.
+
 Return ONLY one JSON object as your final response; the deterministic post hook
 validates and saves it. Do not write an artifact yourself or emit signal tags.
 

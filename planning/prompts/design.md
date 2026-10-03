@@ -8,6 +8,8 @@ purpose and constraints. Plan only the selected AC; parent context does not
 authorize implementing other ACs or the entire Capability. Surface conflicting
 meaning as a blocker rather than silently choosing a new product scope.
 
+Apply the supplied Equill writing rules to new prose in every output field.
+
 Return ONLY one JSON object as your final response. The post hook saves it.
 Use this shape, with actual evidence-backed values, never the placeholders:
 
