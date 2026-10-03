@@ -189,10 +189,13 @@ nodes:
                 > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
             deps=" Repository preflight ($pf) ran."
           else
-            deps=" NOTE: repository preflight ($pf) failed. Full log: ${MEDULLA_RUN_DIR}/artifacts/preflight.txt"
+            cat "$MEDULLA_RUN_DIR/artifacts/preflight.txt" >&2
+            echo "Repository preflight ($pf) failed; see artifacts/preflight.txt" >&2
+            exit 1
           fi
         else
-          deps=" NOTE: .ntkrc names preflight $pf and it is not executable here."
+          echo "Repository preflight ($pf) is not executable in the candidate" >&2
+          exit 1
         fi
       # Объявил предполёт - он и отвечает за зависимости; нашей установки нет.
       elif [ -f "${LANE_WORKTREE}/package.json" ] && command -v bun >/dev/null 2>&1; then

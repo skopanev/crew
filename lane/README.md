@@ -56,6 +56,8 @@ preflight or Docker; the container never claims. Startup failure
 returns a dispatcher claim to `open`. After adoption, workflow failure sets
 `blocked` and attaches the failure report. No confirmed claim means no status write.
 An uncertain claim or dispatch requires inspection before retrying.
+If `.ntkrc` declares a preflight, that script must exist and pass before implementation.
+A failed declared preflight stops the lane and includes its log in the failure report.
 
 Checks run from the candidate repository before each review. Their commands,
 exit codes, tree/SHA, and log hashes are recorded under `artifacts/gates/`.
