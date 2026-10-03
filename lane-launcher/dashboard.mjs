@@ -65,7 +65,8 @@ export function createDashboard(config, paint) {
     const width = Math.max(30, process.stdout.columns || 80);
     const ticketWidth = Math.min(Math.max(8, width - 64),
       Math.max(6, ...runs.slice(0, 15).map(run => Array.from(plain(run.ticket)).length)));
-    const stageWidth = Math.max(23, width - ticketWidth - 41);
+    const stageWidth = 23;
+    const runWidth = Math.max(8, width - ticketWidth - stageWidth - 33);
     for (const run of runs) {
       if (!run.result) Object.assign(run, optional(path.join(run.dir, 'launch.json')));
     }
@@ -79,7 +80,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.total} total · ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: checking',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `${'STATUS'.padEnd(15)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE'.padEnd(stageWidth)}  RUN ID    TIME`];
+      `${'STATUS'.padEnd(15)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Keep the table inside the terminal when its window is short.
     const visible = runs.slice(0, Math.min(15, Math.max(0, (process.stdout.rows || 24) - 8 - footer.length)));
@@ -93,7 +94,7 @@ export function createDashboard(config, paint) {
       const tone = status === 'READY' ? 'available' : result ? 'red' : 'yellow';
       const stage = result ? (run.stage ||= stageFor(run)) : stageFor(run);
       const runId = path.basename(run.dir).slice(0, 8);
-      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
+      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
       output.push(`${paint(status === 'LOST' ? 'red' : tone, status.padEnd(15))}  ${result ? paint('finished', details) : details}`);
     }
     if (!runs.length) output.push('No lane runs yet');
