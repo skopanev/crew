@@ -229,7 +229,7 @@ export async function main(argv) {
       try { dashboard.draw(deadline == null ? null : Math.max(0, Math.ceil((deadline - performance.now()) / 1000))); }
       catch (error) { dashboard.state.fail(error.message); }
     };
-    if (dashboard) { draw(); ticker = setInterval(draw, 1000); }
+    if (dashboard) { draw(); ticker = setInterval(draw, 5000); }
     do {
       deadline = null;
       try { await tick(config, dashboard?.state); }

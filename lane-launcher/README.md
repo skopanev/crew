@@ -80,7 +80,7 @@ Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
 Active rows show elapsed time. Finished rows show total time.
 Finished rows use softer white text for the ticket ID, stage, and time.
 
-The table and countdown update every second without adding scrollback lines.
+The table and countdown update every five seconds without adding scrollback lines.
 Dispatcher errors remain in the normal terminal scrollback with their full text and a timestamp.
 Small terminal windows show fewer rows. Long rows wrap without shortening IDs. The full run history remains on disk.
 Ctrl+C restores the terminal and leaves one final table.
