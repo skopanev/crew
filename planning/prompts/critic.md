@@ -7,6 +7,8 @@ Check alignment with the supplied Domain -> Capability -> Requirement -> AC
 chain. Parent context explains the purpose; implementation scope remains the
 selected AC. Surface contradictions rather than broadening that scope.
 
+Apply the supplied Equill writing rules to new prose in every output field.
+
 Return ONLY one JSON object as your final response; no signal tags:
 
 {"plan_digest":"the exact supplied digest","verdict":"clear",
