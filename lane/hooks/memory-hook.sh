@@ -239,7 +239,7 @@ if [[ "$event" == SessionStart ]]; then
   fi
   # A lane without its contract must not run: it would work confidently under
   # rules it never read.
-  [[ -n "$baseline" ]] || { emit_fatal "$event" "lane memory: baseline failed: $(tr '\n' ' ' <"$err" | cut -c1-400)"; exit 0; }
+  [[ -n "$baseline" ]] || { emit_fatal "$event" "lane memory: baseline failed: $(cat "$err")"; exit 0; }
 
   # The coordinates select records; they do not appear in what those records
   # say. The role is judged against a module the contract never names, so the
@@ -383,7 +383,7 @@ if ! bundle="$("$equill_bin" "${mem_args[@]}" --profile "$profile" "--query=$que
   # A refused retrieval used to say nothing at all. The contract still stands,
   # so this does not stop the session - but an agent working without the memory
   # it believes it has is the silent failure this lane exists to avoid.
-  emit "$event" "" "lane memory: retrieval failed: $(tr '\n' ' ' <"$rerr" | cut -c1-300)"
+  emit "$event" "" "lane memory: retrieval failed: $(cat "$rerr")"
   exit 0
 fi
 content="$("$jq_bin" -er '.content | select(type=="string" and length>0)' <<<"$bundle" 2>/dev/null || true)"

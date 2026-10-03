@@ -58,8 +58,8 @@ async function recordFinding(finding) {
       title: Array.from(`[FINIDING] ${summary}`).slice(0, 256).join(''),
       status: 'blocked', deps: [id],
       tags: [...new Set([...(source.tags || []), 'findings'])],
-      body: `Non-blocking finding from ${id}.\n\n${Array.from(finding).slice(0, 1400).join('')}\n\n` +
-        'See finding-report.txt for evidence and proposed fixes.\n' +
+      body: `Non-blocking finding from ${id}.\n\n` +
+        'Full finding, evidence and proposed fixes in attachment finding-report.txt.\n' +
         `Depends on ${id}. Review before scheduling.`,
     });
     if (typeof created?.id !== 'string' || !created.id) throw new Error('NTK returned no finding ticket ID');
@@ -103,7 +103,9 @@ async function main(mode) {
 
   const sections = [`Lane failure: ${id}\nWorkspace: ${workspace}\nRun: ${runDir}`];
   for (const name of ['failure.txt', 'scout.txt', 'coder-report.txt', 'git-fix-report.txt', 'rejects.txt', 'panel-findings.txt',
-    'architecture.md', 'security.md', 'codereview.md', 'gates/current.json']) {
+    'architecture.md', 'security.md', 'codereview.md', 'gates/current.json', 'fetch.txt', 'preflight.txt',
+    'bun-install.txt', 'commit.txt', 'landing-log.txt', 'rebase-log.txt', 'rebase-status.txt',
+    'scout-contract.txt.err', 'qa-contract.txt.err']) {
     const file = path.join(artifacts, name);
     if (fs.existsSync(file)) sections.push(`--- ${name} ---\n${fs.readFileSync(file, 'utf8')}`);
   }
@@ -121,12 +123,7 @@ async function main(mode) {
       for (const entry of fs.readdirSync(folder, {withFileTypes: true})) {
         if (!entry.isFile() || !/^\d+\.log$/.test(entry.name)) continue;
         const file = path.join(folder, entry.name);
-        const size = fs.statSync(file).size;
-        const tail = Buffer.alloc(Math.min(size, 16384));
-        const fd = fs.openSync(file, 'r');
-        try { fs.readSync(fd, tail, 0, tail.length, size - tail.length); }
-        finally { fs.closeSync(fd); }
-        sections.push(`--- gate ${entry.name} (last ${tail.length} of ${size} bytes) ---\n${tail.toString('utf8')}`);
+        sections.push(`--- gate ${entry.name} (full log) ---\n${fs.readFileSync(file, 'utf8')}`);
       }
     }
   }

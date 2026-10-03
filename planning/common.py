@@ -42,7 +42,7 @@ def digest(value):
 
 def run(argv, **kwargs):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=45, **kwargs)
-    require(result.returncode == 0, f"{argv[0]} failed: {result.stderr.strip()[:600]}")
+    require(result.returncode == 0, f"{argv[0]} failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
     return result.stdout
 
 
@@ -104,7 +104,7 @@ def fingerprint(repo):
                                "--binary", "HEAD", "--"], stdout=output, stderr=errors,
                               env=env, timeout=45)
         errors.seek(0)
-        require(proc.returncode == 0, "git diff failed: " + errors.read(600).decode(errors="replace"))
+        require(proc.returncode == 0, "git diff failed: " + errors.read().decode(errors="replace"))
         output.seek(0)
         changes = stream_digest(output)
     untracked = []
