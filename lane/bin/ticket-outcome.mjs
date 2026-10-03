@@ -102,7 +102,7 @@ async function main(mode) {
   if (mode !== 'blocked') throw new Error('Expected to-test, blocked or findings');
 
   const sections = [`Lane failure: ${id}\nWorkspace: ${workspace}\nRun: ${runDir}`];
-  for (const name of ['failure.txt', 'scout.txt', 'coder-report.txt', 'git-fix-report.txt', 'rejects.txt', 'panel-findings.txt',
+  for (const name of ['failure.txt', 'origin.json', 'scout.txt', 'coder-report.txt', 'git-fix-report.txt', 'rejects.txt', 'panel-findings.txt',
     'architecture.md', 'security.md', 'codereview.md', 'gates/current.json', 'fetch.txt', 'preflight.txt',
     'bun-install.txt', 'commit.txt', 'landing-log.txt', 'rebase-log.txt', 'rebase-status.txt',
     'scout-contract.txt.err', 'qa-contract.txt.err']) {
