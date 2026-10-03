@@ -116,12 +116,12 @@ export function createDashboard(config, paint) {
     for (const run of visible) {
       const {result, worker} = run;
       const status = statusFor(run);
-      const tone = status === 'READY' ? 'available' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'blue';
+      const tone = status === 'READY' ? 'ready' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'blue';
       const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       const runId = path.basename(run.dir);
       const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
       output.push(status === 'READY'
-        ? paint('available', `${status.padEnd(statusWidth)}  ${details}`)
+        ? paint('ready', `${status.padEnd(statusWidth)}  ${details}`)
         : `${paint(status === 'LOST' ? 'red' : tone, status.padEnd(statusWidth))}  ${result ? paint('finished', details) : details}`);
     }
     if (!runs.length) output.push('No lane runs yet');
