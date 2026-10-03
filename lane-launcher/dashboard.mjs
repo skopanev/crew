@@ -77,9 +77,9 @@ export function createDashboard(config, paint) {
     const recent = runs.slice(0, 15);
     const statusWidth = Math.max(6, ...recent.map(run => statusFor(run).length));
     const stageWidth = 32;
-    const ticketWidth = Math.min(Math.max(8, width - statusWidth - stageWidth - 25),
-      Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length)));
-    const runWidth = Math.max(8, width - statusWidth - ticketWidth - stageWidth - 17);
+    const ticketWidth = Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length));
+    const runWidth = Math.max(36, width - statusWidth - ticketWidth - stageWidth - 17);
+    const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 16) / width);
     const folders = new Set(runs.map(run => run.runFolder));
     const active = runs.filter(run => !run.result).length +
       state.containers.filter(container => !folders.has(container.runFolder)).length;
@@ -92,14 +92,15 @@ export function createDashboard(config, paint) {
       '─'.repeat(width),
       `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
-    // Keep the table inside the terminal when its window is short.
-    const visible = runs.slice(0, Math.min(15, Math.max(0, (process.stdout.rows || 24) - 8 - footer.length)));
+    // Account for wrapped rows without shortening the ticket or run ID.
+    const visible = runs.slice(0, Math.min(15,
+      Math.max(0, Math.floor(((process.stdout.rows || 24) - 7 - footer.length - rowHeight) / rowHeight))));
     for (const run of visible) {
       const {result, worker} = run;
       const status = statusFor(run);
       const tone = status === 'READY' ? 'available' : result ? 'red' : 'yellow';
       const stage = result ? (run.stage ||= stageFor(run)) : stageFor(run);
-      const runId = path.basename(run.dir).slice(0, 8);
+      const runId = path.basename(run.dir);
       const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
       output.push(`${paint(status === 'LOST' ? 'red' : tone, status.padEnd(statusWidth))}  ${result ? paint('finished', details) : details}`);
     }
