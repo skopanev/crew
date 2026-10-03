@@ -147,6 +147,8 @@ nodes:
       # No shared objects, hardlinks, worktree registration or canonical Git writes.
       git clone --no-hardlinks --no-checkout "$project_dir" "$LANE_WORKTREE"
       cd "$LANE_WORKTREE"
+      git config user.name lane
+      git config user.email lane@local
       git remote set-url origin "$origin"
       timeout 120 git fetch origin > "$MEDULLA_RUN_DIR/artifacts/fetch.txt" 2>&1 && rc=0 || rc=$?
       [ "$rc" -ne 124 ] || echo 'timeout: git fetch did not finish in 120s' >> "$MEDULLA_RUN_DIR/artifacts/fetch.txt"
@@ -513,7 +515,12 @@ nodes:
         else
           cat "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt" >&2
           git status --short > "$MEDULLA_RUN_DIR/artifacts/rebase-status.txt"
+          conflicts="$(git diff --name-only --diff-filter=U)"
           git rebase --abort || true
+          if [ -z "$conflicts" ]; then
+            echo "<signal:LAND_FAILED>rebase failed without file conflicts; see artifacts/rebase-log.txt</signal:LAND_FAILED>"
+            exit 0
+          fi
           tried="$(jq -r 'select(.node=="git_fix")|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
           if [ "${tried:-0}" -ge 1 ]; then
             echo "<signal:LAND_FAILED>rebase onto ${target} still conflicts after a fix attempt; a person has to resolve it</signal:LAND_FAILED>"
