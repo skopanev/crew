@@ -60,6 +60,20 @@ function statusFor({result, worker}) {
     worker ? alive(worker.pid) ? 'RUNNING' : 'LOST' : 'STARTING';
 }
 
+function reasonFor(run) {
+  try {
+    const report = fs.readdirSync(run.runFolder).sort().reverse()
+      .map(name => path.join(run.runFolder, name, 'artifacts/failure.txt'))
+      .find(file => fs.existsSync(file));
+    if (report) return fs.readFileSync(report, 'utf8').trim()
+      .replace(/^lane stopped on \S+ \([^)]+\) for \S+\.\s*/, '');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return String(run.result.error || `Exit ${run.result.code ?? '?'}`)
+    .replace(/;\s*full output:[^\n]*/g, '');
+}
+
 export function createDashboard(config, paint) {
   const state = {containers: [], counts: null, message: 'Checking tickets', error: null};
   let runs = [];
@@ -78,7 +92,7 @@ export function createDashboard(config, paint) {
       Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const recent = runs.slice(0, 15);
     const statusWidth = Math.max(6, ...recent.map(run => statusFor(run).length));
-    const stageWidth = 23;
+    const stageWidth = 40;
     const ticketWidth = Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length));
     const runWidth = Math.max(36, width - statusWidth - ticketWidth - stageWidth - 17);
     const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 16) / width);
@@ -92,7 +106,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.total} total · ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Account for wrapped rows without shortening the ticket or run ID.
     const visible = runs.slice(0, Math.min(15,
@@ -100,8 +114,8 @@ export function createDashboard(config, paint) {
     for (const run of visible) {
       const {result, worker} = run;
       const status = statusFor(run);
-      const tone = status === 'READY' ? 'available' : result ? 'red' : 'yellow';
-      const stage = result ? '' : stageFor(run);
+      const tone = status === 'READY' ? 'available' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'yellow';
+      const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       const runId = path.basename(run.dir);
       const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
       output.push(status === 'READY'
