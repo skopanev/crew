@@ -6,6 +6,7 @@ Medulla workflows for preparing and implementing tickets.
 
 - [Planning](planning/README.md): prepare one acceptance criterion, resolve questions,
   and produce scoped tasks with implementation instructions and checks.
+- [NTK planning](planning-ntk/README.md): prepare one ticket or re-plan a blocked Lane failure.
 - [Lane](lane/README.md): implement one prepared NTK ticket, check it, review it,
   land it, and set `to_test`. A workflow failure sets `blocked` with a report.
 - [Dolber](lane-launcher/README.md): select open tickets and launch lanes within

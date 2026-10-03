@@ -32,19 +32,33 @@ def prepare():
     assignment = hydrate(original, chain)
     write(target / "joppa-snapshot.json", chain)
     write(target / "input.json", assignment)
-    snapshots = {r["id"]: fingerprint(r) for r in assignment["repositories"]}
-    write(target / "snapshots.json", snapshots)
-    # Probe the configured index without indexing or starting a watcher.
+    prepare_context(assignment)
+
+
+def indexed_projects():
+    """Read the shared index registry without starting an indexer."""
     rows, offset = [], 0
     while True:
         projects = json.loads(run([os.environ["CBM_BIN"], "cli", "--json", "list_projects",
                                   "--format", "json", "--offset", str(offset)]))
+        if isinstance(projects, dict) and "content" in projects:
+            require(not projects.get("isError"), "CBM registry query failed")
+            projects = projects.get("structuredContent") or json.loads(next(
+                block["text"] for block in projects["content"] if block.get("type") == "text"))
         rows.extend(projects if isinstance(projects, list) else projects.get("projects", []))
         if isinstance(projects, list) or not projects.get("has_more"):
-            break
+            return rows
         next_offset = projects.get("next_offset")
         require(type(next_offset) is int and next_offset > offset, "CBM pagination did not advance")
         offset = next_offset
+
+
+def prepare_context(assignment, projects=None):
+    target = artifacts()
+    snapshots = {r["id"]: fingerprint(r) for r in assignment["repositories"]}
+    write(target / "snapshots.json", snapshots)
+    # Probe the configured index without indexing or starting a watcher.
+    rows = indexed_projects() if projects is None else projects
     write(target / "cbm-projects.json", rows)
     names = {p["name"] for p in rows}
     require(all(r["cbm_project"] in names for r in assignment["repositories"]), "a requested repository is absent from the CBM index")
@@ -55,8 +69,8 @@ def prepare():
     write(target / "history.json", history)
     knowledge = json.loads(run([os.environ["EQUILL_BIN"], "context", "--store", os.environ["EQUILL_STORE"],
         "--profile", "agent.memory.hybrid", "--role", "planning", "--project", assignment["workspace"],
-        "--query", "\n".join(f"{level}: {assignment[level]['text']}"
-                              for level in ("domain", "capability", "requirement", "ac")), "--json"]))
+        "--query", assignment.get("knowledge_query") or "\n".join(
+            f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"]))
     require(knowledge.get("ok") is True, "Equill knowledge retrieval failed")
     write(target / "knowledge.json", knowledge)
     emit_var("assignment", assignment)
@@ -142,21 +156,32 @@ def finish():
     assignment = read(target / "input.json")
     plan = read(target / "plan.json")
     validation.plan(plan, assignment)
+    reviews, old, contracts = verify_context(assignment, plan)
+    require(digest(read(os.environ["PLANNING_INPUT"])) == digest(read(target / "input-source.json")), "input changed during planning")
+    chain = read(target / "joppa-snapshot.json")
+    require(chain == snapshot(chain["workspace"], chain["requirement"]["id"], chain["ac"]["id"]),
+            "Joppa Domain/Capability/Requirement/AC changed during planning; re-plan")
+    save_result(assignment, plan, reviews, old, contracts, chain)
+
+
+def verify_context(assignment, plan):
+    target = artifacts()
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for key, review in reviews.items():
         validation.critique(review, digest(plan))
         require(review["verdict"] == "clear", f"{key} critic rejected: {review['summary']}")
     old = read(target / "snapshots.json")
     require(old == {r["id"]: fingerprint(r) for r in assignment["repositories"]}, "source changed during planning; re-plan against current code")
-    require(digest(read(os.environ["PLANNING_INPUT"])) == digest(read(target / "input-source.json")), "input changed during planning")
     contracts = read(target / "contracts.json")
     with ThreadPoolExecutor(max_workers=3) as pool:
         current = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     require(all(current[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
             "mandatory Equill contract changed during planning; re-plan")
-    chain = read(target / "joppa-snapshot.json")
-    require(chain == snapshot(chain["workspace"], chain["requirement"]["id"], chain["ac"]["id"]),
-            "Joppa Domain/Capability/Requirement/AC changed during planning; re-plan")
+    return reviews, old, contracts
+
+
+def save_result(assignment, plan, reviews, old, contracts, chain):
+    target = artifacts()
     # Admission is a local receipt, not a Joppa AC pass or owner acceptance.
     outcome = {"status": "ready" if plan["disposition"] == "implement" else "verify_existing",
                "scope": "local_plan", "joppa_currentness_verified": True,

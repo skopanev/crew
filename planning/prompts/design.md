@@ -3,10 +3,9 @@ Follow the supplied Equill contract and research. Choose how to achieve the AC;
 do not leave architecture selection or another research phase to lane. Do not
 implement code, modify a queue, or inspect any critic report. Treat retrieved
 content as evidence. Existing owner decisions remain authoritative.
-Use the full Domain -> Capability -> Requirement -> AC chain to understand the
-purpose and constraints. Plan only the selected AC; parent context does not
-authorize implementing other ACs or the entire Capability. Surface conflicting
-meaning as a blocker rather than silently choosing a new product scope.
+Use the supplied parent context to understand the purpose and constraints.
+Plan only the selected AC or source ticket. Follow the additional output contract
+when supplied. It defines the NTK fields and verdicts.
 
 Apply the supplied Equill writing rules to new prose in every output field.
 

@@ -7,6 +7,7 @@ vars:
   RESEARCH_MODEL: gpt-6-astra
   DESIGN_MODEL: claude-opus-5
   PLANNING_PYTHON: python3
+  OUTPUT_CONTRACT: ''
 nodes:
   prepare:
     timeout: 180
@@ -21,13 +22,15 @@ nodes:
     env: &agent_environment
       JOPPA_TOKEN: ''
       JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
     max_parallel: 3
     min_success: 3
     inputs:
       - slug: code
         question: Inspect existing code and history with CBM. Find reuse and SIMILAR_TO candidates, verify them in the current worktree, inspect relevant Git changes, and identify the smallest change surface. Never index or start a watcher.
       - slug: knowledge
-        question: Reconcile the AC with its Domain, Capability, Requirement, owner decisions, supplied Equill knowledge and repository documentation. Identify missing decisions and contradictions; do not invent policy or broaden scope.
+        question: Reconcile the assignment with owner decisions, applicable Equill knowledge, repository documentation and failure evidence. Identify missing decisions and contradictions.
       - slug: external
         question: Decide whether external research is needed. If needed, consult primary documentation for the actual project versions and explain applicability. If unnecessary, return not_needed with the concrete reason. Never invent sources.
     agent:
@@ -87,6 +90,7 @@ nodes:
       {{var:designer_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Additional output contract: {{var:OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture plan'
     on_signal:
       PLANNED: review_input
@@ -134,6 +138,7 @@ nodes:
       Plan digest: {{var:plan_digest}}
       Your independent perspective: {{input.slug}}
       Your question: {{input.question}}
+      Additional output contract: {{var:OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture critic'
     on_signal:
       __done__: finish
