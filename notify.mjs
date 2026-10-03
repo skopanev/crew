@@ -24,8 +24,10 @@ export async function notify(config, event) {
     .replace(/;?\s*full output:[^\n]*/gi, '')
     .replace(/^Lane exited [^\n]*$/gm, '').trim();
   const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
+  const ticketId = clean(event.id);
+  const ticketLine = `Ticket: ${ticketId}`;
   const runId = clean(event.runId || event.id);
-  const message = [header, runId, stage, summary]
+  const message = [header, ticketLine, `Run: ${runId}`, stage, summary]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
     fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
@@ -41,7 +43,8 @@ export async function notify(config, event) {
       await send('sendMessage', JSON.stringify({...destination, text: message.slice(start, end),
         ...(start === 0 ? {entities: [
           {type: 'bold', offset: 0, length: header.length},
-          {type: 'code', offset: header.length + 1, length: runId.length},
+          {type: 'code', offset: header.length + 1 + 'Ticket: '.length, length: ticketId.length},
+          {type: 'code', offset: header.length + ticketLine.length + 2 + 'Run: '.length, length: runId.length},
         ]} : {})}));
       start = end;
     }
