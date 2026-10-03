@@ -70,7 +70,21 @@ The selected ticket ID is bold cyan, followed by its title in yellow without bol
 
 The dispatcher waits 60 seconds after each iteration and continues until Ctrl+C, with a default limit of one lane. JavaScript calls `POST /v1/tickets/next?dry_run=true` to preview an **open** ticket matching the configured filters, with a module and satisfied dependencies. With actual launches enabled, it opens a tab and starts the lane worker there. The worker atomically claims the ticket through `POST /v1/tickets/<id>/start` before preflight or Docker. The container workflow adopts that confirmed receipt without claiming again. A preview does not claim work. Each tick starts at most one lane.
 
-In a terminal, the pause is a single updating line: `Next check in 00:59 · Ctrl+C to stop`, with the remaining time in bold cyan. Redirected output keeps a single static `pause 60s` line. Ctrl+C clears the countdown and stops waiting immediately.
+In a terminal, the loop shows a live table of the latest 15 lane runs.
+Each row shows the status, ticket ID, and time in `HH:MM:SS` format.
+`READY` is green and means that the lane completed successfully for testing.
+Failures and lost workers are red. `RUNNING` and `STARTING` are yellow.
+Active rows show elapsed time. Finished rows show total time.
+
+The table and countdown update every second without adding scrollback lines.
+Dispatcher errors remain in the normal terminal scrollback with their full text and a timestamp.
+Short terminal windows show fewer rows. The full run history remains on disk.
+Ctrl+C restores the terminal and leaves one final table.
+
+`--once`, `--dry-run`, and redirected output keep the existing text output.
+Each new run keeps its input, worker PID, start time, and result in `launch.json`.
+The display reads that file. It does not create a separate history store.
+Existing runs can still use their earlier `worker.json` and `result.json` files.
 
 A refused or unconfirmed claim fails visibly in the tab, without starting preflight or Docker or writing the ticket status. Dolber continues polling. A confirmed startup failure returns an `in_progress` ticket to `open`. After the workflow adopts the claim, its failures produce `blocked` with a report. An uncertain worker launch retains its reservation for inspection.
 

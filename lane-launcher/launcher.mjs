@@ -5,8 +5,9 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {nextTicket, countTickets, credentials} from './ntk.mjs';
-import {save, read, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
+import {save, read, readRun, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
 import {scopeDirectory, runScope, validateId} from './scope.mjs';
+import {createDashboard} from './dashboard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
@@ -88,16 +89,15 @@ export function activeCount(config, containers, panes) {
   for (const dir of runDirectories(config.stateDir)) {
     const stateFile = path.join(dir, 'launch.json');
     if (!fs.existsSync(stateFile)) continue;
-    const run = read(stateFile);
-    if (fs.existsSync(path.join(dir, 'result.json'))) continue;
-    const workerFile = path.join(dir, 'worker.json');
-    const worker = fs.existsSync(workerFile) ? read(workerFile) : null;
+    const run = readRun(stateFile);
+    if (run.result) continue;
+    const worker = run.worker;
     const containerRunning = containers.some(container => container.runFolder === run.runFolder);
     if (containerRunning) continue; // Already counted by Docker.
     if (panes && run.config?.herdrWorkspace === config.herdrWorkspace &&
         run.pane && !panes.has(run.pane) && (!worker || !alive(worker.pid))) {
-      save(path.join(dir, 'result.json'), {status: 'interrupted', finishedAt: new Date().toISOString(),
-        error: 'Herdr pane and worker disappeared; inspect lane artifacts before reopening the ticket'});
+      save(stateFile, {...run, result: {status: 'interrupted', finishedAt: new Date().toISOString(),
+        error: 'Herdr pane and worker disappeared; inspect lane artifacts before reopening the ticket'}});
       continue;
     }
     // Reserve capacity even before the worker/container has appeared.
@@ -127,11 +127,14 @@ function preflight(config) {
   }
 }
 
-export async function tick(config) {
+export async function tick(config, display = null) {
+  const print = display ? message => { display.message = message; } : console.log;
+  if (display) { display.message = 'Checking tickets'; display.error = null; }
   const {containers, panes} = snapshots(config);
   const active = activeCount(config, containers, panes);
-  divider();
-  console.log(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  if (display) display.containers = containers;
+  else divider();
+  print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   const countFilter = `workspace=${config.workspace}, tags=${config.tags.join(',') || '(any)'}, strict=${config.strict}`;
   const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
@@ -143,16 +146,23 @@ export async function tick(config) {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
     const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
     const ready = candidate === null ? '0' : candidate ? '≥1' : 'not checked (lane limit)';
-    console.log(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
-  } catch (error) { console.error(paint('red', `Tickets with tags [${countFilter}]: unavailable (${error.message})`)); }
-  if (active >= config.limit) return;
-  console.log('checking params:');
-  console.log(`  tags: ${config.tags.join(', ') || '(any)'}`);
-  console.log(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
-  if (!candidate) return;
+    if (display) display.counts = {total, open, ready, blocked: candidate === null && open > 0};
+    else print(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
+  } catch (error) {
+    const message = `Tickets with tags [${countFilter}]: unavailable (${error.message})`;
+    if (display) { display.counts = null; display.fail(message); }
+    else console.error(paint('red', message));
+  }
+  if (active >= config.limit) { if (display) display.message = 'Lane limit reached'; return; }
+  if (!display) {
+    print('checking params:');
+    print(`  tags: ${config.tags.join(', ') || '(any)'}`);
+    print(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
+  }
+  if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('NTK returned a ticket without an id');
-  console.log(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
-  if (candidate.title) console.log(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
+  print(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
+  if (!display && candidate.title) print(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
   if (!config.launchLanes) return;
   const dir = path.join(config.stateDir, 'runs', randomUUID());
   fs.mkdirSync(dir, {recursive: true, mode: 0o700});
@@ -169,19 +179,19 @@ export async function tick(config) {
       '--cwd', path.dirname(here), '--label', `lane:${candidate.id}`, '--no-focus']);
   } catch (error) {
     // No worker was dispatched, even if the tab response was lost.
-    save(path.join(dir, 'result.json'), {status: 'failed', error: error.message,
-      finishedAt: new Date().toISOString()});
+    save(stateFile, {...run, result: {status: 'failed', error: error.message,
+      finishedAt: new Date().toISOString()}});
     throw new Error(`Herdr could not open a tab: ${error.message}; no ticket was claimed`);
   }
   run.pane = result?.root_pane?.pane_id;
   if (!run.pane) {
-    save(path.join(dir, 'result.json'), {status: 'failed', finishedAt: new Date().toISOString()});
+    save(stateFile, {...run, result: {status: 'failed', finishedAt: new Date().toISOString()}});
     throw new Error(`Herdr returned no pane; no ticket was claimed`);
   }
   save(stateFile, run);
   herdr(config, ['pane', 'run', run.pane,
     `${quote(process.execPath)} ${quote(path.join(here, 'worker.mjs'))} ${quote(stateFile)}`]);
-  console.log(`started ${candidate.id} in ${run.pane}; logs: ${dir}`);
+  print(display ? `Started ${candidate.id} in ${run.pane}` : `started ${candidate.id} in ${run.pane}; logs: ${dir}`);
 }
 
 export async function main(argv) {
@@ -211,37 +221,45 @@ export async function main(argv) {
   let stopped = false, wake;
   const stop = () => { stopped = true; wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
+  let dashboard, ticker;
   try {
+    dashboard = process.stdout.isTTY && mode === 'loop' ? createDashboard(config, paint) : null;
+    let deadline = null;
+    const draw = () => {
+      try { dashboard.draw(deadline == null ? null : Math.max(0, Math.ceil((deadline - performance.now()) / 1000))); }
+      catch (error) { dashboard.state.fail(error.message); }
+    };
+    if (dashboard) { draw(); ticker = setInterval(draw, 1000); }
     do {
-      try { await tick(config); }
+      deadline = null;
+      try { await tick(config, dashboard?.state); }
       catch (error) {
         if (mode !== 'loop') throw error;
-        console.error(paint('red', error.message));
+        if (dashboard) dashboard.state.fail(error.message);
+        else console.error(paint('red', error.message));
       }
+      if (dashboard) { dashboard.refresh(); draw(); }
       if (mode !== 'loop' || stopped) break;
       if (!process.stdout.isTTY) console.log(`pause ${config.intervalSeconds}s · Ctrl+C to stop\n`);
       await new Promise(resolve => {
-        const deadline = performance.now() + config.intervalSeconds * 1000;
-        const draw = () => {
-          const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
-          const time = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
-          process.stdout.write(`\r\x1b[2KNext check in ${paint('accent', time)} · Ctrl+C to stop`);
-        };
-        const ticker = process.stdout.isTTY ? setInterval(draw, 1000) : null;
+        deadline = performance.now() + config.intervalSeconds * 1000;
         const timer = setTimeout(() => wake(), config.intervalSeconds * 1000);
         wake = () => {
-          clearTimeout(timer); clearInterval(ticker);
-          if (process.stdout.isTTY) process.stdout.write('\r\x1b[2K\n');
+          clearTimeout(timer);
           resolve();
         };
-        if (process.stdout.isTTY) draw();
+        if (dashboard) draw();
         if (stopped) wake();
       });
     } while (!stopped);
   } finally {
-    process.off('SIGINT', stop); process.off('SIGTERM', stop);
-    fs.rmSync(lock, {recursive: true});
-    if (stopped) console.log('stopped');
+    clearInterval(ticker);
+    try { dashboard?.close(); }
+    finally {
+      process.off('SIGINT', stop); process.off('SIGTERM', stop);
+      fs.rmSync(lock, {recursive: true});
+    }
+    if (stopped && !dashboard) console.log('stopped');
   }
 }
 

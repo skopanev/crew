@@ -11,6 +11,7 @@ import {notifyCompletion} from '../notify.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
+// The worker owns this state after dispatch. The launcher must not change it while the worker lives.
 const run = read(stateFile);
 const log = fs.openSync(path.join(dir, 'output.log'), 'a', 0o600);
 const color = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
@@ -19,7 +20,8 @@ function announce(message) {
   fs.writeSync(log, message + '\n');
   process.stdout.write(formatLaneLine(message, color) + '\n');
 }
-save(path.join(dir, 'worker.json'), {pid: process.pid, startedAt: new Date().toISOString()});
+run.worker = {pid: process.pid, startedAt: new Date().toISOString()};
+save(stateFile, run);
 const script = fileURLToPath(new URL('../lane/run.sh', import.meta.url));
 let child, signal;
 const stop = value => {
@@ -137,7 +139,8 @@ try {
     } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }
   }
   // Record completion first: closing this pane can terminate this process immediately.
-  save(path.join(dir, 'result.json'), {...result, finishedAt: new Date().toISOString()});
+  run.result = {...result, finishedAt: new Date().toISOString()};
+  save(stateFile, run);
   try {
     if (await notifyCompletion(run, result, artifacts)) {
       announce('[lane] Notification sent to channel');
