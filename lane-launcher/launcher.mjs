@@ -135,17 +135,18 @@ export async function tick(config, display = null) {
   if (display) display.containers = containers;
   else divider();
   print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  if (active >= config.limit) { if (display) display.message = ''; return; }
   const countFilter = `workspace=${config.workspace}, tags=${config.tags.join(',') || '(any)'}, strict=${config.strict}`;
   const query = {workspace: config.workspace,
     tag: config.tags.length ? config.tags.join(',') : undefined,
     prefer: config.preferTags.length ? config.preferTags.join(',') : undefined,
     module: config.module ?? undefined, assignee: config.assignee ?? undefined,
     strict: config.strict, has_module: true, dry_run: true};
-  const candidate = active < config.limit ? await nextTicket(query) : undefined;
+  const candidate = await nextTicket(query);
   try {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
     const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
-    const ready = candidate === null ? '0' : candidate ? '≥1' : 'not checked (lane limit)';
+    const ready = candidate ? '≥1' : '0';
     if (display) display.counts = {total, open, ready, blocked: candidate === null && open > 0};
     else print(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
   } catch (error) {
@@ -153,7 +154,6 @@ export async function tick(config, display = null) {
     if (display) { display.counts = null; display.fail(message); }
     else console.error(paint('red', message));
   }
-  if (active >= config.limit) { if (display) display.message = ''; return; }
   if (!display) {
     print('checking params:');
     print(`  tags: ${config.tags.join(', ') || '(any)'}`);
