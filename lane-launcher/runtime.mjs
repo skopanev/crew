@@ -9,6 +9,15 @@ export function save(file, value) {
   fs.renameSync(temp, file);
 }
 export const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+export function readRun(file) {
+  const run = read(file);
+  // Read existing history. New runs keep their state in one file.
+  for (const field of ['worker', 'result']) {
+    const previous = path.join(path.dirname(file), `${field}.json`);
+    if (!run[field] && fs.existsSync(previous)) run[field] = read(previous);
+  }
+  return run;
+}
 export const alive = pid => {
   if (!Number.isInteger(pid) || pid < 1) return false;
   try { process.kill(pid, 0); return true; }
