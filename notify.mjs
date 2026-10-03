@@ -85,8 +85,9 @@ export function completionEvent(run, result, artifacts) {
   const detail = fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : '';
   const originFile = path.join(artifacts, 'origin.json');
   const legacy = /^lane stopped on (\S+) \(([^)]+)\) for \S+\. ([\s\S]*)$/.exec(detail);
-  const origin = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8'))
-    : {node: legacy?.[1], signal: legacy?.[2], message: legacy?.[3] || detail};
+  const saved = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8')) : {};
+  const origin = {node: saved.node || legacy?.[1], signal: saved.signal || legacy?.[2],
+    message: saved.message || legacy?.[3] || detail};
   const runDir = path.dirname(artifacts);
   const journalFile = path.join(runDir, 'journal.jsonl');
   const journal = fs.existsSync(journalFile) ? fs.readFileSync(journalFile, 'utf8')
