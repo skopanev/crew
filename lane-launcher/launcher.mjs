@@ -191,7 +191,7 @@ export async function tick(config, display = null) {
   save(stateFile, run);
   herdr(config, ['pane', 'run', run.pane,
     `${quote(process.execPath)} ${quote(path.join(here, 'worker.mjs'))} ${quote(stateFile)}`]);
-  print(display ? `Started ${candidate.id} in ${run.pane}` : `started ${candidate.id} in ${run.pane}; logs: ${dir}`);
+  print(display ? '' : `started ${candidate.id} in ${run.pane}; logs: ${dir}`);
 }
 
 export async function main(argv) {
