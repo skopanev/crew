@@ -18,6 +18,7 @@
   "cbmCacheDir": "",
   "sshDir": "",
   "readOnlyRepos": [],
+  "readWriteDirs": [],
   "gateCommands": [],
   "testCommand": []
 }

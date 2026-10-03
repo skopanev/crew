@@ -49,7 +49,30 @@ export function laneArgs(config, ticket) {
     '--test-command', JSON.stringify(config.testCommand || []),
     '--ssh-dir', config.sshDir,
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
+    ...(config.readWriteDirs || []).flatMap(dir => ['--mount-rw', dir]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];
+}
+export function validateWritableDirs(config, ticket) {
+  if (!config.readWriteDirs?.length) return;
+  const protectedDirs = [config.sourceRoot, config.sshDir, config.cbmCacheDir,
+    ...(config.readOnlyRepos || [])].filter(Boolean).map(dir => fs.realpathSync(dir));
+  const names = new Set([config.sourceRoot, config.sshDir, ...(config.readOnlyRepos || [])]
+    .filter(Boolean).map(dir => path.basename(fs.realpathSync(dir))));
+  if (ticket) names.add(ticket);
+  const inside = (a, b) => {
+    const relative = path.relative(b, a);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  };
+  for (const folder of config.readWriteDirs) {
+    const dir = fs.realpathSync(folder);
+    if (protectedDirs.some(other => inside(dir, other) || inside(other, dir))) {
+      throw new Error(`Writable directory overlaps a protected directory: ${folder}`);
+    }
+    const name = path.basename(dir);
+    if (names.has(name)) throw new Error(`Writable mount name is already in use: ${name}`);
+    names.add(name);
+    protectedDirs.push(dir);
+  }
 }
 export function runDirectories(stateDir) {
   const root = path.join(stateDir, 'runs');

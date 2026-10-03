@@ -8,7 +8,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --gate-command <shell command> [...]
               --test-command '["runner", "args"]'
               [--module <module>]
-              [--mount-ro <repo>]... [--ssh-dir <dir>]
+              [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
@@ -29,6 +29,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
                   Supplied by the operator; no commands are inferred from code.
   --test-command  required runner argument array for existing-code verification.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
+  --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
              made-up path that nobody created is worse than none. The whole
@@ -50,6 +51,7 @@ ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_co
 planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 test_command='[]'
 also=()
+writable=()
 gate_commands=()
 passthrough=()
 while (( $# )); do
@@ -58,13 +60,14 @@ while (( $# )); do
     --dispatcher-id) dispatcher_id="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     # Removed flags must not reach Medulla as passthrough mounts.
-    --repo|--repo=*|--mount-rw|--mount-rw=*) say "run.sh: ${1%%=*} was removed; use --source-root"; exit 2 ;;
+    --repo|--repo=*) say "run.sh: ${1%%=*} was removed; use --source-root"; exit 2 ;;
     --source-root) source_root="${2:-}"; shift 2 ;;
     --module) module="${2:-}"; shift 2 ;;
     --planning-result) planning_result="${2:-}"; shift 2 ;;
     --planning-task) planning_task="${2:-}"; shift 2 ;;
     --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
+    --mount-rw) writable+=("${2:-}"); shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
@@ -178,12 +181,29 @@ say "run.sh: sources RO: $source_root"
 say "run.sh: worktree RW: $worktree (private .git)"
 
 mounts=(--mount "$source_root")
+node --input-type=module -e '
+  import {pathToFileURL} from "node:url";
+  const {validateWritableDirs} = await import(pathToFileURL(process.argv[1]));
+  const [sourceRoot, sshDir, cbmCacheDir, ticket, ...dirs] = process.argv.slice(2);
+  const split = dirs.indexOf("--");
+  try { validateWritableDirs({sourceRoot, sshDir, cbmCacheDir,
+    readOnlyRepos: dirs.slice(0, split), readWriteDirs: dirs.slice(split + 1)}, ticket); }
+  catch (error) { console.error(`run.sh: ${error.message}`); process.exit(2); }
+' "$TOOLING_ROOT/lane-launcher/runtime.mjs" "$source_root" "$ssh_dir" "$cbm_cache" "$ticket" \
+  ${also[@]+"${also[@]}"} -- ${writable[@]+"${writable[@]}"}
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
   [[ "$extra" != "$source_root" && "$extra" != "$repo" ]] || continue
   check_mountpoint "$extra"
   mounts+=(--mount "$extra")
+done
+
+for extra in ${writable[@]+"${writable[@]}"}; do
+  [[ "$extra" = /* && -d "$extra" ]] || { say "run.sh: --mount-rw needs an existing absolute directory: $extra"; exit 2; }
+  extra="$(cd "$extra" && pwd -P)"
+  check_mountpoint "$extra"
+  mounts+=(--mount-rw "$extra")
 done
 
 git_ssh=""
@@ -231,7 +251,7 @@ cleanup() {
   return "$code"
 }
 trap cleanup EXIT
-for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"}; do
+for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"} ${writable[@]+"${writable[@]}"}; do
   point="$TOOLING_ROOT/$(basename "$m")"
   [[ " ${mounts[*]} " == *" $m "* ]] || continue
   check_mountpoint "$m"
@@ -306,7 +326,7 @@ equill_vars=(
 )
 say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
-# Only this ticket directory is exposed with write access. Clone happens after claim.
+# Code and Git writes use this ticket directory. Clone happens after claim.
 check_mountpoint "$worktree"
 mkdir -p "$(dirname "$worktree")" "$TOOLING_ROOT/$ticket"
 worktree_created=false
