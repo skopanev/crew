@@ -310,6 +310,7 @@ nodes:
       fi
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
+      git diff --binary "origin/${target}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
       if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
         echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
         exit 0
@@ -379,7 +380,7 @@ nodes:
       Worktree: {{var:LANE_WORKTREE}}.
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
       {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
-      git diff "origin/$(jq -er .target_branch .ntkrc)"...HEAD.
+      {{var:RUN_ARTIFACTS}}/diff.patch.
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>

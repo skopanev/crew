@@ -162,19 +162,20 @@ TTL фиксирован: 24 часа после успешного заверш
 перезаписывает результат и не продлевает время; возраст проверяется также после
 сетевых обращений. Старые результаты без времени/снимка требуют нового planning.
 
-У существующего пусковика lane есть связанная проверка:
+The lane launcher accepts these optional admission arguments with its required launch options:
 
 ```sh
-bash lane/run.sh --planning-result /path/to/run/artifacts/result.json \
-  --planning-task task-1 --ticket-id TICKET --project WORKSPACE \
-  --mount-rw /path/to/repo --cbm-store /path/to/index --gate-command 'project test command'
+--planning-result /path/to/run/artifacts/result.json --planning-task task-1
 ```
 
-Оба флага обязательны вместе. Проверяются Task, его репозиторий и модуль тикета.
-Допуск выполняется до подготовки контейнера и повторно непосредственно перед
-Medulla; `stale`/`error` прекращает запуск. Без этих флагов остаётся существующий
-NTK путь, не использующий результат planning. Dolber пока не создаёт связь
-NTK-тикета с планом автоматически.
+Both flags are required together. Admission checks the Task, repository, ticket
+module, live Joppa chain, and plan age. It runs before container preparation and
+again before Medulla. A `stale` or `error` result stops the launch.
+
+These flags check admission only. They do not deliver the plan or Task steps to
+scout or coder. Dolber does not link an NTK ticket to a planning result. Both
+agents read the NTK ticket. The ticket must contain the chosen approach, edit
+steps, scope, and acceptance checks before dispatch.
 
 Создание Joppa Tasks, перенос плана в их контракты и автоматическая передача
 в очередь остаются отдельной интеграцией. Адаптеру нужны сопоставление
