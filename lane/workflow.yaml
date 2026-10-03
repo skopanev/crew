@@ -596,7 +596,7 @@ nodes:
       msg="lane stopped on ${MEDULLA_LAST_NODE:-?} (${MEDULLA_LAST_SIGNAL:-none}) for ${ticket_id}. ${MEDULLA_LAST_MESSAGE:-}"
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       jq -n --arg node "${MEDULLA_LAST_NODE:-?}" --arg signal "${MEDULLA_LAST_SIGNAL:-none}" \
-        --arg message "${MEDULLA_LAST_MESSAGE:-}" '{node, signal, message}' \
+        --arg message "${MEDULLA_LAST_MESSAGE:-}" '{node: $node, signal: $signal, message: $message}' \
         > "$MEDULLA_RUN_DIR/artifacts/origin.json"
       # Before a confirmed claim, never write the ticket or touch its worktree.
       if [ "${MEDULLA_LAST_SIGNAL:-}" = "CLAIM_REFUSED" ] || ! jq -e \
