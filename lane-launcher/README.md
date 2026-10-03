@@ -35,6 +35,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `cbmMcpCommand` | Absolute path to the native host CBM executable. Broker creates a current bridge scoped to `sourceRoot` at each lane start; do not use a temporary box shim |
 | `cbmCacheDir` | Absolute path to the existing shared CBM store, matching the active CBM daemon. No store is created or copied |
 | `readOnlyRepos` | Additional repositories mounted read-only |
+| `readWriteDirs` | Existing absolute directories mounted writable at `/workspace/<directory-name>`; defaults to `[]` |
 | `gateCommands` | Required check commands run against the lane's candidate |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
@@ -44,8 +45,13 @@ The first component of the ticket's NTK module names its source repository
 under `sourceRoot`; there is no project lookup table or repository override.
 Only `<sourceRoot>/.worktrees/<ticket>` is mounted writable for code and Git
 metadata. It is an independent checkout with its own `.git`, exposed inside the
-container at `/workspace/<ticket>`. Run artifacts are writable separately.
+container at `/workspace/<ticket>`. Run artifacts and configured `readWriteDirs` are writable separately.
 A retained nonempty checkout is preserved; startup fails and reopens the confirmed claim.
+
+For a shared Gradle cache, set `"readWriteDirs": ["/absolute/path/gradle-cache"]`.
+Create that directory before launch. Set `GRADLE_USER_HOME=/workspace/gradle-cache` in the project's check command.
+Writable directories must not overlap the source workspace, read-only folders, SSH directory or CBM store.
+Their directory names must be unique across mounts and must differ from the ticket ID.
 
 The supplied file uses required tag filter `agent-ready`, `strict: false`, preferred tags `bug`, `kyc`, `ceo60`, `kyt`, and a 60-second pause between iterations. NTK independently requires the ticket's status to be `open`; do not add `open` as a tag to express this status. Preferred tags match exactly, including case, and affect ordering after NTK urgency and dependency ranking.
 
