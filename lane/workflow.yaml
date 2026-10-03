@@ -260,6 +260,7 @@ nodes:
     env:
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
+      ticket_title: '{{var:ticket_title}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       gate_commands: '{{var:gate_commands}}'
       module_name: '{{var:module_name}}'
@@ -295,6 +296,17 @@ nodes:
       fi
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       export PATH="/home/medulla/.bun/bin:${PATH}"
+      # Native check receipts can bind to the commit reviewed and pushed.
+      if [ "${VERIFY_ONLY}" != "true" ] && ! git diff --cached --quiet; then
+        if ! git -c user.name=lane -c user.email=lane@local \
+            commit -m "${ticket_id}: ${ticket_title:0:60}" > "$MEDULLA_RUN_DIR/artifacts/commit.txt" 2>&1; then
+          cat "$MEDULLA_RUN_DIR/artifacts/commit.txt" >&2
+          echo '<signal:GATE_FAIL>commit rejected; see artifacts/commit.txt</signal:GATE_FAIL>'
+          exit 0
+        fi
+      fi
+      tree="$(git write-tree)"
+      base="$(git rev-parse HEAD)"
       if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
         echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
         exit 0
@@ -450,10 +462,12 @@ nodes:
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
       target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
 
-      # Verify the reviewed snapshot before committing.
+      # Push exactly the commit checked and reviewed by the panel.
       snap="$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       [ -f "$snap" ] || { echo "<signal:LAND_FAILED>нет зафиксированного снимка панели</signal:LAND_FAILED>"; exit 0; }
       want_tree="$(sed -n 1p "$snap")"
+      [ "$(git rev-parse HEAD)" = "$(sed -n 2p "$snap")" ] || {
+        echo '<signal:LAND_FAILED>HEAD changed after review</signal:LAND_FAILED>'; exit 0; }
       git diff --quiet || { echo "<signal:LAND_FAILED>дерево изменилось после панели: есть неиндексированные правки</signal:LAND_FAILED>"; exit 0; }
       # Новые файлы после проверок меняют среду кандидата: требуется новый gate.
       new_files="$(git ls-files --others --exclude-standard | head -10 | tr '\n' ' ')"
@@ -475,17 +489,15 @@ nodes:
         exit 0
       fi
 
-      if ! git diff --cached --quiet; then
-        # Repository commit hooks need Bun on PATH.
-        export PATH="/home/medulla/.bun/bin:${PATH}"
-        cmsg="$(git -c user.name="lane" -c user.email="lane@local" \
-            commit -m "${ticket_id}: ${ticket_title:0:60}" 2>&1)" \
-          || { echo "<signal:LAND_FAILED>коммит отклонён: $(printf '%s' "$cmsg" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"; exit 0; }
-      fi
       [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
         echo "<signal:LAND_FAILED>nothing to land: no commit above origin/${target}</signal:LAND_FAILED>"; exit 0; }
 
-      land() { rc=0; out="$("${TOOLING_ROOT}/lane/bin/land.sh" "$target" 2>&1)" || rc=$?; printf '%s\n' "$out"; }
+      export PATH="/home/medulla/.bun/bin:${PATH}"
+      land() {
+        rc=0
+        "${TOOLING_ROOT}/lane/bin/land.sh" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
+        cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
+      }
 
       land
       if [ "$rc" -eq 3 ]; then
@@ -507,7 +519,7 @@ nodes:
         fi
       fi
 
-      [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)</signal:LAND_FAILED>"
+      [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
   cleanup:
     env:
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'

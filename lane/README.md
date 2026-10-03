@@ -56,7 +56,9 @@ An uncertain claim or dispatch requires inspection before retrying.
 
 Checks run from the candidate repository before each review. Their commands,
 exit codes, tree/SHA, and log hashes are recorded under `artifacts/gates/`.
-Landing requires the checked and reviewed tree and runs native Git hooks.
+Implementation is committed with native hooks before the configured checks and
+review. Checks can therefore produce receipts for the exact commit to be pushed.
+Landing requires that same commit and tree, and runs the native push hook.
 A moved target requires a rebase and another review; force push is unavailable.
 
 After landing, `to_test` has three attempts with one-second pauses. Exhaustion
