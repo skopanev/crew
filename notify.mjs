@@ -6,6 +6,14 @@ import {pathToFileURL} from 'node:url';
 const events = new Set(['READY', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
 
+export function reasonCode(event) {
+  if (event.event === 'READY') return '';
+  if (event.event === 'TIMEOUT') return 'TIMEOUT';
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(event.signal || '') ? event.signal :
+    /^([A-Z][A-Z0-9_]+):/.exec(event.summary || '')?.[1] ||
+    `EXIT_${Number.isInteger(event.exit) ? event.exit : 'UNKNOWN'}`;
+}
+
 export async function notify(config, event) {
   const route = config.notify;
   if (!route) return false;
@@ -22,9 +30,7 @@ export async function notify(config, event) {
   const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
-  const code = /^[A-Za-z_][A-Za-z0-9_]*$/.test(event.signal || '') ? event.signal :
-    /^([A-Z][A-Z0-9_]+):/.exec(event.summary || '')?.[1] || `EXIT_${event.exit ?? 'UNKNOWN'}`;
-  const reason = event.event === 'READY' ? '' : event.event === 'TIMEOUT' ? 'TIMEOUT' : code;
+  const reason = reasonCode(event);
   const message = [header, ticketLine, stage, reason && `Reason: ${reason}`]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
