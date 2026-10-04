@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {readRun, alive, runDirectories} from './runtime.mjs';
+import {completionEvent, reasonCode} from '../notify.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -61,19 +62,15 @@ function statusFor({result, worker}) {
 }
 
 function reasonFor(run) {
-  let reason = String(run.result.error || `Exit ${run.result.code ?? '?'}`)
-    .replace(/;\s*full output:[^\n]*/g, '');
+  let artifacts;
   try {
-    const report = fs.readdirSync(run.runFolder).sort().reverse()
-      .map(name => path.join(run.runFolder, name, 'artifacts/failure.txt'))
-      .find(file => fs.existsSync(file));
-    if (report) reason = fs.readFileSync(report, 'utf8').trim()
-      .replace(/^lane stopped on \S+ \([^)]+\) for \S+\.\s*/, '');
+    artifacts = fs.readdirSync(run.runFolder).sort().reverse()
+      .map(name => path.join(run.runFolder, name, 'artifacts'))
+      .find(folder => fs.existsSync(path.join(folder, 'failure.txt')));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  return reason.replace(/(^|[\s('"])\/[^\s;,'")]+/g, '$1')
-    .replace(/:\s*;/g, ';').replace(/ {2,}/g, ' ').trim();
+  return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
 export function createDashboard(config, paint) {
@@ -108,7 +105,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.total} total · ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Account for wrapped rows without shortening the ticket or run ID.
     const visible = runs.slice(0, Math.min(15,
