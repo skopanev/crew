@@ -17,18 +17,14 @@ export async function notify(config, event) {
   if (event.event === 'TIMEOUT' && (!event.node || !event.model)) {
     throw new Error('TIMEOUT needs node and model');
   }
-  const stage = [event.node, event.signal, event.event === 'TIMEOUT' ? event.model : undefined]
+  const stage = [event.node, event.event === 'TIMEOUT' ? event.model : undefined]
     .filter(Boolean).map(clean).join(' · ');
-  const summary = String(event.summary ?? '')
-    .replace(/[\r\x00-\x09\x0b-\x1f\x7f]/g, '')
-    .replace(/;?\s*full output:[^\n]*/gi, '')
-    .replace(/^Lane exited [^\n]*$/gm, '')
-    .replace(/(^|[\s('"])\/[^\s;,'")]+/g, '$1')
-    .replace(/:\s*;/g, ';').replace(/ {2,}/g, ' ').trim();
   const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
-  const reason = summary || (event.event === 'READY' ? '' : clean(event.signal) || 'Failure details are unavailable');
+  const code = /^[A-Za-z_][A-Za-z0-9_]*$/.test(event.signal || '') ? event.signal :
+    /^([A-Z][A-Z0-9_]+):/.exec(event.summary || '')?.[1] || `EXIT_${event.exit ?? 'UNKNOWN'}`;
+  const reason = event.event === 'READY' ? '' : event.event === 'TIMEOUT' ? 'TIMEOUT' : code;
   const message = [header, ticketLine, stage, reason && `Reason: ${reason}`]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
@@ -70,7 +66,7 @@ export function completionEvent(run, result, artifacts) {
     runId: path.basename(path.dirname(run.runFolder)),
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
-  if (result.blocked) return {...event, event: 'BLOCKED', summary: result.error};
+  if (result.blocked) return {...event, event: 'BLOCKED', signal: 'WORKTREE_PREEXISTED', summary: result.error};
   if (result.code === 0) return event;
   if (!artifacts) {
     // Startup refusals have no Medulla journal. Keep the complete refusal lines.
@@ -121,11 +117,11 @@ export async function notifyCompletion(run, result, artifacts) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   try {
-    const [configFile, event, id, summary, node, model] = process.argv.slice(2);
-    if (!configFile || !event || !id || !summary) {
-      throw new Error('Usage: node notify.mjs config.json READY|FAILED|BLOCKED|TIMEOUT ticket-id "summary" [node model]');
+    const [configFile, event, id, signal, node, model] = process.argv.slice(2);
+    if (!configFile || !event || !id || (event !== 'READY' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(signal || ''))) {
+      throw new Error('Usage: node notify.mjs config.json READY|FAILED|BLOCKED|TIMEOUT ticket-id [reason-code node model]');
     }
-    const sent = await notify(JSON.parse(fs.readFileSync(configFile, 'utf8')), {event, id, summary, node, model});
+    const sent = await notify(JSON.parse(fs.readFileSync(configFile, 'utf8')), {event, id, signal, node, model});
     if (!sent) throw new Error('Notifications are not configured');
     console.log('Notification sent to channel');
   } catch (error) {
