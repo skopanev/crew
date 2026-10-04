@@ -122,7 +122,7 @@ the tab remains open after completion; `closeTabOnExit` controls closure.
 Optional host notifications use `notify.mjs`, with no LLM invocation:
 
 ```sh
-node notify.mjs config.json READY ticket-id "Ticket ready for test"
+node notify.mjs config.json READY ticket-id
 ```
 
 Configure `notify.chatId`, optional `notify.threadId`, and `notify.envFile`
