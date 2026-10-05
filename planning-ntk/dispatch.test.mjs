@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {candidates, runResult, settings} from './dispatch.mjs';
+import {candidates, incomplete, lock, runResult, settings} from './dispatch.mjs';
 
 const ticket = (id, updated, status = updated) => ({id, updated_at: updated, current_status_at: status, title: id});
 
@@ -26,29 +26,52 @@ test('a retained lane worktree holds the ticket for an operator', () => {
   assert.deepEqual(held.map(t => t.id), ['W']);
 });
 
-test('settings select blocked tickets without the dispatch tag and validate it', t => {
+test('settings select blocked tickets by every configured tag and reject an empty filter', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const file = path.join(dir, 'config.json');
-  const base = {id: 'x', workspace: 'w', stateDir: dir, sourceRoot: dir, tags: ['agent-ready', 'ifa-ama']};
+  const base = {id: 'x', workspace: 'w', stateDir: dir, sourceRoot: dir, tags: ['agent-ready', 'team-a']};
   fs.writeFileSync(file, JSON.stringify({...base, planning: {dispatchTag: 'agent-ready'}}));
   const config = settings(file);
-  assert.deepEqual(config.filterTags, ['ifa-ama']);
+  assert.deepEqual(config.filterTags, ['agent-ready', 'team-a']);
   assert.equal(config.interval, 60);
   fs.writeFileSync(file, JSON.stringify(base));
   assert.throws(() => settings(file), /dispatchTag must be one of the dispatcher tags/);
+  fs.writeFileSync(file, JSON.stringify({...base, tags: ['crew']}));
+  assert.deepEqual(settings(file).filterTags, ['crew']);
+  fs.writeFileSync(file, JSON.stringify({...base, tags: ['crew', ' '], planning: {dispatchTag: 'crew'}}));
+  assert.throws(() => settings(file), /non-empty tags/);
 });
 
-test('the newest run started by this tick decides between a verdict and an environment failure', t => {
+test('the named run decides between a verdict and an incomplete run', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-runs-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const config = {stateDir: dir};
-  assert.equal(runResult(config, Date.now()), null);
-  const since = Date.now();
-  fs.mkdirSync(path.join(dir, 'runs/r1/artifacts'), {recursive: true});
-  fs.writeFileSync(path.join(dir, 'runs/r1/artifacts/result.json'), JSON.stringify({verdict: 'NOT_READY', id: 'A'}));
-  assert.equal(runResult(config, since).ticket_unchanged, undefined);
-  fs.writeFileSync(path.join(dir, 'runs/r1/artifacts/result.json'), JSON.stringify({verdict: 'NOT_READY', ticket_unchanged: true}));
-  assert.equal(runResult(config, since).ticket_unchanged, true);
-  assert.equal(runResult(config, Date.now() + 60000), null);
+  const save = (name, value) => {
+    fs.mkdirSync(path.join(dir, 'runs', name, 'artifacts'), {recursive: true});
+    fs.writeFileSync(path.join(dir, 'runs', name, 'artifacts/result.json'), JSON.stringify(value));
+  };
+  assert.equal(runResult(config, 'mine'), null);
+  assert.equal(incomplete(runResult(config, 'mine')), true);
+  save('other', {verdict: 'NOT_READY', id: 'A'});
+  assert.equal(runResult(config, 'mine'), null, 'another run is never read');
+  save('mine', {verdict: 'NOT_READY', id: 'A'});
+  assert.equal(incomplete(runResult(config, 'mine')), false);
+  save('mine', {verdict: 'NOT_READY', ticket_unchanged: true});
+  assert.equal(incomplete(runResult(config, 'mine')), true);
+  save('mine', {verdict: 'NOT_READY', ticket_unchanged: false, publication_uncertain: true});
+  assert.equal(incomplete(runResult(config, 'mine')), true);
+});
+
+test('the dispatcher lock fails closed on any existing lock file', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-lock-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const file = lock(dir);
+  assert.equal(fs.readFileSync(file, 'utf8'), String(process.pid));
+  assert.throws(() => lock(dir, 1), /Another dispatcher holds .*pid \d+.*remove the file/);
+  fs.writeFileSync(file, '999999999');
+  assert.throws(() => lock(dir, 4242), /pid 999999999/, 'a dead owner is not removed automatically');
+  fs.writeFileSync(file, '');
+  assert.throws(() => lock(dir, 4242), /Another dispatcher holds/, 'an empty lock is a live one being written');
+  assert.equal(fs.readFileSync(file, 'utf8'), '');
 });
