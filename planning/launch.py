@@ -3,6 +3,7 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 from common import read, require, validate_input
@@ -32,6 +33,12 @@ def main():
             require(getattr(args, key), f"--{key.replace('_', '-')} is required")
         for binary in (os.environ.get("EQUILL_BIN", "equill"), os.environ.get("CBM_BIN", "codebase-memory-mcp"), "codex", "claude", "agy", "opencode", "git"):
             require(shutil.which(binary), f"required executable missing: {binary}")
+    # The live store must match the committed planning snapshots (one-way export).
+    # Tests with a fake Equill set CREW_SKIP_ROLE_CHECK.
+    if not args.dry_run and not os.environ.get("CREW_SKIP_ROLE_CHECK"):
+        check = subprocess.run([sys.executable, str(workflow.parent / "roles/export.py"), "--check", "planning", "shared"],
+                               env={**os.environ, "EQUILL_STORE": args.equill_store}, capture_output=True, text=True)
+        require(check.returncode == 0, (check.stderr or check.stdout).strip() or "Crew role check failed")
     variables = {
         "PLANNING_INPUT": str(source), "RESEARCH_MODEL": args.research_model, "DESIGN_MODEL": args.design_model,
         "CBM_CACHE_DIR": args.cbm_store or "", "CBM_ALLOWED_ROOT": args.cbm_root or "",

@@ -56,6 +56,10 @@ Before each push it exports these six live contracts and their shared rules.
 If snapshots change, the push stops: commit `roles/*.jsonl` and push again.
 An Equill error also stops the push. The store defaults to `~/.equill/dev`;
 override it with `EQUILL_STORE`. Run `python3 roles/export.py` to export manually.
+Export is one-way: `git pull` never updates another machine's store. Lane and
+planning runs therefore start with `python3 roles/export.py --check`, and stop
+when the live store differs from the committed snapshots. Bring the older side
+up to date, then start again.
 
 The worker atomically claims a ticket in its Herdr tab before preflight or Docker. Startup failure
 returns the confirmed claim to `open`. Once the workflow adopts the claim,

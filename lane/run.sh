@@ -279,6 +279,12 @@ sync_sources=true
 for arg in ${passthrough[@]+"${passthrough[@]}"}; do
   case "$arg" in --dry-run|--validate|--graph) sync_sources=false ;; esac
 done
+# Stop before any sync or Docker work when this machine's Equill store lags the
+# committed role snapshots: export is one-way, so git pull alone never updates it.
+if $sync_sources && [[ -z "${CREW_SKIP_ROLE_CHECK:-}" && -f "$TOOLING_ROOT/roles/export.py" ]]; then
+  EQUILL_STORE="${EQUILL_STORE:-$HOME/.equill/dev}" \
+    python3 "$TOOLING_ROOT/roles/export.py" --check lane shared || exit 2
+fi
 if $sync_sources; then
   python3 "$TOOLING_ROOT/lane-launcher/safe-sync.py" "$source_root" "$cbm_connector" "$MEDULLA_IMAGE"
 else

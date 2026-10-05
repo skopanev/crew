@@ -69,6 +69,12 @@ def main():
         command += ["--var", f"{key}={value}"]
     if args.dry_run:
         return subprocess.run(command + ["--dry-run"], check=False).returncode
+    # The live store must match the committed planning snapshots (one-way export).
+    # Tests with a fake Equill set CREW_SKIP_ROLE_CHECK.
+    check = None if os.environ.get("CREW_SKIP_ROLE_CHECK") else subprocess.run([sys.executable, str(here.parent / "roles/export.py"), "--check", "planning", "shared"],
+                           env={**os.environ, "EQUILL_STORE": variables["EQUILL_STORE"]}, capture_output=True, text=True)
+    if check is not None and check.returncode != 0:
+        raise ValueError((check.stderr or check.stdout).strip() or "Crew role check failed")
     if args.resume:
         run_dir = Path(args.resume).resolve(strict=True)
         if not run_dir.is_relative_to((state / "runs").resolve()):
