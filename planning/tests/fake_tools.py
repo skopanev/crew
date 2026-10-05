@@ -56,6 +56,9 @@ elif name == "opencode" and sys.argv[1:] == ["--pure", "debug", "config"]:
     runtime = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
     config.setdefault("permission", {}).update(runtime.get("permission", {}))
     print(json.dumps(config))
+elif name == "agy" and sys.argv[1:] == ["mcp", "list"]:
+    (Path(os.environ["BROKER_AGY_HOME"]) / ".gemini/config").mkdir(parents=True)
+    print("No MCP servers configured.")
 else:
     assert not os.environ.get("JOPPA_TOKEN") and not os.environ.get("JOPPA_TOKEN_FILE"), "Joppa credential exposed to agent"
     if name == "codex":
@@ -65,10 +68,16 @@ else:
         assert "--strict-mcp-config" in sys.argv
     elif name == "agy":
         assert sys.argv[sys.argv.index("--mode") + 1] == "plan"
+        assert os.environ.get("BROKER_ISOLATE_MCP") == "1"
+        assert os.environ.get("BROKER_AGY_HOME")
     elif name == "opencode":
         assert json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])["permission"]["bash"] == "deny"
     assert not any("{{" in arg for arg in sys.argv), "unresolved agent argument"
-    prompt = sys.argv[sys.argv.index("--print") + 1] if name == "agy" else sys.stdin.read()
+    if name == "agy":
+        prompt = sys.argv[sys.argv.index("--print") + 1] if "--print" in sys.argv else \
+            json.loads(sys.stdin.read())["message"]["content"][0]["text"]
+    else:
+        prompt = sys.stdin.read()
     assert '"domain"' in prompt and "Reliable delivery" in prompt
     assert '"capability"' in prompt and "Bounded work scheduling" in prompt
     role_input = json.loads(os.environ.get("MEDULLA_INPUT", "{}"))

@@ -8,6 +8,7 @@ Resolve each blocking finding, or refute it with source evidence in rationale.
 Use the supplied parent context to understand the purpose and constraints.
 Plan only the selected AC or source ticket. Follow the additional output contract
 when supplied. It defines the NTK fields and verdicts.
+When supplied, use details_file to read relevant attachments and the full input.
 
 Gate commands are written for the lane, where configured directories appear at
 `/workspace/<name>`. Read those files at the host paths in `lane_mounts`.

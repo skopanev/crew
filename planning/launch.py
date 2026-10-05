@@ -47,6 +47,7 @@ def main():
         "EQUILL_STORE": args.equill_store or "", "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),
         "EQUILL_ACTOR": "planning", "PLANNING_PYTHON": sys.executable,
         "OPENCODE_BIN": shutil.which("opencode") or "opencode",
+        "AGY_BIN": shutil.which("agy") or "agy",
     }
     command = [executable, "-w", str(workflow), "--runs-folder", str(output)]
     for key, value in variables.items():
@@ -54,8 +55,10 @@ def main():
     if args.dry_run:
         command.append("--dry-run")
     # Provider settings can include keys. Remove the private config after the run.
-    with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home:
-        command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}"]
+    with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home, \
+            tempfile.TemporaryDirectory(prefix="crew-agy-") as agy_home:
+        command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}",
+                    "--var", f"AGY_PROFILE_HOME={agy_home}"]
         return subprocess.run(command, check=False).returncode
 
 

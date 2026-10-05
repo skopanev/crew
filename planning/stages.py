@@ -18,7 +18,7 @@ def artifacts():
 
 
 def emit_var(name, value):
-    value = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+    value = json.dumps(value, ensure_ascii=False, separators=(",", ":")) if not isinstance(value, str) else value
     require(len(value.encode()) < 100000, f"{name}: context too large; narrow the AC")
     require("</signal:var>" not in value, "reserved signal delimiter in context")
     print(f"<signal:var key={name}>{value}</signal:var>")
@@ -74,7 +74,7 @@ def prepare_context(assignment, projects=None, read_paths=()):
             f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"]))
     require(knowledge.get("ok") is True, "Equill knowledge retrieval failed")
     write(target / "knowledge.json", knowledge)
-    emit_var("assignment", assignment)
+    emit_var("assignment", prompt_assignment(assignment))
     emit_var("source_history", history)
     emit_var("knowledge", knowledge.get("content", ""))
     for role, contract in contracts.items():
@@ -84,7 +84,25 @@ def prepare_context(assignment, projects=None, read_paths=()):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
     prepare_opencode([r["path"] for r in assignment["repositories"]] +
                      list(read_paths) + [os.environ["MEDULLA_RUN_DIR"]])
+    prepare_agy()
     signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
+
+
+def prompt_assignment(assignment):
+    """Remove repeated NTK context without removing prerequisite evidence."""
+    if assignment.get("kind") != "ntk":
+        return assignment
+    result = {key: value for key, value in assignment.items() if key != "knowledge_query"}
+    result["ac"] = {key: value for key, value in assignment["ac"].items() if key != "text"}
+    result["repositories"] = [{key: value for key, value in repo.items() if key != "modules"}
+                              for repo in assignment["repositories"]]
+    result["ntk"] = dict(assignment["ntk"])
+    result["ntk"]["source"] = {key: value for key, value in assignment["ntk"]["source"].items() if key != "ticket"}
+    names = {item["name"] for repo in assignment["repositories"] for item in repo["modules"]}
+    result["ntk"]["meta"] = {**assignment["ntk"]["meta"],
+        "modules": [item for item in assignment["ntk"]["meta"]["modules"] if item["name"] in names]}
+    result["details_file"] = str(artifacts() / "input.json")
+    return result
 
 
 def prepare_opencode(read_paths):
@@ -124,6 +142,21 @@ def prepare_opencode(read_paths):
             all(permission.get(key) == "deny" for key in read_only),
             "OpenCode isolation changed read-only permissions")
     return str(root)
+
+
+def prepare_agy():
+    """Verify the native MCP inventory in a private broker profile."""
+    root = Path(os.environ["AGY_PROFILE_HOME"])
+    require(root.is_dir(), "AGY runtime profile directory is unavailable")
+    environment = {**os.environ, "BROKER_AGY_HOME": str(root), "BROKER_ISOLATE_MCP": "1"}
+    result = subprocess.run([os.environ.get("AGY_BIN", "agy"), "mcp", "list"],
+                            env=environment, capture_output=True, text=True, timeout=45)
+    require(result.returncode == 0, f"AGY MCP query failed (exit {result.returncode})")
+    require(result.stdout.strip() == "No MCP servers configured.",
+            "AGY isolation failed: inherited MCP remains; update broker")
+    config = root / ".gemini/config/mcp_config.json"
+    require(config.parent.is_dir() and config.resolve().is_relative_to(root.resolve()),
+            "AGY isolation failed: MCP configuration points outside the runtime profile; update broker")
 
 
 def body_result():
