@@ -101,11 +101,12 @@ Dolber starts lanes for `open` tickets. A failed lane leaves its ticket `blocked
 and review findings arrive as `blocked` tickets too. The dispatcher walks that pile:
 
 ```sh
-node ./planning-ntk/dispatch.mjs /path/to/config.json --dry-run   # show the queue
-node ./planning-ntk/dispatch.mjs /path/to/config.json --once      # plan one ticket
-node ./planning-ntk/dispatch.mjs /path/to/config.json             # loop
+sh ./lane-launcher/planner-ntk.sh /path/to/config.json --dry-run   # show the queue
+sh ./lane-launcher/planner-ntk.sh /path/to/config.json --once      # plan one ticket
+sh ./lane-launcher/planner-ntk.sh /path/to/config.json             # loop
 ```
 
+Run these commands from the Crew repository root, as you run Dolber.
 It uses Dolber's configuration. Each tick it reads `blocked` tickets that carry
 all of Dolber's tags, `planning.dispatchTag` included. A failed lane keeps that
 tag; a published NOT_READY removes it, so a settled ticket is not planned again.
