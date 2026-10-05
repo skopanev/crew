@@ -308,6 +308,10 @@ def fail(reason=None):
                   "ticket_unchanged": False, "publication_uncertain": True}
     else:
         result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
+        # Only the exact freshness failure counts: the source moved while this
+        # run planned. Nothing was published, so planning again is safe.
+        if reason.split("\n", 1)[0] == shared.CODE_DRIFT:
+            result["code_drift"] = True
     write(target / "result.json", result)
     signal("BLOCKED", json.dumps(result))
 

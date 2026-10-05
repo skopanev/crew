@@ -76,6 +76,24 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(result["ticket_unchanged"])
         self.assertNotIn("publication_uncertain", result)
 
+    def test_code_drift_is_marked_only_for_the_exact_freshness_failure(self):
+        with patch.object(stages, "signal"):
+            stages.fail(stages.shared.CODE_DRIFT)
+        result = json.loads((self.target / "result.json").read_text())
+        self.assertTrue(result["code_drift"])
+        self.assertTrue(result["ticket_unchanged"])
+        with patch.object(stages, "signal"):
+            stages.fail("mandatory Equill contract changed during planning; re-plan")
+        self.assertNotIn("code_drift", json.loads((self.target / "result.json").read_text()))
+
+    def test_drift_after_a_started_publication_is_not_marked(self):
+        (self.target / "publication-started.json").write_text("{}")
+        with patch.object(stages, "signal"):
+            stages.fail(stages.shared.CODE_DRIFT)
+        result = json.loads((self.target / "result.json").read_text())
+        self.assertTrue(result["publication_uncertain"])
+        self.assertNotIn("code_drift", result)
+
 
 if __name__ == "__main__":
     unittest.main()

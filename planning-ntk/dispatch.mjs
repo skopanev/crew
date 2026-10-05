@@ -142,6 +142,13 @@ export function runResult(config, name) {
 // A run that left no verdict: the environment failed before publication
 // (ticket_unchanged), or a publication started and did not confirm. Neither
 // is marked processed; both stop the loop for an operator.
+// Code moved under a run that published nothing: plan it again once against
+// current code. A second drift stops the loop like any incomplete run.
+export const DRIFT_RETRIES = 1;
+export function replanForDrift(result, attempt) {
+  return result?.code_drift === true && result.ticket_unchanged === true && attempt < DRIFT_RETRIES;
+}
+
 export function incomplete(result) {
   return !result || result.ticket_unchanged === true || result.publication_uncertain === true;
 }
@@ -179,17 +186,23 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   console.log(`\n${paint('blue', 'RUNNING')} ${paint('ticket', ticket.id)}`);
   console.log(`  ${paint('title', ticket.title)}`);
   field('Started', new Date(started).toISOString());
-  field('Stage', paint('blue', 'preflight · Git and CBM'));
-  syncSources(config, path.join(config.stateDir, 'dispatch-logs'));
-  field('Stage', paint('blue', 'planning · research, design and review'));
-  const runName = `dispatch-${ticket.id}-${Date.now()}`;
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
-  const log = path.join(logs, `${runName}.log`);
-  field('Log', log);
-  const run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
-    {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
-  fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
+  let run, runName, log, result;
+  for (let attempt = 0; ; attempt++) {
+    field('Stage', paint('blue', 'preflight · Git and CBM'));
+    syncSources(config, logs);
+    field('Stage', paint('blue', 'planning · research, design and review'));
+    runName = `dispatch-${ticket.id}-${Date.now()}`;
+    log = path.join(logs, `${runName}.log`);
+    field('Log', log);
+    run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
+      {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
+    fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
+    result = runResult(config, runName);
+    if (run.status === 0 || !replanForDrift(result, attempt)) break;
+    field('Stage', paint('yellow', 'source changed during planning · planning once more against current code'));
+  }
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
@@ -197,7 +210,6 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   // Do not mark an incomplete run attempted, and stop the loop, so the same
   // fault does not walk the whole queue. Fix it, then start again. A published
   // NOT_READY is a verdict and is recorded like any other.
-  const result = runResult(config, runName);
   const verdict = incomplete(result) ? 'FAILED' : result.verdict ?? 'UNKNOWN';
   const tone = verdict === 'READY' ? 'green' : ['NOT_READY', 'NEEDS_HUMAN'].includes(verdict) ? 'yellow' : 'red';
   console.log(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
@@ -211,7 +223,8 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
     state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log,
       uncertain: result?.publication_uncertain === true}};
     saveState(config, state);
-    return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true, log};
+    return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true,
+      drift: result?.code_drift === true, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
   saveState(config, state);
@@ -234,6 +247,10 @@ async function main(argv) {
     if (result?.uncertain) {
       throw new Error(`publication for ${result.id} started and did not confirm; inspect the ticket in NTK ` +
         `before any other run of it, and do not resume blindly; see ${result.log}`);
+    }
+    if (result?.drift) {
+      throw new Error(`source changed again while ${result.id} was re-planned; nothing was published. ` +
+        `Start again when the target branch is quiet; see ${result.log}`);
     }
     if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
     if (argv.includes('--once')) break;

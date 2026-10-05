@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {candidates, incomplete, lock, runResult, settings} from './dispatch.mjs';
+import {candidates, incomplete, lock, replanForDrift, runResult, settings} from './dispatch.mjs';
 
 const ticket = (id, updated, status = updated) => ({id, updated_at: updated, current_status_at: status, title: id});
 
@@ -74,4 +74,13 @@ test('the dispatcher lock fails closed on any existing lock file', t => {
   fs.writeFileSync(file, '');
   assert.throws(() => lock(dir, 4242), /Another dispatcher holds/, 'an empty lock is a live one being written');
   assert.equal(fs.readFileSync(file, 'utf8'), '');
+});
+
+test('code drift re-plans once, only for the exact unpublished drift result', () => {
+  const drift = {verdict: 'NOT_READY', ticket_unchanged: true, code_drift: true};
+  assert.equal(replanForDrift(drift, 0), true);
+  assert.equal(replanForDrift(drift, 1), false, 'a second drift stops');
+  assert.equal(replanForDrift({...drift, code_drift: undefined}, 0), false, 'other failures do not retry');
+  assert.equal(replanForDrift({...drift, ticket_unchanged: false, publication_uncertain: true}, 0), false);
+  assert.equal(replanForDrift(null, 0), false);
 });
