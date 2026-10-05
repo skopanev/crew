@@ -1,8 +1,9 @@
 version: '2'
 start: prepare
-# Covers the step limits in sequence: prepare 180 + research 600 + design 1200
-# + critics 1200 + publication. At 1800 s a real run died in the critics pool.
-timeout: 3600
+# Covers the step limits in sequence: prepare 180 + research 600, then up to two
+# rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
+# in the critics pool; a rejected plan gets one revision round (critique_join).
+timeout: 6000
 defaults:
   timeout: 60
 vars:
@@ -10,6 +11,7 @@ vars:
   DESIGN_MODEL: claude-opus-5
   PLANNING_PYTHON: python3
   OUTPUT_CONTRACT: ''
+  critique: ''
 nodes:
   prepare:
     timeout: 180
@@ -101,6 +103,7 @@ nodes:
       {{var:designer_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Critic findings on your previous plan (empty in the first round): {{var:critique}}
       Additional output contract: {{var:OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture plan'
     on_signal:
@@ -157,9 +160,18 @@ nodes:
       Additional output contract: {{var:OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture critic'
     on_signal:
-      __done__: finish
+      __done__: critique_join
       __failed__: failed
       __empty__: failed
+  critique_join:
+    # A rejected plan goes back to design once with the blocking findings
+    # (first live reject: two fixable findings ended the run with no second chance).
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" critique_join'
+    on_signal:
+      REVIEWED: finish
+      REVISE: design
+      __failed__: failed
+      __default__: failed
   finish:
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" finish'
     on_signal:

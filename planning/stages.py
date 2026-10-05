@@ -151,6 +151,30 @@ def review_input():
     signal("REVIEW", "Frozen plan sent independently to three critics")
 
 
+# One revision round: a second rejection is the verdict.
+REVISIONS = 1
+
+
+def critique_join():
+    """Send blocking critic findings back to design once; otherwise go to finish."""
+    target = artifacts()
+    plan = read(target / "plan.json")
+    reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
+    for review in reviews.values():
+        validation.critique(review, digest(plan))
+    rejected = {key: [f for f in review["findings"] if f["blocking"]]
+                for key, review in reviews.items() if review["verdict"] == "reject"}
+    rounds = target / "revisions.json"
+    done = read(rounds) if rounds.is_file() else []
+    if not rejected or len(done) >= REVISIONS:
+        signal("REVIEWED", "Critic verdicts sent to finish")
+        return
+    done.append({"plan_digest": digest(plan), "rejected": sorted(rejected)})
+    write(rounds, done)
+    emit_var("critique", {"previous_plan": plan, "blocking_findings": rejected})
+    signal("REVISE", "Rejected by " + ", ".join(sorted(rejected)) + "; design revises once")
+
+
 def finish():
     target = artifacts()
     assignment = read(target / "input.json")
@@ -230,7 +254,7 @@ if __name__ == "__main__":
             capture(sys.argv[2])
         else:
             {"prepare": prepare, "research_join": research_join, "review_input": review_input,
-             "finish": finish, "fail": fail}[command]()
+             "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
     except Exception as exc:
         print(f"planning/{command}: {exc}", file=sys.stderr)
         if command == "capture":

@@ -113,6 +113,15 @@ function syncSources(config) {
   }
 }
 
+// The result of the planning run this tick started: the newest run directory.
+export function runResult(config, since, root = path.join(config.stateDir, 'runs')) {
+  let runs = [];
+  try { runs = fs.readdirSync(root).map(name => path.join(root, name)); } catch { return null; }
+  const fresh = runs.map(dir => ({dir, time: fs.statSync(dir).mtimeMs})).filter(run => run.time >= since - 1000)
+    .sort((a, b) => b.time - a.time);
+  try { return fresh.length ? JSON.parse(fs.readFileSync(path.join(fresh[0].dir, 'artifacts/result.json'), 'utf8')) : null; } catch { return null; }
+}
+
 export async function tick(configFile, config, {dryRun = false} = {}) {
   const state = readState(config);
   state.tickets ??= {};
@@ -133,6 +142,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   if (!ticket) return null;
   syncSources(config);
   console.log(`${new Date().toISOString()} planning ${ticket.id}: ${ticket.title}`);
+  const started = Date.now();
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
   const log = path.join(logs, `${ticket.id}-${Date.now()}.log`);
@@ -144,10 +154,12 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
   const last = ((run.stderr || run.stdout || '').trim().split('\n').pop() || '').slice(0, 300);
   console.log(`${ticket.id}: planning-ntk exit ${run.status}${last ? ` · ${last}` : ''}`);
-  // A failure that left the ticket untouched did not plan it: the environment
-  // failed (CBM, Equill, an agent). Do not mark it attempted, and stop the loop,
-  // so the same fault does not walk the whole queue. Fix it, then start again.
-  const untouched = after === ticket.updated_at;
+  // A run that did not complete left the ticket untouched and says so in its
+  // result: the environment failed (CBM, Equill, an agent). Do not mark it
+  // attempted, and stop the loop, so the same fault does not walk the whole
+  // queue. Fix it, then start again. A published NOT_READY is a verdict.
+  const result = runResult(config, started);
+  const untouched = result ? result.ticket_unchanged === true : after === ticket.updated_at;
   if (run.status !== 0 && untouched) {
     state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log}};
     saveState(config, state);

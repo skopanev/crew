@@ -100,6 +100,8 @@ else:
                 result["evidence"].append({"source": "test:src/uncovered.py:1", "finding": "Unverified assertion"})
     elif slug == "design":
         assignment = json.loads((target / "input.json").read_text())
+        if "Existing API already handles this" in prompt:
+            (root / "design-saw-critique").write_text("yes")
         check = {"command": "python3 -m unittest discover -s src", "cwd": ".", "expected": "Regression passes"}
         task = {"id": "task-1", "ac": assignment["ac"]["id"], "repository": "test", "module": "src",
                 "title": "Fix one condition", "outcome": "Requested behavior", "write_paths": ["src/main.py"],
@@ -115,6 +117,9 @@ else:
         plan = json.loads((target / "plan.json").read_text())
         plan_digest = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
         rejected = case == "rejected" and slug == "simplicity"
+        if case == "rejected_once" and slug == "simplicity" and not (root / "rejected-once").exists():
+            (root / "rejected-once").write_text("yes")
+            rejected = True
         result = {"plan_digest": "wrong" if case == "wrong_digest" else plan_digest,
                   "verdict": "reject" if rejected else "clear", "summary": "Evidence checked",
                   "findings": [{"blocking": True, "claim": "Existing API already handles this",

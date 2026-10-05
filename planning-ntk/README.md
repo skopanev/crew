@@ -36,6 +36,7 @@ NTK selects eligible tickets after their prerequisites close.
 2. Inspect current source, Git history, shared CBM, Equill knowledge, and repository `.ntkrc` contracts.
 3. Run parallel code, knowledge, and external research. Produce a concrete implementation plan.
 4. Ask independent necessity, simplicity, and correctness critics to check that plan.
+   A rejected plan goes back to design once, with the blocking findings. The critics then check the revision.
 5. Confirm source versions and live role contracts. Publish the result to NTK.
 
 The models and critic seats are the same as [Planning](../planning/README.md).
@@ -52,6 +53,7 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | READY, one Task | Update the source ticket and put it in `open` with dispatch tags. |
 | READY, several Tasks | Create children with correct prerequisites. Put the parent in `to_review` without its dispatch tag. |
 | NOT_READY | Keep the source `blocked`, remove its dispatch tag, and attach the concrete reason. |
+| Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
 | NEEDS_HUMAN | Set `to_review`, assign the named person, remove its dispatch tag, and attach the exact decision. |
 | Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
 

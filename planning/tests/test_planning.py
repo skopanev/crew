@@ -92,6 +92,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(starts), 3)
             self.assertLess(max(starts), min(ends), "pool ran sequentially")
 
+    def test_rejected_plan_returns_to_design_once_with_the_findings(self):
+        proc, result = self.execute("rejected_once")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue((self.root / "design-saw-critique").exists(), "design did not receive the critic findings")
+        events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
+        starts = [e["slug"] for e in events if e["kind"] == "start"]
+        self.assertEqual(starts.count("design"), 2)
+        self.assertEqual(starts.count("simplicity"), 2)
+
     def test_failures_never_admit_work(self):
         for case in ("missing_contract", "no_cbm", "outside_module", "rejected", "wrong_digest", "malformed", "stale", "changed_contract",
                      "signal_breakout", "stuck_pagination", "stale_index", "index_generation_mismatch", "no_coverage", "uncovered_citation", "joppa_changed"):
