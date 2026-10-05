@@ -118,6 +118,7 @@ It uses Dolber's configuration. Each tick it reads `blocked` tickets with the
 planner tag filter. A failed lane keeps the dispatch tag. A published NOT_READY
 removes that tag. Other planner tags can still match the ticket, but the dispatcher
 skips it until the ticket changes.
+A `[HUMAN]` ticket stays out until its configured dispatch tag is added again.
 An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
 result. A ticket unchanged since the last attempt is skipped.
