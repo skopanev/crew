@@ -27,10 +27,15 @@ Use this shape, with actual evidence-backed values, never the placeholders:
            "reuse":["Existing symbol or implementation to reuse"],"depends_on":[],
            "checks":[{"command":"actual command","cwd":".","expected":"Expected result"}]}]}
 
-Every Task belongs to this one AC and exactly one repository and module. Put
+Every Task belongs to this one AC and exactly one repository and module. When
+more than one consumer has the defect or pattern, plan the fix at the shared
+source; explain in rationale why a consumer-only Task is necessary. Put
 Tasks in prerequisite order; depends_on names earlier Task ids. Include tests
 in their owning module; another write module requires another Task. Distinguish
 checks that must be added from existing checks; never claim you ran them.
 If already implemented, use disposition "verify_existing", no Tasks, and
 specific acceptance checks. If blocked, use disposition "blocked" and name the
 missing fact or owner decision; do not fabricate a viable implementation plan.
+A question that source, configuration, a donor app, or recorded owner words
+answer is not an owner decision: decide it and cite that source in rationale.
+Give the command or path:line behind each count and current-state claim.

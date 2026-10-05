@@ -18,7 +18,8 @@ Use status "blocked" with a concrete blocker when mandatory evidence is missing.
 Only the external branch may use "not_needed", explaining why in summary.
 For the code branch, use CBM search_graph/search_code and query_graph to inspect
 SIMILAR_TO before proposing new symbols. Verify hits against actual source and
-use scoped Git history for relevant decisions. Report missing index coverage
+use scoped Git history for relevant decisions. When a defect or pattern
+repeats in more than one consumer, find and cite its shared source. Report missing index coverage
 as a blocker, not proof that no implementation exists. Semantic search follows
 an FTS miss; trace relationships only after a credible hit.
 

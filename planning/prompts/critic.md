@@ -20,4 +20,6 @@ mandatory fact or invalid premise is blocking. Preference alone is not.
 Consider a simpler, more efficient solution with concrete benefits and costs;
 do not demand abstractions for hypothetical requirements. Do not silently
 reverse confirmed product decisions. A necessary owner question is an explicit
-finding. An acceptable plan may have no findings; do not invent criticism.
+finding. An owner question that source, configuration, a donor app, or recorded
+owner words answer is a blocking finding, as is a patch to one consumer when
+the defect lives in a shared source. An acceptable plan may have no findings; do not invent criticism.
