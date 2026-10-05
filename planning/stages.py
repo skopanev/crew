@@ -223,6 +223,13 @@ def verify_context(assignment, plan):
     for key, review in reviews.items():
         validation.critique(review, digest(plan))
         require(review["verdict"] == "clear", f"{key} critic rejected: {review['summary']}")
+    old, contracts = verify_freshness(assignment)
+    return reviews, old, contracts
+
+
+def verify_freshness(assignment):
+    """Source and role contracts are unchanged since prepare. Every published verdict needs this."""
+    target = artifacts()
     old = read(target / "snapshots.json")
     require(old == {r["id"]: fingerprint(r) for r in assignment["repositories"]}, "source changed during planning; re-plan against current code")
     contracts = read(target / "contracts.json")
@@ -230,7 +237,7 @@ def verify_context(assignment, plan):
         current = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     require(all(current[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
             "mandatory Equill contract changed during planning; re-plan")
-    return reviews, old, contracts
+    return old, contracts
 
 
 def save_result(assignment, plan, reviews, old, contracts, chain):

@@ -37,7 +37,7 @@ NTK selects eligible tickets after their prerequisites close.
 3. Run parallel code, knowledge, and external research. Produce a concrete implementation plan.
 4. Ask independent necessity, simplicity, and correctness critics to check that plan.
    A rejected plan goes back to design once, with the blocking findings. The critics then check the revision.
-5. Confirm source versions and live role contracts. Publish the result to NTK.
+5. Confirm source versions and live role contracts before any publication. Publish the result to NTK.
 
 The models and critic seats are the same as [Planning](../planning/README.md).
 The planner reads canonical repositories. It does not update Git, index a worktree,
@@ -56,6 +56,7 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
 | NEEDS_HUMAN | Set `to_review`, assign the named person, remove its dispatch tag, and attach the exact decision. |
 | Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
+| Publication started and failed | Record `publication_uncertain`; part of the result may be in NTK. An operator inspects the ticket before another run. |
 
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
 Children never depend on the parent. Each child has one module and its own checks.
@@ -105,11 +106,19 @@ node ./planning-ntk/dispatch.mjs /path/to/config.json --once      # plan one tic
 node ./planning-ntk/dispatch.mjs /path/to/config.json             # loop
 ```
 
-It uses Dolber's configuration. Each tick it reads `blocked` tickets with Dolber's
-tags except `planning.dispatchTag` (planning removes that tag from a ticket it
-leaves blocked), takes the longest-blocked one, and runs this workflow for it.
-A ticket unchanged since the last attempt is skipped, so NOT_READY does not loop.
+It uses Dolber's configuration. Each tick it reads `blocked` tickets that carry
+all of Dolber's tags, `planning.dispatchTag` included. A failed lane keeps that
+tag; a published NOT_READY removes it, so a settled ticket is not planned again.
+An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
+and runs this workflow for it in a run directory it names, then reads that run's
+result. A ticket unchanged since the last attempt is skipped.
+A run without a verdict stops the loop and is not recorded as processed: the
+environment failed before publication, or a publication started and did not
+confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
+After `publication_uncertain`, compare the ticket and `publication.json` in NTK
+before any other run; resume only a confirmed parent publication.
 A ticket with a retained `<sourceRoot>/.worktrees/<ticket>` is reported once and
-left for an operator. One dispatcher per workspace runs at a time. The interval is
+left for an operator. An exclusive `dispatch.lock` allows one dispatcher per
+workspace and fails closed: if no dispatcher runs, an operator removes the file. The interval is
 `planning.dispatchIntervalSeconds`, else `intervalSeconds`, else 60. State and logs
 are in `<stateDir>/planning-ntk/<workspace-hash>/dispatch.json` and `dispatch-logs/`.
