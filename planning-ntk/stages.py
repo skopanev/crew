@@ -236,10 +236,36 @@ def publication_input():
         "stateDir": os.environ["PLANNING_STATE"], "runId": Path(os.environ["MEDULLA_RUN_DIR"]).name}
 
 
+def rejected_plan(plan, reviews):
+    """The plan critics still reject after the revision round, as a NOT_READY verdict."""
+    blockers = [f"{key} critic: {f['claim']} Resolution: {f['resolution']}"
+                for key, review in reviews.items() if review["verdict"] == "reject"
+                for f in review["findings"] if f["blocking"]]
+    if not blockers:
+        return None
+    return {**plan, "disposition": "blocked", "tasks": [], "blockers": blockers,
+            "ntk": {**plan["ntk"], "verdict": "NOT_READY", "failure_class": "plan", "owner": "", "decision": ""}}
+
+
 def finish():
     target = shared.artifacts()
     assignment, plan = read(target / "input.json"), read(target / "plan.json")
     validate_plan(plan, assignment)
+    reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
+    for review in reviews.values():
+        validation.critique(review, digest(plan))
+    # A plan the critics still reject is a verdict about the ticket, not a failed
+    # run: publish NOT_READY with the findings, so the ticket records why and the
+    # dispatcher moves on.
+    rejected = rejected_plan(plan, reviews)
+    if rejected:
+        validate_plan(rejected, assignment)
+        retained(config(), os.environ["PLANNING_TICKET"])
+        result = ntk("publish", {**publication_input(), "plan": rejected, "reviews": reviews})
+        write(target / "result.json", result)
+        remember(result)
+        signal("BLOCKED", json.dumps(result))
+        return
     if plan["ntk"]["verdict"] == "READY":
         require(all(read(target / f"research-{branch}.json")["status"] != "blocked"
                     for branch in validation.RESEARCH), "Missing mandatory research cannot produce READY")
@@ -274,7 +300,7 @@ if __name__ == "__main__":
             capture(sys.argv[2])
         else:
             {"prepare": prepare, "research_join": research_join, "review_input": review_input,
-             "finish": finish, "fail": fail}[command]()
+             "critique_join": shared.critique_join, "finish": finish, "fail": fail}[command]()
     except Exception as error:
         print(f"planning-ntk/{command}: {error}", file=sys.stderr)
         if command == "capture":

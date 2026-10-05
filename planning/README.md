@@ -8,6 +8,7 @@ Domain → Capability → Requirement и возвращает проверенн
 ```text
 prepare → research [code | knowledge | external, параллельно]
         → design → critics [necessity | simplicity | correctness, параллельно]
+        → critique_join (отказ: один раз обратно в design с блокирующими находками)
         → result.json + plan.md
 ```
 

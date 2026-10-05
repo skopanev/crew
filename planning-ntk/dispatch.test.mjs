@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {candidates, settings} from './dispatch.mjs';
+import {candidates, runResult, settings} from './dispatch.mjs';
 
 const ticket = (id, updated, status = updated) => ({id, updated_at: updated, current_status_at: status, title: id});
 
@@ -37,4 +37,18 @@ test('settings select blocked tickets without the dispatch tag and validate it',
   assert.equal(config.interval, 60);
   fs.writeFileSync(file, JSON.stringify(base));
   assert.throws(() => settings(file), /dispatchTag must be one of the dispatcher tags/);
+});
+
+test('the newest run started by this tick decides between a verdict and an environment failure', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-runs-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const config = {stateDir: dir};
+  assert.equal(runResult(config, Date.now()), null);
+  const since = Date.now();
+  fs.mkdirSync(path.join(dir, 'runs/r1/artifacts'), {recursive: true});
+  fs.writeFileSync(path.join(dir, 'runs/r1/artifacts/result.json'), JSON.stringify({verdict: 'NOT_READY', id: 'A'}));
+  assert.equal(runResult(config, since).ticket_unchanged, undefined);
+  fs.writeFileSync(path.join(dir, 'runs/r1/artifacts/result.json'), JSON.stringify({verdict: 'NOT_READY', ticket_unchanged: true}));
+  assert.equal(runResult(config, since).ticket_unchanged, true);
+  assert.equal(runResult(config, Date.now() + 60000), null);
 });
