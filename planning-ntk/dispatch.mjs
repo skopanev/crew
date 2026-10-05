@@ -6,7 +6,7 @@
 // too. Nothing walked that pile. This loop does: on each tick it takes the
 // longest-blocked ticket with the dispatcher's tags and hands it to
 // planning-ntk, which diagnoses it and publishes READY (back in the queue),
-// NOT_READY (stays blocked, with the reason) or NEEDS_HUMAN (to_review, with
+// NOT_READY (stays blocked, with the reason) or NEEDS_HUMAN (blocked, with
 // the exact decision). One ticket at a time: planning-ntk holds one lock per
 // workspace.
 import crypto from 'node:crypto';
@@ -18,6 +18,12 @@ import {fileURLToPath} from 'node:url';
 import {request} from '../lane-launcher/ntk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const useColor = stream => !process.env.NO_COLOR && process.env.FORCE_COLOR !== '0' &&
+  (stream.isTTY || (process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== '0'));
+const tones = {blue: '1;34', green: '1;32', yellow: '1;33', red: '1;31', title: 33, label: 37, line: 36, ticket: '1;36'};
+const paint = (tone, text, stream = process.stdout) => useColor(stream) ? `\x1b[${tones[tone]}m${text}\x1b[0m` : String(text);
+const field = (label, value) => console.log(`  ${paint('label', `${label}:`)} ${value}`);
+const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
 
 export function settings(file) {
   const config = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -144,26 +150,43 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   const state = readState(config);
   state.tickets ??= {};
   const {ready, held} = candidates(await blockedTickets(config), state, config.sourceRoot);
+  divider();
+  console.log(paint('blue', 'PLANNER'));
+  field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(',')}, strict=${config.strict}`);
+  field('Tickets', `${paint('green', `${ready.length} ready to plan`)} · ${paint('yellow', `${held.length} retained worktrees`)}`);
   for (const ticket of held) {
     if (state.tickets[ticket.id]?.held !== ticket.updated_at) {
-      console.log(`${ticket.id}: retained .worktrees/${ticket.id}; inspect it, then remove it or reopen the ticket`);
+      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · .worktrees/${ticket.id}`);
+      console.log('  Inspect it, then remove it or reopen the ticket.');
       if (!dryRun) state.tickets[ticket.id] = {...state.tickets[ticket.id], held: ticket.updated_at};
     }
   }
   if (dryRun) {
-    console.log(`blocked, changed since last attempt: ${ready.length}`);
-    for (const ticket of ready) console.log(`  ${ticket.id}  ${ticket.current_status_at}  ${ticket.title}`);
+    field('Mode', 'dry-run · tickets unchanged');
+    for (const ticket of ready) {
+      console.log(`  ${paint('ticket', ticket.id)} · blocked since ${ticket.current_status_at || ticket.updated_at}`);
+      console.log(`    ${paint('title', ticket.title)}`);
+    }
     return null;
   }
   saveState(config, state);
   const ticket = ready[0];
-  if (!ticket) return null;
+  if (!ticket) {
+    console.log(paint('label', 'IDLE · no changed blocked tickets to plan'));
+    return null;
+  }
+  const started = Date.now();
+  console.log(`\n${paint('blue', 'RUNNING')} ${paint('ticket', ticket.id)}`);
+  console.log(`  ${paint('title', ticket.title)}`);
+  field('Started', new Date(started).toISOString());
+  field('Stage', paint('blue', 'preflight · Git and CBM'));
   syncSources(config, path.join(config.stateDir, 'dispatch-logs'));
-  console.log(`${new Date().toISOString()} planning ${ticket.id}: ${ticket.title}`);
+  field('Stage', paint('blue', 'planning · research, design and review'));
   const runName = `dispatch-${ticket.id}-${Date.now()}`;
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
   const log = path.join(logs, `${runName}.log`);
+  field('Log', log);
   const run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
     {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
   fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
@@ -171,11 +194,19 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
   const last = (run.stderr || run.stdout || '').trim().split('\n').pop() || '';
-  console.log(`${ticket.id}: planning-ntk exit ${run.status}${last ? ` · ${last}` : ''}`);
   // Do not mark an incomplete run attempted, and stop the loop, so the same
   // fault does not walk the whole queue. Fix it, then start again. A published
   // NOT_READY is a verdict and is recorded like any other.
   const result = runResult(config, runName);
+  const verdict = incomplete(result) ? 'FAILED' : result.verdict ?? 'UNKNOWN';
+  const tone = verdict === 'READY' ? 'green' : ['NOT_READY', 'NEEDS_HUMAN'].includes(verdict) ? 'yellow' : 'red';
+  console.log(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  field('Exit', run.status ?? run.signal ?? run.error?.message ?? 'unknown');
+  if (result?.reason || (run.status !== 0 && last)) field('Reason', paint(tone, result?.reason || last));
+  if (verdict === 'NEEDS_HUMAN') {
+    field('Owner', result.owner);
+    field('Decision', result.decision);
+  }
   if (run.status !== 0 && incomplete(result)) {
     state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log,
       uncertain: result?.publication_uncertain === true}};
@@ -206,10 +237,11 @@ async function main(argv) {
     }
     if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
     if (argv.includes('--once')) break;
+    console.log(`\n${paint('blue', `Pause ${config.interval}s`)} · Ctrl+C to stop\n`);
     await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
   } while (true);
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(error => { console.error(`dispatch: ${error.message}`); process.exit(1); });
+  main(process.argv.slice(2)).catch(error => { console.error(paint('red', `PLANNER FAILED · ${error.message}`, process.stderr)); process.exit(1); });
 }
