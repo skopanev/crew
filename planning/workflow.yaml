@@ -18,7 +18,11 @@ nodes:
       __failed__: failed
       __default__: failed
   research:
-    timeout: 300
+    # A branch whose report fails validation gets one more attempt before the
+    # whole plan turns NOT_READY (min_success needs every branch); the step
+    # timeout covers both attempts.
+    timeout: 600
+    max_attempts: 2
     env: &agent_environment
       JOPPA_TOKEN: ''
       JOPPA_TOKEN_FILE: ''
