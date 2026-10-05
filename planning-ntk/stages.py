@@ -148,7 +148,10 @@ def prepare():
     shared.emit_var("OUTPUT_CONTRACT", (HERE / "output.md").read_text()
         .replace("{body_budget}", str(limits["body"] * 85 // 100)).replace("{body_limit}", str(limits["body"]))
         .replace("{title_limit}", str(limits["title"])))
-    shared.prepare_context(assignment, projects)
+    read_paths = [settings["sourceRoot"], *settings.get("readOnlyRepos", [])]
+    if assignment["lane_failure"]:
+        read_paths.append(assignment["lane_failure"]["run"])
+    shared.prepare_context(assignment, projects, read_paths)
 
 
 def lane_mounts(settings):

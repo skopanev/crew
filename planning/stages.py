@@ -54,7 +54,7 @@ def indexed_projects():
         offset = next_offset
 
 
-def prepare_context(assignment, projects=None):
+def prepare_context(assignment, projects=None, read_paths=()):
     target = artifacts()
     snapshots = {r["id"]: fingerprint(r) for r in assignment["repositories"]}
     write(target / "snapshots.json", snapshots)
@@ -82,11 +82,12 @@ def prepare_context(assignment, projects=None):
     # Values become TOML scalars inside Codex's explicit per-run configuration.
     for name in ("CBM_BIN", "CBM_CACHE_DIR", "CBM_ALLOWED_ROOT"):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
-    prepare_opencode()
+    prepare_opencode([r["path"] for r in assignment["repositories"]] +
+                     list(read_paths) + [os.environ["MEDULLA_RUN_DIR"]])
     signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
 
 
-def prepare_opencode():
+def prepare_opencode(read_paths):
     """Keep provider settings in a private native config. Exclude inherited MCP."""
     source_env = {**os.environ, "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
     command = [os.environ.get("OPENCODE_BIN", "opencode"), "--pure", "debug", "config"]
@@ -102,14 +103,26 @@ def prepare_opencode():
     directory = root / "opencode"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     file = directory / "opencode.json"
+    external = {"*": "deny"}
+    for value in read_paths:
+        for candidate in (Path(value).expanduser().absolute(), Path(value).expanduser().resolve()):
+            path = str(candidate)
+            require(path != "/" and not any(char in path for char in "*?"), "OpenCode read path is too broad")
+            external[path] = "allow"
+            external[path.rstrip("/") + "/**"] = "allow"
     with os.fdopen(os.open(file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
-        json.dump({"provider": providers}, stream)
+        json.dump({"provider": providers, "permission": {"external_directory": external}}, stream)
+    read_only = {key: "deny" for key in ("edit", "write", "patch", "bash")}
     isolated_env = {**os.environ, "XDG_CONFIG_HOME": str(root),
                     "OPENCODE_CONFIG_DIR": str(directory), "OPENCODE_CONFIG": "",
-                    "OPENCODE_CONFIG_CONTENT": "{}", "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
+                    "OPENCODE_CONFIG_CONTENT": json.dumps({"permission": read_only}), "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
     isolated = query(isolated_env)
     require(not isolated.get("mcp"), "OpenCode isolation failed: inherited MCP remains")
     require(isolated.get("provider", {}) == providers, "OpenCode isolation changed provider settings")
+    permission = isolated.get("permission", {})
+    require(permission.get("external_directory") == external and
+            all(permission.get(key) == "deny" for key in read_only),
+            "OpenCode isolation changed read-only permissions")
     return str(root)
 
 
