@@ -31,19 +31,20 @@ export function settings(file) {
     if (typeof config[key] !== 'string' || !config[key]) throw new Error(`Config needs ${key}`);
   }
   const tags = Array.isArray(config.tags) ? config.tags : [];
+  const filterTags = config.planning?.tags ?? tags;
   const dispatchTag = config.planning?.dispatchTag ?? 'crew';
   if (!tags.includes(dispatchTag)) throw new Error('planning.dispatchTag must be one of the dispatcher tags');
   // An empty filter would select every blocked ticket in the workspace.
-  if (!tags.length || !tags.every(tag => typeof tag === 'string' && tag.trim())) throw new Error('Config needs non-empty tags');
+  if (!Array.isArray(filterTags) || !filterTags.length || !filterTags.every(tag => typeof tag === 'string' && tag.trim())) throw new Error('Config needs non-empty tags');
+  const tagMatch = config.planning?.tagMatch ?? 'all';
+  if (!['all', 'any'].includes(tagMatch)) throw new Error('planning.tagMatch must be all or any');
   const interval = config.planning?.dispatchIntervalSeconds ?? config.intervalSeconds ?? 60;
   if (!Number.isInteger(interval) || interval < 10) throw new Error('dispatch interval must be an integer of at least 10 seconds');
   const workspaceHash = crypto.createHash('sha256').update(config.workspace).digest('hex').slice(0, 24);
   return {
     workspace: config.workspace, strict: config.strict === true, sourceRoot: config.sourceRoot, interval,
     cbmCommand: config.cbmMcpCommand, cbmCache: config.cbmCacheDir, image: config.image,
-    // All configured tags, the dispatch tag included: a lane failure keeps it,
-    // and a settled NOT_READY loses it, so the planner does not revisit it.
-    filterTags: tags,
+    filterTags, tagMatch,
     stateDir: path.join(config.stateDir, 'planning-ntk', workspaceHash),
   };
 }
@@ -62,15 +63,18 @@ export function candidates(tickets, state, sourceRoot, exists = fs.existsSync) {
 }
 
 async function blockedTickets(config) {
-  const tickets = [];
-  for (let offset = 0; offset !== undefined && offset !== null;) {
-    const page = await request('GET', '/v1/tickets', {workspace: config.workspace, all: true, status: 'blocked',
-      tag: config.filterTags.join(','), strict: config.strict,
-      limit: 100, offset});
-    tickets.push(...(page?.tickets ?? []));
-    offset = page?.next_offset;
-  }
-  return tickets;
+  const filters = config.tagMatch === 'any' ? config.filterTags : [config.filterTags.join(',')];
+  const lists = await Promise.all(filters.map(async tag => {
+    const tickets = [];
+    for (let offset = 0; offset !== undefined && offset !== null;) {
+      const page = await request('GET', '/v1/tickets', {workspace: config.workspace, all: true, status: 'blocked',
+        tag, strict: config.strict, limit: 100, offset});
+      tickets.push(...(page?.tickets ?? []));
+      offset = page?.next_offset;
+    }
+    return tickets;
+  }));
+  return [...new Map(lists.flat().map(ticket => [ticket.id, ticket])).values()];
 }
 
 const stateFile = config => path.join(config.stateDir, 'dispatch.json');
@@ -160,7 +164,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   const {ready, held} = candidates(await blockedTickets(config), state, config.sourceRoot);
   divider();
   console.log(paint('blue', 'PLANNER'));
-  field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(',')}, strict=${config.strict}`);
+  field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
   field('Tickets', `${paint('green', `${ready.length} ready to plan`)} · ${paint('yellow', `${held.length} retained worktrees`)}`);
   for (const ticket of held) {
     if (state.tickets[ticket.id]?.held !== ticket.updated_at) {
