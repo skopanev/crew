@@ -28,7 +28,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def acceptance_check(check):
+def acceptance_check(check, root=None):
     if (not isinstance(check, dict) or set(check) - {"ac", "argv", "stdout"}
             or not isinstance(check.get("ac"), str) or not check["ac"].strip()):
         raise ValueError("acceptance check requires ac, argv and optional stdout")
@@ -54,10 +54,10 @@ def acceptance_check(check):
         paths = argv[2:]
     if not paths or (output_required and "stdout" not in check):
         raise ValueError("unsupported acceptance check or missing exact stdout")
-    root = Path.cwd().resolve()
+    root = Path(root or Path.cwd()).resolve()
     for value in paths:
         path = Path(value)
-        if not value or path.is_absolute() or not path.resolve().is_relative_to(root):
+        if not value or path.is_absolute() or not (root / path).resolve().is_relative_to(root):
             raise ValueError(f"check path must stay inside this checkout: {value}")
     return check
 

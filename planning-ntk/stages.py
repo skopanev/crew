@@ -3,6 +3,7 @@ import json
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -14,6 +15,8 @@ shared = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shared)
 from common import digest, fingerprint, inside, read, require, signal, strings, text, write
 import validation
+sys.path.insert(0, str(HERE.parent / "lane/bin"))
+from gates import acceptance_check
 
 
 def ntk(action, value):
@@ -160,6 +163,30 @@ def lane_mounts(settings):
     return {f"/workspace/{Path(d).name}": str(Path(d).expanduser()) for d in dirs if d}
 
 
+def verify_checks(body, assignment):
+    require(len(re.findall(r"\bTICKET_CHECKS\s*[:=]", body)) == 1,
+            "verify_existing body needs exactly one TICKET_CHECKS array")
+    marker = re.search(r"\bTICKET_CHECKS\s*[:=]\s*(?:```(?:json)?\s*)?(\[)", body)
+    require(marker, "verify_existing body needs TICKET_CHECKS: [JSON checks]")
+    try:
+        checks, _ = json.JSONDecoder().raw_decode(body[marker.start(1):])
+    except json.JSONDecodeError as error:
+        raise ValueError(f"TICKET_CHECKS is not valid JSON: {error}") from error
+    require(isinstance(checks, list) and checks, "TICKET_CHECKS requires a nonempty array")
+    module = assignment["ticket"]["module"]
+    repos = [repo for repo in assignment["repositories"]
+             if any(item["name"] == module for item in repo["modules"])]
+    require(len(repos) == 1, "Verification module must identify one repository")
+    root = Path(repos[0]["path"]).resolve()
+    for check in checks:
+        if isinstance(check, dict):
+            acceptance_check(check, root=root)
+        else:
+            value = text(check, "verification test path")
+            path = inside(root, value)
+            require(path.is_file(), f"verification test does not exist: {value}")
+
+
 def validate_plan(plan, assignment):
     verdict = plan.get("ntk", {}).get("verdict")
     require(verdict in ("READY", "NOT_READY", "NEEDS_HUMAN"), "Invalid NTK planning verdict")
@@ -196,7 +223,9 @@ def validate_plan(plan, assignment):
         require(set(external).issubset(prerequisites), "External dependency is not in the verified prerequisite graph")
     if plan["disposition"] == "verify_existing":
         require(assignment["ticket"].get("module"), "Verification needs a source module")
-        require(len(text(plan["ntk"].get("body"), "verification body")) <= limits["body"], "Verification body exceeds NTK limit")
+        body = text(plan["ntk"].get("body"), "verification body")
+        require(len(body) <= limits["body"], "Verification body exceeds NTK limit")
+        verify_checks(body, assignment)
     if len(plan["tasks"]) > 1 or any(t["project"] != assignment["ticket"]["project"] for t in plan["tasks"]):
         require(len("[CLOSE AT NO DEPS] " + assignment["ticket"]["title"].removeprefix("[HUMAN] ")) <= limits["title"], "Coordinator title exceeds NTK limit")
 
