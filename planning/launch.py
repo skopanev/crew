@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from common import read, require, validate_input
 
@@ -45,19 +46,22 @@ def main():
         "CBM_BIN": shutil.which(os.environ.get("CBM_BIN", "codebase-memory-mcp")) or "codebase-memory-mcp",
         "EQUILL_STORE": args.equill_store or "", "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),
         "EQUILL_ACTOR": "planning", "PLANNING_PYTHON": sys.executable,
+        "OPENCODE_BIN": shutil.which("opencode") or "opencode",
     }
     command = [executable, "-w", str(workflow), "--runs-folder", str(output)]
     for key, value in variables.items():
         command += ["--var", f"{key}={value}"]
     if args.dry_run:
         command.append("--dry-run")
-    # The caller's working directory remains the project; no shared config is rewritten.
-    os.execvpe(executable, command, os.environ)
+    # Provider settings can include keys. Remove the private config after the run.
+    with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home:
+        command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}"]
+        return subprocess.run(command, check=False).returncode
 
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except (ValueError, OSError, KeyError) as exc:
         print(f"planning: {exc}", file=sys.stderr)
         sys.exit(2)

@@ -51,6 +51,8 @@ elif name == "fake-cbm":
                           "next_offset": 0 if case == "stuck_pagination" else 1}))
     else:
         print(json.dumps({"projects": [{"name": "test-project"}], "has_more": False}))
+elif name == "opencode" and sys.argv[1:] == ["--pure", "debug", "config"]:
+    print(json.dumps({"provider": {}}))
 else:
     assert not os.environ.get("JOPPA_TOKEN") and not os.environ.get("JOPPA_TOKEN_FILE"), "Joppa credential exposed to agent"
     if name == "codex":

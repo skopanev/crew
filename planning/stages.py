@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 from common import digest, fingerprint, read, require, run, signal, validate_input, write
@@ -81,7 +82,35 @@ def prepare_context(assignment, projects=None):
     # Values become TOML scalars inside Codex's explicit per-run configuration.
     for name in ("CBM_BIN", "CBM_CACHE_DIR", "CBM_ALLOWED_ROOT"):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
+    prepare_opencode()
     signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
+
+
+def prepare_opencode():
+    """Keep provider settings in a private native config. Exclude inherited MCP."""
+    source_env = {**os.environ, "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
+    command = [os.environ.get("OPENCODE_BIN", "opencode"), "--pure", "debug", "config"]
+    def query(environment):
+        result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=45)
+        require(result.returncode == 0, f"OpenCode config query failed (exit {result.returncode}); check the OpenCode log")
+        return json.loads(result.stdout)
+    source = query(source_env)
+    providers = source.get("provider", {})
+    require(isinstance(providers, dict), "OpenCode provider configuration is invalid")
+    root = Path(os.environ["OPENCODE_CONFIG_HOME"])
+    require(root.is_dir(), "OpenCode runtime config directory is unavailable")
+    directory = root / "opencode"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    file = directory / "opencode.json"
+    with os.fdopen(os.open(file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
+        json.dump({"provider": providers}, stream)
+    isolated_env = {**os.environ, "XDG_CONFIG_HOME": str(root),
+                    "OPENCODE_CONFIG_DIR": str(directory), "OPENCODE_CONFIG": "",
+                    "OPENCODE_CONFIG_CONTENT": "{}", "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
+    isolated = query(isolated_env)
+    require(not isolated.get("mcp"), "OpenCode isolation failed: inherited MCP remains")
+    require(isolated.get("provider", {}) == providers, "OpenCode isolation changed provider settings")
+    return str(root)
 
 
 def body_result():
