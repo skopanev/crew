@@ -77,10 +77,12 @@ test('the dispatcher lock fails closed on any existing lock file', t => {
 });
 
 test('code drift re-plans once, only for the exact unpublished drift result', () => {
-  const drift = {verdict: 'NOT_READY', ticket_unchanged: true, code_drift: true};
+  const drift = {verdict: 'NOT_READY', published: false, ticket_unchanged: true, code_drift: true};
   assert.equal(replanForDrift(drift, 0), true);
   assert.equal(replanForDrift(drift, 1), false, 'a second drift stops');
   assert.equal(replanForDrift({...drift, code_drift: undefined}, 0), false, 'other failures do not retry');
   assert.equal(replanForDrift({...drift, ticket_unchanged: false, publication_uncertain: true}, 0), false);
+  assert.equal(replanForDrift({...drift, publication_uncertain: true}, 0), false, 'contradictory flags stop');
+  assert.equal(replanForDrift({...drift, published: true}, 0), false, 'a published result never retries');
   assert.equal(replanForDrift(null, 0), false);
 });
