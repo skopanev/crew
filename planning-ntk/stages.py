@@ -260,22 +260,29 @@ def finish():
     rejected = rejected_plan(plan, reviews)
     if rejected:
         validate_plan(rejected, assignment)
+        shared.verify_freshness(assignment)
         retained(config(), os.environ["PLANNING_TICKET"])
-        result = ntk("publish", {**publication_input(), "plan": rejected, "reviews": reviews})
-        write(target / "result.json", result)
-        remember(result)
+        result = publish(rejected, reviews)
         signal("BLOCKED", json.dumps(result))
         return
     if plan["ntk"]["verdict"] == "READY":
         require(all(read(target / f"research-{branch}.json")["status"] != "blocked"
                     for branch in validation.RESEARCH), "Missing mandatory research cannot produce READY")
     reviews, _, _ = shared.verify_context(assignment, plan)
-    settings = config()
-    retained(settings, os.environ["PLANNING_TICKET"])
+    retained(config(), os.environ["PLANNING_TICKET"])
+    result = publish(plan, reviews)
+    signal("READY" if result["verdict"] == "READY" else "BLOCKED", json.dumps(result))
+
+
+def publish(plan, reviews):
+    # The marker is written before the first NTK write. If publication then
+    # fails, fail() cannot claim the ticket is unchanged.
+    target = shared.artifacts()
+    write(target / "publication-started.json", {"plan_digest": digest(plan)})
     result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews})
     write(target / "result.json", result)
     remember(result)
-    signal("READY" if result["verdict"] == "READY" else "BLOCKED", json.dumps(result))
+    return result
 
 
 def fail(reason=None):
@@ -287,8 +294,14 @@ def fail(reason=None):
     # A run that did not complete has no verdict about the ticket: a tool, an
     # agent or the environment failed. Leave the ticket and the processed-input
     # memory unchanged so the same ticket can be planned again after the fix.
-    # Only finish() publishes, after the plan and its critics.
-    result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
+    # Only finish() publishes, after the plan and its critics. A publication that
+    # started and failed may have written part of its result: say so, and leave
+    # the decision to an operator.
+    if (target / "publication-started.json").exists():
+        result = {"verdict": "NOT_READY", "reason": reason, "published": False,
+                  "ticket_unchanged": False, "publication_uncertain": True}
+    else:
+        result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
     write(target / "result.json", result)
     signal("BLOCKED", json.dumps(result))
 
