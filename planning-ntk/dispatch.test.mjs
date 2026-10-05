@@ -63,13 +63,15 @@ test('the named run decides between a verdict and an incomplete run', t => {
   assert.equal(incomplete(runResult(config, 'mine')), true);
 });
 
-test('the dispatcher lock is exclusive and replaces only a dead owner', t => {
+test('the dispatcher lock fails closed on any existing lock file', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-lock-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const file = lock(dir);
   assert.equal(fs.readFileSync(file, 'utf8'), String(process.pid));
-  assert.throws(() => lock(dir, 1), /Another dispatcher runs/);
+  assert.throws(() => lock(dir, 1), /Another dispatcher holds .*pid \d+.*remove the file/);
   fs.writeFileSync(file, '999999999');
-  lock(dir, 4242);
-  assert.equal(fs.readFileSync(file, 'utf8'), '4242');
+  assert.throws(() => lock(dir, 4242), /pid 999999999/, 'a dead owner is not removed automatically');
+  fs.writeFileSync(file, '');
+  assert.throws(() => lock(dir, 4242), /Another dispatcher holds/, 'an empty lock is a live one being written');
+  assert.equal(fs.readFileSync(file, 'utf8'), '');
 });

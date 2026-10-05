@@ -115,7 +115,10 @@ result. A ticket unchanged since the last attempt is skipped.
 A run without a verdict stops the loop and is not recorded as processed: the
 environment failed before publication, or a publication started and did not
 confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
+After `publication_uncertain`, compare the ticket and `publication.json` in NTK
+before any other run; resume only a confirmed parent publication.
 A ticket with a retained `<sourceRoot>/.worktrees/<ticket>` is reported once and
-left for an operator. An exclusive lock file allows one dispatcher per workspace. The interval is
+left for an operator. An exclusive `dispatch.lock` allows one dispatcher per
+workspace and fails closed: if no dispatcher runs, an operator removes the file. The interval is
 `planning.dispatchIntervalSeconds`, else `intervalSeconds`, else 60. State and logs
 are in `<stateDir>/planning-ntk/<workspace-hash>/dispatch.json` and `dispatch-logs/`.
