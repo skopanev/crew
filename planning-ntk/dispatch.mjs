@@ -196,6 +196,8 @@ async function main(argv) {
   if (dryRun) return tick(file, config, {dryRun});
   const held = lock(config.stateDir);
   process.on('exit', () => { try { if (fs.readFileSync(held, 'utf8') === String(process.pid)) fs.unlinkSync(held); } catch {} });
+  process.on('SIGINT', () => process.exit(130));
+  process.on('SIGTERM', () => process.exit(143));
   do {
     const result = await tick(file, config);
     if (result?.uncertain) {
