@@ -170,7 +170,10 @@ def capture(kind):
         seat = json.loads(os.environ["MEDULLA_INPUT"])
         slug = seat["slug"]
         require(os.environ["MEDULLA_HARNESS"] == seat["harness"], "critic harness differs from its assigned seat")
-        validation.critique(result, digest(read(target / "plan.json")))
+        expected = digest(read(target / "plan.json"))
+        require(os.environ.get("PLANNING_REVIEW_DIGEST") == expected, "critic reviewed a different plan")
+        result["plan_digest"] = expected
+        validation.critique(result, expected)
         result["reviewer"] = {"harness": seat["harness"], "model": seat["model"]}
         write(target / f"critic-{slug}.json", result)
 

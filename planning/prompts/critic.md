@@ -16,7 +16,7 @@ Apply the supplied Equill writing rules to new prose in every output field.
 
 Return ONLY one JSON object as your final response; no signal tags:
 
-{"plan_digest":"the exact supplied digest","verdict":"clear",
+{"verdict":"clear",
  "summary":"What you checked and why the plan is acceptable or blocked",
  "findings":[{"blocking":false,"claim":"Concrete finding",
               "evidence":"Source and explanation","resolution":"What would resolve it"}]}
