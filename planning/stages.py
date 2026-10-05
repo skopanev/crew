@@ -240,11 +240,16 @@ def verify_context(assignment, plan):
     return reviews, old, contracts
 
 
+# The exact failure when the source moved while planning ran. planning-ntk marks
+# it so its dispatcher can re-plan once against current code.
+CODE_DRIFT = "source changed during planning; re-plan against current code"
+
+
 def verify_freshness(assignment):
     """Source and role contracts are unchanged since prepare. Every published verdict needs this."""
     target = artifacts()
     old = read(target / "snapshots.json")
-    require(old == {r["id"]: fingerprint(r) for r in assignment["repositories"]}, "source changed during planning; re-plan against current code")
+    require(old == {r["id"]: fingerprint(r) for r in assignment["repositories"]}, CODE_DRIFT)
     contracts = read(target / "contracts.json")
     with ThreadPoolExecutor(max_workers=3) as pool:
         current = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
