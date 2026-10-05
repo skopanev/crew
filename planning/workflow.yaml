@@ -77,7 +77,9 @@ nodes:
       BLOCKED: __exit_fail__
       __failed__: failed
   design:
-    timeout: 300
+    # Real repositories need more than five minutes of reading and reasoning
+    # (first live run: design was still working at 300 s).
+    timeout: 1200
     env: *agent_environment
     agent:
       harness: claude-code
@@ -107,7 +109,9 @@ nodes:
       BLOCKED: __exit_fail__
       __failed__: failed
   critics:
-    timeout: 300
+    # Real repositories need more than five minutes of reading and reasoning
+    # (first live run: design was still working at 300 s).
+    timeout: 1200
     env: *agent_environment
     max_parallel: 3
     min_success: 3
