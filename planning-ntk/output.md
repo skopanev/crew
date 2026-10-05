@@ -11,7 +11,7 @@ For NTK input, extend the plan JSON with these fields:
 For each Task, also return:
 
 "project": "NTK project allowed for this module",
-"body": "self-contained English ticket body, at most the NTK body limit",
+"body": "self-contained English ticket body, at most {body_budget} characters",
 "external_dependencies": ["existing prerequisite ticket ids"],
 "acceptance": ["observable criteria for this Task"],
 "covers": ["exact source acceptance criteria covered by this Task"]
@@ -24,6 +24,9 @@ Critics can clear an accurate NOT_READY or NEEDS_HUMAN diagnosis.
 Each body contains the scope, concrete implementation steps, symbol definitions,
 Task acceptance criteria and executable checks. Lane reads this body directly.
 The full plan is an attachment. An attachment cannot replace mandatory body instructions.
+Keep each body and title within {body_budget} and {title_limit} characters. NTK rejects more than
+{body_limit}; the margin covers counting errors. Count before you return. Write steps and checks,
+not rationale: rationale goes to the plan report. If a Task still does not fit, split it.
 Tasks use prerequisite order. All Tasks together cover every source criterion.
 Use the source ticket id as task.ac. Match project and module to NTK metadata.
 Use external dependencies only where needed. Never make a child depend on its parent.

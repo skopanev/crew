@@ -143,7 +143,11 @@ def prepare():
         "lane_mounts": lane_mounts(settings),
         "knowledge_query": ticket["title"] + "\n" + (ticket.get("body") or "")}
     write(target / "input.json", assignment)
-    shared.emit_var("OUTPUT_CONTRACT", (HERE / "output.md").read_text())
+    limits = context["meta"]["limits"]
+    # The designer counts characters badly: ask for a margin under the NTK limit.
+    shared.emit_var("OUTPUT_CONTRACT", (HERE / "output.md").read_text()
+        .replace("{body_budget}", str(limits["body"] * 85 // 100)).replace("{body_limit}", str(limits["body"]))
+        .replace("{title_limit}", str(limits["title"])))
     shared.prepare_context(assignment, projects)
 
 
@@ -176,7 +180,9 @@ def validate_plan(plan, assignment):
     for task in plan["tasks"]:
         require((task.get("project"), task["module"]) in allowed, "Task project/module pair is not registered in NTK")
         body = text(task.get("body"), "Task body")
-        require(len(body) <= limits["body"] and len(task["title"]) <= limits["title"], "NTK text limit exceeded; tighten the Task")
+        require(len(body) <= limits["body"] and len(task["title"]) <= limits["title"],
+                f"NTK text limit exceeded in {task.get('id')}: body {len(body)}/{limits['body']}, "
+                f"title {len(task['title'])}/{limits['title']} characters; move rationale to the plan report or split the Task")
         require(len(set(task["write_paths"])) <= 10, "Task exceeds the ten-file budget; split it")
         strings(task.get("acceptance"), "Task acceptance")
         strings(task.get("covers"), "source acceptance coverage")
