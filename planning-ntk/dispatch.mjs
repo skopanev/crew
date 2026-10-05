@@ -27,14 +27,17 @@ export function settings(file) {
   const tags = Array.isArray(config.tags) ? config.tags : [];
   const dispatchTag = config.planning?.dispatchTag ?? 'crew';
   if (!tags.includes(dispatchTag)) throw new Error('planning.dispatchTag must be one of the dispatcher tags');
+  // An empty filter would select every blocked ticket in the workspace.
+  if (!tags.length || !tags.every(tag => typeof tag === 'string' && tag.trim())) throw new Error('Config needs non-empty tags');
   const interval = config.planning?.dispatchIntervalSeconds ?? config.intervalSeconds ?? 60;
   if (!Number.isInteger(interval) || interval < 10) throw new Error('dispatch interval must be an integer of at least 10 seconds');
   const workspaceHash = crypto.createHash('sha256').update(config.workspace).digest('hex').slice(0, 24);
   return {
     workspace: config.workspace, strict: config.strict === true, sourceRoot: config.sourceRoot, interval,
     cbmCommand: config.cbmMcpCommand, cbmCache: config.cbmCacheDir, image: config.image,
-    // planning-ntk removes the dispatch tag from a ticket it leaves blocked, so select without it.
-    filterTags: tags.filter(tag => tag !== dispatchTag),
+    // All configured tags, the dispatch tag included: a lane failure keeps it,
+    // and a settled NOT_READY loses it, so the planner does not revisit it.
+    filterTags: tags,
     stateDir: path.join(config.stateDir, 'planning-ntk', workspaceHash),
   };
 }
@@ -56,7 +59,7 @@ async function blockedTickets(config) {
   const tickets = [];
   for (let offset = 0; offset !== undefined && offset !== null;) {
     const page = await request('GET', '/v1/tickets', {workspace: config.workspace, all: true, status: 'blocked',
-      tag: config.filterTags.length ? config.filterTags.join(',') : undefined, strict: config.strict,
+      tag: config.filterTags.join(','), strict: config.strict,
       limit: 100, offset});
     tickets.push(...(page?.tickets ?? []));
     offset = page?.next_offset;
@@ -75,17 +78,27 @@ function saveState(config, state) {
   fs.renameSync(temporary, stateFile(config));
 }
 
-function lock(config) {
-  fs.mkdirSync(config.stateDir, {recursive: true});
-  const file = path.join(config.stateDir, 'dispatch.lock');
-  try {
-    const pid = Number(fs.readFileSync(file, 'utf8'));
-    if (pid && pid !== process.pid) { process.kill(pid, 0); throw new Error(`Another dispatcher runs as pid ${pid}`); }
-  } catch (error) {
-    if (error.code !== 'ENOENT' && error.code !== 'ESRCH') throw error;
+// Exclusive create: two dispatchers cannot both pass the check. A lock left by
+// a dead process is removed once, then created again exclusively.
+export function lock(stateDir, pid = process.pid) {
+  fs.mkdirSync(stateDir, {recursive: true});
+  const file = path.join(stateDir, 'dispatch.lock');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(file, String(pid), {flag: 'wx'});
+      return file;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    const owner = Number(fs.readFileSync(file, 'utf8'));
+    try {
+      if (owner) { process.kill(owner, 0); throw new Error(`Another dispatcher runs as pid ${owner}`); }
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+    fs.rmSync(file, {force: true});
   }
-  fs.writeFileSync(file, String(process.pid));
-  process.on('exit', () => { try { if (fs.readFileSync(file, 'utf8') === String(process.pid)) fs.unlinkSync(file); } catch {} });
+  throw new Error('Could not take the dispatcher lock');
 }
 
 // The same source and CBM refresh Dolber runs before a lane: fast-forward every
@@ -113,13 +126,17 @@ function syncSources(config) {
   }
 }
 
-// The result of the planning run this tick started: the newest run directory.
-export function runResult(config, since, root = path.join(config.stateDir, 'runs')) {
-  let runs = [];
-  try { runs = fs.readdirSync(root).map(name => path.join(root, name)); } catch { return null; }
-  const fresh = runs.map(dir => ({dir, time: fs.statSync(dir).mtimeMs})).filter(run => run.time >= since - 1000)
-    .sort((a, b) => b.time - a.time);
-  try { return fresh.length ? JSON.parse(fs.readFileSync(path.join(fresh[0].dir, 'artifacts/result.json'), 'utf8')) : null; } catch { return null; }
+// The result of the planning run this tick started. The dispatcher names the
+// run directory (MEDULLA_RUN_DIR_NAME), so no other run can be mistaken for it.
+export function runResult(config, name) {
+  try { return JSON.parse(fs.readFileSync(path.join(config.stateDir, 'runs', name, 'artifacts/result.json'), 'utf8')); } catch { return null; }
+}
+
+// A run that left no verdict: the environment failed before publication
+// (ticket_unchanged), or a publication started and did not confirm. Neither
+// is marked processed; both stop the loop for an operator.
+export function incomplete(result) {
+  return !result || result.ticket_unchanged === true || result.publication_uncertain === true;
 }
 
 export async function tick(configFile, config, {dryRun = false} = {}) {
@@ -142,26 +159,25 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   if (!ticket) return null;
   syncSources(config);
   console.log(`${new Date().toISOString()} planning ${ticket.id}: ${ticket.title}`);
-  const started = Date.now();
+  const runName = `dispatch-${ticket.id}-${Date.now()}`;
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
-  const log = path.join(logs, `${ticket.id}-${Date.now()}.log`);
+  const log = path.join(logs, `${runName}.log`);
   const run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
-    {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+    {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
   fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
   const last = ((run.stderr || run.stdout || '').trim().split('\n').pop() || '').slice(0, 300);
   console.log(`${ticket.id}: planning-ntk exit ${run.status}${last ? ` · ${last}` : ''}`);
-  // A run that did not complete left the ticket untouched and says so in its
-  // result: the environment failed (CBM, Equill, an agent). Do not mark it
-  // attempted, and stop the loop, so the same fault does not walk the whole
-  // queue. Fix it, then start again. A published NOT_READY is a verdict.
-  const result = runResult(config, started);
-  const untouched = result ? result.ticket_unchanged === true : after === ticket.updated_at;
-  if (run.status !== 0 && untouched) {
-    state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log}};
+  // Do not mark an incomplete run attempted, and stop the loop, so the same
+  // fault does not walk the whole queue. Fix it, then start again. A published
+  // NOT_READY is a verdict and is recorded like any other.
+  const result = runResult(config, runName);
+  if (run.status !== 0 && incomplete(result)) {
+    state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log,
+      uncertain: result?.publication_uncertain === true}};
     saveState(config, state);
     return {id: ticket.id, exit: run.status, environment: true, log};
   }
@@ -177,7 +193,8 @@ async function main(argv) {
   const config = settings(file);
   const dryRun = argv.includes('--dry-run');
   if (dryRun) return tick(file, config, {dryRun});
-  lock(config);
+  const held = lock(config.stateDir);
+  process.on('exit', () => { try { if (fs.readFileSync(held, 'utf8') === String(process.pid)) fs.unlinkSync(held); } catch {} });
   do {
     const result = await tick(file, config);
     if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
