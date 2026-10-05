@@ -25,7 +25,7 @@ Critics can clear an accurate NOT_READY or NEEDS_HUMAN diagnosis.
 Each body contains the scope, concrete implementation steps, symbol definitions,
 Task acceptance criteria and executable checks. Lane reads this body directly.
 The full plan is an attachment. An attachment cannot replace mandatory body instructions.
-For verify_existing, put a JSON array named TICKET_CHECKS in ntk.body.
+For verify_existing, put TICKET_CHECKS: followed by a JSON array in ntk.body.
 Use existing runnable test-file paths, or checks with ac, argv and optional stdout.
 Copy the prescribed checks into the body. Each ac identifies its covered criterion.
 Use only these read forms for argv. Each PATH is relative to the repository root:
