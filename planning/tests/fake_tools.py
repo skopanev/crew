@@ -52,7 +52,11 @@ elif name == "fake-cbm":
     else:
         print(json.dumps({"projects": [{"name": "test-project"}], "has_more": False}))
 elif name == "opencode" and sys.argv[1:] == ["--pure", "debug", "config"]:
-    print(json.dumps({"provider": {}}))
+    file = Path(os.environ.get("OPENCODE_CONFIG_DIR", "")) / "opencode.json"
+    config = json.loads(file.read_text()) if file.is_file() else {"provider": {}}
+    runtime = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
+    config.setdefault("permission", {}).update(runtime.get("permission", {}))
+    print(json.dumps(config))
 else:
     assert not os.environ.get("JOPPA_TOKEN") and not os.environ.get("JOPPA_TOKEN_FILE"), "Joppa credential exposed to agent"
     if name == "codex":
