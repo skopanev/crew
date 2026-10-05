@@ -44,7 +44,7 @@ export function settings(file) {
   return {
     workspace: config.workspace, strict: config.strict === true, sourceRoot: config.sourceRoot, interval,
     cbmCommand: config.cbmMcpCommand, cbmCache: config.cbmCacheDir, image: config.image,
-    filterTags, tagMatch,
+    filterTags, tagMatch, dispatchTag,
     stateDir: path.join(config.stateDir, 'planning-ntk', workspaceHash),
   };
 }
@@ -74,7 +74,8 @@ async function blockedTickets(config) {
     }
     return tickets;
   }));
-  return [...new Map(lists.flat().map(ticket => [ticket.id, ticket])).values()];
+  return [...new Map(lists.flat().map(ticket => [ticket.id, ticket])).values()]
+    .filter(ticket => !ticket.title.startsWith('[HUMAN] ') || ticket.tags?.includes(config.dispatchTag));
 }
 
 const stateFile = config => path.join(config.stateDir, 'dispatch.json');
