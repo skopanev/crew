@@ -95,6 +95,7 @@ nodes:
       sandbox: read-only
       args:
         - --strict-mcp-config
+        - --setting-sources=
         - --mcp-config
         - '{"mcpServers":{}}'
     prompt: |
