@@ -140,6 +140,12 @@ nodes:
       - slug: correctness
         harness: opencode
         model: zai-coding-plan/glm-5.3
+        flag: --pure
+        env:
+          XDG_CONFIG_HOME: '{{var:OPENCODE_CONFIG_HOME}}'
+          OPENCODE_CONFIG_DIR: '{{var:OPENCODE_CONFIG_HOME}}/opencode'
+          OPENCODE_CONFIG: ''
+          OPENCODE_DISABLE_PROJECT_CONFIG: 'true'
         question: Is the plan executable within its declared modules and interfaces? Are prerequisites sufficient and checks capable of proving the AC? Check failure cases, assumptions and compatibility with current source.
     agent:
       harness: '{{input.harness}}'

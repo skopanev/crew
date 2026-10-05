@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def configuration(file):
@@ -56,6 +57,7 @@ def main():
         "CBM_ALLOWED_ROOT": config["sourceRoot"], "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),
         "EQUILL_STORE": options.get("equillStore", os.environ.get("EQUILL_STORE", str(Path.home() / ".equill/dev"))),
         "EQUILL_ACTOR": "planning",
+        "OPENCODE_BIN": shutil.which("opencode") or "opencode",
         "RESEARCH_MODEL": options.get("researchModel", "gpt-6-astra"),
         "DESIGN_MODEL": options.get("designModel", "claude-opus-5"),
     }
@@ -89,7 +91,9 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError("Another planner runs in this workspace")
-        return subprocess.run(command, cwd=config["sourceRoot"], pass_fds=(lock.fileno(),), check=False).returncode
+        with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home:
+            command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}"]
+            return subprocess.run(command, cwd=config["sourceRoot"], pass_fds=(lock.fileno(),), check=False).returncode
 
 
 if __name__ == "__main__":
