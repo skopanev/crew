@@ -608,7 +608,7 @@ nodes:
         cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
         exit 1
       fi
-      # Recovery commits remain only in the private checkout until it is deleted.
+      # The host retains failed checkouts with commits or changes.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
       if [ -d "${LANE_WORKTREE}/.git" ]; then
@@ -617,7 +617,7 @@ nodes:
           if git -C "${LANE_WORKTREE}" add -A 2>&1 \
              && git -C "${LANE_WORKTREE}" -c user.name=lane -c user.email=lane@local \
                     commit -q --no-verify -m "SAVE STATE: ${MEDULLA_LAST_NODE:-?}" 2>&1; then
-            saved=" Local recovery commit $(git -C "${LANE_WORKTREE}" rev-parse --short HEAD) at ${LANE_WORKTREE}; not pushed, deleted with this checkout."
+            saved=" Local recovery commit $(git -C "${LANE_WORKTREE}" rev-parse --short HEAD) at ${LANE_WORKTREE}; not pushed; checkout retained."
           else
             saved=" Recovery commit failed; worktree retained at ${LANE_WORKTREE}."
           fi
