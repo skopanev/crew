@@ -20,8 +20,8 @@ Optional configuration:
   "planning": {
     "dispatchTag": "crew",
     "equillStore": "/absolute/path/to/equill/store",
-    "researchModel": "gpt-6-astra",
-    "designModel": "claude-opus-5"
+    "researchModel": "gpt-6.1-sol",
+    "designModel": "claude-opus-5-5"
   }
 }
 ```

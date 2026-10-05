@@ -81,8 +81,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(result["reviews"]), 3)
         events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
         used = {e["slug"]: (e["binary"], e["model"]) for e in events if e["kind"] == "start"}
-        self.assertEqual(used["design"], ("claude", "claude-opus-5"))
-        self.assertEqual(used["necessity"], ("codex", "gpt-6-astra"))
+        self.assertEqual(used["design"], ("claude", "claude-opus-5-5"))
+        self.assertEqual(used["necessity"], ("codex", "gpt-6.1-sol"))
         self.assertEqual(used["simplicity"], ("agy", "Gemini 3.1 Pro (High)"))
         self.assertEqual(used["correctness"], ("opencode", "zai-coding-plan/glm-5.3"))
         self.assertEqual(len({v["reviewer"]["harness"] for v in result["reviews"].values()}), 3)

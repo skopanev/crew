@@ -101,7 +101,7 @@ nodes:
       __default__: notify_failure
     agent:
       harness: codex
-      model: gpt-6-astra
+      model: gpt-6.1-sol
       effort: high
       sets: [TICKET_CHECKS]
       args: [-s, read-only]
@@ -243,7 +243,7 @@ nodes:
       __default__: notify_failure
     agent:
       harness: claude-code
-      model: claude-opus-5
+      model: claude-opus-5-5
       effort: high
       # Reuse the coder session across review rounds.
       session: coder
@@ -350,7 +350,7 @@ nodes:
     max_attempts: 2
     inputs:
     - harness: codex
-      model: gpt-6-astra
+      model: gpt-6.1-sol
       effort: high
       slug: architecture
     - harness: agy

@@ -58,8 +58,8 @@ def main():
         "EQUILL_STORE": options.get("equillStore", os.environ.get("EQUILL_STORE", str(Path.home() / ".equill/dev"))),
         "EQUILL_ACTOR": "planning",
         "OPENCODE_BIN": shutil.which("opencode") or "opencode",
-        "RESEARCH_MODEL": options.get("researchModel", "gpt-6-astra"),
-        "DESIGN_MODEL": options.get("designModel", "claude-opus-5"),
+        "RESEARCH_MODEL": options.get("researchModel", "gpt-6.1-sol"),
+        "DESIGN_MODEL": options.get("designModel", "claude-opus-5-5"),
     }
     medulla = os.environ.get("MEDULLA_BIN", "medulla")
     binaries = [medulla] if args.dry_run else [medulla, "node", "git", "codex", "claude", "agy", "opencode", variables["EQUILL_BIN"]]
