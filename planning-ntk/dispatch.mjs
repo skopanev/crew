@@ -78,34 +78,29 @@ function saveState(config, state) {
   fs.renameSync(temporary, stateFile(config));
 }
 
-// Exclusive create: two dispatchers cannot both pass the check. A lock left by
-// a dead process is removed once, then created again exclusively.
+// Exclusive create, fail closed. A lock left by a dead dispatcher is never
+// removed automatically: between reading its owner and removing it, another
+// dispatcher may have replaced it. An operator checks the pid and removes it.
 export function lock(stateDir, pid = process.pid) {
   fs.mkdirSync(stateDir, {recursive: true});
   const file = path.join(stateDir, 'dispatch.lock');
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      fs.writeFileSync(file, String(pid), {flag: 'wx'});
-      return file;
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-    }
-    const owner = Number(fs.readFileSync(file, 'utf8'));
-    try {
-      if (owner) { process.kill(owner, 0); throw new Error(`Another dispatcher runs as pid ${owner}`); }
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-    }
-    fs.rmSync(file, {force: true});
+  try {
+    fs.writeFileSync(file, String(pid), {flag: 'wx'});
+    return file;
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
   }
-  throw new Error('Could not take the dispatcher lock');
+  let owner = '';
+  try { owner = fs.readFileSync(file, 'utf8').trim(); } catch {}
+  throw new Error(`Another dispatcher holds ${file}${owner ? ` (pid ${owner})` : ''}. ` +
+    'If no dispatcher runs for this workspace, remove the file and start again.');
 }
 
 // The same source and CBM refresh Dolber runs before a lane: fast-forward every
 // canonical repository and re-index it, through the lane image. Planning reads
 // the canonical worktrees and CBM, so without it plans stale code and research
 // blocks on metadata_changed.
-function syncSources(config) {
+function syncSources(config, logs) {
   for (const key of ['cbmCommand', 'cbmCache', 'image']) {
     if (!config[key]) throw new Error(`Config needs ${{cbmCommand: 'cbmMcpCommand', cbmCache: 'cbmCacheDir', image: 'image'}[key]} to refresh sources`);
   }
@@ -119,7 +114,13 @@ function syncSources(config) {
     ]) {
       if (label === 'source and CBM refresh') fs.chmodSync(connector, 0o600);
       const run = spawnSync('python3', args, {encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});
-      if (run.status !== 0) throw new Error(`${label} failed: ${(run.stderr || run.stdout || '').trim().split('\n').pop()}`);
+      if (run.status !== 0) {
+        // Keep the whole output: the last line rarely names the cause.
+        fs.mkdirSync(logs, {recursive: true});
+        const log = path.join(logs, `sync-${Date.now()}.log`);
+        fs.writeFileSync(log, `${label}\n${run.stdout || ''}${run.stderr || ''}`);
+        throw new Error(`${label} failed: ${(run.stderr || run.stdout || '').trim().split('\n').pop()}; see ${log}`);
+      }
     }
   } finally {
     fs.rmSync(dir, {recursive: true, force: true});
@@ -157,7 +158,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   saveState(config, state);
   const ticket = ready[0];
   if (!ticket) return null;
-  syncSources(config);
+  syncSources(config, path.join(config.stateDir, 'dispatch-logs'));
   console.log(`${new Date().toISOString()} planning ${ticket.id}: ${ticket.title}`);
   const runName = `dispatch-${ticket.id}-${Date.now()}`;
   const logs = path.join(config.stateDir, 'dispatch-logs');
@@ -169,7 +170,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
-  const last = ((run.stderr || run.stdout || '').trim().split('\n').pop() || '').slice(0, 300);
+  const last = (run.stderr || run.stdout || '').trim().split('\n').pop() || '';
   console.log(`${ticket.id}: planning-ntk exit ${run.status}${last ? ` · ${last}` : ''}`);
   // Do not mark an incomplete run attempted, and stop the loop, so the same
   // fault does not walk the whole queue. Fix it, then start again. A published
@@ -179,7 +180,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
     state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log,
       uncertain: result?.publication_uncertain === true}};
     saveState(config, state);
-    return {id: ticket.id, exit: run.status, environment: true, log};
+    return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
   saveState(config, state);
@@ -197,6 +198,10 @@ async function main(argv) {
   process.on('exit', () => { try { if (fs.readFileSync(held, 'utf8') === String(process.pid)) fs.unlinkSync(held); } catch {} });
   do {
     const result = await tick(file, config);
+    if (result?.uncertain) {
+      throw new Error(`publication for ${result.id} started and did not confirm; inspect the ticket in NTK ` +
+        `before any other run of it, and do not resume blindly; see ${result.log}`);
+    }
     if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
     if (argv.includes('--once')) break;
     await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
