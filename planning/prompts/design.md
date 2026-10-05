@@ -7,6 +7,8 @@ Use the supplied parent context to understand the purpose and constraints.
 Plan only the selected AC or source ticket. Follow the additional output contract
 when supplied. It defines the NTK fields and verdicts.
 
+Gate commands are written for the lane, where configured directories appear at
+`/workspace/<name>`. Read those files at the host paths in `lane_mounts`.
 The working directory is the source root, not a repository. Start every shell
 command with `cd <repository path from the assignment> && `; a command run from
 the source root fails and costs a turn.

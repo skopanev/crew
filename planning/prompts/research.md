@@ -5,6 +5,8 @@ Use the registered CBM project names from the assignment. All inspected
 repositories are read-only. Do not change files, queues, requirements, or Git.
 Do not read other researchers' reports or any critic reports.
 
+Gate commands are written for the lane, where configured directories appear at
+`/workspace/<name>`. Read those files at the host paths in `lane_mounts`.
 The working directory is the source root, not a repository. Start every shell
 command with `cd <repository path from the assignment> && `; a command run from
 the source root fails and costs a turn.
