@@ -174,6 +174,9 @@ def validate_plan(plan, assignment):
             require(owner in {p["id"] for p in assignment["ntk"]["meta"]["people"] if p.get("kind") == "human"},
                     "Decision owner must be a registered person")
             text(plan["ntk"].get("decision"), "required decision")
+            title = "[HUMAN] " + assignment["ticket"]["title"].removeprefix("[HUMAN] ")
+            require(len(title) <= assignment["ntk"]["meta"]["limits"]["title"],
+                    "Human decision title exceeds the NTK limit; shorten it before planning")
         return
     validation.plan(plan, assignment)
     meta = assignment["ntk"]["meta"]
@@ -195,7 +198,7 @@ def validate_plan(plan, assignment):
         require(assignment["ticket"].get("module"), "Verification needs a source module")
         require(len(text(plan["ntk"].get("body"), "verification body")) <= limits["body"], "Verification body exceeds NTK limit")
     if len(plan["tasks"]) > 1 or any(t["project"] != assignment["ticket"]["project"] for t in plan["tasks"]):
-        require(len("[CLOSE AT NO DEPS] " + assignment["ticket"]["title"]) <= limits["title"], "Coordinator title exceeds NTK limit")
+        require(len("[CLOSE AT NO DEPS] " + assignment["ticket"]["title"].removeprefix("[HUMAN] ")) <= limits["title"], "Coordinator title exceeds NTK limit")
 
 
 def capture(kind):

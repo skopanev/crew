@@ -19,6 +19,7 @@ For each Task, also return:
 READY uses disposition implement or verify_existing. NOT_READY and NEEDS_HUMAN
 use blocked, no Tasks, and explicit blockers. They may have empty acceptance_checks.
 NEEDS_HUMAN requires owner and decision. System/access failures stay NOT_READY.
+NEEDS_HUMAN leaves the ticket blocked with a [HUMAN] title prefix and assigns its owner.
 Critics can clear an accurate NOT_READY or NEEDS_HUMAN diagnosis.
 
 Each body contains the scope, concrete implementation steps, symbol definitions,

@@ -54,13 +54,15 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | READY, several Tasks | Create children with correct prerequisites. Put the parent in `to_review` without its dispatch tag. |
 | NOT_READY | Keep the source `blocked`, remove its dispatch tag, and attach the concrete reason. |
 | Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
-| NEEDS_HUMAN | Set `to_review`, assign the named person, remove its dispatch tag, and attach the exact decision. |
+| NEEDS_HUMAN | Set `blocked`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
 | Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
 | Publication started and failed | Record `publication_uncertain`; part of the result may be in NTK. An operator inspects the ticket before another run. |
 
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
 Children never depend on the parent. Each child has one module and its own checks.
 External prerequisites go only to children that need them.
+The planner removes `[HUMAN]` when the next verdict no longer needs a person.
+After the decision, record it in the ticket and restore the dispatch tag to plan it again.
 All prepared children get dispatch tags, including children waiting for prerequisites.
 The workflow does not close the parent automatically.
 
