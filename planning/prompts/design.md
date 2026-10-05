@@ -7,6 +7,10 @@ Use the supplied parent context to understand the purpose and constraints.
 Plan only the selected AC or source ticket. Follow the additional output contract
 when supplied. It defines the NTK fields and verdicts.
 
+The working directory is the source root, not a repository. Start every shell
+command with `cd <repository path from the assignment> && `; a command run from
+the source root fails and costs a turn.
+
 Apply the supplied Equill writing rules to new prose in every output field.
 
 Return ONLY one JSON object as your final response. The post hook saves it.
