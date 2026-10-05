@@ -108,11 +108,13 @@ def prepare_opencode(read_paths):
     """Keep provider settings in a private native config. Exclude inherited MCP."""
     source_env = {**os.environ, "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
     command = [os.environ.get("OPENCODE_BIN", "opencode"), "--pure", "debug", "config"]
-    def query(environment):
+    def query(environment, phase):
         result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=45)
-        require(result.returncode == 0, f"OpenCode config query failed (exit {result.returncode}); check the OpenCode log")
+        require(result.returncode == 0,
+                f"OpenCode {phase} config query failed (exit {result.returncode}):\n"
+                + (result.stderr.strip() or "OpenCode returned no error details on stderr"))
         return json.loads(result.stdout)
-    source = query(source_env)
+    source = query(source_env, "source")
     providers = source.get("provider", {})
     require(isinstance(providers, dict), "OpenCode provider configuration is invalid")
     root = Path(os.environ["OPENCODE_CONFIG_HOME"])
@@ -133,7 +135,7 @@ def prepare_opencode(read_paths):
     isolated_env = {**os.environ, "XDG_CONFIG_HOME": str(root),
                     "OPENCODE_CONFIG_DIR": str(directory), "OPENCODE_CONFIG": "",
                     "OPENCODE_CONFIG_CONTENT": json.dumps({"permission": read_only}), "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
-    isolated = query(isolated_env)
+    isolated = query(isolated_env, "isolated")
     require(not isolated.get("mcp"), "OpenCode isolation failed: inherited MCP remains")
     require(isolated.get("provider", {}) == providers, "OpenCode isolation changed provider settings")
     permission = isolated.get("permission", {})
