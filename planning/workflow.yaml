@@ -124,7 +124,12 @@ nodes:
     # A vetoed report retries once; Medulla puts the veto reason in the prompt
     # (first live design exceeded the NTK text limit and had no second chance).
     max_attempts: 2
-    env: *agent_environment
+    env:
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
+      PLANNING_REVIEW_DIGEST: '{{var:plan_digest}}'
     max_parallel: 3
     min_success: 3
     inputs:
@@ -161,7 +166,6 @@ nodes:
       Assignment: {{var:assignment}}
       Research: {{var:research}}
       Frozen plan: {{var:plan}}
-      Plan digest: {{var:plan_digest}}
       Your independent perspective: {{input.slug}}
       Your question: {{input.question}}
       Additional output contract: {{var:OUTPUT_CONTRACT}}

@@ -103,8 +103,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(starts.count("simplicity"), 2)
 
     def test_failures_never_admit_work(self):
-        for case in ("missing_contract", "no_cbm", "outside_module", "rejected", "wrong_digest", "malformed", "stale", "changed_contract",
-                     "signal_breakout", "stuck_pagination", "stale_index", "index_generation_mismatch", "no_coverage", "uncovered_citation", "joppa_changed"):
+        for case in ("missing_contract", "no_cbm", "outside_module", "rejected", "malformed", "stale", "changed_contract",
+                     "signal_breakout", "stuck_pagination", "stale_index", "index_generation_mismatch", "no_coverage", "uncovered_citation", "joppa_changed", "changed_review_plan"):
             with self.subTest(case=case):
                 proc, result = self.execute(case)
                 self.assertNotEqual(proc.returncode, 0, case)
@@ -124,7 +124,7 @@ class WorkflowTests(unittest.TestCase):
                 shutil.rmtree(self.root / "runs")
 
     def test_nested_signals_remain_context_and_project_pagination_completes(self):
-        for case in ("nested_signal", "paginated"):
+        for case in ("nested_signal", "paginated", "wrong_digest"):
             with self.subTest(case=case):
                 proc, result = self.execute(case)
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
