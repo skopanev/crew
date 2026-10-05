@@ -138,10 +138,19 @@ def prepare():
         "lane_failure": failure_evidence(settings, id),
         "repository_contracts": repository_contracts,
         "gate_commands": settings.get("gateCommands", []),
+        # Gate commands run inside the lane, where each configured directory is
+        # mounted at /workspace/<name>. Planning runs on the host: read the host path.
+        "lane_mounts": lane_mounts(settings),
         "knowledge_query": ticket["title"] + "\n" + (ticket.get("body") or "")}
     write(target / "input.json", assignment)
     shared.emit_var("OUTPUT_CONTRACT", (HERE / "output.md").read_text())
     shared.prepare_context(assignment, projects)
+
+
+def lane_mounts(settings):
+    """Lane path -> host path for every directory the lane mounts by name."""
+    dirs = [settings.get("sourceRoot"), *settings.get("readOnlyRepos", []), *settings.get("readWriteDirs", [])]
+    return {f"/workspace/{Path(d).name}": str(Path(d).expanduser()) for d in dirs if d}
 
 
 def validate_plan(plan, assignment):
