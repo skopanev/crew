@@ -32,7 +32,7 @@ def main():
     if not args.dry_run:
         for key in ("cbm_store", "cbm_root", "equill_store"):
             require(getattr(args, key), f"--{key.replace('_', '-')} is required")
-        for binary in (os.environ.get("EQUILL_BIN", "equill"), os.environ.get("CBM_BIN", "codebase-memory-mcp"), "codex", "claude", "agy", "opencode", "git"):
+        for binary in (os.environ.get("EQUILL_BIN", "equill"), os.environ.get("CBM_BIN", "codebase-memory-mcp"), "codex", "claude", "opencode", "git"):
             require(shutil.which(binary), f"required executable missing: {binary}")
     # The live store must match the committed planning snapshots (one-way export).
     # Tests with a fake Equill set CREW_SKIP_ROLE_CHECK.

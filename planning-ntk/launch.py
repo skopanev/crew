@@ -63,7 +63,7 @@ def main():
         "DESIGN_MODEL": options.get("designModel", "claude-opus-5-5"),
     }
     medulla = os.environ.get("MEDULLA_BIN", "medulla")
-    binaries = [medulla] if args.dry_run else [medulla, "node", "git", "codex", "claude", "agy", "opencode", variables["EQUILL_BIN"]]
+    binaries = [medulla] if args.dry_run else [medulla, "node", "git", "codex", "claude", "opencode", variables["EQUILL_BIN"]]
     for binary in binaries:
         if not shutil.which(binary):
             raise ValueError(f"Required executable is unavailable: {binary}")
