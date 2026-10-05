@@ -114,10 +114,19 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
-  state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
-  saveState(config, state);
   const last = ((run.stderr || run.stdout || '').trim().split('\n').pop() || '').slice(0, 300);
   console.log(`${ticket.id}: planning-ntk exit ${run.status}${last ? ` · ${last}` : ''}`);
+  // A failure that left the ticket untouched did not plan it: the environment
+  // failed (CBM, Equill, an agent). Do not mark it attempted, and stop the loop,
+  // so the same fault does not walk the whole queue. Fix it, then start again.
+  const untouched = after === ticket.updated_at;
+  if (run.status !== 0 && untouched) {
+    state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log}};
+    saveState(config, state);
+    return {id: ticket.id, exit: run.status, environment: true, log};
+  }
+  state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
+  saveState(config, state);
   return {id: ticket.id, exit: run.status};
 }
 
@@ -130,7 +139,8 @@ async function main(argv) {
   if (dryRun) return tick(file, config, {dryRun});
   lock(config);
   do {
-    await tick(file, config);
+    const result = await tick(file, config);
+    if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
     if (argv.includes('--once')) break;
     await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
   } while (true);
