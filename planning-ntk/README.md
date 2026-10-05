@@ -115,7 +115,9 @@ tag; a published NOT_READY removes it, so a settled ticket is not planned again.
 An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
 result. A ticket unchanged since the last attempt is skipped.
-A run without a verdict stops the loop and is not recorded as processed: the
+If the source changed while a run planned (`code_drift`, nothing published), the
+dispatcher refreshes sources and plans the same ticket once more; a second drift
+stops the loop. A run without a verdict stops the loop and is not recorded as processed: the
 environment failed before publication, or a publication started and did not
 confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
 After `publication_uncertain`, compare the ticket and `publication.json` in NTK
