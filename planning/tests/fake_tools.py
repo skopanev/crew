@@ -57,7 +57,7 @@ elif name == "opencode" and sys.argv[1:] == ["--pure", "debug", "config"]:
     config.setdefault("permission", {}).update(runtime.get("permission", {}))
     print(json.dumps(config))
 elif name == "agy" and sys.argv[1:] == ["mcp", "list"]:
-    (Path(os.environ["BROKER_AGY_HOME"]) / ".gemini/config").mkdir(parents=True)
+    (Path(os.environ["BROKER_AGY_HOME"]) / ".gemini/config").mkdir(parents=True, exist_ok=True)
     print("No MCP servers configured.")
 else:
     assert not os.environ.get("JOPPA_TOKEN") and not os.environ.get("JOPPA_TOKEN_FILE"), "Joppa credential exposed to agent"

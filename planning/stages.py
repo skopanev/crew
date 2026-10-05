@@ -84,7 +84,6 @@ def prepare_context(assignment, projects=None, read_paths=()):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
     prepare_opencode([r["path"] for r in assignment["repositories"]] +
                      list(read_paths) + [os.environ["MEDULLA_RUN_DIR"]])
-    prepare_agy()
     signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
 
 
@@ -142,6 +141,11 @@ def prepare_opencode(read_paths):
             all(permission.get(key) == "deny" for key in read_only),
             "OpenCode isolation changed read-only permissions")
     return str(root)
+
+
+def prepare_critic():
+    if os.environ["MEDULLA_HARNESS"] == "agy":
+        prepare_agy()
 
 
 def prepare_agy():
@@ -343,13 +347,14 @@ if __name__ == "__main__":
         if command == "capture":
             capture(sys.argv[2])
         else:
-            {"prepare": prepare, "research_join": research_join, "review_input": review_input,
+            {"prepare": prepare, "prepare_critic": prepare_critic, "research_join": research_join, "review_input": review_input,
              "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
     except Exception as exc:
         print(f"planning/{command}: {exc}", file=sys.stderr)
-        if command == "capture":
-            path = capture_error_file(sys.argv[2])
-            write(path, {"stage": sys.argv[2], "branch": path.stem.split("-")[-1], "reason": str(exc)})
+        if command in ("capture", "prepare_critic"):
+            kind = sys.argv[2] if command == "capture" else "critic"
+            path = capture_error_file(kind)
+            write(path, {"stage": kind, "branch": path.stem.split("-")[-1], "reason": str(exc)})
         else:
             fail(str(exc))
         sys.exit(1)

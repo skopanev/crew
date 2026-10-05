@@ -118,6 +118,7 @@ nodes:
       BLOCKED: __exit_fail__
       __failed__: failed
   critics:
+    pre: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" prepare_critic'
     # Real repositories need more than five minutes of reading and reasoning
     # (first live run: design was still working at 300 s).
     timeout: 1200

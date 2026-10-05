@@ -351,13 +351,14 @@ if __name__ == "__main__":
         if command == "capture":
             capture(sys.argv[2])
         else:
-            {"prepare": prepare, "research_join": research_join, "review_input": review_input,
+            {"prepare": prepare, "prepare_critic": shared.prepare_critic, "research_join": research_join, "review_input": review_input,
              "critique_join": shared.critique_join, "finish": finish, "fail": fail}[command]()
     except Exception as error:
         print(f"planning-ntk/{command}: {error}", file=sys.stderr)
-        if command == "capture":
-            file = shared.capture_error_file(sys.argv[2])
-            write(file, {"stage": sys.argv[2], "branch": file.stem.split("-")[-1], "reason": str(error)})
+        if command in ("capture", "prepare_critic"):
+            kind = sys.argv[2] if command == "capture" else "critic"
+            file = shared.capture_error_file(kind)
+            write(file, {"stage": kind, "branch": file.stem.split("-")[-1], "reason": str(error)})
         else:
             fail(str(error))
         sys.exit(1)
