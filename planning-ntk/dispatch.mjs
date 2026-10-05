@@ -146,7 +146,8 @@ export function runResult(config, name) {
 // current code. A second drift stops the loop like any incomplete run.
 export const DRIFT_RETRIES = 1;
 export function replanForDrift(result, attempt) {
-  return result?.code_drift === true && result.ticket_unchanged === true && attempt < DRIFT_RETRIES;
+  return result?.code_drift === true && result.ticket_unchanged === true && result.published === false &&
+    result.publication_uncertain !== true && attempt < DRIFT_RETRIES;
 }
 
 export function incomplete(result) {
