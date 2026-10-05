@@ -18,6 +18,8 @@ Optional configuration:
 ```json
 {
   "planning": {
+    "tags": ["crew", "topic-a", "topic-b"],
+    "tagMatch": "any",
     "dispatchTag": "crew",
     "equillStore": "/absolute/path/to/equill/store",
     "researchModel": "gpt-6.1-sol",
@@ -27,6 +29,9 @@ Optional configuration:
 ```
 
 Include `dispatchTag` in Dolber's required `tags`.
+Set `planning.tags` to override the planner filter. Otherwise, it uses Dolber's tags.
+Set `planning.tagMatch` to `any` for OR or `all` for AND. The default is `all`.
+`strict` controls exact tag matching. It does not control OR or AND.
 The planner adds all configured dispatch tags only after it confirms the plan and graph.
 NTK selects eligible tickets after their prerequisites close.
 
@@ -109,9 +114,10 @@ sh ./lane-launcher/planner-ntk.sh /path/to/config.json             # loop
 ```
 
 Run these commands from the Crew repository root, as you run Dolber.
-It uses Dolber's configuration. Each tick it reads `blocked` tickets that carry
-all of Dolber's tags, `planning.dispatchTag` included. A failed lane keeps that
-tag; a published NOT_READY removes it, so a settled ticket is not planned again.
+It uses Dolber's configuration. Each tick it reads `blocked` tickets with the
+planner tag filter. A failed lane keeps the dispatch tag. A published NOT_READY
+removes that tag. Other planner tags can still match the ticket, but the dispatcher
+skips it until the ticket changes.
 An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
 result. A ticket unchanged since the last attempt is skipped.
