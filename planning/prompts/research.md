@@ -36,7 +36,9 @@ input repository. For each registered CBM project, perform a scoped search and
 SIMILAR_TO query, then call check_index_coverage with format json for the exact
 inspected paths; paginate until each path has a result. A project name or index
 timestamp alone does not prove freshness. Missing/changed path metadata or
-incomplete/mismatched coverage metadata blocks this pass; do not reindex.
+incomplete/mismatched coverage metadata blocks this pass; do not reindex. A path that
+CBM reports as not_tracked is not a blocker: CBM does not index it, so read it in
+the worktree and list it in inspected_paths.
 Even clean metadata is only a best-effort signal about CBM's indexed root:
 read and verify the actual worktree files and any relevant uncommitted changes.
 Code file evidence.source must use the exact registered repository id followed

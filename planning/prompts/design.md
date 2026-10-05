@@ -40,7 +40,8 @@ Tasks in prerequisite order; depends_on names earlier Task ids. Include tests
 in their owning module; another write module requires another Task. Distinguish
 checks that must be added from existing checks; never claim you ran them.
 If already implemented, use disposition "verify_existing", no Tasks, and
-specific acceptance checks. If blocked, use disposition "blocked" and name the
+specific acceptance checks. If any research report is blocked, READY is not allowed: return NEEDS_HUMAN with
+the exact owner decision, or NOT_READY with the missing fact. If blocked, use disposition "blocked" and name the
 missing fact or owner decision; do not fabricate a viable implementation plan.
 A question that source, configuration, a donor app, or recorded owner words
 answer is not an owner decision: decide it and cite that source in rationale.

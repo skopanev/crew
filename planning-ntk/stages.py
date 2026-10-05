@@ -195,6 +195,14 @@ def capture(kind):
     shared.capture_error_file(kind).unlink(missing_ok=True)
     result, _ = shared.body_result()
     validate_plan(result, read(shared.artifacts() / "input.json"))
+    # Checked here, not only in finish(): a vetoed design retries with this reason
+    # in its prompt, so a blocked research report turns into NEEDS_HUMAN or
+    # NOT_READY instead of a READY that finish() can only refuse.
+    if result["ntk"]["verdict"] == "READY":
+        blocked = [branch for branch in validation.RESEARCH
+                   if read(shared.artifacts() / f"research-{branch}.json")["status"] == "blocked"]
+        require(not blocked, f"Research is blocked ({', '.join(blocked)}): READY is not allowed. "
+                "Return NEEDS_HUMAN with the exact owner decision, or NOT_READY with the missing fact.")
     write(shared.artifacts() / "plan.json", result)
     signal("PLANNED", "NTK plan validated")
 

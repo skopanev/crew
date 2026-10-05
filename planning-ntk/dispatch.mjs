@@ -10,6 +10,7 @@
 // the exact decision). One ticket at a time: planning-ntk holds one lock per
 // workspace.
 import crypto from 'node:crypto';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -31,6 +32,7 @@ export function settings(file) {
   const workspaceHash = crypto.createHash('sha256').update(config.workspace).digest('hex').slice(0, 24);
   return {
     workspace: config.workspace, strict: config.strict === true, sourceRoot: config.sourceRoot, interval,
+    cbmCommand: config.cbmMcpCommand, cbmCache: config.cbmCacheDir, image: config.image,
     // planning-ntk removes the dispatch tag from a ticket it leaves blocked, so select without it.
     filterTags: tags.filter(tag => tag !== dispatchTag),
     stateDir: path.join(config.stateDir, 'planning-ntk', workspaceHash),
@@ -86,6 +88,31 @@ function lock(config) {
   process.on('exit', () => { try { if (fs.readFileSync(file, 'utf8') === String(process.pid)) fs.unlinkSync(file); } catch {} });
 }
 
+// The same source and CBM refresh Dolber runs before a lane: fast-forward every
+// canonical repository and re-index it, through the lane image. Planning reads
+// the canonical worktrees and CBM, so without it plans stale code and research
+// blocks on metadata_changed.
+function syncSources(config) {
+  for (const key of ['cbmCommand', 'cbmCache', 'image']) {
+    if (!config[key]) throw new Error(`Config needs ${{cbmCommand: 'cbmMcpCommand', cbmCache: 'cbmCacheDir', image: 'image'}[key]} to refresh sources`);
+  }
+  const crew = path.dirname(here);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-cbm-'));
+  try {
+    const connector = path.join(dir, 'mcp.py');
+    for (const [args, label] of [
+      [[path.join(crew, 'lane/bridge/cbm-connect.py'), config.cbmCommand, config.sourceRoot, config.cbmCache, connector], 'CBM connector'],
+      [[path.join(crew, 'lane-launcher/safe-sync.py'), config.sourceRoot, connector, config.image], 'source and CBM refresh'],
+    ]) {
+      if (label === 'source and CBM refresh') fs.chmodSync(connector, 0o600);
+      const run = spawnSync('python3', args, {encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});
+      if (run.status !== 0) throw new Error(`${label} failed: ${(run.stderr || run.stdout || '').trim().split('\n').pop()}`);
+    }
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+}
+
 export async function tick(configFile, config, {dryRun = false} = {}) {
   const state = readState(config);
   state.tickets ??= {};
@@ -104,6 +131,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   saveState(config, state);
   const ticket = ready[0];
   if (!ticket) return null;
+  syncSources(config);
   console.log(`${new Date().toISOString()} planning ${ticket.id}: ${ticket.title}`);
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
