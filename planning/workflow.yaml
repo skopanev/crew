@@ -1,6 +1,8 @@
 version: '2'
 start: prepare
-timeout: 1800
+# Covers the step limits in sequence: prepare 180 + research 600 + design 1200
+# + critics 1200 + publication. At 1800 s a real run died in the critics pool.
+timeout: 3600
 defaults:
   timeout: 60
 vars:
