@@ -58,6 +58,7 @@ def main():
         "EQUILL_STORE": options.get("equillStore", os.environ.get("EQUILL_STORE", str(Path.home() / ".equill/dev"))),
         "EQUILL_ACTOR": "planning",
         "OPENCODE_BIN": shutil.which("opencode") or "opencode",
+        "AGY_BIN": shutil.which("agy") or "agy",
         "RESEARCH_MODEL": options.get("researchModel", "gpt-6.1-sol"),
         "DESIGN_MODEL": options.get("designModel", "claude-opus-5-5"),
     }
@@ -91,8 +92,10 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError("Another planner runs in this workspace")
-        with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home:
-            command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}"]
+        with tempfile.TemporaryDirectory(prefix="crew-opencode-") as config_home, \
+                tempfile.TemporaryDirectory(prefix="crew-agy-") as agy_home:
+            command += ["--var", f"OPENCODE_CONFIG_HOME={config_home}",
+                        "--var", f"AGY_PROFILE_HOME={agy_home}"]
             return subprocess.run(command, cwd=config["sourceRoot"], pass_fds=(lock.fileno(),), check=False).returncode
 
 

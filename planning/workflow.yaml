@@ -141,6 +141,9 @@ nodes:
       - slug: simplicity
         harness: agy
         model: Gemini 3.1 Pro (High)
+        env:
+          BROKER_AGY_HOME: '{{var:AGY_PROFILE_HOME}}'
+          BROKER_ISOLATE_MCP: '1'
         question: Does the plan solve the underlying problem or prop up a flawed design? Identify workarounds. Compare concrete alternatives by AC, simplicity, efficiency, reliability and extensibility. Cite code evidence and explain the advantage. Reject speculative abstractions; preference alone is not a blocker.
       - slug: correctness
         harness: opencode
