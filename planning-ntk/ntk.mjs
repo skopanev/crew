@@ -105,19 +105,24 @@ async function publish(input) {
   const original = input.snapshot.source.ticket;
   if (receipt.parentRevision) return activate(input, receipt, receiptFile, original);
   const source = await unchanged(input);
+  const title = source.title.replace(/^\[HUMAN\] /, '');
   const report = JSON.stringify({source: source.id, plan, reviews: input.reviews}, null, 2);
   const update = (id, fields) => request('PATCH', route(id), {}, {workspace, ...fields});
   const tags = [...new Set([...(source.tags || []), ...input.dispatchTags])];
   const tasks = plan.tasks;
   const split = plan.disposition === 'implement' && (tasks.length > 1 || tasks[0].project !== source.project);
-  require(!split || `[CLOSE AT NO DEPS] ${source.title}`.length <= input.snapshot.meta.limits.title,
+  require(!split || `[CLOSE AT NO DEPS] ${title}`.length <= input.snapshot.meta.limits.title,
     'Coordinator title exceeds the NTK limit; tighten it before planning');
 
   if (plan.ntk.verdict !== 'READY') {
+    const human = plan.ntk.verdict === 'NEEDS_HUMAN';
+    const blockedTitle = human ? `[HUMAN] ${title}` : title;
+    require(blockedTitle.length <= input.snapshot.meta.limits.title,
+      'Human decision title exceeds the NTK limit; shorten it before planning');
     await attachReport(source.id, workspace, `planning-ntk-${hash(plan).slice(0, 16)}.json`, report);
     await unchanged(input);
-    await update(source.id, {status: plan.ntk.verdict === 'NEEDS_HUMAN' ? 'to_review' : 'blocked',
-      ...(plan.ntk.verdict === 'NEEDS_HUMAN' ? {assignee: plan.ntk.owner} : {}),
+    await update(source.id, {status: 'blocked', title: blockedTitle,
+      ...(human ? {assignee: plan.ntk.owner} : {}),
       tag_edits: [`-${dispatchTag}`]});
     return {verdict: plan.ntk.verdict, id: source.id, reason: plan.blockers.join('\n'), owner: plan.ntk.owner, decision: plan.ntk.decision};
   }
@@ -128,12 +133,12 @@ async function publish(input) {
     await unchanged(input);
     const body = task?.body || plan.ntk.body, module = task?.module || source.module;
     const deps = [...new Set([...(source.deps || []), ...(task?.external_dependencies || [])])];
-    await update(source.id, {status: 'open', body,
+    await update(source.id, {status: 'open', title, body,
       module, dep_set: deps,
       tag_edits: input.dispatchTags.map(tag => `+${tag}`)});
     const confirmed = await ticket(source.id, workspace);
     require(['open', 'in_progress', 'to_test', 'done'].includes(confirmed.ticket.status) &&
-      sameFields(confirmed.ticket, {body, module, deps, tags}), 'Prepared ticket fields were not confirmed');
+      sameFields(confirmed.ticket, {title, body, module, deps, tags}), 'Prepared ticket fields were not confirmed');
     return {verdict: 'READY', id: source.id, children: []};
   }
 
@@ -177,10 +182,10 @@ async function publish(input) {
   const ids = tasks.map(task => receipt.children[task.id].id);
   await attachReport(source.id, workspace, `planning-ntk-${hash(plan).slice(0, 16)}.json`, report);
   await unchanged(input);
-  await update(source.id, {status: 'to_review', title: `[CLOSE AT NO DEPS] ${source.title}`,
+  await update(source.id, {status: 'to_review', title: `[CLOSE AT NO DEPS] ${title}`,
     dep_set: [...new Set([...(source.deps || []), ...ids])], tag_edits: [`-${dispatchTag}`]});
   const parent = await ticket(source.id, workspace);
-  receipt.parent = {status: 'to_review', title: `[CLOSE AT NO DEPS] ${source.title}`,
+  receipt.parent = {status: 'to_review', title: `[CLOSE AT NO DEPS] ${title}`,
     body: source.body, module: source.module, deps: [...new Set([...(source.deps || []), ...ids])],
     tags: (source.tags || []).filter(tag => tag !== dispatchTag)};
   require(sameFields(parent.ticket, receipt.parent), 'Parent publication was not confirmed');
