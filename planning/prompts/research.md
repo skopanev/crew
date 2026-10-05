@@ -22,6 +22,8 @@ validates and saves it. Do not write an artifact yourself or emit signal tags.
 
 Use status "blocked" with a concrete blocker when mandatory evidence is missing.
 Only the external branch may use "not_needed", explaining why in summary.
+Complete external research must cite at least one HTTPS primary source.
+You may add repository and Git citations.
 For the code branch, use CBM search_graph/search_code and query_graph to inspect
 SIMILAR_TO before proposing new symbols. Verify hits against actual source and
 use scoped Git history for relevant decisions. When a defect or pattern

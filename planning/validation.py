@@ -24,7 +24,7 @@ def research(report, branch):
     evidence(report.get("evidence"), "research", empty=report["status"] != "complete")
     require(not report["blockers"] or report["status"] == "blocked", "research blockers cannot accompany success")
     if branch == "external" and report["status"] == "complete":
-        require(all(e["source"].startswith("https://") for e in report["evidence"]), "external research must cite HTTPS primary sources")
+        require(any(e["source"].startswith("https://") for e in report["evidence"]), "external research must cite at least one HTTPS primary source")
 
 
 def code_coverage(report, calls, assignment):
