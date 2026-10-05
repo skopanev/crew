@@ -89,3 +89,23 @@ It activates unchanged blocked children and preserves already active children.
 A parent write without a confirmed receipt requires operator inspection.
 Run files are under `<stateDir>/planning-ntk/<workspace-hash>/runs`.
 A prepared run processes one ticket. It does not add a second selection loop to Dolber.
+
+## Blocked-ticket dispatcher
+
+Dolber starts lanes for `open` tickets. A failed lane leaves its ticket `blocked`,
+and review findings arrive as `blocked` tickets too. The dispatcher walks that pile:
+
+```sh
+node ./planning-ntk/dispatch.mjs /path/to/config.json --dry-run   # show the queue
+node ./planning-ntk/dispatch.mjs /path/to/config.json --once      # plan one ticket
+node ./planning-ntk/dispatch.mjs /path/to/config.json             # loop
+```
+
+It uses Dolber's configuration. Each tick it reads `blocked` tickets with Dolber's
+tags except `planning.dispatchTag` (planning removes that tag from a ticket it
+leaves blocked), takes the longest-blocked one, and runs this workflow for it.
+A ticket unchanged since the last attempt is skipped, so NOT_READY does not loop.
+A ticket with a retained `<sourceRoot>/.worktrees/<ticket>` is reported once and
+left for an operator. One dispatcher per workspace runs at a time. The interval is
+`planning.dispatchIntervalSeconds`, else `intervalSeconds`, else 60. State and logs
+are in `<stateDir>/planning-ntk/<workspace-hash>/dispatch.json` and `dispatch-logs/`.
