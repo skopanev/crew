@@ -53,6 +53,7 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | READY, several Tasks | Create children with correct prerequisites. Put the parent in `to_review` without its dispatch tag. |
 | NOT_READY | Keep the source `blocked`, remove its dispatch tag, and attach the concrete reason. |
 | NEEDS_HUMAN | Set `to_review`, assign the named person, remove its dispatch tag, and attach the exact decision. |
+| Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
 
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
 Children never depend on the parent. Each child has one module and its own checks.
@@ -64,7 +65,8 @@ The workflow does not close the parent automatically.
 
 Active or completed tickets and live or unresolved Lane runs are excluded.
 An existing `.worktrees/<ticket>` requires operator inspection. The planner does not delete it.
-An unchanged processed failure is refused until evidence, source, or the ticket changes.
+An unchanged processed verdict is refused until evidence, source, or the ticket changes.
+An incomplete run is not a verdict and is never recorded as processed.
 Text limits come from NTK metadata. The workflow refuses overflow without truncation.
 Unread attachments remain listed by filename. Missing required evidence blocks readiness.
 

@@ -189,18 +189,10 @@ async function publish(input) {
   return activate(input, receipt, receiptFile, source);
 }
 
-async function failed(input) {
-  const source = await unchanged(input);
-  await attachReport(source.id, input.workspace, `planning-ntk-failure-${input.runId}.txt`, input.reason);
-  await unchanged(input);
-  await request('PATCH', route(source.id), {}, {workspace: input.workspace, status: 'blocked', tag_edits: [`-${input.dispatchTag}`]});
-  return {verdict: 'NOT_READY', id: source.id, reason: input.reason};
-}
-
 try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const action = process.argv[2];
-  const result = await ({snapshot, publish, failed}[action])(input);
+  const result = await ({snapshot, publish}[action])(input);
   process.stdout.write(JSON.stringify(result) + '\n');
 } catch (error) {
   console.error(`planning-ntk: ${error.message}`);

@@ -235,13 +235,11 @@ def fail(reason=None):
     errors = [read(path) for path in target.glob("error-*.json")]
     if errors:
         reason += "\n" + "\n".join(item["reason"] for item in errors)
-    result = {"verdict": "NOT_READY", "reason": reason, "published": False}
-    if (target / "ntk-input.json").exists() and (target / "config.json").exists():
-        try:
-            result = ntk("failed", {**publication_input(), "reason": reason})
-            remember(result)
-        except Exception as error:
-            result["publication_error"] = str(error)
+    # A run that did not complete has no verdict about the ticket: a tool, an
+    # agent or the environment failed. Leave the ticket and the processed-input
+    # memory unchanged so the same ticket can be planned again after the fix.
+    # Only finish() publishes, after the plan and its critics.
+    result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
     write(target / "result.json", result)
     signal("BLOCKED", json.dumps(result))
 
