@@ -123,7 +123,9 @@ def prepare():
     write(target / "ntk-input.json", source)
     write(target / "config.json", settings)
     evidence = []
-    for item in source["attachments"]:
+    attachments = source["attachments"] + [dict(item, source_ticket=parent["source"]["ticket"]["id"])
+        for parent in source.get("parents", []) for item in parent["attachments"]]
+    for item in attachments:
         metadata = {key: value for key, value in item.items() if key != "content"}
         if item.get("content") is not None:
             file = target / "ntk-attachments" / (digest(metadata) + ".txt")
@@ -133,8 +135,9 @@ def prepare():
         else:
             metadata["unread"] = True
         evidence.append(metadata)
-    context = {key: value for key, value in source.items() if key != "attachments"}
+    context = {key: value for key, value in source.items() if key not in ("attachments", "parents")}
     context["attachments"] = evidence
+    context["parents"] = [parent["source"] for parent in source.get("parents", [])]
     assignment = {"kind": "ntk", "workspace": settings["workspace"], "ticket": ticket,
         "ac": {"id": ticket["id"], "text": ticket.get("body") or ticket["title"]},
         "repositories": list(repositories.values()), "ntk": context,
@@ -187,6 +190,45 @@ def verify_checks(body, assignment):
             require(path.is_file(), f"verification test does not exist: {value}")
 
 
+MAX_DECOMPOSITION_DEPTH = 3
+
+
+def validate_decomposition(plan, assignment):
+    depth = max((item["depth"] for item in assignment["ntk"]["deps"].get("down", [])
+                 if not item.get("removed") and item["title"].startswith("[CLOSE AT NO DEPS] ")), default=0)
+    require(depth < MAX_DECOMPOSITION_DEPTH,
+            "Decomposition depth limit reached; prepare one leaf or return a concrete blocker")
+    for key in ("outcome", "necessity", "approach", "rationale"):
+        text(plan.get(key), "plan." + key)
+    strings(plan.get("alternatives"), "plan.alternatives")
+    require(plan.get("blockers") == [], "Blocked work cannot be decomposed")
+    require(plan.get("acceptance_checks") == [], "Decomposition does not define executable checks")
+    tasks = plan.get("tasks")
+    require(isinstance(tasks, list) and len(tasks) >= 2, "Decomposition needs at least two smaller children")
+    seen, outcomes, bodies = set(), set(), set()
+    repos = {r["id"]: r for r in assignment["repositories"]}
+    for task in tasks:
+        key = text(task.get("id"), "task.id")
+        require(key not in seen, "Duplicate decomposition child")
+        require(task.get("ac") == assignment["ac"]["id"], "Child must belong to the source ticket")
+        repo = repos.get(task.get("repository"))
+        require(repo is not None and any(m["name"] == task.get("module") for m in repo["modules"]),
+                "Child module is not in the input registry")
+        text(task.get("title"), "child.title")
+        outcome = text(task.get("outcome"), "child.outcome")
+        require(outcome not in outcomes, "Children must have distinct outcomes")
+        body = text(task.get("body"), "child.body")
+        require(body != assignment["ticket"].get("body") and body not in bodies,
+                "A child must not copy the source or another child")
+        dependencies = strings(task.get("depends_on"), "child.depends_on", empty=True)
+        require(set(dependencies).issubset(seen), "Children need prerequisite order without cycles")
+        require(not any(task.get(field) for field in ("steps", "checks", "write_paths", "reuse", "tasks")),
+                "Decompose only one level; prepare each child in a later pass")
+        seen.add(key)
+        outcomes.add(outcome)
+        bodies.add(body)
+
+
 def validate_plan(plan, assignment):
     verdict = plan.get("ntk", {}).get("verdict")
     require(verdict in ("READY", "NOT_READY", "NEEDS_HUMAN"), "Invalid NTK planning verdict")
@@ -205,7 +247,13 @@ def validate_plan(plan, assignment):
             require(len(title) <= assignment["ntk"]["meta"]["limits"]["title"],
                     "Human decision title exceeds the NTK limit; shorten it before planning")
         return
-    validation.plan(plan, assignment)
+    decomposing = plan.get("disposition") == "decompose"
+    if decomposing:
+        validate_decomposition(plan, assignment)
+    else:
+        validation.plan(plan, assignment)
+        require(plan["disposition"] != "implement" or len(plan["tasks"]) == 1,
+                "Prepare one Task per pass; use decompose for several children")
     meta = assignment["ntk"]["meta"]
     limits = meta["limits"]
     allowed = {(m["project"], m["name"]) for m in meta["modules"] if not m.get("archived")}
@@ -216,7 +264,8 @@ def validate_plan(plan, assignment):
         require(len(body) <= limits["body"] and len(task["title"]) <= limits["title"],
                 f"NTK text limit exceeded in {task.get('id')}: body {len(body)}/{limits['body']}, "
                 f"title {len(task['title'])}/{limits['title']} characters; move rationale to the plan report or split the Task")
-        require(len(set(task["write_paths"])) <= 10, "Task exceeds the ten-file budget; split it")
+        if not decomposing:
+            require(len(set(task["write_paths"])) <= 10, "Task exceeds the ten-file budget; split it")
         strings(task.get("acceptance"), "Task acceptance")
         strings(task.get("covers"), "source acceptance coverage")
         external = strings(task.get("external_dependencies"), "external dependencies", empty=True)
@@ -306,7 +355,7 @@ def finish():
     reviews, _, _ = shared.verify_context(assignment, plan)
     retained(config(), os.environ["PLANNING_TICKET"])
     result = publish(plan, reviews)
-    signal("READY" if result["verdict"] == "READY" else "BLOCKED", json.dumps(result))
+    signal("READY" if result["verdict"] in ("READY", "DECOMPOSED") else "BLOCKED", json.dumps(result))
 
 
 def publish(plan, reviews):

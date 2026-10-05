@@ -217,7 +217,7 @@ export async function tick(configFile, config, {dryRun = false} = {}) {
   // fault does not walk the whole queue. Fix it, then start again. A published
   // NOT_READY is a verdict and is recorded like any other.
   const verdict = incomplete(result) ? 'FAILED' : result.verdict ?? 'UNKNOWN';
-  const tone = verdict === 'READY' ? 'green' : ['NOT_READY', 'NEEDS_HUMAN'].includes(verdict) ? 'yellow' : 'red';
+  const tone = verdict === 'READY' ? 'green' : verdict === 'DECOMPOSED' ? 'blue' : ['NOT_READY', 'NEEDS_HUMAN'].includes(verdict) ? 'yellow' : 'red';
   console.log(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
   field('Exit', run.status ?? run.signal ?? run.error?.message ?? 'unknown');
   if (result?.reason || (run.status !== 0 && last)) field('Reason', paint(tone, result?.reason || last));

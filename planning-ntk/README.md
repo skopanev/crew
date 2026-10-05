@@ -56,7 +56,7 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | Result | NTK state |
 | --- | --- |
 | READY, one Task | Update the source ticket and put it in `open` with dispatch tags. |
-| READY, several Tasks | Create children with correct prerequisites. Put the parent in `to_review` without its dispatch tag. |
+| READY, decompose | Create smaller children in `blocked` with dispatch tags for later planning. Put the parent in `to_review`. |
 | NOT_READY | Keep the source `blocked`, remove its dispatch tag, and attach the concrete reason. |
 | Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
 | NEEDS_HUMAN | Set `blocked`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
@@ -64,11 +64,21 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | Publication started and failed | Record `publication_uncertain`; part of the result may be in NTK. An operator inspects the ticket before another run. |
 
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
-Children never depend on the parent. Each child has one module and its own checks.
+Children never depend on the parent. Each child has one module and its own acceptance criteria.
+One pass divides only one level or prepares one executable Task.
+Decomposition children have no implementation steps or executable checks yet.
+They stay blocked, so Dolber cannot execute them. The planner selects each child in a later pass.
+It divides that child again or prepares it for the lane. Each split must reduce the scope.
+At coordinator graph distance three, the planner must prepare a leaf or report a concrete blocker.
+This conservative bound can also count a coordinator reached through a sibling prerequisite.
 External prerequisites go only to children that need them.
+Each dependency has a concrete reason in the child's body. Independent children remain parallel.
 The planner removes `[HUMAN]` when the next verdict no longer needs a person.
 After the decision, record it in the ticket and restore the dispatch tag to plan it again.
-All prepared children get dispatch tags, including children waiting for prerequisites.
+All children get dispatch tags, including children waiting for prerequisites.
+Decomposition returns `DECOMPOSED`. Only a prepared leaf returns `READY` for execution.
+Each child reads coordinator bodies and attachments through the existing dependency graph.
+Source reports remain on their original tickets. The planner does not copy or nest attachment content.
 The workflow does not close the parent automatically.
 
 ## Failure and retry
@@ -90,6 +100,7 @@ Child creation records each POST before sending it in a stable `publication.json
 An uncertain POST stops. It never creates a replacement child automatically.
 If NTK refuses a duplicate, inspect the refusal and receipt before another attempt.
 Partial publication leaves unactivated children blocked without the dispatch tag.
+Decomposition children start without tags. The workflow restores all source and dispatch tags after it confirms the parent.
 Resume a confirmed parent publication from the same run:
 
 ```sh
