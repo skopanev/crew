@@ -65,6 +65,10 @@ def code_coverage(report, calls, assignment):
             if (path.get("status") == "no_recorded_issue" and path.get("freshness") == "metadata_match"
                     and not path.get("coverage")):
                 covered.add((project, path.get("path")))
+            elif path.get("freshness") == "not_tracked":
+                # CBM does not index this file at all (for example helper scripts).
+                # Nothing can be stale; the researcher read it in the worktree.
+                covered.add((project, path.get("path")))
     seen, inspected_keys = set(), set()
     for item in inspected:
         repo = repos.get(item.get("repository"))
