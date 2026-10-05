@@ -47,7 +47,7 @@ class WorkflowTests(unittest.TestCase):
             self.skipTest("set MEDULLA_BIN to the installed Medulla executable")
         self.env = {**os.environ, **self.joppa.env, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "MEDULLA_BIN": executable, "PLANNING_TEST_ROOT": str(self.root),
-                    "EQUILL_BIN": str(self.bin / "fake-equill"), "CBM_BIN": str(self.bin / "fake-cbm"),
+                    "EQUILL_BIN": str(self.bin / "fake-equill"), "CREW_SKIP_ROLE_CHECK": "1", "CBM_BIN": str(self.bin / "fake-cbm"),
                     "MEDULLA_STREAM": "0", "MEDULLA_RETRY_DELAY_S": "0",
                     # Fake providers need no host AGY trust; native adapters are
                     # still exercised, but no real account/agent is invoked.
