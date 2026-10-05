@@ -133,7 +133,10 @@ try {
           .map(name => path.join(gates, name, 'receipt.json')).filter(file => fs.existsSync(file))
           .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs) : [];
         for (const check of (receipts[0] ? read(receipts[0]).checks : []) || []) {
-          if (check.exit_code !== 0) announce(`[lane] FAILED check: ${check.command} · exit ${check.exit_code} · log: ${check.log}`);
+          if (check.exit_code !== 0 || check.stdout_matches === false) {
+            const command = typeof check.command === 'string' ? check.command : JSON.stringify(check.command);
+            announce(`[lane] FAILED check: ${command} · exit ${check.exit_code} · stdout match ${check.stdout_matches ?? true} · log: ${check.log}`);
+          }
         }
       }
     } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }

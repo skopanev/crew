@@ -10,10 +10,12 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import signal
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -26,6 +28,40 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def acceptance_check(check):
+    if (not isinstance(check, dict) or set(check) - {"ac", "argv", "stdout"}
+            or not isinstance(check.get("ac"), str) or not check["ac"].strip()):
+        raise ValueError("acceptance check requires ac, argv and optional stdout")
+    argv = check.get("argv")
+    if (not isinstance(argv, list) or not argv
+            or any(not isinstance(arg, str) or "\0" in arg for arg in argv)
+            or ("stdout" in check and not isinstance(check["stdout"], str))):
+        raise ValueError("invalid acceptance check arguments or stdout")
+    paths = []
+    output_required = False
+    if (len(argv) >= 5 and argv[:2] == ["git", "check-attr"]
+            and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", argv[2])
+            and argv[3] == "--"):
+        paths, output_required = argv[4:], True
+    elif len(argv) >= 4 and argv[:3] == ["git", "ls-files", "--"]:
+        paths, output_required = argv[3:], True
+    elif len(argv) >= 5 and argv[:4] == ["git", "ls-files", "--error-unmatch", "--"]:
+        paths = argv[4:]
+    elif (len(argv) == 5 and argv[:3] == ["grep", "-Fq", "--"] and argv[3]
+          and "\n" not in argv[3] and "\r" not in argv[3]):
+        paths = argv[4:]
+    elif len(argv) == 3 and argv[0] == "test" and argv[1] in {"-e", "-f", "-d", "-s"}:
+        paths = argv[2:]
+    if not paths or (output_required and "stdout" not in check):
+        raise ValueError("unsupported acceptance check or missing exact stdout")
+    root = Path.cwd().resolve()
+    for value in paths:
+        path = Path(value)
+        if not value or path.is_absolute() or not path.resolve().is_relative_to(root):
+            raise ValueError(f"check path must stay inside this checkout: {value}")
+    return check
+
+
 def plan():
     commands = json.loads(os.environ.get("gate_commands", "[]"))
     if not isinstance(commands, list) or not commands or any(
@@ -34,24 +70,33 @@ def plan():
         raise ValueError("no valid gate commands declared by the launcher")
     if os.environ.get("VERIFY_ONLY") == "true":
         tests = json.loads((Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts/ticket-checks.json").read_text())
-        if not isinstance(tests, list) or not tests or any(
-            not isinstance(command, str) or not command.strip() for command in tests
-        ):
-            raise ValueError("verification requires test-file paths in ticket-checks.json")
-        runner = json.loads(os.environ.get("ticket_test_command", "[]"))
-        if not isinstance(runner, list) or not runner or any(
-            not isinstance(arg, str) or not arg.strip() for arg in runner
-        ):
-            raise ValueError("verification requires testCommand in dispatcher config")
+        if not isinstance(tests, list) or not tests:
+            raise ValueError("verification requires checks in ticket-checks.json")
         root = Path.cwd().resolve()
-        paths = []
+        paths, checks = [], []
         for test in tests:
+            if isinstance(test, dict):
+                checks.append(acceptance_check(test))
+                continue
+            if not isinstance(test, str) or not test.strip():
+                raise ValueError("verification requires test paths or acceptance checks")
             path = Path(test)
             if path.is_absolute() or not path.is_file() or not path.resolve().is_relative_to(root):
                 raise ValueError(f"test must be an existing file inside this checkout: {test}")
             paths.append("./" + str(path.resolve().relative_to(root)))
-        commands = [shlex.join([*runner, *dict.fromkeys(paths)]), *commands]
-    return list(dict.fromkeys(commands))
+        if paths:
+            runner = json.loads(os.environ.get("ticket_test_command", "[]"))
+            if not isinstance(runner, list) or not runner or any(
+                not isinstance(arg, str) or not arg.strip() for arg in runner
+            ):
+                raise ValueError("verification requires testCommand in dispatcher config")
+            checks.insert(0, shlex.join([*runner, *dict.fromkeys(paths)]))
+        commands = [*checks, *commands]
+    unique = []
+    for command in commands:
+        if command not in unique:
+            unique.append(command)
+    return unique
 
 
 def identity():
@@ -94,9 +139,13 @@ def run(root):
         log = folder / f"{index + 1}.log"
         started = time.time()
         timed_out = False
-        with log.open("xb") as output:
-            process = subprocess.Popen(["bash", "-euo", "pipefail", "-c", command],
-                                       stdout=output, stderr=subprocess.STDOUT,
+        structured = isinstance(command, dict)
+        stdout_matches = True
+        argv = command["argv"] if structured else ["bash", "-euo", "pipefail", "-c", command]
+        with log.open("xb") as output, tempfile.TemporaryFile() as errors:
+            process = subprocess.Popen(argv,
+                                       env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"} if structured else None,
+                                       stdout=output, stderr=errors if structured else subprocess.STDOUT,
                                        start_new_session=True)
             try:
                 rc = process.wait(timeout=900)
@@ -104,15 +153,22 @@ def run(root):
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
                 timed_out, rc = True, 124
+            if structured:
+                output.flush()
+                if "stdout" in command:
+                    stdout_matches = log.read_bytes() == command["stdout"].encode("utf-8")
+                errors.seek(0)
+                output.write(errors.read())
         receipt["checks"].append({"command": command, "cwd": who["cwd"],
                                   "exit_code": rc, "timed_out": timed_out,
+                                  "stdout_matches": stdout_matches,
                                   "started_at": started, "finished_at": time.time(),
                                   "log": str(log), "sha256": digest(log)})
-        print(f"gate {index + 1}: rc={rc} log={log}", file=sys.stderr)
-        if rc != 0:
+        print(f"gate {index + 1}: rc={rc} stdout_matches={stdout_matches} log={log}", file=sys.stderr)
+        if rc != 0 or not stdout_matches:
             break
     receipt["passed"] = (len(receipt["checks"]) == len(commands)
-                         and all(c["exit_code"] == 0 for c in receipt["checks"])
+                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"])
                          and unchanged(tree) and git("rev-parse", "HEAD") == base)
     path = folder / "receipt.json"
     with path.open("x") as output:
@@ -151,6 +207,7 @@ def verify(root):
     for command, check in zip(receipt["commands"], receipt["checks"]):
         log = Path(check["log"]).resolve()
         if (check["command"] != command or check["exit_code"] != 0
+                or (isinstance(command, dict) and check.get("stdout_matches") is not True)
                 or not log.is_relative_to(path.parent) or digest(log) != check["sha256"]):
             raise ValueError("gate result or log does not match the receipt")
     print(path)
