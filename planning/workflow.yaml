@@ -7,8 +7,8 @@ timeout: 6000
 defaults:
   timeout: 60
 vars:
-  RESEARCH_MODEL: gpt-6-astra
-  DESIGN_MODEL: claude-opus-5
+  RESEARCH_MODEL: gpt-6.1-sol
+  DESIGN_MODEL: claude-opus-5-5
   PLANNING_PYTHON: python3
   OUTPUT_CONTRACT: ''
   critique: ''
@@ -130,7 +130,7 @@ nodes:
     inputs:
       - slug: necessity
         harness: codex
-        model: gpt-6-astra
+        model: gpt-6.1-sol
         flag: --ignore-user-config
         question: Is this change necessary for the agreed outcome? Is existing behavior sufficient? Does the plan add unrequested scope? Respect confirmed owner decisions and surface contradictions without cancelling them yourself.
       - slug: simplicity
