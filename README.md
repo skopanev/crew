@@ -86,6 +86,17 @@ python3 -m unittest discover -s lane/tests -v
 ```
 
 The image extends `broker-box` with Medulla and repository check tools.
+Build the optional Chromium variant for browser tests:
+
+```sh
+docker build -t medulla-crew-chromium:latest - < Dockerfile.chromium
+```
+
+Set `image` to `medulla-crew-chromium:latest` in the local dispatcher configuration.
+The variant installs Chromium system libraries with Playwright `1.63.0`.
+Set `PLAYWRIGHT_VERSION` to match the project's version and `RUNTIME_USER` to match the base image user.
+The default runtime user is `501:501`. Browser downloads remain part of the project setup.
+
 Each lane uses the broker's on-demand private Docker engine for integration tests.
 Its Docker storage is removed with the lane container. No host Docker socket is mounted.
 Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
