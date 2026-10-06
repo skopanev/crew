@@ -301,6 +301,12 @@ def validate_plan(plan, assignment):
     limits = meta["limits"]
     allowed = {(m["project"], m["name"]) for m in meta["modules"] if not m.get("archived")}
     prerequisites = {r["ticket"]["id"] for r in assignment["ntk"]["prerequisites"]}
+    descendants = {item["id"] for item in assignment["ntk"]["deps"].get("down", [])}
+    prerequisites.update(item["ticket"]["id"] for item in assignment["ntk"].get("referenced", [])
+                         if item.get("workspace") == assignment["workspace"] and item.get("ticket")
+                         and item["ticket"].get("project") in meta["projects"]
+                         and not item["ticket"].get("removed") and not item["ticket"].get("removed_at"))
+    prerequisites.difference_update(descendants | {assignment["ticket"]["id"]})
     for task in plan["tasks"]:
         require((task.get("project"), task["module"]) in allowed, "Task project/module pair is not registered in NTK")
         body = text(task.get("body"), "Task body")
@@ -310,7 +316,7 @@ def validate_plan(plan, assignment):
         strings(task.get("acceptance"), "Task acceptance")
         strings(task.get("covers"), "source acceptance coverage")
         external = strings(task.get("external_dependencies"), "external dependencies", empty=True)
-        require(set(external).issubset(prerequisites), "External dependency is not in the verified prerequisite graph")
+        require(set(external).issubset(prerequisites), "External dependency is not a verified prerequisite or cited ticket")
     if plan["disposition"] == "verify_existing":
         require(assignment["ticket"].get("module"), "Verification needs a source module")
         body = text(plan["ntk"].get("body"), "verification body")

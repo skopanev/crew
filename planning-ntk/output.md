@@ -72,6 +72,11 @@ not rationale: rationale goes to the plan report. If a Task still does not fit, 
 Tasks use prerequisite order. All Tasks together cover every source criterion.
 Use the source ticket id as task.ac. Match project and module to NTK metadata.
 Use external dependencies only where needed. Never make a child depend on its parent.
+Existing dependencies and verified tickets in ntk.referenced are eligible.
+Missing or unread references are not eligible. Do not claim their coverage.
+Read referenced ticket bodies from details_file. The inline context contains metadata only.
+Cite ticket IDs for referenced facts used in the plan or diagnosis.
+The source ticket and its dependants cannot become dependencies.
 Add a dependency only when the child needs that ticket's result before it can execute.
 Explain each dependency in the child's body. Do not chain independent children for ordering.
 Do not copy all source prerequisites to every child. Give each child only its required prerequisites.

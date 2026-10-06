@@ -14,6 +14,10 @@ const optional = file => {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 };
 const plain = value => String(value).replace(/\x1b\[[0-9;]*m/g, '').replace(/[\x00-\x1f\x7f]/g, ' ');
+const startFormat = new Intl.DateTimeFormat('sv-SE', {
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
 const clip = (value, width) => {
   const text = Array.from(plain(value));
   return text.length > width ? text.slice(0, Math.max(0, width - 1)).join('') + '…' : text.join('');
@@ -90,11 +94,11 @@ export function createDashboard(config, paint) {
     runs.sort((a, b) => Number(Boolean(a.result)) - Number(Boolean(b.result)) ||
       Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const recent = runs.slice(0, 15);
-    const statusWidth = Math.max(6, ...recent.map(run => statusFor(run).length));
-    const stageWidth = 40;
+    const statusWidth = Math.min(8, Math.max(6, ...recent.map(run => statusFor(run).length)));
+    const stageWidth = 24;
     const ticketWidth = Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length));
-    const runWidth = Math.max(36, width - statusWidth - ticketWidth - stageWidth - 17);
-    const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 16) / width);
+    const runWidth = 36;
+    const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 37) / width);
     const folders = new Set(runs.map(run => run.runFolder));
     const active = runs.filter(run => !run.result).length +
       state.containers.filter(container => !folders.has(container.runFolder)).length;
@@ -105,7 +109,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  ${'STARTED'.padEnd(19)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Account for wrapped rows without shortening the ticket or run ID.
     const visible = runs.slice(0, Math.min(15,
@@ -116,10 +120,14 @@ export function createDashboard(config, paint) {
       const tone = status === 'READY' ? 'ready' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'blue';
       const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       const runId = path.basename(run.dir);
-      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(worker?.startedAt || run.createdAt, result?.finishedAt || Date.now())}`;
+      const start = worker?.startedAt || run.createdAt;
+      const date = new Date(start);
+      const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
+      const label = clip(status, statusWidth).padEnd(statusWidth);
+      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${started.padEnd(19)}  ${duration(start, result?.finishedAt || Date.now())}`;
       output.push(status === 'READY'
-        ? paint('ready', `${status.padEnd(statusWidth)}  ${details}`)
-        : `${paint(status === 'LOST' ? 'red' : tone, status.padEnd(statusWidth))}  ${result ? paint('finished', details) : details}`);
+        ? paint('ready', `${label}  ${details}`)
+        : `${paint(status === 'LOST' ? 'red' : tone, label)}  ${result ? paint('finished', details) : details}`);
     }
     if (!runs.length) output.push('No lane runs yet');
     output.push(...footer);
