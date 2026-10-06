@@ -109,7 +109,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tickets: ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
       '─'.repeat(width),
-      `${'STATUS'.padEnd(statusWidth)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  ${'STARTED'.padEnd(19)}  TIME`];
+      `${'STARTED'.padEnd(19)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     // Account for wrapped rows without shortening the ticket or run ID.
     const visible = runs.slice(0, Math.min(15,
@@ -124,10 +124,11 @@ export function createDashboard(config, paint) {
       const date = new Date(start);
       const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
       const label = clip(status, statusWidth).padEnd(statusWidth);
-      const details = `${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}  ${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${started.padEnd(19)}  ${duration(start, result?.finishedAt || Date.now())}`;
+      const identity = `${started.padEnd(19)}  ${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}`;
+      const details = `${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(start, result?.finishedAt || Date.now())}`;
       output.push(status === 'READY'
-        ? paint('ready', `${label}  ${details}`)
-        : `${paint(status === 'LOST' ? 'red' : tone, label)}  ${result ? paint('finished', details) : details}`);
+        ? paint('ready', `${identity}  ${label}  ${details}`)
+        : `${result ? paint('finished', identity) : identity}  ${paint(status === 'LOST' ? 'red' : tone, label)}  ${result ? paint('finished', details) : details}`);
     }
     if (!runs.length) output.push('No lane runs yet');
     output.push(...footer);
