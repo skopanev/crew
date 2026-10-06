@@ -54,7 +54,7 @@ def collect():
                 if kind not in {"agent.process.v1", "agent.step.v1", "agent.role.v1", "agent.rule.v1"}:
                     raise ValueError(f"Unexpected contract record: {kind}")
                 if payload.get("project") is not None:
-                    raise ValueError(f"Project-specific record in {name}")
+                    continue
                 owner = payload.get("actor") or payload.get("role") or payload.get("process")
                 if owner and owner != name:
                     raise ValueError(f"Unexpected role in {name}: {owner}")
