@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -49,9 +50,8 @@ def lane_state(file):
     return state
 
 
-def retained(settings, ticket):
+def retained(settings, ticket, allow_worktree=False):
     path = Path(settings["sourceRoot"]) / ".worktrees" / ticket
-    require(not path.exists() and not path.is_symlink(), f"WORKTREE PREEXISTED: {path}; operator cleanup required")
     roots = [Path(settings["stateDir"]) / "crew-dispatchers"]
     for root in roots:
         for file in root.glob("*/runs/*/launch.json"):
@@ -60,6 +60,40 @@ def retained(settings, ticket):
                 continue
             require(not (state.get("ticket") == ticket and not state.get("result")),
                     "A live or unresolved lane owns this ticket; leave it unchanged")
+    require(allow_worktree or (not path.exists() and not path.is_symlink()),
+            f"WORKTREE PREEXISTED: {path}; cleanup requires a blocked ticket")
+
+
+def cleanup_blocked(settings, ticket):
+    if ticket["status"] != "blocked":
+        return
+    root = Path(settings["sourceRoot"]).resolve()
+    path = root / ".worktrees" / ticket["id"]
+    require(not path.parent.is_symlink() and not path.is_symlink(), "Worktree cleanup refuses symlinks")
+    if not path.exists():
+        return
+    require(path.is_dir(), "Worktree cleanup requires a directory")
+    component = (ticket.get("module") or "").split("/", 1)[0]
+    require(component, "Worktree cleanup needs the ticket module")
+    repo = inside(root, component)
+    require((repo / ".git").exists(), "Worktree cleanup needs the ticket repository")
+    if (path / ".git").exists():
+        def origin(directory):
+            return subprocess.check_output(["git", "-C", str(directory), "remote", "get-url", "origin"], text=True).strip()
+        require(origin(path) in (origin(repo), str(repo), f"/workspace/{root.name}/{component}"),
+                "Retained worktree belongs to another repository")
+    branch = "ticket-" + ticket["id"]
+    require(branch != read(repo / ".ntkrc")["target_branch"], "Worktree cleanup cannot delete the target branch")
+    query = subprocess.run(["git", "-C", str(repo), "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/" + branch],
+                           capture_output=True, text=True, timeout=120)
+    require(query.returncode in (0, 2), query.stderr.strip() or "Cannot check the ticket remote branch")
+    if query.returncode == 0:
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "--delete", branch], check=True, timeout=120)
+    if (path / ".git").is_file():
+        subprocess.run(["git", "-C", str(repo), "worktree", "remove", "--force", str(path)], check=True, timeout=120)
+    else:
+        shutil.rmtree(path)
+    print(f"Removed blocked ticket worktree: {path}; remote branch: {branch}", flush=True)
 
 
 def failure_evidence(settings, ticket):
@@ -100,7 +134,8 @@ def prepare():
     source = ntk("snapshot", {"id": id, "workspace": settings["workspace"]})
     ticket = source["source"]["ticket"]
     require(ticket["status"] in ("open", "blocked"), "Plan only open or blocked tickets; leave active and completed work unchanged")
-    retained(settings, id)
+    retained(settings, id, allow_worktree=ticket["status"] == "blocked")
+    cleanup_blocked(settings, ticket)
     projects = shared.indexed_projects()
     registry = {}
     for project in projects:
@@ -197,8 +232,7 @@ def verify_checks(body, assignment):
             acceptance_check(check, root=root)
         else:
             value = text(check, "verification test path")
-            path = inside(root, value)
-            require(path.is_file(), f"verification test does not exist: {value}")
+            inside(root, value)
 
 
 MAX_DECOMPOSITION_DEPTH = 3

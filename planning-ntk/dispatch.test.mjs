@@ -19,11 +19,11 @@ test('a ticket changed after the last attempt is planned again', () => {
   assert.deepEqual(ready.map(t => t.id), ['B']);
 });
 
-test('a retained lane worktree holds the ticket for an operator', () => {
+test('a retained lane worktree remains eligible for blocked-ticket planning', () => {
   const {ready, held} = candidates([ticket('A', '1'), ticket('W', '1')], {tickets: {}}, '/src',
     file => file === path.join('/src', '.worktrees', 'W'));
-  assert.deepEqual(ready.map(t => t.id), ['A']);
-  assert.deepEqual(held.map(t => t.id), ['W']);
+  assert.deepEqual(ready.map(t => t.id), ['A', 'W']);
+  assert.deepEqual(held, []);
 });
 
 test('settings select blocked tickets by every configured tag and reject an empty filter', t => {

@@ -49,16 +49,15 @@ export function settings(file) {
   };
 }
 
-// A ticket is a candidate when it changed since our last attempt and no lane
-// worktree is retained for it (planning-ntk refuses those; an operator decides).
+// Planning removes retained worktrees for selected blocked tickets.
 export const MAX_DEFERRALS = 3;
-export function candidates(tickets, state, sourceRoot, exists = fs.existsSync) {
+export function candidates(tickets, state) {
   const ready = [], held = [];
   for (const ticket of tickets) {
     if (state.tickets?.[ticket.id]?.stamp === ticket.updated_at) continue;
     const deferred = state.tickets?.[ticket.id]?.deferrals;
     const exhausted = deferred?.stamp === ticket.updated_at && deferred.count >= MAX_DEFERRALS;
-    (exhausted || exists(path.join(sourceRoot, '.worktrees', ticket.id)) ? held : ready).push(ticket);
+    (exhausted ? held : ready).push(ticket);
   }
   const age = ticket => ticket.current_status_at || ticket.updated_at || '';
   ready.sort((a, b) => age(a).localeCompare(age(b)) || a.id.localeCompare(b.id));
@@ -170,7 +169,7 @@ export function deferForDrift(result) {
 export async function tick(configFile, config, {dryRun = false, deferred = new Set()} = {}) {
   const state = readState(config);
   state.tickets ??= {};
-  const {ready, held} = candidates(await blockedTickets(config), state, config.sourceRoot);
+  const {ready, held} = candidates(await blockedTickets(config), state);
   divider();
   console.log(paint('blue', 'PLANNER'));
   field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
@@ -178,10 +177,8 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   for (const ticket of held) {
     if (state.tickets[ticket.id]?.held !== ticket.updated_at) {
       const drift = state.tickets[ticket.id]?.deferrals;
-      const exhausted = drift?.stamp === ticket.updated_at && drift.count >= MAX_DEFERRALS;
-      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${exhausted ? `${drift.count} input changes` : `.worktrees/${ticket.id}`}`);
-      console.log(exhausted ? '  Check the changing inputs. Update the ticket when it is ready for another attempt.' :
-        '  Inspect it, then remove it or reopen the ticket.');
+      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${drift.count} input changes`);
+      console.log('  Check the changing inputs. Update the ticket when it is ready for another attempt.');
       if (!dryRun) state.tickets[ticket.id] = {...state.tickets[ticket.id], held: ticket.updated_at};
     }
   }
