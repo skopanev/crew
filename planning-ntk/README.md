@@ -34,6 +34,7 @@ Set `planning.tagMatch` to `any` for OR or `all` for AND. The default is `all`.
 `strict` controls exact tag matching. It does not control OR or AND.
 The planner adds all configured dispatch tags only after it confirms the plan and graph.
 NTK selects eligible tickets after their prerequisites close.
+Unfinished prerequisites alone do not block planning. Plan from their declared outputs and preserve required dependencies.
 
 ## Process
 
@@ -46,7 +47,7 @@ NTK selects eligible tickets after their prerequisites close.
 
 The models and critic seats are the same as [Planning](../planning/README.md).
 The planner reads canonical repositories. It does not update Git, index a worktree,
-implement code, run project checks, or clean retained work.
+implement code or run project checks.
 Existing shared CBM must cover the inspected current files.
 A Task body contains the required edit steps, acceptance criteria, and executable checks.
 Attachments carry the full plan and reviews. They do not replace body instructions.
@@ -86,7 +87,7 @@ Each dependency has a concrete reason in the child's body. Independent children 
 The planner removes `[HUMAN]` when the next verdict no longer needs a person.
 After the decision, record it in the ticket and restore the dispatch tag to plan it again.
 All children get dispatch tags, including children waiting for prerequisites.
-Decomposition returns `DECOMPOSED`. Only a prepared leaf returns `READY` for execution.
+Decomposition returns `DECOMPOSED`. A prepared leaf returns `READY`; NTK dependencies still control execution.
 Each child reads coordinator bodies and attachments through the existing dependency graph.
 Source reports remain on their original tickets. The planner does not copy or nest attachment content.
 The workflow does not close the parent automatically.
@@ -94,7 +95,8 @@ The workflow does not close the parent automatically.
 ## Failure and retry
 
 Active or completed tickets and live or unresolved Lane runs are excluded.
-An existing `.worktrees/<ticket>` requires operator inspection. The planner does not delete it.
+Before planning a blocked ticket, remove its retained `.worktrees/<ticket>` and remote `ticket-<id>` branch.
+Refuse cleanup when a live or unresolved Lane run owns the ticket. Open tickets do not receive this cleanup.
 An unchanged processed verdict is refused until evidence, source, or the ticket changes.
 An incomplete run is not a verdict and is never recorded as processed.
 Text limits come from NTK metadata. The workflow refuses overflow without truncation.
