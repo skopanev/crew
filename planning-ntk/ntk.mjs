@@ -118,21 +118,24 @@ async function publish(input) {
   if (receipt.parentRevision) return activate(input, receipt, receiptFile, original);
   const source = await unchanged(input);
   const title = source.title.replace(/^\[HUMAN\] /, '');
-  const report = JSON.stringify({source: source.id, plan, reviews: input.reviews}, null, 2);
+  const report = JSON.stringify({source: source.id, source_title: source.title, plan, reviews: input.reviews}, null, 2);
+  const prefixedTitle = prefix => {
+    const limit = input.snapshot.meta.limits.title;
+    require(Number.isInteger(limit) && limit > Array.from(prefix).length,
+      'NTK title limit cannot fit the required prefix');
+    return prefix + Array.from(title.replace(/^\[CLOSE AT NO DEPS\] /, ''))
+      .slice(0, limit - Array.from(prefix).length).join('');
+  };
   const update = (id, fields) => request('PATCH', route(id), {}, {workspace, ...fields});
   const tags = [...new Set([...(source.tags || []), ...input.dispatchTags])];
   const tasks = plan.tasks;
   const decomposing = plan.disposition === 'decompose';
   const stagedTags = decomposing ? [] : tags.filter(tag => tag !== dispatchTag);
   const split = decomposing || (plan.disposition === 'implement' && (tasks.length > 1 || tasks[0].project !== source.project));
-  require(!split || `[CLOSE AT NO DEPS] ${title}`.length <= input.snapshot.meta.limits.title,
-    'Coordinator title exceeds the NTK limit; tighten it before planning');
 
   if (plan.ntk.verdict !== 'READY') {
     const human = plan.ntk.verdict === 'NEEDS_HUMAN';
-    const blockedTitle = human ? `[HUMAN] ${title}` : title;
-    require(blockedTitle.length <= input.snapshot.meta.limits.title,
-      'Human decision title exceeds the NTK limit; shorten it before planning');
+    const blockedTitle = human ? prefixedTitle('[HUMAN] ') : title;
     await attachReport(source.id, workspace, `planning-ntk-${hash(plan).slice(0, 16)}.json`, report);
     await unchanged(input);
     await update(source.id, {status: 'blocked', title: blockedTitle,
@@ -196,10 +199,11 @@ async function publish(input) {
   const ids = tasks.map(task => receipt.children[task.id].id);
   await attachReport(source.id, workspace, `planning-ntk-${hash(plan).slice(0, 16)}.json`, report);
   await unchanged(input);
-  await update(source.id, {status: 'to_review', title: `[CLOSE AT NO DEPS] ${title}`,
+  const coordinatorTitle = prefixedTitle('[CLOSE AT NO DEPS] ');
+  await update(source.id, {status: 'to_review', title: coordinatorTitle,
     dep_set: [...new Set([...(source.deps || []), ...ids])], tag_edits: [`-${dispatchTag}`]});
   const parent = await ticket(source.id, workspace);
-  receipt.parent = {status: 'to_review', title: `[CLOSE AT NO DEPS] ${title}`,
+  receipt.parent = {status: 'to_review', title: coordinatorTitle,
     body: source.body, module: source.module, deps: [...new Set([...(source.deps || []), ...ids])],
     tags: (source.tags || []).filter(tag => tag !== dispatchTag)};
   require(sameFields(parent.ticket, receipt.parent), 'Parent publication was not confirmed');

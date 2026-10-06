@@ -91,7 +91,8 @@ def plan():
             ):
                 raise ValueError("verification requires testCommand in dispatcher config")
             checks.insert(0, shlex.join([*runner, *dict.fromkeys(paths)]))
-        commands = [*checks, *commands]
+        # Verification has no change set. Run the ticket's acceptance checks.
+        commands = checks
     unique = []
     for command in commands:
         if command not in unique:
