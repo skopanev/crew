@@ -67,6 +67,7 @@ nodes:
       _sc="$MEDULLA_RUN_DIR/artifacts/scout-contract.txt"
       if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
            --profile agent.context.target --role crew-lane-scout \
+           --project "$project_name" \
            --process crew-lane-scout --coordinate rules=none --json 2>"$_sc.err" \
          | jq -er '.content | select(type == "string" and test("\\S"))' > "$_sc.tmp"; then
         mv "$_sc.tmp" "$_sc"
@@ -272,6 +273,7 @@ nodes:
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
+      project_name: '{{var:project_name}}'
       EQUILL_STORE: '{{var:EQUILL_STORE}}'
       EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
     timeout: 3600
@@ -331,6 +333,7 @@ nodes:
       if [ ! -s "$qa" ]; then
         if equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
              --profile agent.context.target --role crew-lane-qa --process crew-lane-qa \
+             --project "$project_name" \
              --coordinate rules=none --json 2>"$qa.err" \
            | jq -er '.content | select(type == "string" and test("\\S"))' > "$qa.tmp"; then
           mv "$qa.tmp" "$qa"
