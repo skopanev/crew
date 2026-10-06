@@ -63,6 +63,14 @@ Attachments carry the full plan and reviews. They do not replace body instructio
 | NEEDS_HUMAN | Set `blocked`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
 | Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
 | Publication started and failed | Record `publication_uncertain`; part of the result may be in NTK. An operator inspects the ticket before another run. |
+| Input changed before any NTK write | Defer the ticket and continue the queue. Retry it in a later cycle. |
+
+The adapter marks publication before its first NTK write. Attachment uploads count as writes.
+Existing child receipts also require inspection after a failed resume.
+Deferred tickets keep their tags and have no processed stamp. A cycle does not select a deferred ticket again.
+After three deferrals, the ticket waits for an operator. Other tickets continue.
+Check the changing inputs, then update the ticket to permit another attempt.
+`--once` returns after its selected ticket, including a deferral.
 
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
 Generated prefixes fit the NTK title limit. The report keeps the full original title.
@@ -136,8 +144,8 @@ An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
 result. A ticket unchanged since the last attempt is skipped.
 If the source changed while a run planned (`code_drift`, nothing published), the
-dispatcher refreshes sources and plans the same ticket once more; a second drift
-stops the loop. A run without a verdict stops the loop and is not recorded as processed: the
+dispatcher refreshes sources and plans the same ticket once more. A second drift
+defers that ticket while the queue continues. Other runs without a verdict stop the loop and have no processed stamp: the
 environment failed before publication, or a publication started and did not
 confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
 After `publication_uncertain`, compare the ticket and `publication.json` in NTK

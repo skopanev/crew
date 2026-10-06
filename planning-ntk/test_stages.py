@@ -59,8 +59,11 @@ class PublicationTests(unittest.TestCase):
         self.assertFalse((self.target / "publication-started.json").exists())
 
     def test_a_failed_publication_is_uncertain_not_unchanged(self):
+        def failed_write(*args):
+            (self.target / "publication-started.json").write_text("{}")
+            raise RuntimeError("NTK timed out")
         with patch.object(stages.shared, "verify_freshness"), \
-             patch.object(stages, "ntk", side_effect=RuntimeError("NTK timed out")):
+             patch.object(stages, "ntk", side_effect=failed_write):
             with self.assertRaises(RuntimeError):
                 stages.finish()
         with patch.object(stages, "signal"):
