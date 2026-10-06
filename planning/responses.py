@@ -3,6 +3,7 @@
 Tool output and incomplete streaming deltas cannot supply a planning result.
 """
 import json
+import re
 
 from common import require
 
@@ -38,14 +39,15 @@ def final_response(events, harness):
     if message.startswith("```json\n") and message.endswith("```"):
         message = message[8:-3].strip()
     # Read only the final delivery. Reject broken containers and multiple results.
-    starts = [position for token in ("{", "[")
-              if (position := message.find(token)) >= 0]
+    # Shell placeholders in prose are not JSON containers. Keep JSON text unchanged.
+    tokens = list(re.finditer(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|[{}\[\]]", message))
+    starts = [token.start() for token in tokens if token.group() in ("{", "[")]
     require(starts, "agent response contains no JSON object")
     start = min(starts)
-    require(not any(token in message[:start] for token in "}]"),
+    require(not any(token.group() in ("}", "]") for token in tokens if token.start() < start),
             "agent response contains a broken JSON container")
     result, end = json.JSONDecoder().raw_decode(message, start)
-    require(not any(token in message[end:] for token in "{}[]"),
+    require(not any(token.group() in "{}[]" for token in tokens if token.start() >= end),
             "agent response contains more than one JSON result")
     require(isinstance(result, dict), "agent response must be one JSON object")
     return result
