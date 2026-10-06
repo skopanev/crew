@@ -61,7 +61,7 @@ Preview output has this shape (the ID below is an example):
 
 ```text
 Running lanes 0 of 1
-Tickets with tags [workspace=example, tags=agent-ready, strict=false]: 56 total · 17 open · ready to work: ≥1
+Tickets with tags [workspace=example, tags=agent-ready, strict=false]: 17 open · ready to work: ≥1
 checking params:
   tags: agent-ready
   prefer: bug → kyc → ceo60 → kyt

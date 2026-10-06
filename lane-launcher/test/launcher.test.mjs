@@ -225,7 +225,7 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
-  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 56 total · 17 open/);
+  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 17 open/);
   assert.equal(queueReads(f), 1);
 });
 for (const [options, expected] of [
@@ -361,7 +361,7 @@ test('existing external Docker lane prevents a queue read', async t => {
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 0);
   assert.equal(countReads(f).length, 2);
-  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 56 total · 17 open/);
+  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 17 open/);
 });
 test('another dispatcher and unscoped containers do not occupy this dispatcher', async t => {
   const f = await setup(t);
@@ -423,7 +423,7 @@ test('empty queue leaves Herdr tabs unchanged', async t => {
   const f = await setup(t, {empty: true});
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 0 total · 0 open · ready to work: 0/);
+  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 0 open · ready to work: 0/);
   assert.ok(!fs.readFileSync(f.events, 'utf8').includes('create'));
 });
 test('count failure reports unavailable and still dispatches the next ticket', async t => {
@@ -478,7 +478,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
   assert.equal(lines[0], 'Running lanes 0 of 1');
-  assert.equal(lines[1], 'Tickets with tags [workspace=test, tags=open,agent-ready, strict=false]: 56 total · 17 open · ready to work: ≥1');
+  assert.equal(lines[1], 'Tickets with tags [workspace=test, tags=open,agent-ready, strict=false]: 17 open · ready to work: ≥1');
   assert.equal(lines[2], 'checking params:');
   assert.equal(lines[3], '  tags: open, agent-ready');
   assert.equal(lines[4], '  prefer: KYC → ceo60 → KYT');

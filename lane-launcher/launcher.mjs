@@ -147,10 +147,10 @@ export async function tick(config, display = null) {
   const candidate = await nextTicket(query);
   try {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
-    const [total, open] = await Promise.all([countTickets(filter), countTickets({...filter, status: 'open'})]);
+    const open = await countTickets({...filter, status: 'open'});
     const ready = candidate ? '≥1' : '0';
-    if (display) display.counts = {total, open, ready, blocked: candidate === null && open > 0};
-    else print(`Tickets with tags [${countFilter}]: ${paint('accent', total)} total · ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
+    if (display) display.counts = {open, ready, blocked: candidate === null && open > 0};
+    else print(`Tickets with tags [${countFilter}]: ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
   } catch (error) {
     const message = `Tickets with tags [${countFilter}]: unavailable (${error.message})`;
     if (display) { display.counts = null; display.fail(message); }
