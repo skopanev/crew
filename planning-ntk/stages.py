@@ -113,6 +113,7 @@ def failure_evidence(settings, ticket):
 def input_key(source, settings, repositories):
     evidence = failure_evidence(settings, source["source"]["ticket"]["id"])
     return digest({"source": source, "failure": evidence, "config": settings,
+                   "planning_contract": digest((HERE.parent / "roles/crew-planning-records.jsonl").read_text()),
                    "code": {r["id"]: fingerprint(r) for r in repositories}})
 
 

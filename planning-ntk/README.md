@@ -102,7 +102,8 @@ The workflow does not close the parent automatically.
 Active or completed tickets and live or unresolved Lane runs are excluded.
 Before planning a blocked ticket, remove its retained `.worktrees/<ticket>` and remote `ticket-<id>` branch.
 Refuse cleanup when a live or unresolved Lane run owns the ticket. Open tickets do not receive this cleanup.
-An unchanged processed verdict is refused until evidence, source, or the ticket changes.
+An unchanged processed verdict is refused until evidence, source, the ticket, or the generic planning contract changes.
+Startup checks that the exported generic contract matches live Equill before using it for this retry key.
 An incomplete run is not a verdict and is never recorded as processed.
 Text limits come from NTK metadata. The workflow refuses overflow without truncation.
 Unread attachments remain listed by filename. Missing required evidence blocks readiness.
