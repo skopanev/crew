@@ -79,7 +79,12 @@ def code_coverage(report, calls, assignment):
                 f"CBM coverage missing, stale or uncertain for {repo['id']}:{path}; verify index and re-plan")
         seen.add(repo["id"])
         inspected_keys.add((repo["id"], path))
-    require(seen == set(repos), "code research must inspect existing source in every input repository")
+    if assignment.get("kind") == "ntk":
+        module = assignment["ticket"].get("module")
+        owners = {r["id"] for r in repos.values() if any(m["name"] == module for m in r["modules"])} if module else set()
+        require(owners.issubset(seen), "code research must inspect the ticket module repository")
+    else:
+        require(seen == set(repos), "code research must inspect every repository in the AC scope")
     cited = set()
     for evidence in report["evidence"]:
         source = evidence["source"]
@@ -91,7 +96,8 @@ def code_coverage(report, calls, assignment):
                 cited.add((repository, match.group(1)))
     require(cited, "code research needs file evidence using registered repository:path:line")
     require(cited.issubset(inspected_keys), "code evidence cites a path absent from inspected_paths")
-    for repo in repos.values():
+    for key in seen:
+        repo = repos[key]
         scoped = [c for c in calls if c.get("arguments", {}).get("project") == repo["cbm_project"]]
         require(any(c.get("tool") in ("search_graph", "search_code") for c in scoped)
                 and any(c.get("tool") == "query_graph" and "SIMILAR_TO" in json.dumps(c.get("arguments", {})) for c in scoped),
@@ -123,7 +129,7 @@ def plan(result, assignment):
         module = next((m for m in repo["modules"] if m["name"] == task.get("module")), None)
         require(module is not None, "Task module not in input registry")
         root = inside(repo["path"], module["path"])
-        for path in strings(task.get("write_paths"), "task.write_paths"):
+        for path in strings(task.get("write_paths", []), "task.write_paths", empty=True):
             require(inside(repo["path"], path).is_relative_to(root), f"Task path outside module: {path}")
         for field in ("title", "outcome"):
             text(task.get(field), "task." + field)
@@ -136,17 +142,26 @@ def plan(result, assignment):
     for check in result["acceptance_checks"]:
         repo = repos.get(check.get("repository"))
         require(repo is not None, "acceptance check repository not in input scope")
-        inside(repo["path"], check["cwd"])
+        if "cwd" in check:
+            inside(repo["path"], check["cwd"])
     for task in tasks:
         for check in task["checks"]:
-            inside(repos[task["repository"]]["path"], check["cwd"])
+            if "cwd" in check:
+                inside(repos[task["repository"]]["path"], check["cwd"])
 
 
 def checks(items):
-    require(isinstance(items, list) and items, "executable checks required")
+    require(isinstance(items, list) and items, "observable acceptance checks required")
     for check in items:
-        for field in ("command", "cwd", "expected"):
-            text(check.get(field), "check." + field)
+        require(isinstance(check, dict), "check must be an object")
+        text(check.get("expected"), "check.expected")
+        if "scenario" in check:
+            text(check["scenario"], "check.scenario")
+        else:
+            text(check.get("command"), "check.command")
+        if "command" in check:
+            text(check["command"], "check.command")
+            text(check.get("cwd"), "check.cwd")
 
 
 def critique(result, expected_digest):
