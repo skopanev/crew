@@ -80,7 +80,7 @@ export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
    проектов в CBM, получает три обязательных контракта и применимые знания из
    Equill. Общие правила без нужного процесса и шагов не считаются контрактом.
 2. Три исследователя работают параллельно. Кодовая ветка обязана действительно
-   вызвать CBM search и запрос `SIMILAR_TO` для каждого входного репозитория:
+   вызвать CBM search и запрос `SIMILAR_TO` для каждого репозитория в заданном охвате AC:
    post hook проверяет события CLI. В отчёте перечисляются `inspected_paths`;
    для этих путей нужны успешные квитанции `check_index_coverage` с полными,
    согласованными метаданными и `freshness: metadata_match`. Пропущенные или
@@ -91,10 +91,11 @@ export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
    Агент обязан прочитать исходники, включая применимые локальные изменения.
    История исследуется через Git; внешняя ветка может обоснованно вернуть
    `not_needed`. Индексацию и watchers этот workflow не запускает.
-3. Проектировщик возвращает выбранный подход, альтернативы, конкретные шаги,
-   границы записи, зависимости и проверки. Валидатор проверяет модульные границы,
-   привязку к AC и порядок зависимостей. Команды проверок здесь описываются;
-   выполнение проверок относится к реализации и последующей верификации.
+3. The designer chooses the smallest sufficient mechanism and explains necessity, reuse, safety, and extensibility.
+   Each Task contains numbered mechanism steps, a module, dependencies, and observable acceptance checks.
+   Lane selects files, functions, test placement, and build details. Source citations are evidence, not edit instructions.
+   The validator checks module ownership, AC binding, dependencies, and acceptance check specifications.
+   Existing checks may include commands. Planning does not execute project checks.
 4. Три критика получают один план и его digest в независимых сессиях. Любой
    блокирующий вердикт, отсутствующий ответ или несовпадающий digest останавливает
    подготовку. Проверка готовности также отказывает при изменении исходников,

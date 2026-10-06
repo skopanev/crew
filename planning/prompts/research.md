@@ -34,8 +34,9 @@ an FTS miss; trace relationships only after a credible hit.
 
 For a complete code report also return inspected_paths:
 [{"repository":"registered repository id","path":"existing/source/file"}].
-Include the existing source files that substantiate your findings in every
-input repository. For each registered CBM project, perform a scoped search and
+Include the existing source files that substantiate your findings in the ticket
+module and relevant interfaces. For Joppa, inspect each repository in the assigned AC scope.
+For each inspected CBM project, perform a scoped search and
 SIMILAR_TO query, then call check_index_coverage with format json for the exact
 inspected paths; paginate until each path has a result. A project name or index
 timestamp alone does not prove freshness. Missing/changed path metadata or

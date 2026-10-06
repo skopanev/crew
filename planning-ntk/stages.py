@@ -306,8 +306,6 @@ def validate_plan(plan, assignment):
         require(len(body) <= limits["body"] and len(task["title"]) <= limits["title"],
                 f"NTK text limit exceeded in {task.get('id')}: body {len(body)}/{limits['body']}, "
                 f"title {len(task['title'])}/{limits['title']} characters; move rationale to the plan report or split the Task")
-        if not decomposing:
-            require(len(set(task["write_paths"])) <= 10, "Task exceeds the ten-file budget; split it")
         strings(task.get("acceptance"), "Task acceptance")
         strings(task.get("covers"), "source acceptance coverage")
         external = strings(task.get("external_dependencies"), "external dependencies", empty=True)

@@ -18,7 +18,7 @@ For each Task, also return:
 
 One pass plans only the selected ticket. Choose one result:
 
-- implement: prepare exactly one executable Task in one module.
+- implement: prepare exactly one Task with mechanism steps in one module.
 - verify_existing: prepare checks for the selected ticket, with no Tasks.
 - decompose: divide the source into at least two smaller children, one level only.
 
@@ -34,7 +34,8 @@ needed to divide this source. Do not design all child implementations now.
 Allow at most three decomposition levels. Use the maximum coordinator distance in ntk.deps.down.
 At that limit, prepare one leaf or return a concrete blocker.
 Critics check coverage, boundaries, and dependencies for decompose.
-They check implementation steps and executable checks only for a leaf.
+For a leaf, they check mechanisms and observable acceptance checks.
+Files, functions, test placement and build wiring belong to lane.
 
 READY uses disposition implement, verify_existing, or decompose. NOT_READY and NEEDS_HUMAN
 use blocked, no Tasks, and explicit blockers. They may have empty acceptance_checks.
@@ -42,8 +43,10 @@ NEEDS_HUMAN requires owner and decision. System/access failures stay NOT_READY.
 NEEDS_HUMAN leaves the ticket blocked with a [HUMAN] title prefix and assigns its owner.
 Critics can clear an accurate NOT_READY or NEEDS_HUMAN diagnosis.
 
-For implement, the body contains the scope, concrete implementation steps, symbol definitions,
-Task acceptance criteria and executable checks. Lane reads this body directly.
+For implement, the body contains the scope, numbered mechanism steps, reuse,
+Task acceptance criteria, observable checks and required dependency outputs.
+Do not prescribe edit files, functions, test placement or build wiring.
+Source citations are evidence, not edit instructions. Lane reads this body directly.
 The full plan is an attachment. An attachment cannot replace mandatory body instructions.
 For verify_existing, put TICKET_CHECKS: followed by a JSON array in ntk.body.
 Use test-file paths from current source or declared prerequisite outputs, or checks with ac, argv and optional stdout.
@@ -64,7 +67,7 @@ Example: {"ac":"AC-2","argv":["grep","-Fq","--","required text","config.json"]}.
 Cover all acceptance criteria and prescribed checks. Missing check specifications mean NOT_READY.
 Describe checks against declared prerequisite outputs. Do not require passing results during planning.
 Keep each body and title within {body_budget} and {title_limit} characters. NTK rejects more than
-{body_limit}; the margin covers counting errors. Count before you return. Write steps and checks,
+{body_limit}; the margin covers counting errors. Count before you return. Write mechanisms and checks,
 not rationale: rationale goes to the plan report. If a Task still does not fit, use decompose.
 Tasks use prerequisite order. All Tasks together cover every source criterion.
 Use the source ticket id as task.ac. Match project and module to NTK metadata.

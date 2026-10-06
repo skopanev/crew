@@ -40,7 +40,7 @@ Unfinished prerequisites alone do not block planning. Plan from their declared o
 
 1. Read the ticket, prerequisite graph, NTK metadata, attachments, and available Lane failure artifacts.
 2. Inspect current source, Git history, shared CBM, Equill knowledge, and repository `.ntkrc` contracts.
-3. Run parallel code, knowledge, and external research. Produce a concrete implementation plan.
+3. Run parallel code, knowledge, and external research. Choose the simplest sufficient mechanism.
 4. Ask independent necessity, simplicity, and correctness critics to check that plan.
    A rejected plan goes back to design once, with the blocking findings. The critics then check the revision.
 5. Confirm source versions and live role contracts before any publication. Publish the result to NTK.
@@ -49,7 +49,12 @@ The models and critic seats are the same as [Planning](../planning/README.md).
 The planner reads canonical repositories. It does not update Git, index a worktree,
 implement code or run project checks.
 Existing shared CBM must cover the inspected current files.
-A Task body contains the required edit steps, acceptance criteria, and executable checks.
+A Task body contains numbered mechanism steps, reuse, acceptance criteria, observable checks, and required dependency outputs.
+Lane selects edit files, functions, test placement, and build details.
+Source citations prove current behavior and reuse. They do not prescribe edits.
+Research inspects the ticket module and affected interfaces, not every registered repository.
+Critics check necessity, reuse, simplicity, safety, extensibility, AC coverage, and dependencies.
+Implementation details and file preferences do not block readiness.
 Attachments carry the full plan and reviews. They do not replace body instructions.
 
 ## Results
@@ -76,7 +81,7 @@ Check the changing inputs, then update the ticket to permit another attempt.
 A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all children.
 Generated prefixes fit the NTK title limit. The report keeps the full original title.
 Children never depend on the parent. Each child has one module and its own acceptance criteria.
-One pass divides only one level or prepares one executable Task.
+One pass divides only one level or prepares one Task with mechanism steps.
 Decomposition children have no implementation steps or executable checks yet.
 They stay blocked, so Dolber cannot execute them. The planner selects each child in a later pass.
 It divides that child again or prepares it for the lane. Each split must reduce the scope.

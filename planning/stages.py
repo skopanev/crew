@@ -316,10 +316,12 @@ def save_result(assignment, plan, reviews, old, contracts, chain):
     for task in plan["tasks"]:
         lines += ["", "## " + task["id"] + ": " + task["title"], "", f"Repository: {task['repository']} · module: {task['module']}", "", task["outcome"], ""]
         lines += ["Prerequisite Tasks: " + (", ".join(task["depends_on"]) or "none"),
-                  "Write paths: " + ", ".join(task["write_paths"]),
                   "Reuse: " + ("; ".join(task["reuse"]) or "none identified"), ""]
         lines += [f"{i}. {step}" for i, step in enumerate(task["steps"], 1)]
-        lines += ["", "Checks:", ""] + [f"- `{c['command']}` in `{c['cwd']}`: {c['expected']}" for c in task["checks"]]
+        lines += ["", "Checks:", ""]
+        for check in task["checks"]:
+            method = check.get("scenario") or f"`{check['command']}` in `{check['cwd']}`"
+            lines.append(f"- {method}: {check['expected']}")
     (target / "plan.md").write_text("\n".join(lines) + "\n")
     outcome["completed_at"] = utc_now().isoformat()
     write(target / "result.json", outcome)
