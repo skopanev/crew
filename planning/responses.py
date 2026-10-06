@@ -37,6 +37,15 @@ def final_response(events, harness):
     message = message.strip()
     if message.startswith("```json\n") and message.endswith("```"):
         message = message[8:-3].strip()
-    result = json.loads(message)
+    # Read only the final delivery. Reject broken containers and multiple results.
+    starts = [position for token in ("{", "[")
+              if (position := message.find(token)) >= 0]
+    require(starts, "agent response contains no JSON object")
+    start = min(starts)
+    require(not any(token in message[:start] for token in "}]"),
+            "agent response contains a broken JSON container")
+    result, end = json.JSONDecoder().raw_decode(message, start)
+    require(not any(token in message[end:] for token in "{}[]"),
+            "agent response contains more than one JSON result")
     require(isinstance(result, dict), "agent response must be one JSON object")
     return result

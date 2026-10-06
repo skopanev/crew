@@ -44,8 +44,9 @@ conflicts go through a fix and another check/review round.
 
 `DUPLICATE` verifies the existing implementation instead of stopping the lane.
 The scout lists existing test-file paths in `artifacts/ticket-checks.json`.
-Gates execute them through the configured `testCommand` argument array, plus
-configured checks. The panel maps all AC to existing code and executed tests.
+Gates execute test paths through the configured `testCommand` argument array.
+They also run the ticket's structured acceptance checks. Verification skips configured change gates because it has no change set.
+The panel maps all AC to existing code and executed checks.
 Passing checks and review set `to_test` without a new commit or push. Missing
 tests, failed checks, review blockers or a moved target stop with details.
 This path never returns to implementation.

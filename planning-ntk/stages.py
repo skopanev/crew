@@ -243,9 +243,6 @@ def validate_plan(plan, assignment):
             require(owner in {p["id"] for p in assignment["ntk"]["meta"]["people"] if p.get("kind") == "human"},
                     "Decision owner must be a registered person")
             text(plan["ntk"].get("decision"), "required decision")
-            title = "[HUMAN] " + assignment["ticket"]["title"].removeprefix("[HUMAN] ")
-            require(len(title) <= assignment["ntk"]["meta"]["limits"]["title"],
-                    "Human decision title exceeds the NTK limit; shorten it before planning")
         return
     decomposing = plan.get("disposition") == "decompose"
     if decomposing:
@@ -275,8 +272,6 @@ def validate_plan(plan, assignment):
         body = text(plan["ntk"].get("body"), "verification body")
         require(len(body) <= limits["body"], "Verification body exceeds NTK limit")
         verify_checks(body, assignment)
-    if len(plan["tasks"]) > 1 or any(t["project"] != assignment["ticket"]["project"] for t in plan["tasks"]):
-        require(len("[CLOSE AT NO DEPS] " + assignment["ticket"]["title"].removeprefix("[HUMAN] ")) <= limits["title"], "Coordinator title exceeds NTK limit")
 
 
 def capture(kind):
@@ -285,14 +280,20 @@ def capture(kind):
     shared.capture_error_file(kind).unlink(missing_ok=True)
     result, _ = shared.body_result()
     validate_plan(result, read(shared.artifacts() / "input.json"))
-    # Checked here, not only in finish(): a vetoed design retries with this reason
-    # in its prompt, so a blocked research report turns into NEEDS_HUMAN or
-    # NOT_READY instead of a READY that finish() can only refuse.
+    # A valid plan cannot override a research blocker. Keep the ticket blocked
+    # and send the diagnosis through the existing critics and publication guards.
     if result["ntk"]["verdict"] == "READY":
-        blocked = [branch for branch in validation.RESEARCH
-                   if read(shared.artifacts() / f"research-{branch}.json")["status"] == "blocked"]
-        require(not blocked, f"Research is blocked ({', '.join(blocked)}): READY is not allowed. "
-                "Return NEEDS_HUMAN with the exact owner decision, or NOT_READY with the missing fact.")
+        reports = {branch: read(shared.artifacts() / f"research-{branch}.json")
+                   for branch in validation.RESEARCH}
+        blockers = [f"{branch} research: {claim}"
+                    for branch, report in reports.items() if report["status"] == "blocked"
+                    for claim in (report["blockers"] or [report["summary"]])]
+        if blockers:
+            result = {**result, "disposition": "blocked", "tasks": [],
+                      "acceptance_checks": [], "blockers": blockers,
+                      "ntk": {**result["ntk"], "verdict": "NOT_READY", "failure_class": "plan",
+                              "owner": "", "decision": "", "body": ""}}
+            validate_plan(result, read(shared.artifacts() / "input.json"))
     write(shared.artifacts() / "plan.json", result)
     signal("PLANNED", "NTK plan validated")
 
