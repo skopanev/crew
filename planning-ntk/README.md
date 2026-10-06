@@ -35,6 +35,9 @@ Set `planning.tagMatch` to `any` for OR or `all` for AND. The default is `all`.
 The planner adds all configured dispatch tags only after it confirms the plan and graph.
 NTK selects eligible tickets after their prerequisites close.
 Unfinished prerequisites alone do not block planning. Plan from their declared outputs and preserve required dependencies.
+Research identifies the output this ticket needs from each prerequisite.
+A dependency does not transfer unrelated setup or release gates to this ticket.
+Applicable owner decisions and Equill rules still govern its checks.
 
 ## Process
 
