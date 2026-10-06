@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {request, attachReport} from '../lane-launcher/ntk.mjs';
+import {request as httpRequest, attachReport as uploadReport} from '../lane-launcher/ntk.mjs';
 
 const route = id => `/v1/tickets/${encodeURIComponent(id)}`;
 const require = (ok, message) => { if (!ok) throw new Error(message); };
@@ -13,6 +13,25 @@ function save(file, value) {
   fs.renameSync(file + '.tmp', file);
 }
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+let publication;
+function markWrite() {
+  require(publication, 'Publication boundary is unavailable');
+  if (!publication.started) {
+    save(publication.file, {plan_digest: publication.plan});
+    publication.started = true;
+  }
+}
+async function request(method, ...args) {
+  if (method !== 'GET') markWrite();
+  return httpRequest(method, ...args);
+}
+async function attachReport(...args) {
+  markWrite();
+  return uploadReport(...args);
+}
+function fresh(condition, message) {
+  if (!condition) throw Object.assign(new Error(message), {code: 'STALE_INPUT'});
+}
 
 async function ticket(id, workspace) {
   const value = await request('GET', route(id), {workspace});
@@ -57,17 +76,17 @@ async function unchanged(input) {
   const {source, prerequisites, deps} = input.snapshot;
   for (const item of prerequisites) {
     const now = await ticket(item.ticket.id, input.workspace);
-    require(now.revision_count === item.revision_count, `Prerequisite changed: ${item.ticket.id}`);
+    fresh(now.revision_count === item.revision_count, `Prerequisite changed: ${item.ticket.id}`);
   }
   for (const parent of input.snapshot.parents || []) {
     const now = await ticket(parent.source.ticket.id, input.workspace);
-    require(now.revision_count === parent.source.revision_count, 'Coordinator context changed during planning');
+    fresh(now.revision_count === parent.source.revision_count, 'Coordinator context changed during planning');
   }
   const graph = await request('GET', `${route(source.ticket.id)}/deps`, {workspace: input.workspace});
-  require(hash(graph) === hash(deps), 'Dependency graph changed during planning');
+  fresh(hash(graph) === hash(deps), 'Dependency graph changed during planning');
   const current = await ticket(source.ticket.id, input.workspace);
-  require(['open', 'blocked'].includes(current.ticket.status), 'Source ticket is active, complete, or awaiting review; unchanged');
-  require(current.revision_count === source.revision_count, 'Source ticket changed during planning; unchanged');
+  fresh(['open', 'blocked'].includes(current.ticket.status), 'Source ticket is active, complete, or awaiting review; unchanged');
+  fresh(current.revision_count === source.revision_count, 'Source ticket changed during planning; unchanged');
   return current.ticket;
 }
 
@@ -111,8 +130,13 @@ async function activate(input, receipt, file, source) {
 
 async function publish(input) {
   const {workspace, plan, stateDir, dispatchTag} = input;
+  require(typeof input.publicationMarker === 'string' && path.isAbsolute(input.publicationMarker),
+    'Publication marker path is required');
+  publication = {file: input.publicationMarker, plan: hash(plan), started: false};
   const receiptFile = path.join(stateDir, 'publication.json');
   let receipt = fs.existsSync(receiptFile) ? read(receiptFile) : {plan: hash(plan), children: {}};
+  // Existing child receipts can represent a previous partial or uncertain write.
+  if (receipt.parentRevision || Object.keys(receipt.children).length) markWrite();
   require(receipt.plan === hash(plan), 'A different plan already has publication receipts; inspect them before another plan');
   const original = input.snapshot.source.ticket;
   if (receipt.parentRevision) return activate(input, receipt, receiptFile, original);
@@ -218,6 +242,7 @@ try {
   const result = await ({snapshot, publish}[action])(input);
   process.stdout.write(JSON.stringify(result) + '\n');
 } catch (error) {
+  process.stdout.write(JSON.stringify({error: {code: error.code || 'FAILED', message: error.message}}) + '\n');
   console.error(`planning-ntk: ${error.message}`);
   process.exitCode = 1;
 }

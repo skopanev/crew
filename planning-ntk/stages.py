@@ -19,9 +19,20 @@ sys.path.insert(0, str(HERE.parent / "lane/bin"))
 from gates import acceptance_check
 
 
+class SourceDrift(ValueError):
+    pass
+
+
 def ntk(action, value):
     result = subprocess.run(["node", str(HERE / "ntk.mjs"), action],
                             input=json.dumps(value), capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        try:
+            error = json.loads(result.stdout).get("error", {})
+        except (ValueError, AttributeError):
+            error = {}
+        if error.get("code") == "STALE_INPUT":
+            raise SourceDrift(error["message"])
     require(result.returncode == 0, result.stderr.strip() or "NTK planning operation failed")
     return json.loads(result.stdout)
 
@@ -360,11 +371,9 @@ def finish():
 
 
 def publish(plan, reviews):
-    # The marker is written before the first NTK write. If publication then
-    # fails, fail() cannot claim the ticket is unchanged.
     target = shared.artifacts()
-    write(target / "publication-started.json", {"plan_digest": digest(plan)})
-    result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews})
+    result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews,
+                             "publicationMarker": str(target / "publication-started.json")})
     write(target / "result.json", result)
     remember(result)
     return result
@@ -372,7 +381,8 @@ def publish(plan, reviews):
 
 def fail(reason=None):
     target = shared.artifacts()
-    reason = reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "Planning did not complete"
+    source_drift = isinstance(reason, SourceDrift)
+    reason = str(reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "Planning did not complete")
     errors = [read(path) for path in target.glob("error-*.json")]
     if errors:
         reason += "\n" + "\n".join(item["reason"] for item in errors)
@@ -387,6 +397,8 @@ def fail(reason=None):
                   "ticket_unchanged": False, "publication_uncertain": True}
     else:
         result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
+        if source_drift:
+            result["source_drift"] = True
         # Only the exact freshness failure counts: the source moved while this
         # run planned. Nothing was published, so planning again is safe.
         if reason.split("\n", 1)[0] == shared.CODE_DRIFT:
@@ -410,5 +422,5 @@ if __name__ == "__main__":
             file = shared.capture_error_file(kind)
             write(file, {"stage": kind, "branch": file.stem.split("-")[-1], "reason": str(error)})
         else:
-            fail(str(error))
+            fail(error)
         sys.exit(1)
