@@ -65,6 +65,12 @@ def code_coverage(report, calls, assignment):
             if (path.get("status") == "no_recorded_issue" and path.get("freshness") == "metadata_match"
                     and not path.get("coverage")):
                 covered.add((project, path.get("path")))
+            elif (path.get("status") == "partial" and path.get("freshness") == "metadata_match"
+                    and isinstance(path.get("coverage"), list) and path["coverage"]
+                    and all(isinstance(issue, dict) and issue.get("kind") == "parse_partial"
+                            for issue in path["coverage"])):
+                # Fresh parser gaps require source verification, not another index pass.
+                covered.add((project, path.get("path")))
             elif path.get("freshness") == "not_tracked":
                 # CBM does not index this file at all (for example helper scripts).
                 # Nothing can be stale; the researcher read it in the worktree.

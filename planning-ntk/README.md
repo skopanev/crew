@@ -56,7 +56,8 @@ Applicable owner decisions and Equill rules still govern its checks.
 The models and critic seats are the same as [Planning](../planning/README.md).
 The planner reads canonical repositories. It does not update Git, index a worktree,
 implement code or run project checks.
-Existing shared CBM must cover the inspected current files.
+Inspect current files through shared CBM and direct source reads.
+Fresh parser gaps require source verification. Stale or incomplete index metadata blocks planning.
 A Task body contains numbered mechanism steps, reuse, acceptance criteria, observable checks, and required dependency outputs.
 Lane selects edit files, functions, test placement, and build details.
 Source citations prove current behavior and reuse. They do not prescribe edits.

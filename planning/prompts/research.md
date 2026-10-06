@@ -28,8 +28,8 @@ You may add repository and Git citations.
 For the code branch, use CBM search_graph/search_code and query_graph to inspect
 SIMILAR_TO before proposing new symbols. Verify hits against actual source and
 use scoped Git history for relevant decisions. When a defect or pattern
-repeats in more than one consumer, find and cite its shared source. Report missing index coverage
-as a blocker, not proof that no implementation exists. Semantic search follows
+repeats in more than one consumer, find and cite its shared source. Missing index coverage
+does not prove that no implementation exists. Semantic search follows
 an FTS miss; trace relationships only after a credible hit.
 
 For a complete code report also return inspected_paths:
@@ -40,7 +40,11 @@ For each inspected CBM project, perform a scoped search and
 SIMILAR_TO query, then call check_index_coverage with format json for the exact
 inspected paths; paginate until each path has a result. A project name or index
 timestamp alone does not prove freshness. Missing/changed path metadata or
-incomplete/mismatched coverage metadata blocks this pass; do not reindex. A path that
+incomplete/mismatched index metadata blocks this pass; do not reindex.
+Fresh paths with status partial and only parse_partial coverage entries permit
+source verification. Read flagged source and required lines directly. Qualify
+claims that the partial index cannot establish. Other coverage issues block this pass.
+A path that
 CBM reports as not_tracked is not a blocker: CBM does not index it, so read it in
 the worktree and list it in inspected_paths.
 Even clean metadata is only a best-effort signal about CBM's indexed root:

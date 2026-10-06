@@ -86,6 +86,8 @@ export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
    согласованными метаданными и `freshness: metadata_match`. Пропущенные или
    устаревшие сведения останавливают проход. Файлы из ссылок `evidence.source`
    должны входить в `inspected_paths`, чтобы агент не обходил проверку покрытия.
+   Fresh `parse_partial` entries require direct source verification, not another index pass.
+   Other coverage issues still block planning.
    Это best-effort проверка индекса;
    она не доказывает полноту графа или совпадение его дерева с текущим worktree.
    Агент обязан прочитать исходники, включая применимые локальные изменения.
