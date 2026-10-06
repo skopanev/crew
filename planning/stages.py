@@ -96,6 +96,11 @@ def prompt_assignment(assignment):
     result["repositories"] = [{key: value for key, value in repo.items() if key != "modules"}
                               for repo in assignment["repositories"]]
     result["ntk"] = dict(assignment["ntk"])
+    result["ntk"]["referenced"] = [
+        {"workspace": item["workspace"], "revision_count": item["revision_count"],
+         "ticket": {key: item["ticket"].get(key) for key in ("id", "title", "status", "project", "module")}}
+        if item.get("ticket") else item
+        for item in assignment["ntk"].get("referenced", [])]
     result["ntk"]["source"] = {key: value for key, value in assignment["ntk"]["source"].items() if key != "ticket"}
     names = {item["name"] for repo in assignment["repositories"] for item in repo["modules"]}
     result["ntk"]["meta"] = {**assignment["ntk"]["meta"],

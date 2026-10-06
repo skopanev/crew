@@ -69,7 +69,31 @@ async function snapshot({id, workspace}) {
     item.title.startsWith('[CLOSE AT NO DEPS] ')).map(async item => ({
       source: await ticket(item.id, workspace), attachments: await attachments(item.id, workspace),
   })));
-  return {source, meta, deps, attachments: reports, prerequisites, parents};
+  const texts = [source.ticket.title, source.ticket.body,
+    ...prerequisites.map(item => item.ticket.body),
+    ...parents.map(item => item.source.ticket.body),
+    ...reports.map(item => item.content),
+    ...parents.flatMap(item => item.attachments.map(report => report.content))];
+  const prefixes = meta.projects.map(value => value.replace(/[.*+?^\u0024{}()|[\]\\]/g, '\\$&'));
+  const pattern = new RegExp('\\b(?:' + prefixes.join('|') + ')-[a-z0-9]+\\b', 'gi');
+  const known = new Set([source.ticket.id, ...prerequisites.map(item => item.ticket.id),
+    ...parents.map(item => item.source.ticket.id)]);
+  const ids = [...new Set((texts.filter(Boolean).join('\n').match(pattern) || [])
+    .map(value => value.toLowerCase()))].filter(value => !known.has(value));
+  // Read one reference level. Keep unfetched ids visible to the agents.
+  const referenced = await Promise.all(ids.map(async (id, index) => {
+    if (index >= 20) return {id, unread: true, reason: 'Reference read limit reached'};
+    try {
+      const response = await ticket(id, workspace);
+      require(response.ticket.id === id && meta.projects.includes(response.ticket.project),
+        'Referenced ticket differs from its scoped request');
+      return {...response, workspace};
+    } catch (error) {
+      if (!/^NTK HTTP (404|410)(?:\b|:)/.test(error.message)) throw error;
+      return {id, missing: true};
+    }
+  }));
+  return {source, meta, deps, attachments: reports, prerequisites, parents, referenced};
 }
 
 async function unchanged(input) {
@@ -78,12 +102,21 @@ async function unchanged(input) {
     const now = await ticket(item.ticket.id, input.workspace);
     fresh(now.revision_count === item.revision_count, `Prerequisite changed: ${item.ticket.id}`);
   }
+  const usedReferences = JSON.stringify(input.plan);
+  for (const item of input.snapshot.referenced || []) {
+    if (!item.ticket || !usedReferences.includes(item.ticket.id)) continue;
+    const now = await ticket(item.ticket.id, input.workspace);
+    fresh(now.revision_count === item.revision_count, 'Referenced ticket changed: ' + item.ticket.id);
+  }
   for (const parent of input.snapshot.parents || []) {
     const now = await ticket(parent.source.ticket.id, input.workspace);
     fresh(now.revision_count === parent.source.revision_count, 'Coordinator context changed during planning');
   }
   const graph = await request('GET', `${route(source.ticket.id)}/deps`, {workspace: input.workspace});
   fresh(hash(graph) === hash(deps), 'Dependency graph changed during planning');
+  const selected = new Set(input.plan.tasks.flatMap(task => task.external_dependencies || []));
+  fresh(!(graph.down || []).some(item => selected.has(item.id)),
+    'Selected dependency would create a cycle');
   const current = await ticket(source.ticket.id, input.workspace);
   fresh(['open', 'blocked'].includes(current.ticket.status), 'Source ticket is active, complete, or awaiting review; unchanged');
   fresh(current.revision_count === source.revision_count, 'Source ticket changed during planning; unchanged');

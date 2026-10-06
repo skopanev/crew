@@ -36,6 +36,11 @@ The planner adds all configured dispatch tags only after it confirms the plan an
 NTK selects eligible tickets after their prerequisites close.
 Unfinished prerequisites alone do not block planning. Plan from their declared outputs and preserve required dependencies.
 Research identifies the output this ticket needs from each prerequisite.
+The snapshot also reads ticket IDs cited in the supplied text, using registered project prefixes.
+It reads at most 20 references, without their attachments or further references.
+Missing and unread IDs remain visible. Only verified references can become dependencies.
+The inline context contains reference metadata. Read their bodies from the existing details_file.
+Publication checks references cited in the plan and rejects dependencies on the source ticket or its dependants.
 A dependency does not transfer unrelated setup or release gates to this ticket.
 Applicable owner decisions and Equill rules still govern its checks.
 
