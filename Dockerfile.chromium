@@ -1,0 +1,11 @@
+ARG BASE_IMAGE=medulla-crew:latest
+FROM ${BASE_IMAGE}
+
+ARG PLAYWRIGHT_VERSION=1.63.0
+ARG RUNTIME_USER=501:501
+
+USER root
+RUN npm_config_cache=/tmp/playwright-deps-cache \
+      npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
+ && rm -rf /var/lib/apt/lists/* /tmp/playwright-deps-cache
+USER ${RUNTIME_USER}
