@@ -264,7 +264,7 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
       uncertain: result?.publication_uncertain === true}};
     saveState(config, state);
     return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true,
-      log};
+      reason: result?.reason, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
   saveState(config, state);
@@ -291,7 +291,8 @@ async function main(argv) {
       continue;
     }
     if (result?.uncertain) {
-      throw new Error(`publication for ${result.id} started and did not confirm; inspect the ticket in NTK ` +
+      throw new Error(`publication for ${result.id} started and did not confirm; ` +
+        (result.reason ? `${result.reason}; ` : '') + `inspect the ticket in NTK ` +
         `before any other run of it, and do not resume blindly; see ${result.log}`);
     }
     if (result?.environment && (!result.preflight || argv.includes('--once'))) {
