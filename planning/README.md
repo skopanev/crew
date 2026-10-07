@@ -164,13 +164,12 @@ python3 planning/admit.py --result /path/to/run/artifacts/result.json
 | `stale` | Изменилась цепочка, возраст ≥24 часов либо у старого результата нет проверенного снимка. Нужен новый planning. | 3 |
 | `error` | Текущее состояние не прочитано, ответ некорректен, часы противоречивы или результат не допускает реализацию. Запуск запрещён. | 2 |
 
-Сравниваются формулировки, описания, владельцы, подтверждение и связи Domain,
-Capability, текущей ревизии Requirement и её AC. Все AC входят в контекст REQ;
-новая ревизия тоже считается изменением. Счётчики заметок, обычные комментарии,
-просмотры карточек, активность Tasks и результаты проверок не являются изменением
-формулировки. Для двух чтений Joppa требуется одинаковая позиция журнала;
-при гонке выполняется до трёх попыток, затем отказ. Сама позиция не входит
-в сравнение: изменение постороннего объекта не инвалидирует план.
+The reader resolves the current Requirement through its public ID and reads its parents with `joppa_objects`.
+It follows `document.parent` without fixed parent type names or a full index scan.
+The snapshot includes authored fields, links, references, the Requirement confirmation, and all current ACs.
+Parent objects do not require a confirmation field. Removed or archived context prevents admission.
+All scoped reads must have the same journal position. The reader permits three attempts.
+The position does not enter the snapshot. Unrelated writes, comments, task activity, and check results do not invalidate it.
 
 TTL фиксирован: 24 часа после успешного завершения planning. Проверка не
 перезаписывает результат и не продлевает время; возраст проверяется также после

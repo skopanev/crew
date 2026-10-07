@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import digest
-from freshness import admit, snapshot, StalePlan
+from freshness import admit, snapshot, hydrate, StalePlan
 from joppa_fixture import JoppaFixture
 
 
@@ -48,24 +48,26 @@ class AdmissionTests(unittest.TestCase):
             admit(self.result, clock=lambda: next(times))
 
     def test_each_level_and_relationship_change_expires_plan(self):
-        original_index, original_detail = deepcopy(self.peer.index), deepcopy(self.peer.detail)
+        original_objects, original_detail = deepcopy(self.peer.objects), deepcopy(self.peer.detail)
         mutations = (
-            lambda: self.peer.index["index"]["domains"]["domain-1"].update(description="changed"),
-            lambda: self.peer.index["index"]["capabilities"]["cap-1"].update(title="changed"),
-            lambda: self.peer.detail["requirement"]["revisions"][0].update(body="changed"),
+            lambda: self.peer.objects["area:domain-1"]["document"]["data"].update(description="changed"),
+            lambda: self.peer.objects["service:cap-1"]["document"]["data"].update(title="changed"),
+            lambda: self.peer.detail["object"]["document"]["data"].update(body="changed"),
             lambda: self.peer.detail["requirement"]["revisions"][0]["acs"][0].update(text="changed"),
             lambda: self.peer.detail["requirement"]["revisions"][0]["acs"][0].update(depends_on=["another"]),
         )
         for mutation in mutations:
-            self.peer.index, self.peer.detail = deepcopy(original_index), deepcopy(original_detail)
+            self.peer.objects, self.peer.detail = deepcopy(original_objects), deepcopy(original_detail)
             mutation()
             with self.assertRaisesRegex(StalePlan, "changed"):
                 self.check()
 
     def test_unrelated_activity_and_reads_do_not_expire_plan(self):
-        self.peer.index["position"] = self.peer.detail["position"] = 100
+        self.peer.detail["position"] = 100
+        for obj in self.peer.objects.values():
+            obj["position"] = 100
         self.peer.detail["requirement"]["revisions"][0]["tasks"] = {"other": {"status": "done"}}
-        self.peer.index["index"]["domains"]["unrelated"] = {"title": "another domain"}
+        self.peer.objects["area:unrelated"] = {"title": "another domain"}
         self.assertEqual(self.check()["status"], "allowed")
         self.assertEqual(self.check()["status"], "allowed")
 
@@ -85,6 +87,25 @@ class AdmissionTests(unittest.TestCase):
         del old["joppa_snapshot"]
         with self.assertRaises(StalePlan):
             self.check(old)
+
+    def test_addresses_custom_types_and_removed_parents(self):
+        current = snapshot("test", "test-R-0123456789", "test-A-0123456789")
+        assignment = {"domain": {"id": "area:domain-1"}, "capability": {"id": "cap-1"}}
+        self.assertEqual(hydrate(assignment, current)["capability"]["id"], "service:cap-1")
+        self.assertTrue(all("req" in call or "item_id" in call or "address" in call for call in self.peer.calls))
+        with self.assertRaisesRegex(ValueError, "workspace mismatch"):
+            snapshot("other", "test-R-0123456789", "test-A-0123456789")
+        self.peer.objects["service:cap-1"]["document"]["present"] = False
+        with self.assertRaisesRegex(StalePlan, "removed"):
+            self.check()
+
+    def test_parent_cycle_and_reference_change_refuse(self):
+        self.peer.objects["area:domain-1"]["references"] = [{"field": "owner", "target": "member:other"}]
+        with self.assertRaisesRegex(StalePlan, "changed"):
+            self.check()
+        self.peer.objects["area:domain-1"]["document"]["parent"] = "service:cap-1"
+        with self.assertRaisesRegex(ValueError, "cyclic"):
+            self.check()
 
     def test_cli_distinguishes_stale_and_read_error_without_mutating_receipt(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -51,7 +51,13 @@ class Joppa:
         return message["result"]
 
     def read(self, **arguments):
-        result = self.rpc("tools/call", {"name": "joppa_read", "arguments": arguments})
+        return self.call("joppa_read", arguments)
+
+    def objects(self, **arguments):
+        return self.call("joppa_objects", arguments)
+
+    def call(self, name, arguments):
+        result = self.rpc("tools/call", {"name": name, "arguments": arguments})
         require(isinstance(result, dict) and not result.get("isError"), "Joppa read failed")
         if isinstance(result.get("structuredContent"), dict):
             return result["structuredContent"]
