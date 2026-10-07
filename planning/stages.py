@@ -283,13 +283,13 @@ def finish():
     save_result(assignment, plan, reviews, old, contracts, chain)
 
 
-def verify_context(assignment, plan):
+def verify_context(assignment, plan, review=True):
     target = artifacts()
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for key, review in reviews.items():
         validation.critique(review, digest(plan))
         require(review["verdict"] == "clear", f"{key} critic rejected: {review['summary']}")
-    old, contracts = verify_freshness(assignment)
+    old, contracts = verify_freshness(assignment, review)
     return reviews, old, contracts
 
 
@@ -302,22 +302,29 @@ class DriftReview(Exception):
     """finish stops before publication and sends the landed diff to the critics."""
 
 
-def verify_freshness(assignment):
+def verify_freshness(assignment, review=True):
     """Source and role contracts are unchanged since prepare. Every published verdict needs this.
 
-    A clean fast-forward of the base gets one critic review of the diff per run
-    (drift_review). Publication then uses the new base only if every critic
-    clears it; any other change, or a second move, is CODE_DRIFT.
+    With review, a clean fast-forward of the base gets one critic review of the
+    diff per run (drift_review). Publication then uses the new base only if every
+    critic clears it; any other change, or a second move, is CODE_DRIFT. This is
+    the last check before publication, not an atomic part of it.
     """
     target = artifacts()
     old = read(target / "snapshots.json")
-    current = {r["id"]: fingerprint(r) for r in assignment["repositories"]}
-    review = reviewed_base(assignment, old, current) if current != old else None
+    sources = lambda: {r["id"]: fingerprint(r) for r in assignment["repositories"]}
+    current = sources()
+    # A requested review binds this run to its new base, even if the source returns to the old one.
+    drifted = current != old or (target / "drift.json").is_file()
+    require(review or not drifted, CODE_DRIFT)
+    review = reviewed_base(assignment, old, current) if drifted else None
     contracts = read(target / "contracts.json")
     with ThreadPoolExecutor(max_workers=3) as pool:
         loaded = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     require(all(loaded[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
             "mandatory Equill contract changed during planning; re-plan")
+    # The source can move while contracts load; judge only the base read above.
+    require(sources() == current, CODE_DRIFT)
     if review is None:
         return old, contracts
     if review.get("outcome") == "cleared":

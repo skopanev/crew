@@ -4,7 +4,6 @@ The critics, not a path heuristic, decide whether the landed diff affects the
 plan. This module only decides which drift is small and simple enough to show
 them, binds their verdicts to that exact diff, and records the result.
 """
-from fnmatch import fnmatch
 import hashlib
 import json
 import os
@@ -20,8 +19,6 @@ import validation
 DIFF_LIMIT = 60 * 1024
 # Statuses that remove or replace a path. git diff -M reports renames as R<score>.
 STRUCTURAL = ("D", "R", "T")
-# A reviewer cannot read a binary build or dependency input; its change always re-plans.
-BUILD_INPUTS = ("*.gradle*", "*.toml", "*.lock", "package*.json", "Package.resolved", "*.pbxproj")
 GIT_ENV = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
 
@@ -63,11 +60,6 @@ def binaries(root, old, new):
     return found
 
 
-def build_input(path):
-    name = os.path.basename(path)
-    return ".xcodeproj/" in "/" + path or any(fnmatch(name, pattern) for pattern in BUILD_INPUTS)
-
-
 def patch(root, old, new, budget):
     """The diff text, or None when it exceeds the budget. Spooled, never fully in memory."""
     with tempfile.TemporaryFile() as output:
@@ -84,10 +76,14 @@ def cited(assignment, plan, target):
     """Per repository: path prefixes the plan or research depends on, and check directories."""
     repos = {r["id"]: r for r in assignment["repositories"]}
     paths = {key: set() for key in repos}
-    modules = {m["name"]: (r["id"], m["path"]) for r in repos.values() for m in r["modules"]}
-    for name in [t.get("module") for t in plan.get("tasks", [])] + [assignment.get("ticket", {}).get("module")]:
-        if name in modules:
-            paths[modules[name][0]].add(modules[name][1])
+    # Module names are unique only within a repository.
+    modules = {(r["id"], m["name"]): m["path"] for r in repos.values() for m in r["modules"]}
+    named = [(t.get("repository"), t.get("module")) for t in plan.get("tasks", [])]
+    ticket = assignment.get("ticket", {}).get("module")
+    named += [(key, ticket) for key in repos if ticket]
+    for key in named:
+        if key in modules:
+            paths[key[0]].add(modules[key])
     # A check directory is not a dependency on every file below it; it only has to survive.
     cwds = {key: set() for key in repos}
     checks = [(c, c.get("repository")) for c in plan.get("acceptance_checks", [])]
@@ -128,10 +124,9 @@ def prepare(assignment, plan, target, old, current):
             for path in (row["path"], row.get("from")):
                 require(not (path and row["status"][0] in STRUCTURAL and touches(path, citations[repo["id"]], text)),
                         f"{repo['id']}: {row['status']} {path} is cited by the plan or research")
+        # A reviewer sees only the name of a binary change; it cannot clear its effect.
         opaque = binaries(root, before["head"], after["head"])
-        for path in opaque:
-            require(not (touches(path, citations[repo["id"]], text) or build_input(path)),
-                    f"{repo['id']}: binary {path} is cited, in planned scope, or a build input")
+        require(not opaque, f"{repo['id']}: binary change {', '.join(opaque)}")
         for cwd in cwds[repo["id"]] - {"."}:
             require(subprocess.run(["git", "-C", root, "cat-file", "-e", f"{after['head']}:{cwd}"],
                                    capture_output=True, timeout=45).returncode == 0,
@@ -141,7 +136,7 @@ def prepare(assignment, plan, target, old, current):
         require("</signal:var>" not in diff, f"{repo['id']}: diff contains a reserved signal delimiter")
         budget -= len(diff.encode())
         repos[repo["id"]] = {"old_head": before["head"], "new_head": after["head"], "changes": rows,
-                             "binaries": opaque, "diff_digest": hashlib.sha256(diff.encode()).hexdigest(), "diff": diff}
+                             "diff_digest": hashlib.sha256(diff.encode()).hexdigest(), "diff": diff}
     record = {"plan_digest": digest(plan), "old": old, "new": current,
               "repositories": {k: {n: v for n, v in r.items() if n != "diff"} for k, r in repos.items()}}
     record["digest"] = digest(record)
@@ -173,11 +168,6 @@ def grounded(result, record, text):
                     f"{key} evidence names neither a changed path nor a plan citation: {item['source']}")
             reason = item["reason"].strip()
             require(len(reason) >= 20 and not GENERIC.match(reason), f"{key} evidence reason is generic: {reason}")
-    # Critics see only the name of a binary change; a clear verdict must say it considered it.
-    sources = {item["source"] for answer in result["answers"].values() for item in answer["evidence"]}
-    for repo, details in record["repositories"].items():
-        for path in details["binaries"]:
-            require(any(path in source for source in sources), f"no evidence names binary {repo}:{path}")
 
 
 def verdicts(record, target, plan):

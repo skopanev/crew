@@ -395,7 +395,8 @@ def finish():
     rejected = rejected_plan(plan, reviews)
     if rejected:
         validate_plan(rejected, assignment)
-        shared.verify_freshness(assignment)
+        # The critics reviewed the original plan, not this diagnosis: no drift review.
+        shared.verify_freshness(assignment, review=False)
         retained(config(), os.environ["PLANNING_TICKET"])
         result = publish(rejected, reviews)
         signal("BLOCKED", json.dumps(result))
@@ -403,7 +404,8 @@ def finish():
     if plan["ntk"]["verdict"] == "READY":
         require(all(read(target / f"research-{branch}.json")["status"] != "blocked"
                     for branch in validation.RESEARCH), "Missing mandatory research cannot produce READY")
-    reviews, _, _ = shared.verify_context(assignment, plan)
+    # Only a READY plan can be cleared by a drift review; a published diagnosis needs the exact base.
+    reviews, _, _ = shared.verify_context(assignment, plan, review=plan["ntk"]["verdict"] == "READY")
     retained(config(), os.environ["PLANNING_TICKET"])
     result = publish(plan, reviews)
     signal("READY" if result["verdict"] in ("READY", "DECOMPOSED") else "BLOCKED", json.dumps(result))
