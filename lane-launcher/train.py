@@ -96,6 +96,12 @@ def due(config, rows):
     return not lanes_running()
 
 
+def gradle_home(config):
+    home = os.path.join(config["trainDir"], "gradle-home")
+    os.makedirs(home, exist_ok=True)
+    return home
+
+
 class Box:
     """One lane-image container holding the integration clone."""
 
@@ -104,7 +110,10 @@ class Box:
         source = os.path.realpath(config["sourceRoot"])
         mounts = [(source, f"/workspace/{os.path.basename(source)}", "ro"),
                   (work, "/workspace/train", "rw"),
-                  (os.path.realpath(config["sshDir"]), "/workspace/lane-ssh", "ro")]
+                  (os.path.realpath(config["sshDir"]), "/workspace/lane-ssh", "ro"),
+                  # The lander is the only user of its Gradle home: keep it across
+                  # trains so the shared cache is copied once, not per train.
+                  (gradle_home(config), "/home/medulla/.gradle", "rw")]
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "ro")
                    for d in config.get("readOnlyRepos", [])]
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "rw")

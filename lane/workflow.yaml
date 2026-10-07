@@ -172,7 +172,7 @@ nodes:
       # released across containers and a second build times out. Seed a private
       # home from the mounted cache once; the mounted cache stays a read-only seed.
       if [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
-        mkdir -p "$HOME/.gradle" && cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
+        mkdir -p "$HOME/.gradle" && nice -n 19 ionice -c 3 cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
       fi
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
