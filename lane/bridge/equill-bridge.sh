@@ -14,6 +14,23 @@ command -v jq >/dev/null 2>&1 || { echo "equill-bridge: no jq on PATH" >&2; exit
 mkdir -p "$bridge/req" "$bridge/resp" || exit 1
 chmod 700 "$bridge" "$bridge/req" "$bridge/resp" 2>/dev/null || true
 
+# The operating system releases this lock when the bridge exits.
+if [ "${1:-}" != --locked ]; then
+  exec python3 - "$0" "$bridge" <<'PY'
+import fcntl
+from pathlib import Path
+import subprocess
+import sys
+
+lock = (Path(sys.argv[2]) / "bridge.lock").open("a")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(0)
+sys.exit(subprocess.call(["/bin/bash", sys.argv[1], "--locked"]))
+PY
+fi
+
 pidfile="$bridge/bridge.pid"
 if [ -f "$pidfile" ]; then
   old="$(cat "$pidfile" 2>/dev/null || true)"

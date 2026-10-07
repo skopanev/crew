@@ -301,11 +301,16 @@ mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
 if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
   nohup bash "$WORKFLOW_DIR/bridge/equill-bridge.sh" >>"$MEDULLA_BRIDGE/equill-bridge.log" 2>&1 &
   disown || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [[ -f "$bridge_dir/bridge.pid" ]] && break
-    sleep 0.2
-  done
 fi
+
+for ((bridge_attempt=0; bridge_attempt<25; bridge_attempt++)); do
+  bridge_pid="$(cat "$bridge_dir/bridge.pid" 2>/dev/null || true)"
+  if [[ -n "$bridge_pid" ]] && kill -0 "$bridge_pid" 2>/dev/null \
+     && [[ "$(cat "$bridge_dir/bridge.identity" 2>/dev/null || true)" == "lane:$bridge_pid" ]]; then
+    break
+  fi
+  sleep 0.2
+done
 
 # An already-running old bridge may still inherit its owner's write identity.
 # Do not reuse it silently or stop it while another caller might be using it.
