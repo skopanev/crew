@@ -13,6 +13,8 @@ PLANNING = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLANNING))
 from common import validate_input, fingerprint
 from validation import plan
+import validation
+from stages import CODE_DRIFT
 from joppa_fixture import JoppaFixture
 
 
@@ -101,6 +103,34 @@ class WorkflowTests(unittest.TestCase):
         starts = [e["slug"] for e in events if e["kind"] == "start"]
         self.assertEqual(starts.count("design"), 2)
         self.assertEqual(starts.count("simplicity"), 2)
+
+    def test_a_clean_base_advance_publishes_after_every_critic_clears_the_diff(self):
+        proc, result = self.execute("drift_clear")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(result["status"], "ready")
+        review = result["drift_review"]
+        self.assertEqual(review["outcome"], "cleared")
+        self.assertEqual(sorted(review["verdicts"]), sorted(validation.CRITICS))
+        self.assertEqual(result["snapshots"], review["new"])
+        repo = review["repositories"]["test"]
+        self.assertEqual(repo["new_head"], result["snapshots"]["test"]["head"])
+        self.assertEqual([c["path"] for c in repo["changes"]], ["drift_clear.md"])
+        events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
+        starts = [e["slug"] for e in events if e["kind"] == "start"]
+        self.assertEqual(sum(s.startswith("drift-") for s in starts), 3)
+
+    def test_drift_review_failures_end_in_code_drift(self):
+        for case, reviews in (("drift_affected", 3), ("drift_moved", 3), ("stale", 0)):
+            with self.subTest(case=case):
+                (self.root / "events.jsonl").unlink(missing_ok=True)
+                proc, result = self.execute(case)
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(result["status"], "blocked")
+                self.assertTrue(result["reason"].startswith(CODE_DRIFT), result["reason"])
+                events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
+                self.assertEqual(sum(e["kind"] == "start" and e["slug"].startswith("drift-") for e in events), reviews)
+                shutil.rmtree(self.root / "runs")
+                (self.root / "repo/src/main.py").write_text("value = 1\n")
 
     def test_failures_never_admit_work(self):
         for case in ("missing_contract", "no_cbm", "outside_module", "rejected", "malformed", "stale", "changed_contract",

@@ -184,3 +184,27 @@ def critique(result, expected_digest):
         require(type(finding.get("blocking")) is bool, "finding.blocking must be boolean")
     blocking = any(f["blocking"] for f in findings)
     require(blocking == (result["verdict"] == "reject"), "critic verdict and blocking findings disagree")
+
+
+DRIFT_QUESTIONS = ("cited_paths", "reused_units", "build_contracts", "absence_claims")
+
+
+def drift(result, expected_digest):
+    # Strict: a drift verdict allows publication on a new base, so every
+    # question needs an explicit boolean and no extra or missing field passes.
+    require(set(result) == {"drift_digest", "verdict", "summary", "affected", "findings", "reviewer"},
+            "drift verdict has missing or extra fields")
+    require(result["drift_digest"] == expected_digest, "critic reviewed a different drift")
+    require(result["verdict"] in ("clear", "affected"), "invalid drift verdict")
+    text(result["summary"], "drift.summary")
+    affected = result["affected"]
+    require(isinstance(affected, dict) and set(affected) == set(DRIFT_QUESTIONS)
+            and all(type(v) is bool for v in affected.values()), "drift.affected needs one boolean per question")
+    findings = result["findings"]
+    require(isinstance(findings, list), "drift.findings must be a list")
+    for finding in findings:
+        for field in ("claim", "evidence", "resolution"):
+            text(finding.get(field), "finding." + field)
+        require(type(finding.get("blocking")) is bool, "finding.blocking must be boolean")
+    blocking = any(affected.values()) or any(f["blocking"] for f in findings)
+    require(blocking == (result["verdict"] == "affected"), "drift verdict and its answers disagree")

@@ -165,6 +165,12 @@ the configured interval and retries.
 It does not mark the ticket processed. Configuration and repository faults still stop the dispatcher.
 The existing sync log records the failure. With `--once`, the dispatcher exits
 unsuccessfully instead of repeating the attempt.
+If a repository only advanced by commits while a run planned (clean tree before
+and after, old HEAD an ancestor of the new one), finish first sends the landed
+diff to the same three critic seats once (`drift_review`). It publishes on the
+new base only if all of them clear it, and records `drift_review` in `result.json`.
+A diff over 60 KB, a renamed or deleted path that the plan or research cites,
+a blocking answer, or a second move is still `code_drift`.
 If the source changed while a run planned (`code_drift`, nothing published), the
 dispatcher refreshes sources and plans the same ticket once more. A second drift
 defers that ticket while the queue continues. Other runs without a verdict stop the loop and have no processed stamp: the

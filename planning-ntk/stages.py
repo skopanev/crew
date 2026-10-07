@@ -413,6 +413,10 @@ def publish(plan, reviews):
     target = shared.artifacts()
     result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews,
                              "publicationMarker": str(target / "publication-started.json")})
+    # Published on a base the critics cleared after a clean advance: keep the audit trail.
+    reviewed = shared.drift.cleared(target)
+    if reviewed:
+        result = {**result, "drift_review": reviewed}
     write(target / "result.json", result)
     remember(result)
     return result
@@ -454,6 +458,8 @@ if __name__ == "__main__":
         else:
             {"prepare": prepare, "prepare_critic": shared.prepare_critic, "research_join": research_join, "review_input": review_input,
              "critique_join": shared.critique_join, "finish": finish, "fail": fail}[command]()
+    except shared.DriftReview as review:
+        signal("DRIFT", review)
     except Exception as error:
         print(f"planning-ntk/{command}: {error}", file=sys.stderr)
         if command in ("capture", "prepare_critic"):
