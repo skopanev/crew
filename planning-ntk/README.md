@@ -165,6 +165,20 @@ the configured interval and retries.
 It does not mark the ticket processed. Configuration and repository faults still stop the dispatcher.
 The existing sync log records the failure. With `--once`, the dispatcher exits
 unsuccessfully instead of repeating the attempt.
+If a repository only advanced by commits while a run planned (clean tree before
+and after, old HEAD an ancestor of the new one), finish first sends the landed
+diff to the same three critic seats once (`drift_review`). It publishes on the
+new base only if all of them clear it, and records `drift_review` in `result.json`.
+Each seat answers four questions (cited paths, reused units, build and test
+contracts, absence claims), each with evidence that names a changed path or a
+plan citation and says why. Empty, unnamed or generic evidence is not clear.
+Only a READY plan gets this review; a NOT_READY or NEEDS_HUMAN diagnosis,
+including a plan the critics still reject, needs the exact planned base.
+Any binary change, a diff over 60 KB, a renamed or deleted path that the plan or
+research cites, a blocking answer, or any move after the review started (also
+back to the old base) is still `code_drift`. The source is checked again after
+the role contracts load, immediately before publication; that check is not
+atomic with the NTK write.
 If the source changed while a run planned (`code_drift`, nothing published), the
 dispatcher refreshes sources and plans the same ticket once more. A second drift
 defers that ticket while the queue continues. Other runs without a verdict stop the loop and have no processed stamp: the

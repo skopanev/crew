@@ -44,11 +44,27 @@ class PublicationTests(unittest.TestCase):
 
     def test_a_rejected_plan_checks_freshness_before_it_publishes(self):
         calls = []
-        with patch.object(stages.shared, "verify_freshness", side_effect=lambda a: calls.append("fresh")), \
+        with patch.object(stages.shared, "verify_freshness", side_effect=lambda a, review: calls.append(("fresh", review))), \
              patch.object(stages, "ntk", side_effect=lambda action, value: calls.append(action) or {"verdict": "NOT_READY"}), \
              patch.object(stages, "signal"):
             stages.finish()
-        self.assertEqual(calls, ["fresh", "publish"])
+        # The critics never saw the NOT_READY diagnosis: no drift review on this path.
+        self.assertEqual(calls, [("fresh", False), "publish"])
+
+    def test_only_a_ready_plan_may_be_published_after_a_drift_review(self):
+        for key in stages.validation.CRITICS:
+            (self.target / f"critic-{key}.json").write_text(json.dumps({"verdict": "clear", "summary": "Clear", "findings": []}))
+        for verdict, review in (("READY", True), ("NOT_READY", False), ("NEEDS_HUMAN", False)):
+            with self.subTest(verdict=verdict):
+                plan = json.loads((self.target / "plan.json").read_text())
+                plan["ntk"]["verdict"] = verdict
+                (self.target / "plan.json").write_text(json.dumps(plan))
+                for branch in stages.validation.RESEARCH:
+                    (self.target / f"research-{branch}.json").write_text(json.dumps({"status": "complete"}))
+                with patch.object(stages.shared, "verify_context", return_value=({}, {}, {})) as context, \
+                     patch.object(stages, "ntk", return_value={"verdict": verdict}), patch.object(stages, "signal"):
+                    stages.finish()
+                self.assertEqual(context.call_args.kwargs, {"review": review})
 
     def test_stale_sources_stop_a_rejected_plan_before_any_write(self):
         with patch.object(stages.shared, "verify_freshness", side_effect=ValueError("source changed")), \
@@ -88,6 +104,30 @@ class PublicationTests(unittest.TestCase):
         with patch.object(stages, "signal"):
             stages.fail("mandatory Equill contract changed during planning; re-plan")
         self.assertNotIn("code_drift", json.loads((self.target / "result.json").read_text()))
+
+    def test_a_drift_review_request_stops_finish_before_any_write(self):
+        with patch.object(stages.shared, "verify_freshness", side_effect=stages.shared.DriftReview("review")), \
+             patch.object(stages, "ntk") as ntk:
+            with self.assertRaises(stages.shared.DriftReview):
+                stages.finish()
+        ntk.assert_not_called()
+        self.assertFalse((self.target / "result.json").exists())
+
+    def test_a_publication_after_a_cleared_drift_review_records_it(self):
+        record = {"outcome": "cleared", "digest": "d", "old": {"r": {"head": "a"}}, "new": {"r": {"head": "b"}},
+                  "repositories": {"r": {"old_head": "a", "new_head": "b", "diff_digest": "x", "changes": []}},
+                  "verdicts": {"necessity": {"verdict": "clear"}}}
+        (self.target / "drift.json").write_text(json.dumps(record))
+        with patch.object(stages.shared, "verify_freshness"), \
+             patch.object(stages, "ntk", return_value={"verdict": "NOT_READY"}), patch.object(stages, "signal"):
+            stages.finish()
+        self.assertEqual(json.loads((self.target / "result.json").read_text())["drift_review"], record)
+        for outcome in ("review", "code_drift: simplicity: diff affects the plan"):
+            (self.target / "drift.json").write_text(json.dumps({**record, "outcome": outcome}))
+            with patch.object(stages.shared, "verify_freshness"), \
+                 patch.object(stages, "ntk", return_value={"verdict": "NOT_READY"}), patch.object(stages, "signal"):
+                stages.finish()
+            self.assertNotIn("drift_review", json.loads((self.target / "result.json").read_text()))
 
     def test_drift_after_a_started_publication_is_not_marked(self):
         (self.target / "publication-started.json").write_text("{}")

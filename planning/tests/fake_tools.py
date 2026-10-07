@@ -3,12 +3,21 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
 name = Path(sys.argv[0]).name
 case = os.environ.get("PLANNING_TEST_CASE", "ready")
 root = Path(os.environ["PLANNING_TEST_ROOT"])
+
+
+def land(name):
+    """Another lane lands a commit on the planned repository."""
+    repo = root / "repo"
+    (repo / name).write_text("landed elsewhere\n")
+    for args in (["add", name], ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", name]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
 def event(kind, slug):
@@ -82,6 +91,8 @@ else:
     assert '"capability"' in prompt and "Bounded work scheduling" in prompt
     role_input = json.loads(os.environ.get("MEDULLA_INPUT", "{}"))
     slug = role_input.get("slug", "design")
+    if os.environ.get("PLANNING_DRIFT_DIGEST"):
+        slug = "drift-" + slug
     event("start", slug)
     time.sleep(0.25)
     target = Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
@@ -127,6 +138,16 @@ else:
                   "outcome": "The AC holds", "necessity": "Observed missing behavior", "approach": "Adjust existing predicate",
                   "rationale": "No new abstraction", "alternatives": ["No change leaves the defect"], "blockers": [],
                   "tasks": [] if case == "existing" else [task], "acceptance_checks": [{**check, "repository": "test"}]}
+    elif slug.startswith("drift-"):
+        affected = case == "drift_affected" and slug == "drift-correctness"
+        evidence = [] if case == "drift_no_evidence" else [{"source": "src/main.py", "reason":
+                    f"The diff only adds {case}.md; the plan cites src/main.py, which it leaves unchanged"}]
+        result = {"verdict": "affected" if affected else "clear", "summary": "Diff checked against the plan",
+                  "answers": {key: {"affected": affected and key == "reused_units", "evidence": evidence}
+                              for key in ("cited_paths", "reused_units", "build_contracts", "absence_claims")},
+                  "findings": []}
+        if case == "drift_moved" and slug == "drift-correctness":
+            land("second.md")
     else:
         rejected = case == "rejected" and slug == "simplicity"
         if case == "rejected_once" and slug == "simplicity" and not (root / "rejected-once").exists():
@@ -143,6 +164,8 @@ else:
             (target / "plan.json").write_text(json.dumps(plan))
         if case == "stale" and slug == "correctness":
             (root / "repo/src/main.py").write_text("changed during planning\n")
+        if case.startswith("drift_") and slug == "correctness":
+            land(case + ".md")
         if case == "changed_contract" and slug == "correctness":
             (root / "contracts-changed").write_text("changed")
         if case == "joppa_changed" and slug == "correctness":

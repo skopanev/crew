@@ -176,11 +176,42 @@ def critique(result, expected_digest):
     require(result.get("plan_digest") == expected_digest, "critic reviewed a different plan")
     require(result.get("verdict") in ("clear", "reject"), "invalid critic verdict")
     text(result.get("summary"), "critic.summary")
-    findings = result.get("findings")
-    require(isinstance(findings, list), "critic.findings must be a list")
-    for finding in findings:
+    blocking = findings(result.get("findings"))
+    require(blocking == (result["verdict"] == "reject"), "critic verdict and blocking findings disagree")
+
+
+def findings(items):
+    """Validate critic findings; True when any of them blocks."""
+    require(isinstance(items, list), "critic.findings must be a list")
+    for finding in items:
         for field in ("claim", "evidence", "resolution"):
             text(finding.get(field), "finding." + field)
         require(type(finding.get("blocking")) is bool, "finding.blocking must be boolean")
-    blocking = any(f["blocking"] for f in findings)
-    require(blocking == (result["verdict"] == "reject"), "critic verdict and blocking findings disagree")
+    return any(f["blocking"] for f in items)
+
+
+DRIFT_QUESTIONS = ("cited_paths", "reused_units", "build_contracts", "absence_claims")
+
+
+def drift(result, expected_digest):
+    # Strict shape only: a drift verdict allows publication on a new base, so
+    # every question needs an explicit boolean and an evidence list. Whether the
+    # evidence names something real is decided at finish (drift.grounded).
+    require(set(result) == {"drift_digest", "verdict", "summary", "answers", "findings", "reviewer"},
+            "drift verdict has missing or extra fields")
+    require(result["drift_digest"] == expected_digest, "critic reviewed a different drift")
+    require(result["verdict"] in ("clear", "affected"), "invalid drift verdict")
+    text(result["summary"], "drift.summary")
+    answers = result["answers"]
+    require(isinstance(answers, dict) and set(answers) == set(DRIFT_QUESTIONS), "drift.answers needs every question")
+    for key, answer in answers.items():
+        require(isinstance(answer, dict) and set(answer) == {"affected", "evidence"}
+                and type(answer["affected"]) is bool and isinstance(answer["evidence"], list),
+                f"drift.answers.{key} needs affected and an evidence list")
+        for item in answer["evidence"]:
+            require(isinstance(item, dict) and set(item) == {"source", "reason"},
+                    f"drift.answers.{key}.evidence needs source and reason")
+            text(item["source"], "evidence.source")
+            text(item["reason"], "evidence.reason")
+    blocking = findings(result["findings"]) or any(a["affected"] for a in answers.values())
+    require(blocking == (result["verdict"] == "affected"), "drift verdict and its answers disagree")
