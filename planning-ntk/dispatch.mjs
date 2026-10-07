@@ -169,10 +169,16 @@ export function deferForDrift(result) {
     result.ticket_unchanged === true && result.published === false && result.publication_uncertain !== true;
 }
 
-export async function tick(configFile, config, {dryRun = false, deferred = new Set()} = {}) {
+export async function tick(configFile, config, {dryRun = false, deferred = new Set(), retryPoll = false} = {}) {
   const state = readState(config);
   state.tickets ??= {};
-  const {ready, held} = candidates(await blockedTickets(config), state);
+  let tickets;
+  try { tickets = await blockedTickets(config); } catch (error) {
+    if (!retryPoll || !['fetch failed', 'The operation was aborted due to timeout'].includes(error.message)) throw error;
+    console.log(paint('yellow', `DEFERRED · NTK queue poll failed: ${error.message}`));
+    return null;
+  }
+  const {ready, held} = candidates(tickets, state);
   divider();
   console.log(paint('blue', 'PLANNER'));
   field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
@@ -278,7 +284,7 @@ async function main(argv) {
   process.on('SIGTERM', () => process.exit(143));
   const deferred = new Set();
   do {
-    const result = await tick(file, config, {deferred});
+    const result = await tick(file, config, {deferred, retryPoll: !argv.includes('--once')});
     if (result?.deferred) {
       deferred.add(result.id);
       if (argv.includes('--once')) break;
