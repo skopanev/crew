@@ -384,6 +384,13 @@ nodes:
       effort: '{{input.effort}}'
       args:
       - '{{input.flag:-}}'
+    post: |
+      [ "$MEDULLA_BODY_RC" = 0 ] || exit 1
+      case "$MEDULLA_BODY_SIGNAL" in
+        CLEAR|REJECT) exit 0 ;;
+        *) echo 'Return CLEAR or REJECT as a signal. A report with NONE does not supply a verdict.' >&2
+           exit 1 ;;
+      esac
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/qa-contract.txt and execute its steps.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
@@ -402,6 +409,7 @@ nodes:
     on_signal:
       CLEAR: git_landing
       REJECT: reject_gate
+      REVIEW_INCOMPLETE: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -422,7 +430,10 @@ nodes:
           found = {n for n in names if n in VERDICTS}
           return found.pop() if len(found) == 1 else ""
 
-      go, findings, notes = 0, [], []
+      go, findings, notes, incomplete = 0, [], [], []
+      seats = [r.get("slug") or (r.get("input") or {}).get("slug") for r in rows]
+      if sorted(str(s) for s in seats) != ["architecture", "codereview", "security"]:
+          incomplete.append("Expected one result from each of the three reviewer seats.")
       for r in rows:
           v = verdict(r)
           who = r.get("harness") or "?"
@@ -431,6 +442,8 @@ nodes:
               v = ""
               result = f"TIMEOUT ({r.get('model') or '?'}, rc={r.get('rc')}, attempts={r.get('attempts')})"
               print(f"[lane] {who}: {result}", file=sys.stderr)
+          if r.get("ok") is not True or r.get("rc") != 0 or r.get("timed_out") or not v:
+              incomplete.append(f"{who}: {result}; attempts={r.get('attempts')}")
           line = f"- {who}: {result} {r.get('message') or ''}".strip()
           # Keep every reviewer result, including nonblocking findings.
           notes.append(line)
@@ -446,7 +459,10 @@ nodes:
           fh.write("\n".join(notes) + "\n---\n")
       print(f"панель: {go} из {len(rows)} сказали CLEAR", file=sys.stderr)
 
-      if rows and go == len(rows):
+      if incomplete:
+          detail = "; ".join(incomplete)
+          print(f"<signal:REVIEW_INCOMPLETE>{detail}; full results: {art / 'panel-findings.txt'}</signal:REVIEW_INCOMPLETE>")
+      elif go == len(rows):
           print(f"<signal:CLEAR>все {len(rows)} ревьюера сказали CLEAR</signal:CLEAR>")
       else:
           print(f"<signal:REJECT>Reviewer blockers; full verdicts: {art / 'panel-findings.txt'}</signal:REJECT>")
