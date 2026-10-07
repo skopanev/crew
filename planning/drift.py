@@ -189,4 +189,3 @@ def cleared(target):
     file = Path(target) / "drift.json"
     record = read(file) if file.is_file() else None
     return record if record and record.get("outcome") == "cleared" else None
-
