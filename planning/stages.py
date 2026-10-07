@@ -8,6 +8,7 @@ import sys
 
 from common import digest, fingerprint, read, require, run, signal, validate_input, write
 from contracts import ROLES, load_contract
+import drift
 import validation
 from freshness import snapshot, hydrate, utc_now
 from responses import final_response
@@ -211,17 +212,21 @@ def capture(kind):
         validation.plan(result, read(target / "input.json"))
         write(target / "plan.json", result)
         signal("PLANNED", "Structured implementation plan validated")
-    elif kind == "critic":
+    elif kind in ("critic", "drift"):
+        # A drift review uses the critic seats; only the bound digest and the verdict shape differ.
         seat = json.loads(os.environ["MEDULLA_INPUT"])
-        slug = seat["slug"]
         require(os.environ["MEDULLA_HARNESS"] == seat["harness"], "critic harness differs from its assigned seat")
-        expected = digest(read(target / "plan.json"))
-        require(os.environ.get("PLANNING_REVIEW_DIGEST") == expected, "critic reviewed a different plan")
-        result["plan_digest"] = expected
-        validation.critique(result, expected)
+        if kind == "critic":
+            expected = digest(read(target / "plan.json"))
+            require(os.environ.get("PLANNING_REVIEW_DIGEST") == expected, "critic reviewed a different plan")
+            result["plan_digest"] = expected
+        else:
+            expected = read(target / "drift.json")["digest"]
+            require(os.environ.get("PLANNING_DRIFT_DIGEST") == expected, "critic reviewed a different drift")
+            result["drift_digest"] = expected
         result["reviewer"] = {"harness": seat["harness"], "model": seat["model"]}
-        write(target / f"critic-{slug}.json", result)
-
+        (validation.critique if kind == "critic" else validation.drift)(result, expected)
+        write(target / f"{kind}-{seat['slug']}.json", result)
 
 def research_join():
     target = artifacts()
@@ -278,13 +283,13 @@ def finish():
     save_result(assignment, plan, reviews, old, contracts, chain)
 
 
-def verify_context(assignment, plan):
+def verify_context(assignment, plan, review=True):
     target = artifacts()
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
-    for key, review in reviews.items():
-        validation.critique(review, digest(plan))
-        require(review["verdict"] == "clear", f"{key} critic rejected: {review['summary']}")
-    old, contracts = verify_freshness(assignment)
+    for key, critic_review in reviews.items():
+        validation.critique(critic_review, digest(plan))
+        require(critic_review["verdict"] == "clear", f"{key} critic rejected: {critic_review['summary']}")
+    old, contracts = verify_freshness(assignment, review)
     return reviews, old, contracts
 
 
@@ -293,17 +298,76 @@ def verify_context(assignment, plan):
 CODE_DRIFT = "source changed during planning; re-plan against current code"
 
 
-def verify_freshness(assignment):
-    """Source and role contracts are unchanged since prepare. Every published verdict needs this."""
+class DriftReview(Exception):
+    """finish stops before publication and sends the landed diff to the critics."""
+
+
+def verify_freshness(assignment, review=True):
+    """Source and role contracts are unchanged since prepare. Every published verdict needs this.
+
+    With review, a clean fast-forward of the base gets one critic review of the
+    diff per run (drift_review). Publication then uses the new base only if every
+    critic clears it; any other change, or a second move, is CODE_DRIFT. This is
+    the last check before publication, not an atomic part of it.
+    """
     target = artifacts()
     old = read(target / "snapshots.json")
-    require(old == {r["id"]: fingerprint(r) for r in assignment["repositories"]}, CODE_DRIFT)
+    sources = lambda: {r["id"]: fingerprint(r) for r in assignment["repositories"]}
+    current = sources()
+    # A requested review binds this run to its new base, even if the source returns to the old one.
+    drifted = current != old or (target / "drift.json").is_file()
+    require(review or not drifted, CODE_DRIFT)
+    review = reviewed_base(assignment, old, current) if drifted else None
     contracts = read(target / "contracts.json")
     with ThreadPoolExecutor(max_workers=3) as pool:
-        current = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
-    require(all(current[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
+        loaded = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
+    require(all(loaded[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
             "mandatory Equill contract changed during planning; re-plan")
-    return old, contracts
+    # The source can move while contracts load; judge only the base read above.
+    require(sources() == current, CODE_DRIFT)
+    if review is None:
+        return old, contracts
+    if review.get("outcome") == "cleared":
+        write(target / "drift.json", review)
+        return current, contracts
+    request_review(review)
+
+
+def reviewed_base(assignment, old, current):
+    """The cleared record, a new review request, or CODE_DRIFT. Writes nothing on success."""
+    target = artifacts()
+    plan = read(target / "plan.json")
+    file = target / "drift.json"
+    if file.is_file():
+        record = read(file)
+        try:
+            require("digest" in record, record.get("outcome", "no drift review"))
+            # The new base must still be clean and identical to the reviewed one.
+            require(all(drift.clean(current[k]) for k in record["repositories"]),
+                    "uncommitted changes on the reviewed base")
+            require(record["new"] == current, "source moved again during the drift review")
+            require(record["old"] == old and record["plan_digest"] == digest(plan), "drift review covers another plan")
+            return {**record, "verdicts": drift.verdicts(record, target, plan), "outcome": "cleared"}
+        except Exception as error:
+            write(target / "drift.json", {**record, "outcome": f"code_drift: {error}"})
+            raise ValueError(CODE_DRIFT) from error
+    try:
+        record, diff = drift.prepare(assignment, plan, target, old, current)
+    except Exception as error:
+        write(target / "drift.json", {"old": old, "new": current, "outcome": f"code_drift without review: {error}"})
+        raise ValueError(CODE_DRIFT) from error
+    return {**record, "diff": diff}
+
+
+def request_review(review):
+    target = artifacts()
+    diff = review.pop("diff")
+    (target / "drift.diff").write_text(diff)
+    write(target / "drift.json", {**review, "outcome": "review"})
+    emit_var("drift", review)
+    emit_var("drift_diff", diff)
+    emit_var("drift_digest", review["digest"])
+    raise DriftReview("Base advanced cleanly; critics review the landed diff before publication")
 
 
 def save_result(assignment, plan, reviews, old, contracts, chain):
@@ -318,6 +382,8 @@ def save_result(assignment, plan, reviews, old, contracts, chain):
                "contracts": {k: {n: v[n] for n in ("role", "record_ids", "bundle_digest")}
                              for k, v in contracts.items()},
                "plan": plan, "reviews": reviews, "joppa_updated": False}
+    if drift.cleared(target):
+        outcome["drift_review"] = drift.cleared(target)
     lines = ["# Implementation plan", "", "Status: " + outcome["status"], "", plan["outcome"], "", "## Approach", "", plan["approach"], "", plan["rationale"]]
     for task in plan["tasks"]:
         lines += ["", "## " + task["id"] + ": " + task["title"], "", f"Repository: {task['repository']} · module: {task['module']}", "", task["outcome"], ""]
@@ -359,6 +425,8 @@ if __name__ == "__main__":
         else:
             {"prepare": prepare, "prepare_critic": prepare_critic, "research_join": research_join, "review_input": review_input,
              "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
+    except DriftReview as review:
+        signal("DRIFT", review)
     except Exception as exc:
         print(f"planning/{command}: {exc}", file=sys.stderr)
         if command in ("capture", "prepare_critic"):

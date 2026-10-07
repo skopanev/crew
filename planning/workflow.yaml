@@ -2,8 +2,9 @@ version: '2'
 start: prepare
 # Covers the step limits in sequence: prepare 180 + research 600, then up to two
 # rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
-# in the critics pool; a rejected plan gets one revision round (critique_join).
-timeout: 6000
+# in the critics pool; a rejected plan gets one revision round (critique_join),
+# and a clean base advance at finish gets one drift review of 600.
+timeout: 6600
 defaults:
   timeout: 60
 vars:
@@ -133,7 +134,7 @@ nodes:
       PLANNING_REVIEW_DIGEST: '{{var:plan_digest}}'
     max_parallel: 3
     min_success: 3
-    inputs:
+    inputs: &critic_seats
       - slug: necessity
         harness: codex
         model: gpt-6.1-sol
@@ -156,7 +157,7 @@ nodes:
           OPENCODE_CONFIG: ''
           OPENCODE_DISABLE_PROJECT_CONFIG: 'true'
         question: Can the mechanisms meet the AC within the declared modules? Are prerequisite outputs sufficient? Do observable checks cover success and failure? Check assumptions and compatibility. Lane owns files, functions and build details.
-    agent:
+    agent: &critic_agent
       harness: '{{input.harness}}'
       model: '{{input.model}}'
       effort: high
@@ -191,9 +192,43 @@ nodes:
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" finish'
     on_signal:
       READY: __exit_ok__
+      DRIFT: drift_review
       BLOCKED: __exit_fail__
       __failed__: failed
       __default__: failed
+  drift_review:
+    # The base advanced cleanly after the critics cleared the plan. The same seats
+    # judge whether the landed diff affects it. finish runs once more and publishes
+    # only if every seat clears; a failed or missing verdict there is code drift.
+    pre: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" prepare_critic'
+    timeout: 600
+    max_attempts: 2
+    env:
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
+      PLANNING_DRIFT_DIGEST: '{{var:drift_digest}}'
+    max_parallel: 3
+    min_success: 3
+    inputs: *critic_seats
+    agent: *critic_agent
+    prompt: |
+      {{file:prompts/drift.md}}
+      Mandatory Equill contract:
+      {{var:critic_contract}}
+      Assignment: {{var:assignment}}
+      Research: {{var:research}}
+      Frozen plan: {{var:plan}}
+      Base advance: {{var:drift}}
+      Landed diff:
+      {{var:drift_diff}}
+      Your independent perspective: {{input.slug}}
+    post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture drift'
+    on_signal:
+      __done__: finish
+      __failed__: finish
+      __empty__: finish
   failed:
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" fail'
     on_signal:
