@@ -169,6 +169,9 @@ If a repository only advanced by commits while a run planned (clean tree before
 and after, old HEAD an ancestor of the new one), finish first sends the landed
 diff to the same three critic seats once (`drift_review`). It publishes on the
 new base only if all of them clear it, and records `drift_review` in `result.json`.
+Each seat answers four questions (cited paths, reused units, build and test
+contracts, absence claims), each with evidence that names a changed path or a
+plan citation and says why. Empty, unnamed or generic evidence is not clear.
 A diff over 60 KB, a renamed or deleted path that the plan or research cites,
 a blocking answer, or a second move is still `code_drift`.
 If the source changed while a run planned (`code_drift`, nothing published), the

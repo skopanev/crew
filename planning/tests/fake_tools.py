@@ -140,9 +140,12 @@ else:
                   "tasks": [] if case == "existing" else [task], "acceptance_checks": [{**check, "repository": "test"}]}
     elif slug.startswith("drift-"):
         affected = case == "drift_affected" and slug == "drift-correctness"
+        evidence = [] if case == "drift_no_evidence" else [{"source": "src/main.py", "reason":
+                    f"The diff only adds {case}.md; the plan cites src/main.py, which it leaves unchanged"}]
         result = {"verdict": "affected" if affected else "clear", "summary": "Diff checked against the plan",
-                  "affected": {"cited_paths": False, "reused_units": affected,
-                               "build_contracts": False, "absence_claims": False}, "findings": []}
+                  "answers": {key: {"affected": affected and key == "reused_units", "evidence": evidence}
+                              for key in ("cited_paths", "reused_units", "build_contracts", "absence_claims")},
+                  "findings": []}
         if case == "drift_moved" and slug == "drift-correctness":
             land("second.md")
     else:

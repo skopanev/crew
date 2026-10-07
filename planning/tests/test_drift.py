@@ -16,11 +16,14 @@ import stages
 import validation
 
 
-def verdict(record, affected=False):
+def verdict(record, affected=False, evidence=None):
+    if evidence is None:
+        evidence = [{"source": "docs/notes.md",
+                     "reason": "Only changed file; the plan cites src/main.py, which the diff leaves unchanged"}]
     return {"drift_digest": record["digest"], "verdict": "affected" if affected else "clear",
             "summary": "Diff checked", "findings": [], "reviewer": {"harness": "codex", "model": "m"},
-            "affected": {"cited_paths": False, "reused_units": affected,
-                         "build_contracts": False, "absence_claims": False}}
+            "answers": {key: {"affected": affected and key == "reused_units", "evidence": evidence}
+                        for key in validation.DRIFT_QUESTIONS}}
 
 
 class DriftReviewTests(unittest.TestCase):
@@ -81,9 +84,9 @@ class DriftReviewTests(unittest.TestCase):
         self.assertIn(reason, json.loads((self.target / "drift.json").read_text())["outcome"])
         return emitted
 
-    def answer(self, record, blocked=()):
+    def answer(self, record, blocked=(), evidence=None):
         for key in validation.CRITICS:
-            (self.target / f"drift-{key}.json").write_text(json.dumps(verdict(record, key in blocked)))
+            (self.target / f"drift-{key}.json").write_text(json.dumps(verdict(record, key in blocked, evidence)))
 
     def test_unchanged_source_needs_no_review(self):
         old, _ = stages.verify_freshness(self.assignment)
@@ -104,6 +107,63 @@ class DriftReviewTests(unittest.TestCase):
         cleared = drift.cleared(self.target)
         self.assertEqual(sorted(cleared["verdicts"]), sorted(validation.CRITICS))
         self.assertEqual(cleared["digest"], record["digest"])
+
+    def test_clear_verdicts_without_grounded_evidence_are_code_drift(self):
+        self.land()
+        record = self.request()
+        for evidence, reason in (([], "no evidence for cited_paths"),
+                                 ([{"source": "docs/notes.md", "reason": "Unaffected."}], "generic"),
+                                 ([{"source": "docs/notes.md", "reason": "not affected"}], "generic"),
+                                 ([{"source": "somewhere/else.py", "reason": "The diff does not reach this file at all"}],
+                                  "neither a changed path nor a plan citation")):
+            with self.subTest(reason=reason):
+                (self.target / "drift.json").write_text(json.dumps({**record, "outcome": "review"}))
+                self.answer(record, evidence=evidence)
+                self.assert_code_drift(reason)
+                self.assertIsNone(drift.cleared(self.target))
+
+    def test_evidence_may_cite_the_plan_with_repository_and_line(self):
+        self.land()
+        record = self.request()
+        self.answer(record, evidence=[{"source": "test:src/main.py:1",
+                                       "reason": "The plan edits src/main.py; the diff changes only docs/notes.md"}])
+        base, _ = stages.verify_freshness(self.assignment)
+        self.assertEqual(base, record["new"])
+
+    def test_a_dirty_tree_on_the_reviewed_base_is_code_drift(self):
+        self.land()
+        self.answer(self.request())
+        (self.repo / "docs/notes.md").write_text("uncommitted after the review\n")
+        self.assert_code_drift("uncommitted changes on the reviewed base")
+
+    def test_every_change_kind_is_listed_and_binary_names_reach_the_diff(self):
+        (self.repo / "docs/new.md").write_text("added\n")
+        (self.repo / "docs/image.bin").write_bytes(bytes(range(256)))
+        self.commit("prepare kinds")
+        (self.target / "snapshots.json").write_text(json.dumps({"test": fingerprint(self.assignment["repositories"][0])}))
+        (self.repo / "docs/added.md").write_text("a different addition\n")
+        (self.repo / "docs/image.bin").write_bytes(bytes(reversed(range(256))))
+        self.git("rm", "-q", "docs/new.md")
+        self.git("mv", "docs/notes.md", "docs/renamed.md")
+        (self.repo / "docs/link").symlink_to("renamed.md")
+        self.commit("kinds")
+        (self.repo / "docs/link").unlink()
+        (self.repo / "docs/link").write_text("now a file\n")
+        self.commit("type change")
+        rows = self.request()["repositories"]["test"]["changes"]
+        self.assertEqual(sorted((r["status"][0], r["path"]) for r in rows),
+                         [("A", "docs/added.md"), ("A", "docs/link"), ("D", "docs/new.md"),
+                          ("M", "docs/image.bin"), ("R", "docs/renamed.md")])
+        self.assertIn("Binary files", (self.target / "drift.diff").read_text())
+
+    def test_a_type_change_is_listed(self):
+        (self.repo / "docs/link").symlink_to("notes.md")
+        self.commit("link")
+        (self.target / "snapshots.json").write_text(json.dumps({"test": fingerprint(self.assignment["repositories"][0])}))
+        (self.repo / "docs/link").unlink()
+        (self.repo / "docs/link").write_text("now a file\n")
+        self.commit("type change")
+        self.assertEqual(self.request()["repositories"]["test"]["changes"], [{"status": "T", "path": "docs/link"}])
 
     def test_one_blocking_critic_is_code_drift(self):
         self.land()
@@ -193,11 +253,13 @@ class DriftVerdictTests(unittest.TestCase):
     def test_strict_verdict_shape(self):
         record = {"digest": "d"}
         validation.drift(verdict(record), "d")
-        for broken, reason in (({"verdict": "clear", "affected": {"cited_paths": True, "reused_units": False,
-                                                                  "build_contracts": False, "absence_claims": False}}, "disagree"),
-                               ({"affected": {"cited_paths": False}}, "one boolean"),
-                               ({"affected": {"cited_paths": "no", "reused_units": False,
-                                              "build_contracts": False, "absence_claims": False}}, "one boolean"),
+        good = verdict(record)["answers"]["cited_paths"]
+        for broken, reason in (({"verdict": "clear", "answers": {**verdict(record)["answers"],
+                                                               "cited_paths": {**good, "affected": True}}}, "disagree"),
+                               ({"answers": {"cited_paths": good}}, "every question"),
+                               ({"answers": {**verdict(record)["answers"], "cited_paths": {"affected": False}}}, "evidence list"),
+                               ({"answers": {**verdict(record)["answers"], "cited_paths": {**good, "evidence": ["src"]}}},
+                                "source and reason"),
                                ({"findings": [{"blocking": True, "claim": "c", "evidence": "e", "resolution": "r"}]}, "disagree"),
                                ({"verdict": "maybe"}, "invalid drift verdict")):
             with self.subTest(reason=reason):
