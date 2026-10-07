@@ -120,7 +120,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sum(s.startswith("drift-") for s in starts), 3)
 
     def test_drift_review_failures_end_in_code_drift(self):
-        for case, reviews in (("drift_affected", 3), ("drift_moved", 3), ("stale", 0)):
+        for case, reviews in (("drift_affected", 3), ("drift_no_evidence", 3), ("drift_moved", 3), ("stale", 0)):
             with self.subTest(case=case):
                 (self.root / "events.jsonl").unlink(missing_ok=True)
                 proc, result = self.execute(case)

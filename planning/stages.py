@@ -339,9 +339,12 @@ def reviewed_base(assignment, old, current):
         record = read(file)
         try:
             require("digest" in record, record.get("outcome", "no drift review"))
+            # The new base must still be clean and identical to the reviewed one.
+            require(all(drift.clean(current[k]) for k in record["repositories"]),
+                    "uncommitted changes on the reviewed base")
             require(record["new"] == current, "source moved again during the drift review")
             require(record["old"] == old and record["plan_digest"] == digest(plan), "drift review covers another plan")
-            return {**record, "verdicts": drift.verdicts(record, target), "outcome": "cleared"}
+            return {**record, "verdicts": drift.verdicts(record, target, plan), "outcome": "cleared"}
         except Exception as error:
             drift.save(target, {**record, "outcome": f"code_drift: {error}"})
             raise ValueError(CODE_DRIFT) from error

@@ -190,21 +190,30 @@ DRIFT_QUESTIONS = ("cited_paths", "reused_units", "build_contracts", "absence_cl
 
 
 def drift(result, expected_digest):
-    # Strict: a drift verdict allows publication on a new base, so every
-    # question needs an explicit boolean and no extra or missing field passes.
-    require(set(result) == {"drift_digest", "verdict", "summary", "affected", "findings", "reviewer"},
+    # Strict shape only: a drift verdict allows publication on a new base, so
+    # every question needs an explicit boolean and an evidence list. Whether the
+    # evidence names something real is decided at finish (drift.grounded).
+    require(set(result) == {"drift_digest", "verdict", "summary", "answers", "findings", "reviewer"},
             "drift verdict has missing or extra fields")
     require(result["drift_digest"] == expected_digest, "critic reviewed a different drift")
     require(result["verdict"] in ("clear", "affected"), "invalid drift verdict")
     text(result["summary"], "drift.summary")
-    affected = result["affected"]
-    require(isinstance(affected, dict) and set(affected) == set(DRIFT_QUESTIONS)
-            and all(type(v) is bool for v in affected.values()), "drift.affected needs one boolean per question")
+    answers = result["answers"]
+    require(isinstance(answers, dict) and set(answers) == set(DRIFT_QUESTIONS), "drift.answers needs every question")
+    for key, answer in answers.items():
+        require(isinstance(answer, dict) and set(answer) == {"affected", "evidence"}
+                and type(answer["affected"]) is bool and isinstance(answer["evidence"], list),
+                f"drift.answers.{key} needs affected and an evidence list")
+        for item in answer["evidence"]:
+            require(isinstance(item, dict) and set(item) == {"source", "reason"},
+                    f"drift.answers.{key}.evidence needs source and reason")
+            text(item["source"], "evidence.source")
+            text(item["reason"], "evidence.reason")
     findings = result["findings"]
     require(isinstance(findings, list), "drift.findings must be a list")
     for finding in findings:
         for field in ("claim", "evidence", "resolution"):
             text(finding.get(field), "finding." + field)
         require(type(finding.get("blocking")) is bool, "finding.blocking must be boolean")
-    blocking = any(affected.values()) or any(f["blocking"] for f in findings)
+    blocking = any(a["affected"] for a in answers.values()) or any(f["blocking"] for f in findings)
     require(blocking == (result["verdict"] == "affected"), "drift verdict and its answers disagree")

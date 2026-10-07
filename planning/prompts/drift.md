@@ -21,17 +21,31 @@ Do not critique the plan again. Answer only whether the landed diff affects it:
 The working directory is the source root, not a repository. Start every shell
 command with `cd <repository path from the assignment> && `.
 
+Every question needs evidence that names what you compared. Each entry has a
+`source`: a changed path from the diff, or a path, unit or check exactly as the
+plan or research cites it (`path`, `repository:path` or `path:line`). Its
+`reason` says why that item is or is not affected, for example "diff touches
+only docs/notes.md; plan cites src/main.py and its callers are unchanged".
+For a clear question, give at least one entry. For an affected question, name
+the concrete path and hunk. An empty list, an unnamed source, or a bare
+conclusion such as "unaffected" counts as not clear and sends the plan back to
+a full re-plan.
+
 Return ONLY one JSON object as your final response; no signal tags:
 
 {"verdict":"clear",
  "summary":"What you checked in the diff and why the plan still holds",
- "affected":{"cited_paths":false,"reused_units":false,
-             "build_contracts":false,"absence_claims":false},
+ "answers":{
+   "cited_paths":{"affected":false,"evidence":[{"source":"docs/notes.md",
+     "reason":"Only changed file; the plan cites src/main.py, which the diff leaves unchanged"}]},
+   "reused_units":{"affected":false,"evidence":[{"source":"...","reason":"..."}]},
+   "build_contracts":{"affected":false,"evidence":[{"source":"...","reason":"..."}]},
+   "absence_claims":{"affected":false,"evidence":[{"source":"...","reason":"..."}]}},
  "findings":[{"blocking":false,"claim":"Concrete finding",
               "evidence":"Diff hunk or source and explanation",
               "resolution":"What would resolve it"}]}
 
-Use "affected" if and only if at least one answer is true or a finding is
+Use "affected" if and only if at least one answer is affected or a finding is
 blocking. If you cannot decide an answer from the diff and the source, answer
-true: an uncertain answer sends the plan back to a full re-plan, which is safe.
+affected: an uncertain answer sends the plan back to a full re-plan, which is safe.
 An unrelated diff may have no findings; do not invent them.

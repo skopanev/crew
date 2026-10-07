@@ -7,6 +7,7 @@ them, binds their verdicts to that exact diff, and records the result.
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -93,7 +94,7 @@ def prepare(assignment, plan, target, old, current):
     """Build the review input for a clean fast-forward, or raise Ineligible with the reason."""
     citations, cwds = cited(assignment, plan, target)
     # Names cited in prose (steps, reuse, evidence, absence claims) count as cited too.
-    text = json.dumps([plan, *(read(target / f"research-{b}.json") for b in validation.RESEARCH)], ensure_ascii=False)
+    text = citations_text(plan, target)
     repos, budget = {}, DIFF_LIMIT
     for repo in assignment["repositories"]:
         before, after = old[repo["id"]], current[repo["id"]]
@@ -129,15 +130,43 @@ def prepare(assignment, plan, target, old, current):
     return record, "\n".join(f"### {key}\n{r['diff']}" for key, r in repos.items())
 
 
-def verdicts(record, target):
-    """Every critic seat cleared exactly this diff. Raises with the reason otherwise."""
-    results = {}
+def citations_text(plan, target):
+    return json.dumps([plan, *(read(target / f"research-{b}.json") for b in validation.RESEARCH)], ensure_ascii=False)
+
+
+# Reasons that state a conclusion without saying what was compared.
+GENERIC = re.compile(r"(?i)^\W*(un|not |no )?(affected|impact(ed)?|change[sd]?|relevant|related|applicable)?\W*"
+                     r"(n/?a|none|ok|clear|fine|same|nothing|no issues?)?\W*$")
+
+
+def grounded(result, record, text):
+    """Every answer names a changed path or a plan/research citation and says why.
+
+    A clear verdict needs evidence for each question; an empty, unnamed or
+    generic entry means the critic did not show the check, so it is not clear.
+    """
+    changed = {p for r in record["repositories"].values() for c in r["changes"] for p in (c["path"], c.get("from")) if p}
+    for key, answer in result["answers"].items():
+        require(answer["evidence"], f"no evidence for {key}")
+        for item in answer["evidence"]:
+            source = re.sub(r":[1-9][0-9]*(?:-[1-9][0-9]*)?$", "", item["source"].strip())
+            source = source.split(":", 1)[1] if source.split(":", 1)[0] in record["repositories"] else source
+            require(source in changed or (len(source) >= 3 and source in text),
+                    f"{key} evidence names neither a changed path nor a plan citation: {item['source']}")
+            reason = item["reason"].strip()
+            require(len(reason) >= 20 and not GENERIC.match(reason), f"{key} evidence reason is generic: {reason}")
+
+
+def verdicts(record, target, plan):
+    """Every critic seat cleared exactly this diff with grounded evidence. Raises with the reason otherwise."""
+    results, text = {}, citations_text(plan, target)
     for key in validation.CRITICS:
         file = target / f"drift-{key}.json"
         require(file.is_file(), f"{key}: no drift verdict")
         result = read(file)
         validation.drift(result, record["digest"])
         require(result["verdict"] == "clear", f"{key}: diff affects the plan: {result['summary']}")
+        grounded(result, record, text)
         results[key] = result
     return results
 
