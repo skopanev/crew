@@ -114,6 +114,33 @@ Use `--dry-run` for one preview iteration: check configuration and Docker, then 
 
 Capacity includes only Docker lane containers and pending reservations belonging to the selected dispatcher ID. Container membership uses the existing `medulla.workflow=lane` and `medulla.runs_under` labels: the run path contains `crew-dispatchers/<id>/`. Other IDs, other workflows and legacy containers without a dispatcher identity are excluded. Stop or finish old unscoped lanes before switching their dispatcher to this version; their historical files are retained. Docker/Herdr inspection errors prevent launches. Use the same `stateDir` for all dispatcher invocations: locks are under `crew-dispatchers/<id>/dispatcher.lock`, so the same ID cannot run twice while different IDs can run concurrently. Manual `lane/run.sh` launches require `--dispatcher-id <id>` and become visible to that dispatcher through their container label. Manual launches must respect the same limit; a separate manual start can race the dispatcher. After a hard crash, inspect `dispatcher.lock/owner.json` and remove the lock only once that PID has stopped. An uncertain tab creation keeps its reservation until inspected; it does not silently free capacity.
 
+## Landing train
+
+With `"train"` in `dolber.json`, lanes do not push. After review and checks a
+lane queues its candidate (`artifacts/train-request.json`), keeps its worktree
+and exits; the ticket stays `in_progress`. Run one lander per dispatcher:
+
+```bash
+python3 lane-launcher/train.py lane-launcher/dolber.json            # loop
+python3 lane-launcher/train.py lane-launcher/dolber.json --dry-run  # no push
+```
+
+The lander is the only writer to the target branch. When `train.size`
+candidates are queued, the oldest waited `train.waitSeconds`, or no lane runs,
+it applies every candidate onto a fresh target in one clone, runs
+`train.gateCommands` once in a lane-image container, and pushes. A conflicting
+candidate leaves the train; a failing train splits in halves until the failing
+candidate is found. Left-out tickets reopen with a note; their commits stay as
+a bundle in the train directory (`<stateDir>/crew-dispatchers/<id>/train`).
+
+```json
+"limit": 3,
+"train": {"size": 3, "waitSeconds": 900, "gateCommands": ["..."]}
+```
+
+Keep checks that use one shared external checkout (for example a remote build
+host) only in `train.gateCommands`: parallel lanes would race on it.
+
 ## Status-only CLI
 
 ```bash

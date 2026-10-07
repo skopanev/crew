@@ -9,7 +9,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --test-command '["runner", "args"]'
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
-              [--image <image>] [--docker-engine]
+              [--image <image>] [--docker-engine] [--land-mode direct|train]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
@@ -48,7 +48,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
-planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
+planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}" land_mode="direct"
 test_command='[]'
 also=()
 writable=()
@@ -74,6 +74,7 @@ while (( $# )); do
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
     --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
+    --land-mode) land_mode="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -86,6 +87,7 @@ fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
+[[ "$land_mode" == direct || "$land_mode" == train ]] || { say "run.sh: --land-mode must be direct or train"; usage; }
 [[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
 [[ -x "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an executable host CBM server"; exit 2; }
 [[ -n "$cbm_cache" && -d "$cbm_cache" ]] || { say "run.sh: --cbm-cache-dir must name the existing shared CBM store"; exit 2; }
@@ -335,6 +337,7 @@ equill_vars=(
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
+    --var "LAND_MODE=$land_mode"
 )
 say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
