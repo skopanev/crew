@@ -132,7 +132,10 @@ function syncSources(config, logs) {
         fs.mkdirSync(logs, {recursive: true});
         const log = path.join(logs, `sync-${Date.now()}.log`);
         fs.writeFileSync(log, `${label}\n${run.stdout || ''}${run.stderr || ''}`);
-        throw new Error(`${label} failed: ${(run.stderr || run.stdout || '').trim().split('\n').pop()}; see ${log}`);
+        const reason = `${label} failed: ${run.error?.message ||
+          (run.stderr || run.stdout || '').trim().split('\n').pop() || run.signal || run.status}`;
+        if (run.status === 75) return {log, reason};
+        throw new Error(`${reason}; see ${log}`);
       }
     }
   } finally {
@@ -207,7 +210,13 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   let run, runName, log, result;
   for (let attempt = 0; ; attempt++) {
     field('Stage', paint('blue', 'preflight · Git and CBM'));
-    syncSources(config, logs);
+    const preflight = syncSources(config, logs);
+    if (preflight) {
+      console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preflight failed`);
+      field('Reason', paint('yellow', preflight.reason));
+      field('Log', preflight.log);
+      return {id: ticket.id, environment: true, preflight: true, log: preflight.log};
+    }
     field('Stage', paint('blue', 'planning · research, design and review'));
     runName = `dispatch-${ticket.id}-${Date.now()}`;
     log = path.join(logs, `${runName}.log`);
@@ -279,7 +288,9 @@ async function main(argv) {
       throw new Error(`publication for ${result.id} started and did not confirm; inspect the ticket in NTK ` +
         `before any other run of it, and do not resume blindly; see ${result.log}`);
     }
-    if (result?.environment) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
+    if (result?.environment && (!result.preflight || argv.includes('--once'))) {
+      throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
+    }
     if (argv.includes('--once')) break;
     deferred.clear();
     console.log(`\n${paint('blue', `Pause ${config.interval}s`)} · Ctrl+C to stop\n`);

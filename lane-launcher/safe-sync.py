@@ -92,9 +92,12 @@ def main(root, connector, image=None):
         for repo, future in futures:
             error = future.exception()
             if error is not None:
-                failures.append(f'{repo.name}: {error}')
+                failures.append((repo, error))
     if failures:
-        raise RuntimeError('; '.join(failures))
+        message = '; '.join(f'{repo.name}: {error}' for repo, error in failures)
+        error_type = TimeoutError if all(isinstance(error, TimeoutError)
+                                        for _, error in failures) else RuntimeError
+        raise error_type(message)
 
 
 if __name__ == '__main__':
@@ -104,4 +107,4 @@ if __name__ == '__main__':
         main(*sys.argv[1:])
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'[sync] {error}', file=sys.stderr)
-        sys.exit(2)
+        sys.exit(75 if isinstance(error, TimeoutError) else 2)

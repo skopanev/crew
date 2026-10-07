@@ -37,7 +37,7 @@ def session(connector, image=None):
             if b"\n" not in buffer:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
-                    raise RuntimeError(f"shared CBM timed out during {method}")
+                    raise TimeoutError(f"shared CBM timed out during {method}")
                 chunk = os.read(process.stdout.fileno(), 65536)
                 if not chunk:
                     raise RuntimeError(f"shared CBM disconnected during {method}")

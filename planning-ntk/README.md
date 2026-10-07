@@ -159,7 +159,12 @@ skips it until the ticket changes.
 A `[HUMAN]` ticket stays out until its configured dispatch tag is added again.
 An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
-result. A ticket unchanged since the last attempt is skipped.
+result. A ticket unchanged since the last completed attempt is skipped.
+If the CBM connection times out before planning starts, continuous mode waits
+the configured interval and retries.
+It does not mark the ticket processed. Configuration and repository faults still stop the dispatcher.
+The existing sync log records the failure. With `--once`, the dispatcher exits
+unsuccessfully instead of repeating the attempt.
 If the source changed while a run planned (`code_drift`, nothing published), the
 dispatcher refreshes sources and plans the same ticket once more. A second drift
 defers that ticket while the queue continues. Other runs without a verdict stop the loop and have no processed stamp: the
