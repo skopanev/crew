@@ -9,6 +9,9 @@ vars:
   gate_commands: '[]'
   LAUNCH_CLAIM: ''
   VERIFY_ONLY: 'false'
+  # direct: the lane pushes its candidate. train: it queues the checked
+  # candidate for lane-launcher/train.py, which lands batches with one gate run.
+  LAND_MODE: direct
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
   CBM_PROJECT: ''
@@ -470,6 +473,7 @@ nodes:
   git_landing:
     env:
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
+      LAND_MODE: '{{var:LAND_MODE}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
@@ -482,6 +486,7 @@ nodes:
     timeout: 600
     on_signal:
       VERIFIED: cleanup
+      QUEUED: notify_success
       LAND_FAILED: notify_failure
       CONFLICT: git_fix
       REBASED: prepare_review
@@ -523,6 +528,18 @@ nodes:
 
       [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
         echo "<signal:LAND_FAILED>nothing to land: no commit above origin/${target}</signal:LAND_FAILED>"; exit 0; }
+
+      if [ "${LAND_MODE:-direct}" = "train" ]; then
+        # The lander takes commits from this retained worktree; the lane stops here.
+        jq -n --arg ticket "$ticket_id" --arg sha "$(git rev-parse HEAD)" --arg tree "$have_tree" \
+          --arg target "$target" --arg worktree "${LANE_WORKTREE}" \
+          --arg queued_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          '{ticket: $ticket, sha: $sha, tree: $tree, target: $target, worktree: $worktree, queued_at: $queued_at}' \
+          > "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp"
+        mv "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp" "$MEDULLA_RUN_DIR/artifacts/train-request.json"
+        echo "<signal:QUEUED>Checked candidate $(git rev-parse --short HEAD) queued for the landing train.</signal:QUEUED>"
+        exit 0
+      fi
 
       export PATH="/home/medulla/.bun/bin:${PATH}"
       land() {
@@ -669,7 +686,8 @@ nodes:
       case "${MEDULLA_LAST_SIGNAL:-}" in
         LANDED) msg="${ticket_id} landed: ${MEDULLA_LAST_MESSAGE:-}" ;;
         VERIFIED) msg="${ticket_id} verified: ${MEDULLA_LAST_MESSAGE:-}" ;;
-        *) echo 'Success requires LANDED or VERIFIED and confirmed to_test' >&2; exit 1 ;;
+        QUEUED) msg="${ticket_id} queued: ${MEDULLA_LAST_MESSAGE:-}" ;;
+        *) echo 'Success requires LANDED, VERIFIED or QUEUED' >&2; exit 1 ;;
       esac
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       # Retain nonblocking findings in the run artifacts.

@@ -44,6 +44,7 @@ export function laneArgs(config, ticket) {
   return ['--ticket-id', ticket, '--project', config.workspace, '--source-root', config.sourceRoot,
     '--dispatcher-id', config.id,
     '--image', config.image,
+    ...(config.train ? ['--land-mode', 'train'] : []),
     ...(config.dockerEngine ? ['--docker-engine'] : []),
     '--cbm-mcp-command', config.cbmMcpCommand, '--cbm-cache-dir', config.cbmCacheDir,
     '--test-command', JSON.stringify(config.testCommand || []),
