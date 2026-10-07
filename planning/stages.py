@@ -72,7 +72,7 @@ def prepare_context(assignment, projects=None, read_paths=()):
     knowledge = json.loads(run([os.environ["EQUILL_BIN"], "context", "--store", os.environ["EQUILL_STORE"],
         "--profile", "agent.memory.hybrid", "--role", "planning", "--project", assignment["workspace"],
         "--query", assignment.get("knowledge_query") or "\n".join(
-            f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"]))
+            f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"], timeout=120))
     require(knowledge.get("ok") is True, "Equill knowledge retrieval failed")
     write(target / "knowledge.json", knowledge)
     emit_var("assignment", prompt_assignment(assignment))

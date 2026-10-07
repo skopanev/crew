@@ -1,10 +1,10 @@
 version: '2'
 start: prepare
-# Covers prepare 180 + research 600 + necessity 1200, then up to two
+# Covers prepare 300 + research 600 + necessity 1200, then up to two
 # rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
 # in the critics pool; a rejected plan gets one revision round (critique_join),
 # and a clean base advance at finish gets one drift review of 600.
-timeout: 7800
+timeout: 7920
 defaults:
   timeout: 60
 vars:
@@ -15,7 +15,7 @@ vars:
   critique: ''
 nodes:
   prepare:
-    timeout: 180
+    timeout: 300
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" prepare'
     on_signal:
       PREPARED: research
