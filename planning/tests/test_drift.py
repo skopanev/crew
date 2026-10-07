@@ -90,6 +90,17 @@ class DriftReviewTests(unittest.TestCase):
         for key in validation.CRITICS:
             (self.target / f"drift-{key}.json").write_text(json.dumps(verdict(record, key in blocked, evidence)))
 
+    def test_verify_context_passes_review_false_through_to_freshness(self):
+        # A critic review dict must not shadow the review flag: NOT_READY/NEEDS_HUMAN
+        # publication calls verify_context(review=False) and must stay on strict CODE_DRIFT.
+        for key in validation.CRITICS:
+            (self.target / f"critic-{key}.json").write_text("{}")
+        with patch.object(validation, "critique"), \
+             patch.object(stages, "read", side_effect=lambda path: {"verdict": "clear", "summary": "ok"}), \
+             patch.object(stages, "verify_freshness", return_value=({}, {})) as fresh:
+            stages.verify_context(self.assignment, self.plan, review=False)
+        fresh.assert_called_once_with(self.assignment, False)
+
     def test_unchanged_source_needs_no_review(self):
         old, _ = stages.verify_freshness(self.assignment)
         self.assertEqual(old, json.loads((self.target / "snapshots.json").read_text()))

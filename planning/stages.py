@@ -286,9 +286,9 @@ def finish():
 def verify_context(assignment, plan, review=True):
     target = artifacts()
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
-    for key, review in reviews.items():
-        validation.critique(review, digest(plan))
-        require(review["verdict"] == "clear", f"{key} critic rejected: {review['summary']}")
+    for key, critic_review in reviews.items():
+        validation.critique(critic_review, digest(plan))
+        require(critic_review["verdict"] == "clear", f"{key} critic rejected: {critic_review['summary']}")
     old, contracts = verify_freshness(assignment, review)
     return reviews, old, contracts
 
