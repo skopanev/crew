@@ -102,6 +102,10 @@ def gradle_home(config):
     return home
 
 
+class TrainDeferred(Exception):
+    """A transient failure: retry the same queue on the next tick."""
+
+
 class Box:
     """One lane-image container holding the integration clone."""
 
@@ -212,6 +216,17 @@ def run_gates(box, config, logfile):
 
 
 def push(box, target, logfile):
+    """Push the train; retry transport failures (the git host drops ssh from this network)."""
+    for attempt in range(3):
+        state, detail = push_once(box, target, logfile)
+        if state != "error":
+            return state, detail
+        log(f"push attempt {attempt + 1} failed: {detail.splitlines()[-1] if detail else ''}")
+        time.sleep(20)
+    return state, detail
+
+
+def push_once(box, target, logfile):
     script = f"""
 before="$(git ls-remote origin refs/heads/{target} | awk '{{print $1}}')"
 git merge-base --is-ancestor "$before" HEAD || exit 3
@@ -305,7 +320,7 @@ def land(config, items, train_dir, depth=0):
                     finish(config, item, "landed", f"{target}@{sha}", train_dir)
                 return
             if state != "moved":
-                raise RuntimeError(f"push failed: {sha}; see {logfile}")
+                raise TrainDeferred(f"push failed: {sha.splitlines()[-1] if sha else ''}; see {logfile}")
             log(f"{target} moved during the gates; rebuilding the train")
         else:
             raise RuntimeError(f"{target} kept moving; train stopped")
@@ -353,6 +368,9 @@ def main(argv):
                     json.dump(rows, fh, indent=2)
                 try:
                     land(config, rows, train_dir)
+                except TrainDeferred as error:
+                    # Nothing landed and no result was written: the queue is intact.
+                    log(f"TRAIN DEFERRED: {error}")
                 except Exception as error:  # noqa: BLE001 - keep the queue, report, stop
                     log(f"TRAIN STOPPED: {error}")
                     raise
