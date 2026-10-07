@@ -701,7 +701,8 @@ nodes:
       grep -h -E '^- (MED|LOW) ' "$MEDULLA_RUN_DIR"/artifacts/*.md 2>/dev/null \
         | sort -u > "$followups" || true
       n_follow="$(wc -l < "$followups" 2>/dev/null | tr -d ' ')"
-      if [ "${n_follow:-0}" -gt 0 ]; then
+      # A queued ticket is still in_progress; the lander publishes findings after to_test.
+      if [ "${n_follow:-0}" -gt 0 ] && [ "${MEDULLA_LAST_SIGNAL:-}" != "QUEUED" ]; then
         if finding="$(node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" findings 2>&1)"; then
           msg="${msg} ${finding}"
         else

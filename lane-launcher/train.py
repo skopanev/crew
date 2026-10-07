@@ -232,6 +232,11 @@ def finish(config, item, status, detail, train_dir):
         result["to_test"] = proc.returncode == 0
         if proc.returncode:
             result["to_test_error"] = (proc.stderr or proc.stdout)[-500:]
+        elif os.path.getsize(followups) if os.path.exists(followups := os.path.join(item["artifacts"], "followups.txt")) else 0:
+            # The lane left nonblocking findings; they need the source ticket in to_test.
+            proc = subprocess.run(["node", os.path.join(TOOLING, "lane", "bin", "ticket-outcome.mjs"), "findings"],
+                                  env=env, capture_output=True, text=True)
+            result["findings"] = (proc.stdout or proc.stderr).strip()[-300:]
     else:
         note = (f"Landing train {os.path.basename(train_dir)}: {status}. {detail} "
                 f"Candidate {item['sha'][:10]} kept as a bundle in the train directory. Reopened for a new lane.")
