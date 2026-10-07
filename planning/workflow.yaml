@@ -4,7 +4,7 @@ start: prepare
 # rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
 # in the critics pool; a rejected plan gets one revision round (critique_join),
 # and a clean base advance at finish gets one drift review of 600.
-timeout: 7920
+timeout: 9120
 defaults:
   timeout: 60
 vars:
@@ -110,6 +110,7 @@ nodes:
       __failed__: failed
       __default__: failed
   needs_human:
+    timeout: 660
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" needs_human'
     on_signal:
       BLOCKED: __exit_fail__
@@ -222,6 +223,8 @@ nodes:
       __failed__: failed
       __default__: failed
   finish:
+    # Publication can take up to 600 seconds, plus the freshness checks.
+    timeout: 660
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" finish'
     on_signal:
       READY: __exit_ok__
