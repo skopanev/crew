@@ -52,8 +52,10 @@ def acceptance_check(check, root=None):
         paths = argv[4:]
     elif len(argv) == 3 and argv[0] == "test" and argv[1] in {"-e", "-f", "-d", "-s"}:
         paths = argv[2:]
-    if not paths or (output_required and "stdout" not in check):
-        raise ValueError("unsupported acceptance check or missing exact stdout")
+    if not paths:
+        raise ValueError(f"unsupported acceptance check for {check['ac']!r}: {shlex.join(argv)}")
+    if output_required and "stdout" not in check:
+        raise ValueError(f"missing exact stdout for acceptance check {check['ac']!r}: {shlex.join(argv)}")
     root = Path(root or Path.cwd()).resolve()
     for value in paths:
         path = Path(value)
