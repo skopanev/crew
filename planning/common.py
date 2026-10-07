@@ -40,8 +40,8 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def run(argv, **kwargs):
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=45, **kwargs)
+def run(argv, timeout=45, **kwargs):
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, **kwargs)
     require(result.returncode == 0, f"{argv[0]} failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
     return result.stdout
 
