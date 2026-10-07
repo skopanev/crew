@@ -159,6 +159,9 @@ if [ -d {src}/.git/lfs/objects ] && command -v git-lfs >/dev/null; then
   mkdir -p .git/lfs && cp -r {src}/.git/lfs/objects .git/lfs/ && git lfs checkout >/dev/null
 fi
 if [ -f scripts/install-git-hooks.sh ]; then bash scripts/install-git-hooks.sh >/dev/null; fi
+if [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
+  mkdir -p "$HOME/.gradle" && cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
+fi
 echo "$target $(git rev-parse HEAD)"
 """
     proc = box.sh(script, logfile, cwd="/workspace/train")
