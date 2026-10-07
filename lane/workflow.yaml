@@ -308,7 +308,7 @@ nodes:
       # Native check receipts can bind to the commit reviewed and pushed.
       if [ "${VERIFY_ONLY}" != "true" ] && ! git diff --cached --quiet; then
         if ! git -c user.name=lane -c user.email=lane@local \
-            commit -m "${ticket_id}: ${ticket_title:0:60}" > "$MEDULLA_RUN_DIR/artifacts/commit.txt" 2>&1; then
+            commit -m "${ticket_id}: implement ticket" -m "$ticket_title" > "$MEDULLA_RUN_DIR/artifacts/commit.txt" 2>&1; then
           cat "$MEDULLA_RUN_DIR/artifacts/commit.txt" >&2
           echo '<signal:GATE_FAIL>commit rejected; see artifacts/commit.txt</signal:GATE_FAIL>'
           exit 0
