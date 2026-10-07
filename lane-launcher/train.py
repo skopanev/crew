@@ -110,7 +110,7 @@ class Box:
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "rw")
                    for d in config.get("readWriteDirs", [])]
         args = ["docker", "run", "-d", "--rm", "--label", "medulla.workflow=train",
-                "--entrypoint", "sleep", "-w", "/workspace/train",
+                "--entrypoint", "sleep", "-w", "/workspace/train", "-e", "GIT_LFS_SKIP_SMUDGE=1",
                 "-e", "GIT_SSH_COMMAND=ssh -F /dev/null -i /workspace/lane-ssh/id_ed25519 -o IdentitiesOnly=yes "
                       "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/workspace/lane-ssh/known_hosts"]
         for host, inside, mode in mounts:
@@ -154,7 +154,7 @@ git config user.name lane; git config user.email lane@local
 git remote set-url origin "$(git -C {src} remote get-url origin)"
 timeout 120 git fetch -q origin
 target="$(jq -er .target_branch {src}/.ntkrc)"
-git checkout -q --detach "origin/$target"
+GIT_LFS_SKIP_SMUDGE=1 git checkout -q --detach "origin/$target"
 if [ -d {src}/.git/lfs/objects ] && command -v git-lfs >/dev/null; then
   mkdir -p .git/lfs && cp -r {src}/.git/lfs/objects .git/lfs/ && git lfs checkout >/dev/null
 fi
