@@ -156,6 +156,32 @@ class DriftReviewTests(unittest.TestCase):
                           ("M", "docs/image.bin"), ("R", "docs/renamed.md")])
         self.assertIn("Binary files", (self.target / "drift.diff").read_text())
 
+    def test_unreadable_binary_changes_in_scope_or_build_inputs_are_code_drift_without_review(self):
+        base = self.git("rev-parse", "HEAD").strip()
+        for path in ("src/data.bin", "gradle/libs.versions.toml", "web/package-lock.json",
+                     "ios/App.xcodeproj/project.xcworkspace/state.bin", "ios/App.xcodeproj/project.pbxproj"):
+            with self.subTest(path=path):
+                self.git("reset", "-q", "--hard", base)
+                (self.target / "drift.json").unlink(missing_ok=True)
+                (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (self.repo / path).write_bytes(b"\0binary\0" + path.encode())
+                self.commit("binary " + path)
+                self.assert_code_drift("is cited, in planned scope, or a build input").assert_not_called()
+
+    def test_another_binary_change_needs_evidence_that_names_it(self):
+        (self.repo / "docs/image.bin").write_bytes(b"\0image\0")
+        self.commit("binary asset")
+        record = self.request()
+        self.assertEqual(record["repositories"]["test"]["binaries"], ["docs/image.bin"])
+        self.answer(record, evidence=[{"source": "src/main.py",
+                                       "reason": "The plan edits src/main.py and the diff does not change it"}])
+        self.assert_code_drift("no evidence names binary test:docs/image.bin")
+        (self.target / "drift.json").write_text(json.dumps({**record, "outcome": "review"}))
+        self.answer(record, evidence=[{"source": "docs/image.bin",
+                                       "reason": "New binary asset under docs; the plan cites only src/main.py"}])
+        base, _ = stages.verify_freshness(self.assignment)
+        self.assertEqual(base, record["new"])
+
     def test_a_type_change_is_listed(self):
         (self.repo / "docs/link").symlink_to("notes.md")
         self.commit("link")
