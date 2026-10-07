@@ -86,3 +86,9 @@ test('code drift re-plans once, only for the exact unpublished drift result', ()
   assert.equal(replanForDrift({...drift, published: true}, 0), false, 'a published result never retries');
   assert.equal(replanForDrift(null, 0), false);
 });
+
+test('a plan published after a cleared drift review is a verdict, not a drift', () => {
+  const result = {verdict: 'READY', id: 'A', children: [], drift_review: {outcome: 'cleared', verdicts: {}}};
+  assert.equal(replanForDrift(result, 0), false);
+  assert.equal(incomplete(result), false);
+});
