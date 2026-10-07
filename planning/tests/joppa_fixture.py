@@ -10,15 +10,27 @@ class JoppaFixture:
         self.root = root
         self.status = 200
         self.calls = []
-        self.index = {"workspace": "test", "position": 1, "index": {
-            "domains": {"domain-1": {"title": "Reliable delivery", "description": "", "owner": "owner",
-                                      "confirmed": True, "archived": False}},
-            "capabilities": {"cap-1": {"title": "Bounded work scheduling", "description": "", "owner": "owner",
-                                        "confirmed": True, "domain": "domain-1"}}}}
-        self.detail = {"workspace": "test", "position": 1, "requirement": {
-            "id": "req-1", "current_revision": 1, "revisions": [{"number": 1, "title": "Expected outcome",
-            "body": "One bounded change", "capability": "cap-1", "consumers": [], "owner": "owner", "confirmed": True,
-            "acs": [{"id": "ac-1", "text": "The predicate returns true", "description": "", "owner": None,
+        def obj(address, title, parent=None, **data):
+            return {"workspace": "test", "position": 1, "address": address,
+                    "id": address.split(":", 1)[1], "item_id": None, "current_revision": 1,
+                    "document": {"revision": 1, "parent": parent, "present": True,
+                                 "data": {"title": title, **data}, "links": []},
+                    "references": [], "annotations": {}}
+        self.objects = {
+            "area:domain-1": obj("area:domain-1", "Reliable delivery", description="", owner="owner"),
+            "service:cap-1": obj("service:cap-1", "Bounded work scheduling", "area:domain-1",
+                                 description="", owner="owner"),
+        }
+        requirement = obj("requirement:req-1", "Expected outcome", "service:cap-1",
+                          body="One bounded change", consumers=[], owner="owner")
+        requirement["item_id"] = "test-R-0123456789"
+        self.detail = {"workspace": "test", "position": 1, "object": requirement,
+                      "system_ids": {"ac": {"ac-1": "test-A-0123456789"},
+                                     "requirement": {"req-1": "test-R-0123456789"}},
+                      "process": {"confirmed": True}, "requirement": {
+            "id": "requirement:req-1", "current_revision": 1, "revisions": [{"number": 1, "title": "Expected outcome",
+            "body": "One bounded change", "capability": None, "consumers": [], "owner": "owner", "confirmed": True,
+            "acs": [{"id": "ac:ac-1", "text": "The predicate returns true", "description": "", "owner": None,
                      "depends_on": [], "before_launch": False}], "tasks": {}, "runs": {}}]}}
         peer = self
 
@@ -35,12 +47,14 @@ class JoppaFixture:
                     result = {"protocolVersion": "2025-03-26", "capabilities": {}, "serverInfo": {"name": "test", "version": "1"}}
                 else:
                     assert request["method"] == "tools/call"
-                    assert request["params"]["name"] == "joppa_read", "admission must never write"
+                    assert request["params"]["name"] in ("joppa_read", "joppa_objects"), "admission must never write"
                     arguments = request["params"]["arguments"]
                     peer.calls.append(arguments)
-                    data = deepcopy(peer.detail if "req" in arguments else peer.index)
-                    if peer.root and (peer.root / "joppa-changed").exists() and "index" in data:
-                        data["index"]["domains"]["domain-1"]["description"] = "Changed during planning"
+                    data = deepcopy(peer.objects[arguments["address"]] if "address" in arguments else peer.detail)
+                    if "req" in arguments:
+                        data.pop("object")
+                    if peer.root and (peer.root / "joppa-changed").exists() and data.get("address") == "area:domain-1":
+                        data["document"]["data"]["description"] = "Changed during planning"
                     result = {"content": [{"type": "text", "text": json.dumps(data)}]}
                 body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
                 self.send_response(status)
