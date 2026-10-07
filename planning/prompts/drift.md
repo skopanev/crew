@@ -29,9 +29,7 @@ only docs/notes.md; plan cites src/main.py and its callers are unchanged".
 For a clear question, give at least one entry. For an affected question, name
 the concrete path and hunk. An empty list, an unnamed source, or a bare
 conclusion such as "unaffected" counts as not clear and sends the plan back to
-a full re-plan. The diff shows a binary file only by name ("Binary files ...
-differ"). For each such file, name its path in at least one evidence entry and
-say why its content cannot affect the plan, or answer affected.
+a full re-plan.
 
 Return ONLY one JSON object as your final response; no signal tags:
 

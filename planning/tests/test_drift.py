@@ -1,10 +1,12 @@
 """Drift review gating in verify_freshness on a real Git repository. No agents or Equill."""
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -136,13 +138,13 @@ class DriftReviewTests(unittest.TestCase):
         (self.repo / "docs/notes.md").write_text("uncommitted after the review\n")
         self.assert_code_drift("uncommitted changes on the reviewed base")
 
-    def test_every_change_kind_is_listed_and_binary_names_reach_the_diff(self):
+    def test_every_change_kind_is_listed(self):
         (self.repo / "docs/new.md").write_text("added\n")
-        (self.repo / "docs/image.bin").write_bytes(bytes(range(256)))
+        (self.repo / "docs/old.md").write_text("old text\n")
         self.commit("prepare kinds")
         (self.target / "snapshots.json").write_text(json.dumps({"test": fingerprint(self.assignment["repositories"][0])}))
         (self.repo / "docs/added.md").write_text("a different addition\n")
-        (self.repo / "docs/image.bin").write_bytes(bytes(reversed(range(256))))
+        (self.repo / "docs/old.md").write_text("new text\n")
         self.git("rm", "-q", "docs/new.md")
         self.git("mv", "docs/notes.md", "docs/renamed.md")
         (self.repo / "docs/link").symlink_to("renamed.md")
@@ -153,34 +155,71 @@ class DriftReviewTests(unittest.TestCase):
         rows = self.request()["repositories"]["test"]["changes"]
         self.assertEqual(sorted((r["status"][0], r["path"]) for r in rows),
                          [("A", "docs/added.md"), ("A", "docs/link"), ("D", "docs/new.md"),
-                          ("M", "docs/image.bin"), ("R", "docs/renamed.md")])
-        self.assertIn("Binary files", (self.target / "drift.diff").read_text())
+                          ("M", "docs/old.md"), ("R", "docs/renamed.md")])
 
-    def test_unreadable_binary_changes_in_scope_or_build_inputs_are_code_drift_without_review(self):
+    def test_any_binary_change_is_code_drift_without_review(self):
         base = self.git("rev-parse", "HEAD").strip()
-        for path in ("src/data.bin", "gradle/libs.versions.toml", "web/package-lock.json",
-                     "ios/App.xcodeproj/project.xcworkspace/state.bin", "ios/App.xcodeproj/project.pbxproj"):
+        for path in ("docs/image.bin", "src/data.bin", "web/package-lock.json"):
             with self.subTest(path=path):
                 self.git("reset", "-q", "--hard", base)
                 (self.target / "drift.json").unlink(missing_ok=True)
                 (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
                 (self.repo / path).write_bytes(b"\0binary\0" + path.encode())
                 self.commit("binary " + path)
-                self.assert_code_drift("is cited, in planned scope, or a build input").assert_not_called()
+                self.assert_code_drift("binary change " + path).assert_not_called()
 
-    def test_another_binary_change_needs_evidence_that_names_it(self):
-        (self.repo / "docs/image.bin").write_bytes(b"\0image\0")
-        self.commit("binary asset")
-        record = self.request()
-        self.assertEqual(record["repositories"]["test"]["binaries"], ["docs/image.bin"])
-        self.answer(record, evidence=[{"source": "src/main.py",
-                                       "reason": "The plan edits src/main.py and the diff does not change it"}])
-        self.assert_code_drift("no evidence names binary test:docs/image.bin")
-        (self.target / "drift.json").write_text(json.dumps({**record, "outcome": "review"}))
-        self.answer(record, evidence=[{"source": "docs/image.bin",
-                                       "reason": "New binary asset under docs; the plan cites only src/main.py"}])
-        base, _ = stages.verify_freshness(self.assignment)
-        self.assertEqual(base, record["new"])
+    def test_a_return_to_the_old_base_after_a_review_request_is_code_drift(self):
+        base = self.git("rev-parse", "HEAD").strip()
+        self.land()
+        self.answer(self.request())
+        self.git("reset", "-q", "--hard", base)
+        self.assert_code_drift("moved again")
+        self.assertIsNone(drift.cleared(self.target))
+
+    def test_without_review_any_drift_is_code_drift(self):
+        self.land()
+        with self.assertRaisesRegex(ValueError, "^" + re.escape(stages.CODE_DRIFT) + "$"):
+            stages.verify_freshness(self.assignment, review=False)
+        self.assertFalse((self.target / "drift.json").exists())
+
+    def test_a_commit_while_contracts_load_is_code_drift(self):
+        once = threading.Lock()  # contracts load in parallel threads
+
+        def landing(role, project):
+            with once:
+                if not (self.repo / "docs/late.md").exists():
+                    (self.repo / "docs/late.md").write_text("late\n")
+                    self.commit("late")
+            return {"bundle_digest": "c1"}
+        for reviewed in (False, True):
+            with self.subTest(reviewed=reviewed):
+                if reviewed:
+                    self.git("rm", "-q", "docs/late.md")
+                    self.commit("start again")
+                    (self.target / "snapshots.json").write_text(
+                        json.dumps({"test": fingerprint(self.assignment["repositories"][0])}))
+                    (self.target / "drift.json").unlink(missing_ok=True)
+                    self.land()
+                    self.answer(self.request())
+                with patch.object(stages, "load_contract", side_effect=landing), \
+                     self.assertRaisesRegex(ValueError, "^" + re.escape(stages.CODE_DRIFT) + "$"):
+                    stages.verify_freshness(self.assignment)
+                self.assertIsNone(drift.cleared(self.target))
+
+    def test_modules_with_the_same_name_in_two_repositories_do_not_collide(self):
+        other = self.root / "other"
+        (other / "src").mkdir(parents=True)
+        (other / "src/tool.py").write_text("tool = 1\n")
+        for args in (["init", "-q"], ["add", "."], ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                                    "commit", "-qm", "base"]):
+            subprocess.run(["git", "-C", str(other), *args], check=True, capture_output=True)
+        self.assignment["repositories"].append({"id": "other", "path": str(other), "cbm_project": "q",
+                                                "modules": [{"name": "src", "path": "src"}]})
+        (self.target / "snapshots.json").write_text(json.dumps(
+            {r["id"]: fingerprint(r) for r in self.assignment["repositories"]}))
+        self.git("rm", "-q", "src/old.py")
+        self.commit("remove a file in the planned module")
+        self.assert_code_drift("test: D src/old.py is cited").assert_not_called()
 
     def test_a_type_change_is_listed(self):
         (self.repo / "docs/link").symlink_to("notes.md")
