@@ -1,10 +1,10 @@
 For NTK input, extend the plan JSON with these fields:
 
 "ntk": {
-  "verdict": "READY | NOT_READY | NEEDS_HUMAN",
+  "verdict": "READY | NOT_READY",
   "failure_class": "none | plan | system | access | governance",
-  "owner": "directory person id when NEEDS_HUMAN, otherwise empty",
-  "decision": "exact required decision when NEEDS_HUMAN, otherwise empty",
+  "owner": "empty",
+  "decision": "empty",
   "body": "prepared source body for verify_existing, otherwise empty"
 }
 
@@ -37,11 +37,11 @@ Critics check coverage, boundaries, and dependencies for decompose.
 For a leaf, they check mechanisms and observable acceptance checks.
 Files, functions, test placement and build wiring belong to lane.
 
-READY uses disposition implement, verify_existing, or decompose. NOT_READY and NEEDS_HUMAN
+READY uses disposition implement, verify_existing, or decompose. NOT_READY
 use blocked, no Tasks, and explicit blockers. They may have empty acceptance_checks.
-NEEDS_HUMAN requires owner and decision. System/access failures stay NOT_READY.
-NEEDS_HUMAN leaves the ticket blocked with a [HUMAN] title prefix and assigns its owner.
-Critics can clear an accurate NOT_READY or NEEDS_HUMAN diagnosis.
+The early necessity assessment owns NEEDS_HUMAN. It stops before design and assigns the named human.
+If design finds a new required owner decision, return NOT_READY with the exact missing decision.
+System/access failures stay NOT_READY. Critics can clear an accurate NOT_READY diagnosis.
 
 For implement, the body contains the scope, numbered mechanism steps, reuse,
 Task acceptance criteria, observable checks and required dependency outputs.

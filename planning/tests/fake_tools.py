@@ -91,6 +91,8 @@ else:
     assert '"capability"' in prompt and "Bounded work scheduling" in prompt
     role_input = json.loads(os.environ.get("MEDULLA_INPUT", "{}"))
     slug = role_input.get("slug", "design")
+    if prompt.startswith("Assess necessity before"):
+        slug = "necessity"
     if os.environ.get("PLANNING_DRIFT_DIGEST"):
         slug = "drift-" + slug
     event("start", slug)
@@ -123,7 +125,14 @@ else:
             result["inspected_paths"] = [{"repository": "test", "path": "src/main.py"}]
             if case == "uncovered_citation":
                 result["evidence"].append({"source": "test:src/uncovered.py:1", "finding": "Unverified assertion"})
+    elif slug == "necessity":
+        result = {"need": "The supplied AC requires the existing predicate to change.",
+                  "minimum_scope": ["Fix the predicate in the src module"],
+                  "reuse": ["test:src/main.py:1 existing predicate"], "owner_gaps": []}
+        if case == "owner_gap":
+            result["owner_gaps"] = [{"owner": "owner-1", "decision": "Choose the required predicate outcome"}]
     elif slug == "design":
+        assert '"minimum_scope"' in prompt, "designer lacks necessity assessment"
         assignment = json.loads((target / "input.json").read_text())
         if "Existing API already handles this" in prompt:
             (root / "design-saw-critique").write_text("yes")
@@ -149,6 +158,7 @@ else:
         if case == "drift_moved" and slug == "drift-correctness":
             land("second.md")
     else:
+        assert '"minimum_scope"' in prompt, "critic lacks necessity assessment"
         rejected = case == "rejected" and slug == "simplicity"
         if case == "rejected_once" and slug == "simplicity" and not (root / "rejected-once").exists():
             (root / "rejected-once").write_text("yes")
@@ -172,7 +182,8 @@ else:
             (root / "joppa-changed").write_text("changed")
     malformed = (case == "malformed" and slug == "design"
                  or case == "malformed_research" and slug == "code"
-                 or case == "malformed_critic" and slug == "correctness")
+                 or case == "malformed_critic" and slug == "correctness"
+                 or case == "malformed_necessity" and slug == "necessity")
     message = "invalid JSON" if malformed else json.dumps(result)
     if name == "codex":
         output = {"type": "item.completed", "item": {"type": "agent_message", "text": message}}

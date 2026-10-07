@@ -48,9 +48,10 @@ Applicable owner decisions and Equill rules still govern its checks.
 
 1. Read the ticket, prerequisite graph, NTK metadata, attachments, and available Lane failure artifacts.
 2. Inspect current source, Git history, shared CBM, Equill knowledge, and repository `.ntkrc` contracts.
-3. Run parallel code, knowledge, and external research. Choose the simplest sufficient mechanism.
-4. Ask independent necessity, simplicity, and correctness critics to check that plan.
-   A rejected plan goes back to design once, with the blocking findings. The critics then check the revision.
+3. Run parallel code, knowledge, and external research. Assess need, minimum scope, reuse, and required owner decisions before design.
+   A required owner decision produces NEEDS_HUMAN before design. Otherwise, the designer receives the assessment and prepares mechanisms.
+4. Ask independent simplicity and correctness critics to check the plan against that assessment.
+   A rejected plan returns to design once. These two critics check the revision. Necessity does not repeat.
 5. Confirm source versions and live role contracts before any publication. Publish the result to NTK.
 
 The models and critic seats are the same as [Planning](../planning/README.md).
@@ -64,7 +65,7 @@ Source citations prove current behavior and reuse. They do not prescribe edits.
 Research inspects the ticket module and affected interfaces, not every registered repository.
 Critics check necessity, reuse, simplicity, safety, extensibility, AC coverage, and dependencies.
 Implementation details and file preferences do not block readiness.
-Attachments carry the full plan and reviews. They do not replace body instructions.
+Attachments carry the full plan, necessity assessment, and reviews. They do not replace body instructions.
 
 ## Results
 

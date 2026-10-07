@@ -1,10 +1,10 @@
 version: '2'
 start: prepare
-# Covers the step limits in sequence: prepare 180 + research 600, then up to two
+# Covers prepare 180 + research 600 + necessity 1200, then up to two
 # rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
 # in the critics pool; a rejected plan gets one revision round (critique_join),
 # and a clean base advance at finish gets one drift review of 600.
-timeout: 6600
+timeout: 7800
 defaults:
   timeout: 60
 vars:
@@ -78,9 +78,43 @@ nodes:
   research_join:
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" research_join'
     on_signal:
-      RESEARCHED: design
+      RESEARCHED: necessity
       BLOCKED: __exit_fail__
       __failed__: failed
+  necessity:
+    timeout: 1200
+    max_attempts: 2
+    env:
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
+      PLANNING_ASSESSMENT_DIGEST: '{{var:assessment_digest}}'
+    agent:
+      harness: codex
+      model: gpt-6.1-sol
+      effort: high
+      sandbox: read-only
+      args:
+        - --ignore-user-config
+    prompt: |
+      {{file:prompts/necessity.md}}
+      Mandatory Equill contract:
+      {{var:critic_contract}}
+      Assignment: {{var:assignment}}
+      Research: {{var:research}}
+    post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture necessity'
+    on_signal:
+      ASSESSED: design
+      NEEDS_HUMAN: needs_human
+      __failed__: failed
+      __default__: failed
+  needs_human:
+    shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" needs_human'
+    on_signal:
+      BLOCKED: __exit_fail__
+      __failed__: failed
+      __default__: failed
   design:
     # Real repositories need more than five minutes of reading and reasoning
     # (first live run: design was still working at 300 s).
@@ -105,6 +139,7 @@ nodes:
       {{var:designer_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Necessity assessment: {{var:necessity}}
       Critic findings on your previous plan (empty in the first round): {{var:critique}}
       Additional output contract: {{var:OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture plan'
@@ -132,22 +167,19 @@ nodes:
       NTK_KEY: ''
       NTK_CONFIG: /dev/null
       PLANNING_REVIEW_DIGEST: '{{var:plan_digest}}'
-    max_parallel: 3
-    min_success: 3
-    inputs: &critic_seats
-      - slug: necessity
-        harness: codex
-        model: gpt-6.1-sol
-        flag: --ignore-user-config
-        question: Is this change necessary for the agreed outcome? Is existing behavior sufficient? Does the plan add unrequested scope? Respect confirmed owner decisions and surface contradictions without cancelling them yourself.
-      - slug: simplicity
+    max_parallel: 2
+    min_success: 2
+    inputs:
+      - &simplicity_seat
+        slug: simplicity
         harness: agy
         model: Gemini 3.1 Pro (High)
         env:
           BROKER_AGY_HOME: '{{var:AGY_PROFILE_HOME}}'
           BROKER_ISOLATE_MCP: '1'
         question: Does the plan solve the underlying problem or prop up a flawed design? Identify workarounds. Compare concrete alternatives by AC, simplicity, efficiency, reliability and extensibility. Cite code evidence and explain the advantage. Reject speculative abstractions; preference alone is not a blocker.
-      - slug: correctness
+      - &correctness_seat
+        slug: correctness
         harness: opencode
         model: zai-coding-plan/glm-5.3
         flag: --pure
@@ -170,6 +202,7 @@ nodes:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Necessity assessment: {{var:necessity}}
       Frozen plan: {{var:plan}}
       Your independent perspective: {{input.slug}}
       Your question: {{input.question}}
@@ -211,7 +244,13 @@ nodes:
       PLANNING_DRIFT_DIGEST: '{{var:drift_digest}}'
     max_parallel: 3
     min_success: 3
-    inputs: *critic_seats
+    inputs:
+      - slug: necessity
+        harness: codex
+        model: gpt-6.1-sol
+        flag: --ignore-user-config
+      - *simplicity_seat
+      - *correctness_seat
     agent: *critic_agent
     prompt: |
       {{file:prompts/drift.md}}
@@ -219,6 +258,7 @@ nodes:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Necessity assessment: {{var:necessity}}
       Frozen plan: {{var:plan}}
       Base advance: {{var:drift}}
       Landed diff:

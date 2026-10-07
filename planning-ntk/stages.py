@@ -329,6 +329,9 @@ def capture(kind):
         return shared.capture(kind)
     shared.capture_error_file(kind).unlink(missing_ok=True)
     result, _ = shared.body_result()
+    shared.bind_necessity(result)
+    require(result.get("ntk", {}).get("verdict") != "NEEDS_HUMAN",
+            "NEEDS_HUMAN requires an owner gap from the necessity assessment")
     validate_plan(result, read(shared.artifacts() / "input.json"))
     # A valid plan cannot override a research blocker. Keep the ticket blocked
     # and send the diagnosis through the existing critics and publication guards.
@@ -353,7 +356,25 @@ def research_join():
     for key, report in reports.items():
         validation.research(report, key)
     shared.emit_var("research", reports)
-    signal("RESEARCHED", "Evidence and missing inputs sent to design")
+    shared.emit_var("assessment_digest", shared.assessment_digest())
+    signal("RESEARCHED", "Evidence and missing inputs sent to necessity assessment")
+
+
+def needs_human():
+    target = shared.artifacts()
+    assignment = read(target / "input.json")
+    assessment = shared.require_necessity(allow_owner_gaps=True)
+    require(assessment["owner_gaps"], "no required owner decision")
+    first = assessment["owner_gaps"][0]
+    plan = {"disposition": "blocked", "tasks": [],
+            "blockers": [f"{gap['owner']}: {gap['decision']}" for gap in assessment["owner_gaps"]],
+            "ntk": {"verdict": "NEEDS_HUMAN", "failure_class": "governance",
+                    "owner": first["owner"], "decision": first["decision"], "body": ""}}
+    validate_plan(plan, assignment)
+    shared.verify_freshness(assignment, review=False)
+    retained(config(), os.environ["PLANNING_TICKET"])
+    result = publish(plan, {})
+    signal("BLOCKED", json.dumps(result))
 
 
 def review_input():
@@ -385,6 +406,7 @@ def rejected_plan(plan, reviews):
 def finish():
     target = shared.artifacts()
     assignment, plan = read(target / "input.json"), read(target / "plan.json")
+    shared.require_necessity(plan)
     validate_plan(plan, assignment)
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for review in reviews.values():
@@ -414,6 +436,7 @@ def finish():
 def publish(plan, reviews):
     target = shared.artifacts()
     result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews,
+                             "necessity": shared.require_necessity(allow_owner_gaps=True),
                              "publicationMarker": str(target / "publication-started.json")})
     # Published on a base the critics cleared after a clean advance: keep the audit trail.
     reviewed = shared.drift.cleared(target)
@@ -458,7 +481,7 @@ if __name__ == "__main__":
         if command == "capture":
             capture(sys.argv[2])
         else:
-            {"prepare": prepare, "prepare_critic": shared.prepare_critic, "research_join": research_join, "review_input": review_input,
+            {"prepare": prepare, "prepare_critic": shared.prepare_critic, "research_join": research_join, "needs_human": needs_human, "review_input": review_input,
              "critique_join": shared.critique_join, "finish": finish, "fail": fail}[command]()
     except shared.DriftReview as review:
         signal("DRIFT", review)

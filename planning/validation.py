@@ -6,7 +6,27 @@ import re
 from common import inside, require, strings, text
 
 RESEARCH = ("code", "knowledge", "external")
-CRITICS = ("necessity", "simplicity", "correctness")
+CRITICS = ("simplicity", "correctness")
+DRIFT_CRITICS = ("necessity", *CRITICS)
+
+
+def necessity(result, expected_digest, assignment):
+    require(isinstance(result, dict) and set(result) == {
+        "need", "minimum_scope", "reuse", "owner_gaps", "input_digest"},
+        "necessity assessment needs need, minimum_scope, reuse and owner_gaps")
+    require(result["input_digest"] == expected_digest, "necessity assessment covers different input or research")
+    text(result["need"], "necessity.need")
+    strings(result["minimum_scope"], "necessity.minimum_scope")
+    strings(result["reuse"], "necessity.reuse", empty=True)
+    gaps = result["owner_gaps"]
+    require(isinstance(gaps, list), "necessity.owner_gaps must be a list")
+    for gap in gaps:
+        require(isinstance(gap, dict) and set(gap) == {"owner", "decision"}, "owner gap needs owner and decision")
+        text(gap["owner"], "owner gap owner")
+        text(gap["decision"], "owner gap decision")
+        if assignment.get("kind") == "ntk":
+            require(gap["owner"] in {p["id"] for p in assignment["ntk"]["meta"]["people"] if p.get("kind") == "human"},
+                    "Decision owner must be a registered person")
 
 
 def evidence(items, name, empty=False):

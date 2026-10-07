@@ -173,7 +173,7 @@ def grounded(result, record, text):
 def verdicts(record, target, plan):
     """Every critic seat cleared exactly this diff with grounded evidence. Raises with the reason otherwise."""
     results, text = {}, citations_text(plan, target)
-    for key in validation.CRITICS:
+    for key in validation.DRIFT_CRITICS:
         file = target / f"drift-{key}.json"
         require(file.is_file(), f"{key}: no drift verdict")
         result = read(file)

@@ -7,7 +7,7 @@ Domain → Capability → Requirement и возвращает проверенн
 
 ```text
 prepare → research [code | knowledge | external, параллельно]
-        → design → critics [necessity | simplicity | correctness, параллельно]
+        → necessity → design → critics [simplicity | correctness, parallel]
         → critique_join (отказ: один раз обратно в design с блокирующими находками)
         → result.json + plan.md
 ```
@@ -93,12 +93,17 @@ export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
    Агент обязан прочитать исходники, включая применимые локальные изменения.
    История исследуется через Git; внешняя ветка может обоснованно вернуть
    `not_needed`. Индексацию и watchers этот workflow не запускает.
-3. The designer chooses the smallest sufficient mechanism and explains necessity, reuse, safety, and extensibility.
+3. The necessity critic first records need, minimum scope, reuse, and required owner decisions.
+   Its assessment binds to the assignment and research. A required owner decision stops before design.
+   The designer receives this assessment and chooses the smallest sufficient mechanism.
    Each Task contains numbered mechanism steps, a module, dependencies, and observable acceptance checks.
    Lane selects files, functions, test placement, and build details. Source citations are evidence, not edit instructions.
    The validator checks module ownership, AC binding, dependencies, and acceptance check specifications.
    Existing checks may include commands. Planning does not execute project checks.
-4. Три критика получают один план и его digest в независимых сессиях. Любой
+4. Simplicity and correctness critics receive the same necessity assessment and frozen plan in independent sessions.
+   Simplicity checks the assessed scope. A rejection returns to design once, without repeating necessity.
+   The plan and assessment digests prevent reuse of results from different inputs.
+   Любой
    блокирующий вердикт, отсутствующий ответ или несовпадающий digest останавливает
    подготовку. Проверка готовности также отказывает при изменении исходников,
    входного файла, цепочки Joppa или обязательных контрактов Equill во время прогона.
@@ -131,9 +136,10 @@ Codex, успешный результат Claude/Gemini или текст по�
 Настройка Codex соответствует
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
-По умолчанию один проход: до 300 секунд на каждую агентную стадию и 1800 секунд
-на весь workflow. Бесконечного цикла «ещё раз покритикуем» нет. Лимиты и состав
-групп видны в [workflow.yaml](workflow.yaml).
+The workflow permits one necessity assessment and at most two design rounds.
+Research has a 600-second limit. Necessity, design, and plan critics each have a 1200-second limit.
+The complete workflow has a 7800-second limit, including retries and the optional drift review.
+See [workflow.yaml](workflow.yaml) for the stage limits and models.
 
 ## Результат и граница с lane
 

@@ -87,7 +87,7 @@ class DriftReviewTests(unittest.TestCase):
         return emitted
 
     def answer(self, record, blocked=(), evidence=None):
-        for key in validation.CRITICS:
+        for key in validation.DRIFT_CRITICS:
             (self.target / f"drift-{key}.json").write_text(json.dumps(verdict(record, key in blocked, evidence)))
 
     def test_verify_context_passes_review_false_through_to_freshness(self):
@@ -95,7 +95,7 @@ class DriftReviewTests(unittest.TestCase):
         # publication calls verify_context(review=False) and must stay on strict CODE_DRIFT.
         for key in validation.CRITICS:
             (self.target / f"critic-{key}.json").write_text("{}")
-        with patch.object(validation, "critique"), \
+        with patch.object(validation, "critique"), patch.object(stages, "require_necessity"), \
              patch.object(stages, "read", side_effect=lambda path: {"verdict": "clear", "summary": "ok"}), \
              patch.object(stages, "verify_freshness", return_value=({}, {})) as fresh:
             stages.verify_context(self.assignment, self.plan, review=False)
@@ -118,7 +118,7 @@ class DriftReviewTests(unittest.TestCase):
         base, _ = stages.verify_freshness(self.assignment)
         self.assertEqual(base, {"test": fingerprint(self.assignment["repositories"][0])})
         cleared = drift.cleared(self.target)
-        self.assertEqual(sorted(cleared["verdicts"]), sorted(validation.CRITICS))
+        self.assertEqual(sorted(cleared["verdicts"]), sorted(validation.DRIFT_CRITICS))
         self.assertEqual(cleared["digest"], record["digest"])
 
     def test_clear_verdicts_without_grounded_evidence_are_code_drift(self):
