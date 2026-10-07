@@ -4,6 +4,7 @@ The critics, not a path heuristic, decide whether the landed diff affects the
 plan. This module only decides which drift is small and simple enough to show
 them, binds their verdicts to that exact diff, and records the result.
 """
+from fnmatch import fnmatch
 import hashlib
 import json
 import os
@@ -12,21 +13,20 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from common import digest, read, require, run, write
+from common import digest, read, require, run
 import validation
 
 # Larger diffs go back to a full re-plan: a reviewer cannot be trusted to read them.
 DIFF_LIMIT = 60 * 1024
 # Statuses that remove or replace a path. git diff -M reports renames as R<score>.
 STRUCTURAL = ("D", "R", "T")
-
-
-class Ineligible(ValueError):
-    pass
+# A reviewer cannot read a binary build or dependency input; its change always re-plans.
+BUILD_INPUTS = ("*.gradle*", "*.toml", "*.lock", "package*.json", "Package.resolved", "*.pbxproj")
+GIT_ENV = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
 
 def git(root, *args):
-    return run(["git", "-C", root, *args], env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    return run(["git", "-C", root, *args], env=GIT_ENV)
 
 
 def clean(snapshot):
@@ -49,12 +49,30 @@ def changes(root, old, new):
     return rows
 
 
+def binaries(root, old, new):
+    """Paths whose change git reports only as "Binary files ... differ" (numstat "-")."""
+    fields, found, index = git(root, "diff", "--no-ext-diff", "--no-textconv", "-M", "--numstat", "-z", old, new).split("\0"), [], 0
+    while index < len(fields) - 1:
+        added, _, path = fields[index].split("\t", 2)
+        if path:
+            index += 1
+        else:  # rename or copy: the old and new path follow as separate fields
+            path, index = fields[index + 2], index + 3
+        if added == "-":
+            found.append(path)
+    return found
+
+
+def build_input(path):
+    name = os.path.basename(path)
+    return ".xcodeproj/" in "/" + path or any(fnmatch(name, pattern) for pattern in BUILD_INPUTS)
+
+
 def patch(root, old, new, budget):
     """The diff text, or None when it exceeds the budget. Spooled, never fully in memory."""
     with tempfile.TemporaryFile() as output:
         proc = subprocess.run(["git", "-C", root, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
-                               "-M", old, new], stdout=output, stderr=subprocess.PIPE,
-                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}, timeout=45)
+                               "-M", old, new], stdout=output, stderr=subprocess.PIPE, env=GIT_ENV, timeout=45)
         require(proc.returncode == 0, "git diff failed: " + proc.stderr.decode(errors="replace"))
         if output.tell() > budget:
             return None
@@ -91,7 +109,7 @@ def touches(path, paths, text):
 
 
 def prepare(assignment, plan, target, old, current):
-    """Build the review input for a clean fast-forward, or raise Ineligible with the reason."""
+    """Build the review input for a clean fast-forward, or raise with the reason it is not eligible."""
     citations, cwds = cited(assignment, plan, target)
     # Names cited in prose (steps, reuse, evidence, absence claims) count as cited too.
     text = citations_text(plan, target)
@@ -100,30 +118,30 @@ def prepare(assignment, plan, target, old, current):
         before, after = old[repo["id"]], current[repo["id"]]
         if before == after:
             continue
-        if not (clean(before) and clean(after)):
-            raise Ineligible(f"{repo['id']}: uncommitted changes at prepare or now")
+        require(clean(before) and clean(after), f"{repo['id']}: uncommitted changes at prepare or now")
         root = repo["path"]
         ancestor = subprocess.run(["git", "-C", root, "merge-base", "--is-ancestor", before["head"], after["head"]],
                                   capture_output=True, timeout=45)
-        if ancestor.returncode != 0:
-            raise Ineligible(f"{repo['id']}: HEAD did not advance from the planned base")
+        require(ancestor.returncode == 0, f"{repo['id']}: HEAD did not advance from the planned base")
         rows = changes(root, before["head"], after["head"])
         for row in rows:
             for path in (row["path"], row.get("from")):
-                if path and row["status"][0] in STRUCTURAL and touches(path, citations[repo["id"]], text):
-                    raise Ineligible(f"{repo['id']}: {row['status']} {path} is cited by the plan or research")
+                require(not (path and row["status"][0] in STRUCTURAL and touches(path, citations[repo["id"]], text)),
+                        f"{repo['id']}: {row['status']} {path} is cited by the plan or research")
+        opaque = binaries(root, before["head"], after["head"])
+        for path in opaque:
+            require(not (touches(path, citations[repo["id"]], text) or build_input(path)),
+                    f"{repo['id']}: binary {path} is cited, in planned scope, or a build input")
         for cwd in cwds[repo["id"]] - {"."}:
-            if subprocess.run(["git", "-C", root, "cat-file", "-e", f"{after['head']}:{cwd}"],
-                              capture_output=True, timeout=45).returncode != 0:
-                raise Ineligible(f"{repo['id']}: check directory {cwd} is gone")
+            require(subprocess.run(["git", "-C", root, "cat-file", "-e", f"{after['head']}:{cwd}"],
+                                   capture_output=True, timeout=45).returncode == 0,
+                    f"{repo['id']}: check directory {cwd} is gone")
         diff = patch(root, before["head"], after["head"], budget)
-        if diff is None:
-            raise Ineligible(f"diff exceeds {DIFF_LIMIT} bytes")
-        if "</signal:var>" in diff:
-            raise Ineligible(f"{repo['id']}: diff contains a reserved signal delimiter")
+        require(diff is not None, f"diff exceeds {DIFF_LIMIT} bytes")
+        require("</signal:var>" not in diff, f"{repo['id']}: diff contains a reserved signal delimiter")
         budget -= len(diff.encode())
         repos[repo["id"]] = {"old_head": before["head"], "new_head": after["head"], "changes": rows,
-                             "diff_digest": hashlib.sha256(diff.encode()).hexdigest(), "diff": diff}
+                             "binaries": opaque, "diff_digest": hashlib.sha256(diff.encode()).hexdigest(), "diff": diff}
     record = {"plan_digest": digest(plan), "old": old, "new": current,
               "repositories": {k: {n: v for n, v in r.items() if n != "diff"} for k, r in repos.items()}}
     record["digest"] = digest(record)
@@ -155,6 +173,11 @@ def grounded(result, record, text):
                     f"{key} evidence names neither a changed path nor a plan citation: {item['source']}")
             reason = item["reason"].strip()
             require(len(reason) >= 20 and not GENERIC.match(reason), f"{key} evidence reason is generic: {reason}")
+    # Critics see only the name of a binary change; a clear verdict must say it considered it.
+    sources = {item["source"] for answer in result["answers"].values() for item in answer["evidence"]}
+    for repo, details in record["repositories"].items():
+        for path in details["binaries"]:
+            require(any(path in source for source in sources), f"no evidence names binary {repo}:{path}")
 
 
 def verdicts(record, target, plan):
@@ -177,6 +200,3 @@ def cleared(target):
     record = read(file) if file.is_file() else None
     return record if record and record.get("outcome") == "cleared" else None
 
-
-def save(target, record):
-    write(Path(target) / "drift.json", record)

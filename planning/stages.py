@@ -212,25 +212,21 @@ def capture(kind):
         validation.plan(result, read(target / "input.json"))
         write(target / "plan.json", result)
         signal("PLANNED", "Structured implementation plan validated")
-    elif kind == "critic":
+    elif kind in ("critic", "drift"):
+        # A drift review uses the critic seats; only the bound digest and the verdict shape differ.
         seat = json.loads(os.environ["MEDULLA_INPUT"])
-        slug = seat["slug"]
         require(os.environ["MEDULLA_HARNESS"] == seat["harness"], "critic harness differs from its assigned seat")
-        expected = digest(read(target / "plan.json"))
-        require(os.environ.get("PLANNING_REVIEW_DIGEST") == expected, "critic reviewed a different plan")
-        result["plan_digest"] = expected
-        validation.critique(result, expected)
+        if kind == "critic":
+            expected = digest(read(target / "plan.json"))
+            require(os.environ.get("PLANNING_REVIEW_DIGEST") == expected, "critic reviewed a different plan")
+            result["plan_digest"] = expected
+        else:
+            expected = read(target / "drift.json")["digest"]
+            require(os.environ.get("PLANNING_DRIFT_DIGEST") == expected, "critic reviewed a different drift")
+            result["drift_digest"] = expected
         result["reviewer"] = {"harness": seat["harness"], "model": seat["model"]}
-        write(target / f"critic-{slug}.json", result)
-    elif kind == "drift":
-        seat = json.loads(os.environ["MEDULLA_INPUT"])
-        require(os.environ["MEDULLA_HARNESS"] == seat["harness"], "critic harness differs from its assigned seat")
-        expected = read(target / "drift.json")["digest"]
-        require(os.environ.get("PLANNING_DRIFT_DIGEST") == expected, "critic reviewed a different drift")
-        result = {**result, "drift_digest": expected, "reviewer": {"harness": seat["harness"], "model": seat["model"]}}
-        validation.drift(result, expected)
-        write(target / f"drift-{seat['slug']}.json", result)
-
+        (validation.critique if kind == "critic" else validation.drift)(result, expected)
+        write(target / f"{kind}-{seat['slug']}.json", result)
 
 def research_join():
     target = artifacts()
@@ -325,7 +321,7 @@ def verify_freshness(assignment):
     if review is None:
         return old, contracts
     if review.get("outcome") == "cleared":
-        drift.save(target, review)
+        write(target / "drift.json", review)
         return current, contracts
     request_review(review)
 
@@ -346,12 +342,12 @@ def reviewed_base(assignment, old, current):
             require(record["old"] == old and record["plan_digest"] == digest(plan), "drift review covers another plan")
             return {**record, "verdicts": drift.verdicts(record, target, plan), "outcome": "cleared"}
         except Exception as error:
-            drift.save(target, {**record, "outcome": f"code_drift: {error}"})
+            write(target / "drift.json", {**record, "outcome": f"code_drift: {error}"})
             raise ValueError(CODE_DRIFT) from error
     try:
         record, diff = drift.prepare(assignment, plan, target, old, current)
     except Exception as error:
-        drift.save(target, {"old": old, "new": current, "outcome": f"code_drift without review: {error}"})
+        write(target / "drift.json", {"old": old, "new": current, "outcome": f"code_drift without review: {error}"})
         raise ValueError(CODE_DRIFT) from error
     return {**record, "diff": diff}
 
@@ -360,7 +356,7 @@ def request_review(review):
     target = artifacts()
     diff = review.pop("diff")
     (target / "drift.diff").write_text(diff)
-    drift.save(target, {**review, "outcome": "review"})
+    write(target / "drift.json", {**review, "outcome": "review"})
     emit_var("drift", review)
     emit_var("drift_diff", diff)
     emit_var("drift_digest", review["digest"])

@@ -172,6 +172,9 @@ new base only if all of them clear it, and records `drift_review` in `result.jso
 Each seat answers four questions (cited paths, reused units, build and test
 contracts, absence claims), each with evidence that names a changed path or a
 plan citation and says why. Empty, unnamed or generic evidence is not clear.
+A binary change that the plan cites, that lies in a planned module or write path,
+or that is a build or dependency input is `code_drift` without review; a clear
+answer about any other binary change must name its path.
 A diff over 60 KB, a renamed or deleted path that the plan or research cites,
 a blocking answer, or a second move is still `code_drift`.
 If the source changed while a run planned (`code_drift`, nothing published), the
