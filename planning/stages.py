@@ -210,8 +210,18 @@ def capture(kind):
         write(target / f"research-{branch}.json", result)
     elif kind == "plan":
         validation.plan(result, read(target / "input.json"))
+        bind_necessity(result)
         write(target / "plan.json", result)
         signal("PLANNED", "Structured implementation plan validated")
+    elif kind == "necessity":
+        expected = assessment_digest()
+        require(os.environ.get("PLANNING_ASSESSMENT_DIGEST") == expected,
+                "input or research changed during necessity assessment")
+        result.setdefault("input_digest", expected)
+        validation.necessity(result, expected, read(target / "input.json"))
+        write(target / "necessity.json", result)
+        emit_var("necessity", result)
+        signal("NEEDS_HUMAN" if result["owner_gaps"] else "ASSESSED", "Necessity assessment validated")
     elif kind in ("critic", "drift"):
         # A drift review uses the critic seats; only the bound digest and the verdict shape differ.
         seat = json.loads(os.environ["MEDULLA_INPUT"])
@@ -235,7 +245,38 @@ def research_join():
         validation.research(report, key)
         require(report["status"] != "blocked", f"{key} research blocked: {report['summary']}")
     emit_var("research", reports)
+    emit_var("assessment_digest", assessment_digest())
     signal("RESEARCHED", "All research branches completed")
+
+
+def assessment_digest():
+    target = artifacts()
+    reports = {key: read(target / f"research-{key}.json") for key in validation.RESEARCH}
+    for key, report in reports.items():
+        validation.research(report, key)
+    return digest({"assignment": read(target / "input.json"), "research": reports})
+
+
+def require_necessity(plan=None, *, allow_owner_gaps=False):
+    result = read(artifacts() / "necessity.json")
+    validation.necessity(result, assessment_digest(), read(artifacts() / "input.json"))
+    require(allow_owner_gaps or not result["owner_gaps"], "a required owner decision prevents design")
+    if plan is not None:
+        require(plan.get("necessity_digest") == digest(result), "plan uses a different necessity assessment")
+    return result
+
+
+def bind_necessity(plan):
+    result = require_necessity()
+    plan.setdefault("necessity_digest", digest(result))
+    require_necessity(plan)
+
+
+def needs_human():
+    result = require_necessity(allow_owner_gaps=True)
+    require(result["owner_gaps"], "no required owner decision")
+    fail("Required owner decision: " + "; ".join(
+        f"{gap['owner']}: {gap['decision']}" for gap in result["owner_gaps"]))
 
 
 def review_input():
@@ -243,7 +284,7 @@ def review_input():
     require(plan["disposition"] != "blocked", "plan blocked: " + "; ".join(plan["blockers"]))
     emit_var("plan", plan)
     emit_var("plan_digest", digest(plan))
-    signal("REVIEW", "Frozen plan sent independently to three critics")
+    signal("REVIEW", "Frozen plan sent independently to two critics")
 
 
 # One revision round: a second rejection is the verdict.
@@ -285,6 +326,7 @@ def finish():
 
 def verify_context(assignment, plan, review=True):
     target = artifacts()
+    require_necessity(plan)
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for key, critic_review in reviews.items():
         validation.critique(critic_review, digest(plan))
@@ -381,7 +423,7 @@ def save_result(assignment, plan, reviews, old, contracts, chain):
                "input_digest": digest(assignment), "plan_digest": digest(plan), "snapshots": old,
                "contracts": {k: {n: v[n] for n in ("role", "record_ids", "bundle_digest")}
                              for k, v in contracts.items()},
-               "plan": plan, "reviews": reviews, "joppa_updated": False}
+               "plan": plan, "necessity": require_necessity(plan), "reviews": reviews, "joppa_updated": False}
     if drift.cleared(target):
         outcome["drift_review"] = drift.cleared(target)
     lines = ["# Implementation plan", "", "Status: " + outcome["status"], "", plan["outcome"], "", "## Approach", "", plan["approach"], "", plan["rationale"]]
@@ -412,8 +454,8 @@ def fail(reason=None):
 
 
 def capture_error_file(kind):
-    branch = "design" if kind == "plan" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
-    require(branch in (*validation.RESEARCH, *validation.CRITICS, "design"), "unknown capture branch")
+    branch = "design" if kind == "plan" else "necessity" if kind == "necessity" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
+    require(branch in (*validation.RESEARCH, *validation.DRIFT_CRITICS, "design"), "unknown capture branch")
     return artifacts() / f"error-{kind}-{branch}.json"
 
 
@@ -423,7 +465,7 @@ if __name__ == "__main__":
         if command == "capture":
             capture(sys.argv[2])
         else:
-            {"prepare": prepare, "prepare_critic": prepare_critic, "research_join": research_join, "review_input": review_input,
+            {"prepare": prepare, "prepare_critic": prepare_critic, "research_join": research_join, "needs_human": needs_human, "review_input": review_input,
              "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
     except DriftReview as review:
         signal("DRIFT", review)

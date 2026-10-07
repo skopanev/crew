@@ -32,7 +32,7 @@ class PublicationTests(unittest.TestCase):
         (self.target / "input.json").write_text(json.dumps({"ticket": {"id": "t-1"}}))
         (self.target / "plan.json").write_text(json.dumps(plan))
         for key in stages.validation.CRITICS:
-            review = reject("The plan misses a case") if key == "necessity" else {"verdict": "clear", "summary": "Clear", "findings": []}
+            review = reject("The plan misses a case") if key == "simplicity" else {"verdict": "clear", "summary": "Clear", "findings": []}
             (self.target / f"critic-{key}.json").write_text(json.dumps(review))
         for name in ("validate_plan", "retained", "config", "publication_input", "remember"):
             stub = patch.object(stages, name, return_value={})
@@ -41,6 +41,9 @@ class PublicationTests(unittest.TestCase):
         critique = patch.object(stages.validation, "critique")
         critique.start()
         self.addCleanup(critique.stop)
+        assessment = patch.object(stages.shared, "require_necessity", return_value={})
+        assessment.start()
+        self.addCleanup(assessment.stop)
 
     def test_a_rejected_plan_checks_freshness_before_it_publishes(self):
         calls = []

@@ -102,7 +102,7 @@ async function unchanged(input) {
     const now = await ticket(item.ticket.id, input.workspace);
     fresh(now.revision_count === item.revision_count, `Prerequisite changed: ${item.ticket.id}`);
   }
-  const usedReferences = JSON.stringify(input.plan);
+  const usedReferences = JSON.stringify([input.plan, input.necessity]);
   for (const item of input.snapshot.referenced || []) {
     if (!item.ticket || !usedReferences.includes(item.ticket.id)) continue;
     const now = await ticket(item.ticket.id, input.workspace);
@@ -175,7 +175,8 @@ async function publish(input) {
   if (receipt.parentRevision) return activate(input, receipt, receiptFile, original);
   const source = await unchanged(input);
   const title = source.title.replace(/^\[HUMAN\] /, '');
-  const report = JSON.stringify({source: source.id, source_title: source.title, plan, reviews: input.reviews}, null, 2);
+  const report = JSON.stringify({source: source.id, source_title: source.title, plan,
+    necessity: input.necessity, reviews: input.reviews}, null, 2);
   const prefixedTitle = prefix => {
     const limit = input.snapshot.meta.limits.title;
     require(Number.isInteger(limit) && limit > Array.from(prefix).length,

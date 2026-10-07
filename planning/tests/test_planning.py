@@ -77,21 +77,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(result["joppa_currentness_verified"])
         self.assertIn("completed_at", result)
         self.assertEqual(result["scope"], "local_plan")
-        for level in ("domain", "capability"):
-            self.assertEqual(result[level]["id"], self.assignment[level]["id"])
+        for level, prefix in (("domain", "area"), ("capability", "service")):
+            self.assertEqual(result[level]["id"], prefix + ":" + self.assignment[level]["id"])
             self.assertEqual(result[level]["text"].strip(), self.assignment[level]["text"])
-        self.assertEqual(len(result["reviews"]), 3)
+        self.assertEqual(len(result["reviews"]), 2)
+        self.assertEqual(result["necessity"]["minimum_scope"], ["Fix the predicate in the src module"])
         events = [json.loads(line) for line in (self.root / "events.jsonl").read_text().splitlines()]
         used = {e["slug"]: (e["binary"], e["model"]) for e in events if e["kind"] == "start"}
         self.assertEqual(used["design"], ("claude", "claude-opus-5-5"))
         self.assertEqual(used["necessity"], ("codex", "gpt-6.1-sol"))
         self.assertEqual(used["simplicity"], ("agy", "Gemini 3.1 Pro (High)"))
         self.assertEqual(used["correctness"], ("opencode", "zai-coding-plan/glm-5.3"))
-        self.assertEqual(len({v["reviewer"]["harness"] for v in result["reviews"].values()}), 3)
-        for group in (("code", "knowledge", "external"), ("necessity", "simplicity", "correctness")):
+        self.assertEqual(len({v["reviewer"]["harness"] for v in result["reviews"].values()}), 2)
+        times = {(e['kind'], e['slug']): e['time'] for e in events}
+        self.assertLess(max(times['end', slug] for slug in validation.RESEARCH), times['start', 'necessity'])
+        self.assertLess(times['end', 'necessity'], times['start', 'design'])
+        self.assertLess(times['end', 'design'], min(times['start', slug] for slug in validation.CRITICS))
+        for group in (("code", "knowledge", "external"), ("simplicity", "correctness")):
             starts = [e["time"] for e in events if e["kind"] == "start" and e["slug"] in group]
             ends = [e["time"] for e in events if e["kind"] == "end" and e["slug"] in group]
-            self.assertEqual(len(starts), 3)
+            self.assertEqual(len(starts), len(group))
             self.assertLess(max(starts), min(ends), "pool ran sequentially")
 
     def test_rejected_plan_returns_to_design_once_with_the_findings(self):
@@ -103,6 +108,7 @@ class WorkflowTests(unittest.TestCase):
         starts = [e["slug"] for e in events if e["kind"] == "start"]
         self.assertEqual(starts.count("design"), 2)
         self.assertEqual(starts.count("simplicity"), 2)
+        self.assertEqual(starts.count("necessity"), 1)
 
     def test_a_clean_base_advance_publishes_after_every_critic_clears_the_diff(self):
         proc, result = self.execute("drift_clear")
@@ -110,7 +116,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "ready")
         review = result["drift_review"]
         self.assertEqual(review["outcome"], "cleared")
-        self.assertEqual(sorted(review["verdicts"]), sorted(validation.CRITICS))
+        self.assertEqual(sorted(review["verdicts"]), sorted(validation.DRIFT_CRITICS))
         self.assertEqual(result["snapshots"], review["new"])
         repo = review["repositories"]["test"]
         self.assertEqual(repo["new_head"], result["snapshots"]["test"]["head"])
@@ -149,7 +155,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertEqual(result["status"], "blocked")
                 self.assertIn(branch, result["reason"])
-                self.assertIn("Expecting value", result["reason"])
+                self.assertIn("no JSON object", result["reason"])
                 self.assertEqual(result["errors"][0]["branch"], branch)
                 shutil.rmtree(self.root / "runs")
 
