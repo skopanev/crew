@@ -135,12 +135,13 @@ def prepare_opencode(read_paths):
             external[path] = "allow"
             external[path.rstrip("/") + "/**"] = "allow"
     with os.fdopen(os.open(file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
-        json.dump({"provider": providers, "permission": {"external_directory": external}}, stream)
+        json.dump({"snapshot": False, "provider": providers, "permission": {"external_directory": external}}, stream)
     read_only = {key: "deny" for key in ("edit", "write", "patch", "bash")}
     isolated_env = {**os.environ, "XDG_CONFIG_HOME": str(root),
                     "OPENCODE_CONFIG_DIR": str(directory), "OPENCODE_CONFIG": "",
                     "OPENCODE_CONFIG_CONTENT": json.dumps({"permission": read_only}), "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
     isolated = query(isolated_env, "isolated")
+    require(isolated.get("snapshot") is False, "OpenCode snapshots remain enabled")
     require(not isolated.get("mcp"), "OpenCode isolation failed: inherited MCP remains")
     require(isolated.get("provider", {}) == providers, "OpenCode isolation changed provider settings")
     permission = isolated.get("permission", {})
