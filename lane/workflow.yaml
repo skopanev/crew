@@ -125,7 +125,7 @@ nodes:
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 900
+    timeout: 2400
     on_signal:
       READY: implement_code
       VERIFY_EXISTING: prepare_review
