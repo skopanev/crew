@@ -9,7 +9,12 @@ retained. This lander is the only writer to the target branch:
    train.waitSeconds, or no lane is running.
 2. Apply each candidate's commits onto a fresh target in one integration
    clone. A conflicting candidate leaves the train and is reopened.
-3. Run train.gateCommands once on the combined tree.
+   Before that, every candidate's gate receipt is verified against its
+   request (digest, task, repository, module, run, tree, candidate commit);
+   a refused receipt blocks the ticket and keeps its checkout.
+3. Run, once on the combined tree, train.gateCommands plus every
+   candidate's own required plan (configured gates, ticket acceptance checks,
+   coder checks) with gates.py semantics; each result goes into the receipt.
 4. Pass: push, move every ticket to to_test, remove the lane worktrees.
    Fail: split the train in halves and land each half again; a single failing
    candidate is reopened with the gate log.
@@ -22,8 +27,11 @@ usage: train.py [dolber.json] [--once] [--dry-run]
 --dry-run builds the train and runs the gates, then stops: no push, no
 ticket change, no worktree removal, no result file.
 """
+import contextlib
 import datetime as dt
 import glob
+import hashlib
+import importlib.util
 import json
 import os
 import shlex
@@ -35,6 +43,18 @@ import time
 DRY = False
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLING = os.path.dirname(HERE)
+
+
+def load_gates():
+    """The lane's gates.py: one definition of plans and acceptance checks for lanes and train."""
+    spec = importlib.util.spec_from_file_location("crew_lane_gates", os.path.join(TOOLING, "lane", "bin", "gates.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GATES = load_gates()
+REFUSED = ("receipt_refused",)
 
 
 def log(msg):
@@ -218,15 +238,58 @@ fi
     return "ok", ""
 
 
-def run_gates(box, config, logfile):
-    for i, command in enumerate(config["train"]["gateCommands"], 1):
-        log(f"  gate {i}: {command}")
-        started = time.time()
-        proc = box.sh(command, logfile, timeout=5400)
-        log(f"  gate {i}: rc={proc.returncode} in {time.time() - started:.0f}s")
-        if proc.returncode:
-            return False, command
-    return True, ""
+def run_check(box, command, logfile):
+    """Run one plan entry in the Box with gates.py semantics; return its result row."""
+    started = time.time()
+    if isinstance(command, dict):
+        # Structured acceptance check: argv without a shell, literal pathspecs, exact stdout.
+        GATES.acceptance_check(command, root=os.path.join(box.work, "repo"))
+        script = "export GIT_LITERAL_PATHSPECS=1; exec " + shlex.join(command["argv"])
+    else:
+        script = command
+    timed_out = False
+    try:
+        proc = box.sh(script, logfile, timeout=5400)
+        rc, stdout = proc.returncode, proc.stdout
+    except subprocess.TimeoutExpired:
+        timed_out, rc, stdout = True, 124, ""
+    stdout_matches = not (isinstance(command, dict) and "stdout" in command) or stdout == command["stdout"]
+    return {"command": command, "exit_code": rc, "timed_out": timed_out, "stdout_matches": stdout_matches,
+            "started_at": started, "finished_at": time.time()}
+
+
+def train_plan(config, items):
+    """train.gateCommands plus every candidate's own verified plan, each entry once."""
+    plan = []
+
+    def add(command, owner):
+        for row in plan:
+            if row["command"] == command:
+                row["owners"].append(owner)
+                return
+        plan.append({"command": command, "owners": [owner]})
+    for command in config["train"]["gateCommands"]:
+        add(command, "train")
+    for item in items:
+        for command in item["receipt"]["commands"]:
+            add(command, item["ticket"])
+    return plan
+
+
+def run_plan(box, plan, logfile):
+    """Run the whole plan on the integrated tree; stop at the first failure."""
+    results = []
+    for i, row in enumerate(plan, 1):
+        command = row["command"]
+        label = command if isinstance(command, str) else shlex.join(command["argv"])
+        log(f"  check {i}/{len(plan)} ({', '.join(row['owners'])}): {label}")
+        result = {**run_check(box, command, logfile), "owners": row["owners"]}
+        results.append(result)
+        log(f"  check {i}: rc={result['exit_code']} stdout_matches={result['stdout_matches']} "
+            f"in {result['finished_at'] - result['started_at']:.0f}s")
+        if result["exit_code"] or not result["stdout_matches"]:
+            return False, label, results
+    return True, "", results
 
 
 def push(box, target, logfile):
@@ -276,20 +339,27 @@ def finish(config, item, status, detail, train_dir):
                                   env=env, capture_output=True, text=True)
             result["findings"] = (proc.stdout or proc.stderr).strip()[-300:]
     else:
+        # A refused receipt is an integrity problem: block for a person, never reopen for a new lane.
+        refused = status in REFUSED
+        new_status = "blocked" if refused else "open"
         note = (f"Landing train {os.path.basename(train_dir)}: {status}. {detail} "
-                f"Candidate {item['sha'][:10]} kept as a bundle in the train directory. Reopened for a new lane.")
+                + (f"Not landed. Checkout {item['sha'][:10]} retained for inspection; blocked."
+                   if refused else
+                   f"Candidate {item['sha'][:10]} kept as a bundle in the train directory. Reopened for a new lane."))
         proc = subprocess.run(["ntk", "update", "-W", config["workspace"], item["ticket"], "--force",
-                               "-s", "open", "-A", note[:300]], capture_output=True, text=True)
+                               "-s", new_status, "-A", note[:300]], capture_output=True, text=True)
         if proc.returncode:  # A full body has no room for the note; the status matters more.
             proc = subprocess.run(["ntk", "update", "-W", config["workspace"], item["ticket"], "--force",
-                                   "-s", "open"], capture_output=True, text=True)
-        result["reopened"] = proc.returncode == 0
+                                   "-s", new_status], capture_output=True, text=True)
+        result["blocked" if refused else "reopened"] = proc.returncode == 0
         if proc.returncode:
-            result["reopen_error"] = (proc.stderr or proc.stdout)[-500:]
+            result["blocked_error" if refused else "reopen_error"] = (proc.stderr or proc.stdout)[-500:]
     # The worktree is not needed after landing; a reopened ticket needs it gone for a new lane.
     wt = item["host_worktree"]
     if os.path.isdir(wt):
-        keep = False
+        keep = status in REFUSED
+        if keep:
+            result["worktree_kept"] = wt
         if status != "landed":
             bundle = subprocess.run(["git", "-C", wt, "bundle", "create", "-q",
                                      os.path.join(train_dir, f"{item['ticket']}.bundle"), "HEAD"],
@@ -308,19 +378,106 @@ def finish(config, item, status, detail, train_dir):
     log(f"  {item['ticket']}: {status} {detail}")
 
 
-def covered(config, items, train_dir):
-    """A lane that deferred its checks may land only if the train runs its whole plan."""
-    plan = set(config["train"]["gateCommands"])
+def sha256(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+@contextlib.contextmanager
+def lane_scope(env, cwd):
+    """Evaluate gates.py functions as the lane did: its environment and its checkout."""
+    saved, here = dict(os.environ), os.getcwd()
+    os.environ.update(env)
+    os.chdir(cwd)
+    try:
+        yield
+    finally:
+        os.chdir(here)
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def required_plan(config, item):
+    """Recompute the plan the lane had to record, from the dispatcher config and the run artifacts."""
+    env = {"gate_commands": json.dumps(config.get("gateCommands") or []),
+           "ticket_test_command": json.dumps(config.get("testCommand") or []),
+           "TRAIN_GATES_ONLY": "true" if item.get("checks_deferred") else "false",
+           "VERIFY_ONLY": "false", "MEDULLA_RUN_DIR": item["run_dir"]}
+    with lane_scope(env, item["host_worktree"]):
+        return GATES.plan()
+
+
+def check_receipt(config, item):
+    """Verify a candidate's gate receipt against its request; return the receipt or raise ValueError."""
+    for key in ("ticket", "sha", "tree", "target", "gate_receipt", "gate_receipt_sha256", "project_dir", "module"):
+        if not isinstance(item.get(key), str) or not item[key]:
+            raise ValueError(f"the request lacks {key}")
+    gates_dir = os.path.join(os.path.realpath(item["artifacts"]), "gates")
+    path = os.path.realpath(item["gate_receipt"])
+    if not path.startswith(gates_dir + os.sep):
+        raise ValueError("the gate receipt is outside this run's artifacts")
+    if sha256(path) != item["gate_receipt_sha256"]:
+        raise ValueError("the gate receipt digest differs from the request")
+    with open(path) as fh:
+        receipt = json.load(fh)
+    expected = {"task": item["ticket"], "tree": item["tree"], "repository": item["project_dir"],
+                "module": item["module"], "run": os.path.realpath(item["run_dir"])}
+    wrong = [key for key, value in expected.items() if receipt.get(key) != value]
+    if wrong:
+        raise ValueError(f"the gate receipt does not match the request: {', '.join(wrong)}")
+    wt = item["host_worktree"]
+
+    def at(*args):
+        return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        if at("rev-parse", "HEAD") != item["sha"] or at("status", "--porcelain", "--untracked-files=normal"):
+            raise ValueError("the candidate checkout changed after it was queued")
+        if at("rev-parse", item["sha"] + "^{tree}") != receipt["tree"]:
+            raise ValueError("the candidate commit tree differs from the receipt tree")
+        if at("rev-parse", receipt["candidate_sha"] + "^{tree}") != receipt["tree"]:
+            raise ValueError("the receipt candidate SHA does not identify its tree")
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"cannot read the candidate checkout: {(error.stderr or '').strip()[-200:]}")
+    deferred = receipt.get("deferred") == "train"
+    if deferred != bool(item.get("checks_deferred")):
+        raise ValueError("the receipt mode (deferred or executed) differs from the request")
+    commands = receipt.get("commands")
+    if not isinstance(commands, list) or not commands:
+        raise ValueError("the gate receipt has no plan")
+    if deferred:
+        if receipt.get("checks") or receipt.get("passed"):
+            raise ValueError("a deferred receipt cannot carry results")
+    else:
+        checks = receipt.get("checks") or []
+        if receipt.get("passed") is not True or len(checks) != len(commands):
+            raise ValueError("the gate receipt is not a complete pass")
+        folder = os.path.dirname(path)
+        for command, check in zip(commands, checks):
+            logfile = os.path.realpath(check.get("log") or "")
+            if (check.get("command") != command or check.get("exit_code") != 0
+                    or (isinstance(command, dict) and check.get("stdout_matches") is not True)
+                    or not logfile.startswith(folder + os.sep) or not os.path.isfile(logfile)
+                    or sha256(logfile) != check.get("sha256")):
+                raise ValueError("a gate result or log does not match the receipt")
+    try:
+        required = required_plan(config, item)
+    except (OSError, ValueError, KeyError) as error:
+        raise ValueError(f"cannot rebuild the required plan: {error}")
+    if commands != required:
+        raise ValueError("the receipt plan differs from the required plan (gates, ticket and coder checks)")
+    return receipt
+
+
+def verified(config, items, train_dir):
+    """Keep candidates whose receipt verifies; refuse the rest explicitly."""
     keep = []
     for item in items:
-        missing = [c for c in (item.get("gate_plan") or []) if c not in plan] if item.get("checks_deferred") else []
-        if item.get("checks_deferred") and not item.get("gate_plan"):
-            missing = ["(no gate plan recorded)"]
-        if missing:
-            finish(config, item, "plan_not_covered",
-                   f"The train does not run these deferred checks: {'; '.join(map(str, missing))[:200]}", train_dir)
-        else:
-            keep.append(item)
+        try:
+            item["receipt"] = check_receipt(config, item)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            finish(config, item, "receipt_refused", f"Gate receipt refused: {error}.", train_dir)
+            continue
+        keep.append(item)
     return keep
 
 
@@ -336,13 +493,16 @@ def unchanged(box, before):
             and box.sh("git rev-parse HEAD").stdout.strip() == before["head"])
 
 
-def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before):
-    """Bind the gate result to the integrated candidate captured before the gates ran."""
-    receipt = {"schema": 1, "target": target, "base": base, "integrated_head": before["head"],
+def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before, plan, results):
+    """Bind every check result to the integrated candidate captured before the checks ran."""
+    receipt = {"schema": 2, "target": target, "base": base, "integrated_head": before["head"],
                "integrated_tree": before["tree"],
-               "gate_commands": config["train"]["gateCommands"], "passed": ok, "failed_command": failed or None,
-               "gate_log": gate_log,
-               "candidates": [{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt", "checks_deferred")}
+               "gate_commands": config["train"]["gateCommands"], "plan": plan, "checks": results,
+               "passed": ok, "failed_command": failed or None, "gate_log": gate_log,
+               "candidates": [{**{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt",
+                                                           "gate_receipt_sha256", "checks_deferred",
+                                                           "project_dir", "module")},
+                               "receipt_verified": True}
                               for item in items]}
     path = os.path.join(train_dir, f"receipt-{depth}-{items[0]['ticket']}.json")
     with open(path, "w") as fh:
@@ -380,7 +540,7 @@ def retry_to_test(config):
 
 def land(config, items, train_dir, depth=0):
     """Land items together; split on a gate failure."""
-    items = covered(config, items, train_dir)
+    items = verified(config, items, train_dir)
     if not items:
         return
     logfile = os.path.join(train_dir, f"git-{depth}-{items[0]['ticket']}.log")
@@ -393,6 +553,11 @@ def land(config, items, train_dir, depth=0):
             log(f"train of {len(items)} on {target}@{base[:10]}: {' '.join(i['ticket'] for i in items)}")
             applied = []
             for item in items:
+                if item["target"] != target:
+                    finish(config, item, "receipt_refused",
+                           f"Gate receipt refused: the request targets {item['target']}, the repository {target}.",
+                           train_dir)
+                    continue
                 state, detail = apply(box, item, target, logfile)
                 if state == "ok":
                     applied.append(item)
@@ -403,11 +568,13 @@ def land(config, items, train_dir, depth=0):
                 return
             gate_log = os.path.join(train_dir, f"gates-{depth}-{items[0]['ticket']}.log")
             before = snapshot(box)
-            ok, failed = run_gates(box, config, gate_log)
+            plan = train_plan(config, items)
+            ok, failed, results = run_plan(box, plan, gate_log)
             if ok and not unchanged(box, before):
                 # A gate that edits tracked files or commits must not decide what lands.
                 ok, failed = False, "a gate changed the integrated candidate (HEAD, tracked or new files)"
-            receipt = train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before)
+            receipt = train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before,
+                                    plan, results)
             if not ok:
                 break
             if DRY:
