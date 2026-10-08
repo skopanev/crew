@@ -282,10 +282,18 @@ def finish(config, item, status, detail, train_dir):
     # The worktree is not needed after landing; a reopened ticket needs it gone for a new lane.
     wt = item["host_worktree"]
     if os.path.isdir(wt):
+        keep = False
         if status != "landed":
-            subprocess.run(["git", "-C", wt, "bundle", "create", "-q",
-                            os.path.join(train_dir, f"{item['ticket']}.bundle"), "HEAD"], capture_output=True)
-        shutil.rmtree(wt, ignore_errors=True)
+            bundle = subprocess.run(["git", "-C", wt, "bundle", "create", "-q",
+                                     os.path.join(train_dir, f"{item['ticket']}.bundle"), "HEAD"],
+                                    capture_output=True, text=True)
+            if bundle.returncode:
+                # Without a bundle the checkout is the only copy of the candidate: keep it.
+                keep = True
+                result["bundle_error"] = (bundle.stderr or bundle.stdout)[-300:]
+                result["worktree_kept"] = wt
+        if not keep:
+            shutil.rmtree(wt, ignore_errors=True)
     tmp = os.path.join(item["artifacts"], "train-result.json.tmp")
     with open(tmp, "w") as fh:
         json.dump(result, fh, indent=2)
@@ -309,11 +317,22 @@ def covered(config, items, train_dir):
     return keep
 
 
-def train_receipt(config, box, train_dir, depth, items, target, base, ok, failed, gate_log):
-    """Bind the gate result to the exact integrated tree and to every candidate in it."""
-    head = box.sh("git rev-parse HEAD").stdout.strip()
-    receipt = {"schema": 1, "target": target, "base": base, "integrated_head": head,
-               "integrated_tree": box.sh("git rev-parse HEAD^{tree}").stdout.strip(),
+def snapshot(box):
+    """The integrated candidate as it stood before any gate ran."""
+    return {"head": box.sh("git rev-parse HEAD").stdout.strip(),
+            "tree": box.sh("git rev-parse HEAD^{tree}").stdout.strip()}
+
+
+def unchanged(box, before):
+    status = box.sh("git status --porcelain --untracked-files=normal")
+    return (status.returncode == 0 and not status.stdout.strip()
+            and box.sh("git rev-parse HEAD").stdout.strip() == before["head"])
+
+
+def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before):
+    """Bind the gate result to the integrated candidate captured before the gates ran."""
+    receipt = {"schema": 1, "target": target, "base": base, "integrated_head": before["head"],
+               "integrated_tree": before["tree"],
                "gate_commands": config["train"]["gateCommands"], "passed": ok, "failed_command": failed or None,
                "gate_log": gate_log,
                "candidates": [{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt", "checks_deferred")}
@@ -322,6 +341,34 @@ def train_receipt(config, box, train_dir, depth, items, target, base, ok, failed
     with open(path, "w") as fh:
         json.dump(receipt, fh, indent=2)
     return path
+
+
+def retry_to_test(config):
+    """A landed candidate whose to_test transition failed is retried, never forgotten."""
+    for path in glob.glob(os.path.join(config["scopeDir"], "runs", "*", "lane", "*", "artifacts", "train-result.json")):
+        try:
+            with open(path) as fh:
+                result = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if result.get("status") != "landed" or result.get("to_test") is not False:
+            continue
+        art = os.path.dirname(path)
+        with open(os.path.join(art, "train-request.json")) as fh:
+            ticket = json.load(fh)["ticket"]
+        env = {**os.environ, "ticket_id": ticket, "project_name": config["workspace"],
+               "MEDULLA_RUN_DIR": os.path.dirname(art)}
+        proc = subprocess.run(["node", os.path.join(TOOLING, "lane", "bin", "ticket-outcome.mjs"), "to-test"],
+                              env=env, capture_output=True, text=True)
+        result["to_test"] = proc.returncode == 0
+        result["to_test_retried_at"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if proc.returncode:
+            result["to_test_error"] = (proc.stderr or proc.stdout)[-500:]
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(result, fh, indent=2)
+        os.replace(tmp, path)
+        log(f"  {ticket}: to_test retry {'ok' if proc.returncode == 0 else 'failed'}")
 
 
 def land(config, items, train_dir, depth=0):
@@ -348,8 +395,12 @@ def land(config, items, train_dir, depth=0):
             if not items:
                 return
             gate_log = os.path.join(train_dir, f"gates-{depth}-{items[0]['ticket']}.log")
+            before = snapshot(box)
             ok, failed = run_gates(box, config, gate_log)
-            receipt = train_receipt(config, box, train_dir, depth, items, target, base, ok, failed, gate_log)
+            if ok and not unchanged(box, before):
+                # A gate that edits tracked files or commits must not decide what lands.
+                ok, failed = False, "a gate changed the integrated candidate (HEAD, tracked or new files)"
+            receipt = train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before)
             if not ok:
                 break
             if DRY:
@@ -404,6 +455,8 @@ def main(argv):
         json.dump({"pid": os.getpid(), "started_at": dt.datetime.now().isoformat()}, fh)
     try:
         while True:
+            if not DRY:
+                retry_to_test(config)
             rows = queued(config)
             if due(config, rows):
                 train_dir = os.path.join(config["trainDir"], dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
