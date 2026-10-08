@@ -39,7 +39,7 @@ def collect():
                  "--process", name, "--coordinate", "rules=none",
                  "--budget-records", "1000", "--json"],
                 env={**os.environ, "EQUILL_ACTOR": group},
-                capture_output=True, text=True, timeout=30, check=True,
+                capture_output=True, text=True, timeout=120, check=True,
             )
             context = json.loads(result.stdout)
             receipt = context.get("receipt", {})
@@ -114,6 +114,9 @@ if __name__ == "__main__":
                          "run roles/export.py and commit. Then start again.")
             sys.exit(0)
         export()
+    except subprocess.TimeoutExpired:
+        print("Crew role export timed out after 120 seconds", file=sys.stderr)
+        sys.exit(75)
     except subprocess.CalledProcessError as error:
         sys.exit(f"Crew role export failed: {error.stderr.strip()[-300:] or error}")
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

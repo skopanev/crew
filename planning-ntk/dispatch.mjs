@@ -231,6 +231,11 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
       {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
     fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
     result = runResult(config, runName);
+    if (run.status === 75 && !fs.existsSync(path.join(config.stateDir, 'runs', runName))) {
+      console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · role check timed out`);
+      field('Log', log);
+      return {id: ticket.id, environment: true, preflight: true, log};
+    }
     if (run.status === 0 || !replanForDrift(result, attempt)) break;
     field('Stage', paint('yellow', 'source changed during planning · planning once more against current code'));
   }
