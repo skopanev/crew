@@ -186,6 +186,18 @@ mounted through `readOnlyRepos`, and skips it in lanes that run no checks:
 }
 ```
 
+The integration container has no Git key or push credential: checks, hooks
+and `train.setup` run there without push authority, and the clone's `origin`
+is a lander-owned mirror mounted read-only
+(`<stateDir>/crew-dispatchers/<id>/train/mirrors`). Only the lander process on
+the host uses `sshDir`: it fetches the target into that mirror, and after the
+decision it publishes from a fresh bare repository. It copies only the
+integrated commit's objects out of the clone (verified with
+`git index-pack --strict`), requires the commit and tree to equal the ones the
+checks ran on, and pushes `<sha>:refs/heads/<target>` with hooks disabled and
+an explicit `core.sshCommand`; no Git command runs inside the clone, so its
+hooks and configuration never execute. The host needs `git` and `ssh`.
+
 Keep checks that use one shared external checkout (for example a remote build
 host) only in `train.gateCommands`: parallel lanes would race on it.
 

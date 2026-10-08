@@ -1,6 +1,7 @@
 """Landing train with a fake Box: real Git fixtures, no Docker, NTK or network."""
 
 import hashlib
+from shlex import quote as shlex_quote
 import importlib.util
 import json
 import os
@@ -37,9 +38,10 @@ def git(cwd, *args):
 class FakeBox:
     """Runs Box scripts with bash on the host; /workspace/train maps to a temp folder."""
 
-    def __init__(self, config, work):
+    def __init__(self, config, work, mirror=None):
         self.config, self.work = config, work
         self.source = os.path.realpath(config["sourceRoot"])
+        self.mirror = mirror or train.mirror_dir(config, "repo")
         self.scripts = []
 
     def sh(self, script, logfile=None, timeout=3600, cwd="/workspace/train/repo"):
@@ -124,7 +126,7 @@ class SetupHookTests(Fixture):
             calls.append(args)
             return subprocess.CompletedProcess(args, 0, stdout="container-id\n", stderr="")
         with mock.patch.object(train.subprocess, "run", fake_run):
-            train.Box(config, str(self.root / "work"))
+            train.Box(config, str(self.root / "work"), str(self.root / "mirror.git"))
         self.assertIn(f"{cache}:/home/medulla/.cache-x:rw", calls[0])
         for bad in ({"host": "relative", "inside": "/x"}, {"host": str(cache), "inside": "/workspace/train/x"},
                     {"host": str(cache), "inside": "/x", "extra": 1}, {"host": str(cache) + ":/y", "inside": "/x"}):
@@ -132,6 +134,26 @@ class SetupHookTests(Fixture):
                 self.config["train"]["persistentMounts"] = [bad]
                 with self.assertRaises(SystemExit):
                     self.write_config()
+
+    def test_check_container_has_no_key_or_push_credential(self):
+        dirs = self.protected_layout()
+        (dirs["ssh"] / "id_ed25519").write_text("fixture key\n")
+        config = self.write_config()
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout="container-id\n", stderr="")
+        with mock.patch.object(train.subprocess, "run", fake_run):
+            box = train.Box(config, str(self.root / "work"), str(self.root / "mirror.git"))
+        args = " ".join(calls[0])
+        self.assertNotIn(str(dirs["ssh"]), args)
+        self.assertNotIn("lane-ssh", args)
+        self.assertNotIn("id_ed25519", args)
+        self.assertNotIn("GIT_SSH", args)
+        self.assertNotIn("sshCommand", args)
+        self.assertIn(f"{self.root / 'mirror.git'}:/workspace/lander-mirror:ro", calls[0])
+        self.assertEqual(box.mirror, "/workspace/lander-mirror")
 
     def test_persistent_mounts_may_not_alias_protected_or_writable_dirs(self):
         dirs = self.protected_layout()
@@ -448,6 +470,81 @@ class TrainVerificationTests(TrainFixture):
         self.assertIn("changed the integrated candidate", self.result(artifacts)["detail"])
         self.assertEqual(self.remote_head(), before)
         self.assertFalse(self.receipts()[0]["passed"])
+
+
+class PublicationTests(TrainFixture):
+    """Item: checks run without push authority; only the host courier publishes the verified commit."""
+
+    def test_checks_cannot_publish_through_the_integration_clone(self):
+        # The clone's origin is the lander mirror, never the real remote: a pushing check misses it.
+        self.config["train"]["gateCommands"] = [
+            f'test "$(git remote get-url origin)" != {shlex_quote(str(self.origin))}',
+            "git push -q origin HEAD:refs/heads/hijack || true"]
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        self.land()
+        self.assertEqual(self.result(artifacts)["status"], "landed")
+        self.assertEqual(git(self.origin, "for-each-ref", "--format=%(refname)", "refs/heads/hijack"), "")
+
+    def test_work_repo_hooks_and_config_never_run_during_publication(self):
+        marker = self.root / "hook-ran"
+        hook = f"#!/bin/sh\ntouch {marker}\n"
+        self.config["train"]["gateCommands"] = [
+            f"mkdir -p .git/evil && printf %s {shlex_quote(hook)} > .git/evil/pre-push && chmod +x .git/evil/pre-push"
+            " && cp .git/evil/pre-push .git/hooks/pre-push && git config core.hooksPath .git/evil"
+            " && git config core.sshCommand 'touch " + str(marker) + "; false'"]
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        before = self.remote_head()
+        self.land()
+        self.assertEqual(self.result(artifacts)["status"], "landed")
+        self.assertNotEqual(self.remote_head(), before)
+        self.assertFalse(marker.exists(), "a hook or config of the integration clone ran")
+
+    def integrated(self, files):
+        """An integration clone with one commit on top of the target, as prepare and apply leave it."""
+        config = self.write_config()
+        box = FakeBox(config, str(self.root / "work"))
+        train.prepare(box, config, "repo", str(self.train_dir / "log"))
+        work = self.root / "work/repo"
+        for name, text in files.items():
+            (work / name).write_text(text)
+        git(work, "add", "-A")
+        git(work, "commit", "-qm", "integrated")
+        return config, work, {"head": git(work, "rev-parse", "HEAD"), "tree": git(work, "rev-parse", "HEAD^{tree}")}
+
+    def test_publication_refuses_a_commit_whose_tree_differs_from_the_receipt(self):
+        config, work, before = self.integrated({"a.txt": "a\n"})
+        start = self.remote_head()
+        wrong = dict(before, tree=git(work, "rev-parse", "HEAD~1^{tree}"))
+        state, detail = train.publish(config, "repo", str(work), "develop", wrong, str(self.train_dir / "log"))
+        self.assertEqual(state, "refused")
+        self.assertIn("integrated head and tree", detail)
+        self.assertEqual(self.remote_head(), start)
+        state, sha = train.publish(config, "repo", str(work), "develop", before, str(self.train_dir / "log"))
+        self.assertEqual((state, sha), ("ok", before["head"]))
+        self.assertEqual(self.remote_head(), before["head"])
+
+    def test_publication_refuses_a_corrupted_object_and_detects_a_moved_target(self):
+        config, work, before = self.integrated({"a.txt": "a\n"})
+        start = self.remote_head()
+        # Replace the integrated commit object with bytes that do not hash to its name.
+        path = work / ".git/objects" / before["head"][:2] / before["head"][2:]
+        path.chmod(0o644)
+        other = git(work, "rev-parse", "HEAD~1")
+        path.write_bytes((work / ".git/objects" / other[:2] / other[2:]).read_bytes())
+        state, _ = train.publish(config, "repo", str(work), "develop", before, str(self.train_dir / "log"))
+        self.assertEqual(state, "refused")
+        self.assertEqual(self.remote_head(), start)
+        config, work, before = self.integrated({"b.txt": "b\n"})
+        elsewhere = self.root / "elsewhere"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(elsewhere)], check=True, env=GIT_ENV)
+        (elsewhere / "c.txt").write_text("c\n")
+        git(elsewhere, "add", "-A")
+        git(elsewhere, "commit", "-qm", "moved")
+        git(elsewhere, "push", "-q", "origin", "HEAD:develop")
+        moved = self.remote_head()
+        state, _ = train.publish(config, "repo", str(work), "develop", before, str(self.train_dir / "log"))
+        self.assertEqual(state, "moved")
+        self.assertEqual(self.remote_head(), moved)
 
 
 class RepositoryTests(TrainFixture):
