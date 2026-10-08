@@ -732,7 +732,7 @@ nodes:
       case "${MEDULLA_LAST_SIGNAL:-}" in
         LANDED) msg="${ticket_id} landed: ${MEDULLA_LAST_MESSAGE:-}" ;;
         VERIFIED) msg="${ticket_id} verified: ${MEDULLA_LAST_MESSAGE:-}" ;;
-        QUEUED) msg="${ticket_id} queued: ${MEDULLA_LAST_MESSAGE:-}" ;;
+        QUEUED) msg="${ticket_id} QUEUED (pending landing), not landed: ${MEDULLA_LAST_MESSAGE:-}" ;;
         *) echo 'Success requires LANDED, VERIFIED or QUEUED' >&2; exit 1 ;;
       esac
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
@@ -751,6 +751,14 @@ nodes:
           cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
           exit 1
         fi
+      fi
+      if [ "${MEDULLA_LAST_SIGNAL:-}" = "QUEUED" ]; then
+        # Exit 0 here is not a landing: the worker, dashboard and notification read this
+        # pending outcome and report QUEUED until the landing train records its result.
+        jq -n --arg ticket "$ticket_id" --arg message "${MEDULLA_LAST_MESSAGE:-}" \
+          '{status: "queued", pending: "landing", ticket: $ticket, message: $message}' \
+          > "$MEDULLA_RUN_DIR/artifacts/outcome.json.tmp" \
+          && mv "$MEDULLA_RUN_DIR/artifacts/outcome.json.tmp" "$MEDULLA_RUN_DIR/artifacts/outcome.json" || exit 1
       fi
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt" || exit 1
       printf '%s\n' "$msg"

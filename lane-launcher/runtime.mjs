@@ -83,3 +83,21 @@ export function runDirectories(stateDir) {
   return fs.readdirSync(root).map(name => path.join(root, name))
     .filter(dir => fs.statSync(dir).isDirectory());
 }
+// A train lane exits 0 after queueing its candidate; that is a pending landing, not READY.
+// Returns {artifacts, train} for the newest queued run in this launch, or null.
+export function queuedOutcome(runFolder) {
+  let names;
+  try { names = fs.readdirSync(runFolder); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  const found = names.map(name => path.join(runFolder, name, 'artifacts'))
+    .filter(folder => fs.existsSync(path.join(folder, 'outcome.json')))
+    .sort((a, b) => fs.statSync(path.join(b, 'outcome.json')).mtimeMs - fs.statSync(path.join(a, 'outcome.json')).mtimeMs)[0];
+  if (!found) return null;
+  let outcome;
+  try { outcome = read(path.join(found, 'outcome.json')); } catch { return null; }
+  if (outcome?.status !== 'queued') return null;
+  const result = path.join(found, 'train-result.json');
+  let train = null;
+  try { if (fs.existsSync(result)) train = read(result); } catch { train = null; }
+  return {artifacts: found, train};
+}

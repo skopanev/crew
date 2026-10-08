@@ -207,6 +207,11 @@ Supply `TELEGRAM_BOT_TOKEN` in the environment, or point `notify.envFile` at an
 existing local env file containing that variable. Keep credentials out of Git.
 Replace legacy `notify.to`, `notify.room` and `notify.from` with these fields.
 Messages show a bold status, a green or red dot, and a bold ticket ID.
+A train lane that queued its candidate exits 0 but has not landed: its run
+writes `artifacts/outcome.json` (`{"status": "queued"}`), and the worker log,
+dashboard and notification show `QUEUED (pending landing)`, never `READY`.
+The dashboard stage then shows the lander's result once `train-result.json`
+exists.
 For failures, `Reason:` contains only the reason code. Detailed explanations stay in NTK and the logs.
 Messages omit the run ID and absolute file paths.
 Both IDs use code formatting for copying.
