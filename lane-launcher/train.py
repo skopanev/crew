@@ -18,9 +18,10 @@ retained. This lander is the only writer to the target branch:
    coder checks) with gates.py semantics; each result goes into the receipt.
 4. Pass: push, move every ticket to to_test, remove the lane worktrees.
    Fail: split the train in halves and land each half again; a single failing
-   candidate is reopened with the gate log. Candidates that land from a failed
-   train leave their plans as carried obligations for every later subset of
-   it, so a later candidate cannot land over a check that held without it.
+   candidate is reopened with the gate log. A failed train is first recorded
+   (failed-batch-*.json: members and verified plans); until every member has a
+   result, each train holding one of its members also runs the plans of the
+   members that already landed, also after a retry or a restart.
 
 Git and the gates run inside one container of the lane image, with the lane's
 mounts, so the train checks the same environment as the lanes.
@@ -296,9 +297,76 @@ def train_plan(config, items, carried=()):
     return plan
 
 
-def obligations(items):
-    """The checks landed candidates leave behind for later subsets of their failed batch."""
-    return [(command, item["ticket"]) for item in items for command in item["receipt"]["commands"]]
+def now():
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_json(path, value):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(value, fh, indent=2)
+    os.replace(tmp, path)
+
+
+def member_status(member):
+    """A failed-batch member is resolved once its run has a train result."""
+    path = os.path.join(member["artifacts"], "train-result.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as fh:
+        return json.load(fh).get("status") or "unknown"
+
+
+def open_batches(config):
+    """Open failed-batch records; a record whose members are all resolved is closed here.
+
+    Records live only while their own failed batch is being recovered: they hold that
+    batch's members and verified plans, not a registry of historical checks.
+    """
+    rows = []
+    for path in sorted(glob.glob(os.path.join(config["trainDir"], "*", "failed-batch-*.json"))):
+        try:
+            with open(path) as fh:
+                record = json.load(fh)
+            members = record["members"]
+        except (OSError, ValueError, KeyError) as error:
+            # Losing a record would drop obligations silently: stop and report instead.
+            raise RuntimeError(f"unreadable failed-batch record {path}: {error}; inspect it before restarting")
+        if record.get("status") != "open":
+            continue
+        states = {member["ticket"]: member_status(member) for member in members}
+        if all(states.values()):
+            write_json(path, {**record, "status": "closed", "closed_at": now(), "results": states})
+            log(f"failed batch {os.path.basename(path)} resolved: {states}")
+            continue
+        rows.append({**record, "path": path})
+    return rows
+
+
+def open_batch(train_dir, depth, items, target, repo):
+    """Persist a failed batch before any subset of it is published."""
+    path = os.path.join(train_dir, f"failed-batch-{depth}-{items[0]['ticket']}.json")
+    write_json(path, {"schema": 1, "status": "open", "opened_at": now(), "repository": repo, "target": target,
+                      "members": [{"ticket": item["ticket"], "sha": item["sha"],
+                                   "artifacts": os.path.realpath(item["artifacts"]),
+                                   "plan": item["receipt"]["commands"]} for item in items]})
+    return path
+
+
+def carried_obligations(config, items):
+    """Plans of members that already landed from an open failed batch one of these items belongs to."""
+    mine = {os.path.realpath(item["artifacts"]) for item in items}
+    carried, sources = [], []
+    for record in open_batches(config):
+        if not mine & {member["artifacts"] for member in record["members"]}:
+            continue
+        sources.append(record["path"])
+        for member in record["members"]:
+            if member_status(member) == "landed":
+                for command in member["plan"]:
+                    if (command, member["ticket"]) not in carried:
+                        carried.append((command, member["ticket"]))
+    return carried, sources
 
 
 def run_plan(box, plan, logfile):
@@ -522,12 +590,13 @@ def unchanged(box, before):
 
 
 def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before, plan, results,
-                  carried=()):
+                  carried=(), sources=()):
     """Bind every check result to the integrated candidate captured before the checks ran."""
     receipt = {"schema": 2, "target": target, "base": base, "integrated_head": before["head"],
                "integrated_tree": before["tree"],
                "gate_commands": config["train"]["gateCommands"], "plan": plan, "checks": results,
                "carried": [{"command": command, "owner": ticket, "landed": True} for command, ticket in carried],
+               "failed_batches": list(sources),
                "passed": ok, "failed_command": failed or None, "gate_log": gate_log,
                "candidates": [{**{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt",
                                                            "gate_receipt_sha256", "checks_deferred",
@@ -568,17 +637,18 @@ def retry_to_test(config):
         log(f"  {ticket}: to_test retry {'ok' if proc.returncode == 0 else 'failed'}")
 
 
-def land(config, items, train_dir, depth=0, carried=()):
+def land(config, items, train_dir, depth=0):
     """Land items together; split on a gate failure. Return the items that landed.
 
-    When a failed batch is split, every candidate that lands from it leaves its plan as
-    an obligation (carried) for each later subset of that batch, so a later candidate
-    cannot land over a check an earlier one passed only without it.
+    A failed batch is persisted (failed-batch-*.json) before it is split. Until all its
+    members are resolved, every train holding one of its unresolved members runs the plans
+    of the members that already landed (carried), also after a retry or restart, so a later
+    candidate cannot land over a check an earlier one passed only without it.
     """
-    carried = list(carried)
     items = verified(config, items, train_dir)
     if not items:
         return []
+    carried, sources = carried_obligations(config, items)
     repos = {item["repository"] for item in items}
     if len(repos) != 1:
         raise RuntimeError(f"a train must hold one repository, got {sorted(repos)}")
@@ -614,8 +684,10 @@ def land(config, items, train_dir, depth=0, carried=()):
                 # A gate that edits tracked files or commits must not decide what lands.
                 ok, failed = False, "a gate changed the integrated candidate (HEAD, tracked or new files)"
             receipt = train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before,
-                                    plan, results, carried)
+                                    plan, results, carried, sources)
             if not ok:
+                if len(items) > 1:
+                    open_batch(train_dir, depth, items, target, repo)
                 break
             if DRY:
                 log(f"DRY: gates passed for {len(items)}; no push")
@@ -642,19 +714,22 @@ def land(config, items, train_dir, depth=0, carried=()):
         return []
     half = len(items) // 2
     log(f"gate failed on {len(items)}: splitting {half}+{len(items) - half}")
-    first = land(config, items[:half], train_dir, depth + 1, carried)
-    second = land(config, items[half:], train_dir, depth + 1, carried + obligations(first))
+    first = land(config, items[:half], train_dir, depth + 1)
+    second = land(config, items[half:], train_dir, depth + 1)
     return first + second
 
 
 def land_queue(config, rows, train_dir):
     """One train per repository, oldest request first; a batch never mixes repositories."""
+    if not os.path.realpath(train_dir).startswith(os.path.realpath(config["trainDir"]) + os.sep):
+        raise RuntimeError("a train directory must sit under trainDir, where failed batches are reloaded")
     groups = {}
     for row in rows:
         key = row.get("repository") if isinstance(row.get("repository"), str) else ""
         groups.setdefault(key, []).append(row)
     for group in groups.values():
         land(config, group, train_dir)
+    open_batches(config)  # close records whose members are now all resolved
 
 
 def main(argv):
