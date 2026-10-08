@@ -131,6 +131,9 @@ candidates are queued, the oldest waited `train.waitSeconds`, or no lane runs,
 it applies every candidate onto a fresh target in one clone, runs the checks
 once in a lane-image container, and pushes. A conflicting candidate leaves the
 train; a failing train splits in halves until the failing candidate is found.
+Candidates that land from a failed train carry their plans into every later
+subset of it (recorded as `carried` in the train receipt), so a later
+candidate that breaks an earlier one's check fails instead of landing.
 Left-out tickets reopen with a note; their commits stay as a bundle in the
 train directory (`<stateDir>/crew-dispatchers/<id>/train`).
 

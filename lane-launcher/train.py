@@ -18,7 +18,9 @@ retained. This lander is the only writer to the target branch:
    coder checks) with gates.py semantics; each result goes into the receipt.
 4. Pass: push, move every ticket to to_test, remove the lane worktrees.
    Fail: split the train in halves and land each half again; a single failing
-   candidate is reopened with the gate log.
+   candidate is reopened with the gate log. Candidates that land from a failed
+   train leave their plans as carried obligations for every later subset of
+   it, so a later candidate cannot land over a check that held without it.
 
 Git and the gates run inside one container of the lane image, with the lane's
 mounts, so the train checks the same environment as the lanes.
@@ -259,8 +261,12 @@ def run_check(box, command, logfile):
             "started_at": started, "finished_at": time.time()}
 
 
-def train_plan(config, items):
-    """train.gateCommands plus every candidate's own verified plan, each entry once."""
+def train_plan(config, items, carried=()):
+    """train.gateCommands, every candidate's own verified plan and the carried obligations, each once.
+
+    carried holds (command, ticket) pairs of candidates that already landed from a failed
+    batch this subset came from; their code is in the target, so their checks still bind.
+    """
     plan = []
 
     def add(command, owner):
@@ -274,7 +280,14 @@ def train_plan(config, items):
     for item in items:
         for command in item["receipt"]["commands"]:
             add(command, item["ticket"])
+    for command, ticket in carried:
+        add(command, f"{ticket} (carried)")
     return plan
+
+
+def obligations(items):
+    """The checks landed candidates leave behind for later subsets of their failed batch."""
+    return [(command, item["ticket"]) for item in items for command in item["receipt"]["commands"]]
 
 
 def run_plan(box, plan, logfile):
@@ -497,11 +510,13 @@ def unchanged(box, before):
             and box.sh("git rev-parse HEAD").stdout.strip() == before["head"])
 
 
-def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before, plan, results):
+def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before, plan, results,
+                  carried=()):
     """Bind every check result to the integrated candidate captured before the checks ran."""
     receipt = {"schema": 2, "target": target, "base": base, "integrated_head": before["head"],
                "integrated_tree": before["tree"],
                "gate_commands": config["train"]["gateCommands"], "plan": plan, "checks": results,
+               "carried": [{"command": command, "owner": ticket, "landed": True} for command, ticket in carried],
                "passed": ok, "failed_command": failed or None, "gate_log": gate_log,
                "candidates": [{**{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt",
                                                            "gate_receipt_sha256", "checks_deferred",
@@ -542,11 +557,17 @@ def retry_to_test(config):
         log(f"  {ticket}: to_test retry {'ok' if proc.returncode == 0 else 'failed'}")
 
 
-def land(config, items, train_dir, depth=0):
-    """Land items together; split on a gate failure."""
+def land(config, items, train_dir, depth=0, carried=()):
+    """Land items together; split on a gate failure. Return the items that landed.
+
+    When a failed batch is split, every candidate that lands from it leaves its plan as
+    an obligation (carried) for each later subset of that batch, so a later candidate
+    cannot land over a check an earlier one passed only without it.
+    """
+    carried = list(carried)
     items = verified(config, items, train_dir)
     if not items:
-        return
+        return []
     repos = {item["repository"] for item in items}
     if len(repos) != 1:
         raise RuntimeError(f"a train must hold one repository, got {sorted(repos)}")
@@ -573,27 +594,27 @@ def land(config, items, train_dir, depth=0):
                     finish(config, item, state, f"Files: {detail}" if state == "conflict" else detail, train_dir)
             items = applied
             if not items:
-                return
+                return []
             gate_log = os.path.join(train_dir, f"gates-{depth}-{items[0]['ticket']}.log")
             before = snapshot(box)
-            plan = train_plan(config, items)
+            plan = train_plan(config, items, carried)
             ok, failed, results = run_plan(box, plan, gate_log)
             if ok and not unchanged(box, before):
                 # A gate that edits tracked files or commits must not decide what lands.
                 ok, failed = False, "a gate changed the integrated candidate (HEAD, tracked or new files)"
             receipt = train_receipt(config, train_dir, depth, items, target, base, ok, failed, gate_log, before,
-                                    plan, results)
+                                    plan, results, carried)
             if not ok:
                 break
             if DRY:
                 log(f"DRY: gates passed for {len(items)}; no push")
-                return
+                return []
             state, sha = push(box, target, logfile)
             if state == "ok":
                 log(f"landed {len(items)} on {target} at {sha[:10]}")
                 for item in items:
                     finish(config, item, "landed", f"{target}@{sha}; train receipt {receipt}", train_dir)
-                return
+                return items
             if state != "moved":
                 raise TrainDeferred(f"push failed: {sha.splitlines()[-1] if sha else ''}; see {logfile}")
             log(f"{target} moved during the gates; rebuilding the train")
@@ -604,12 +625,15 @@ def land(config, items, train_dir, depth=0):
     if len(items) == 1:
         # Alone on the integrated tree, this candidate is the evidence for its own failure.
         finish(config, items[0], "gate_failed",
-               f"Gate failed alone on {target}@{base[:10]}: {failed}. Log: {gate_log}. Receipt: {receipt}", train_dir)
-        return
+               f"Gate failed alone on {target}@{base[:10]}: {failed}"
+               + (f" (carried from landed {', '.join(sorted({t for _, t in carried}))})" if carried else "")
+               + f". Log: {gate_log}. Receipt: {receipt}", train_dir)
+        return []
     half = len(items) // 2
     log(f"gate failed on {len(items)}: splitting {half}+{len(items) - half}")
-    land(config, items[:half], train_dir, depth + 1)
-    land(config, items[half:], train_dir, depth + 1)
+    first = land(config, items[:half], train_dir, depth + 1, carried)
+    second = land(config, items[half:], train_dir, depth + 1, carried + obligations(first))
+    return first + second
 
 
 def land_queue(config, rows, train_dir):
