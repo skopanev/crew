@@ -23,8 +23,13 @@ retained. This lander is the only writer to the target branch:
    result, each train holding one of its members also runs the plans of the
    members that already landed, also after a retry or a restart.
 
-Git and the gates run inside one container of the lane image, with the lane's
-mounts, so the train checks the same environment as the lanes.
+Integration and every check run inside one container of the lane image, with
+the lane's mounts but without any Git key, so the train checks the same
+environment as the lanes and no check can publish. Only the lander process on
+the host holds the key: it fetches the target into a lander-owned mirror the
+container clones read-only, and after the decision it publishes the verified
+integrated commit from a fresh bare repository, running no repository hooks or
+configuration from the integration clone.
 
 usage: train.py [dolber.json] [--once] [--dry-run]
 
@@ -38,10 +43,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 DRY = False
@@ -151,14 +158,15 @@ class TrainDeferred(Exception):
 
 
 class Box:
-    """One lane-image container holding the integration clone."""
+    """One lane-image container holding the integration clone. It has no Git key or push credential."""
 
-    def __init__(self, config, work):
+    def __init__(self, config, work, mirror):
         self.config, self.work = config, work
         source = os.path.realpath(config["sourceRoot"])
         mounts = [(source, f"/workspace/{os.path.basename(source)}", "ro"),
                   (work, "/workspace/train", "rw"),
-                  (os.path.realpath(config["sshDir"]), "/workspace/lane-ssh", "ro")]
+                  # The target as the lander fetched it; checks cannot write or push through it.
+                  (os.path.realpath(mirror), "/workspace/lander-mirror", "ro")]
         # Project-owned directories the lander alone keeps across trains (train.persistentMounts).
         mounts += [(m["host"], m["inside"], "rw") for m in config["train"]["persistentMounts"]]
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "ro")
@@ -166,14 +174,13 @@ class Box:
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "rw")
                    for d in config.get("readWriteDirs", [])]
         args = ["docker", "run", "-d", "--rm", "--label", "medulla.workflow=train",
-                "--entrypoint", "sleep", "-w", "/workspace/train", "-e", "GIT_LFS_SKIP_SMUDGE=1",
-                "-e", "GIT_SSH_COMMAND=ssh -F /dev/null -i /workspace/lane-ssh/id_ed25519 -o IdentitiesOnly=yes "
-                      "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/workspace/lane-ssh/known_hosts"]
+                "--entrypoint", "sleep", "-w", "/workspace/train", "-e", "GIT_LFS_SKIP_SMUDGE=1"]
         for host, inside, mode in mounts:
             args += ["-v", f"{host}:{inside}:{mode}"]
         args += [config["image"], "infinity"]
         self.id = subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
         self.source = f"/workspace/{os.path.basename(source)}"
+        self.mirror = "/workspace/lander-mirror"
 
     def sh(self, script, logfile=None, timeout=3600, cwd="/workspace/train/repo"):
         proc = subprocess.run(["docker", "exec", "-w", cwd, self.id, "bash", "-c",
@@ -186,6 +193,127 @@ class Box:
 
     def close(self):
         subprocess.run(["docker", "rm", "-f", self.id], capture_output=True)
+
+
+def ssh_command(config):
+    """The lander's explicit ssh command; only host-side courier steps use the key."""
+    if not config.get("sshDir"):
+        return "ssh -F /dev/null -o BatchMode=yes"
+    ssh = os.path.realpath(config["sshDir"])
+    return (f"ssh -F /dev/null -i {shlex.quote(os.path.join(ssh, 'id_ed25519'))} -o IdentitiesOnly=yes "
+            f"-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={shlex.quote(os.path.join(ssh, 'known_hosts'))}")
+
+
+def courier(config, cwd, *args, timeout=600, logfile=None):
+    """Git with the key, hooks disabled and an explicit ssh command, only in lander-owned repositories."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_PARAMETERS")}
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_LFS_SKIP_SMUDGE="1")
+    proc = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", f"core.sshCommand={ssh_command(config)}",
+                           *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+    if logfile:
+        with open(logfile, "a") as fh:
+            fh.write(f"$ courier git {shlex.join(args)}\n{proc.stdout}{proc.stderr}\nrc={proc.returncode}\n")
+    return proc
+
+
+def origin_url(config, repo):
+    """Read the source repository's origin URL as a file; never run Git inside the source checkout."""
+    proc = subprocess.run(["git", "config", "--file", os.path.join(config["sourceRoot"], repo, ".git", "config"),
+                           "--get", "remote.origin.url"], capture_output=True, text=True)
+    if proc.returncode or not proc.stdout.strip():
+        raise RuntimeError(f"{repo} has no origin URL")
+    return proc.stdout.strip()
+
+
+def target_of(config, repo):
+    with open(os.path.join(config["sourceRoot"], repo, ".ntkrc")) as fh:
+        target = json.load(fh).get("target_branch")
+    if (not isinstance(target, str) or not target or target.startswith("-") or target == "HEAD"
+            or subprocess.run(["git", "check-ref-format", f"refs/heads/{target}"]).returncode):
+        raise RuntimeError(f"{repo}/.ntkrc must set target_branch to a legal branch name")
+    return target
+
+
+def mirror_dir(config, repo):
+    """A lander-owned bare repository per source repository, mounted read-only into the Box."""
+    mirror = os.path.join(config["trainDir"], "mirrors", repo.replace("/", "__") + ".git")
+    if not os.path.isdir(mirror):
+        os.makedirs(os.path.dirname(mirror), exist_ok=True)
+        subprocess.run(["git", "init", "-q", "--bare", mirror], check=True, capture_output=True)
+    return mirror
+
+
+def refresh_mirror(config, repo, target, logfile):
+    """Key-bearing fetch of the target into the mirror, on the host; no repository code runs."""
+    mirror = mirror_dir(config, repo)
+    proc = courier(config, mirror, "fetch", "-q", "--no-tags", origin_url(config, repo),
+                   f"+refs/heads/{target}:refs/heads/{target}", logfile=logfile)
+    if proc.returncode:
+        raise TrainDeferred(f"fetching {target} failed: {(proc.stderr or proc.stdout).strip()[-200:]}")
+    return mirror
+
+
+def publish(config, repo, work_repo, target, before, logfile):
+    """Publish the verified integrated commit from a fresh bare repository.
+
+    Only objects are read from the integration clone (as a temporary alternate, then
+    copied with index-pack --strict); no Git command runs inside it, so its hooks and
+    configuration never execute. The commit must be exactly the integrated head and
+    tree captured before the checks ran. Returns ok, moved, refused or error.
+    """
+    sha, tree = before["head"], before["tree"]
+    if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return "refused", f"not a commit id: {sha!r}"
+    url = origin_url(config, repo)
+    mirror_objects = os.path.join(mirror_dir(config, repo), "objects")
+    work_objects = os.path.join(os.path.realpath(work_repo), ".git", "objects")
+    fresh = tempfile.mkdtemp(prefix="publish-", dir=config["trainDir"])
+    try:
+        subprocess.run(["git", "init", "-q", "--bare", fresh], check=True, capture_output=True)
+        alternates = os.path.join(fresh, "objects", "info", "alternates")
+
+        def git(*args, **kwargs):
+            return courier(config, fresh, *args, logfile=logfile, **kwargs)
+        with open(alternates, "w") as fh:
+            fh.write(mirror_objects + "\n")
+        remote = f"refs/remotes/origin/{target}"
+        proc = git("fetch", "-q", "--no-tags", url, f"+refs/heads/{target}:{remote}")
+        if proc.returncode:
+            return "error", (proc.stderr or proc.stdout).strip()[-500:]
+        # Pack the candidate's new objects while the clone's objects are visible ...
+        with open(alternates, "w") as fh:
+            fh.write(mirror_objects + "\n" + work_objects + "\n")
+        pack = os.path.join(fresh, "candidate.pack")
+        with open(pack, "wb") as out:
+            packed = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "pack-objects", "--revs", "--stdout",
+                                     "-q"], cwd=fresh, input=f"{sha}\n^{remote}\n".encode(), stdout=out,
+                                    stderr=subprocess.PIPE)
+        # ... then hide them again and import the pack with full object verification.
+        with open(alternates, "w") as fh:
+            fh.write(mirror_objects + "\n")
+        if packed.returncode:
+            return "refused", f"cannot read the integrated commit: {packed.stderr.decode()[-300:]}"
+        with open(pack, "rb") as data:
+            imported = subprocess.run(["git", "index-pack", "--strict", "--stdin"], cwd=fresh, stdin=data,
+                                      capture_output=True)
+        if imported.returncode:
+            return "refused", f"the integrated objects failed verification: {imported.stderr.decode()[-300:]}"
+        if (git("cat-file", "-e", f"{sha}^{{commit}}").returncode
+                or git("rev-parse", f"{sha}^{{tree}}").stdout.strip() != tree
+                or git("rev-list", "--objects", sha, f"^{remote}").returncode):
+            return "refused", "the commit to publish is not the integrated head and tree the checks ran on"
+        if git("merge-base", "--is-ancestor", remote, sha).returncode:
+            return "moved", ""
+        proc = git("push", "-q", "--no-verify", url, f"{sha}:refs/heads/{target}")
+        if proc.returncode:
+            return "error", (proc.stderr or proc.stdout).strip()[-500:]
+        head = git("ls-remote", url, f"refs/heads/{target}").stdout.split()
+        if not head or head[0] != sha:
+            return "error", "the remote does not show the pushed commit"
+        return "ok", sha
+    finally:
+        shutil.rmtree(fresh, ignore_errors=True)
 
 
 def repository_dir(config, item):
@@ -203,13 +331,13 @@ def repository_dir(config, item):
 
 def prepare(box, config, repo, logfile):
     src = f"{box.source}/{repo}"
+    target = target_of(config, repo)
+    refresh_mirror(config, repo, target, logfile)
     script = f"""
 rm -rf /workspace/train/repo; mkdir -p /workspace/train/repo; cd /workspace/train/repo
-git clone -q --no-hardlinks --no-checkout {src} .
+git clone -q --no-hardlinks --no-checkout {box.mirror} .
 git config user.name lane; git config user.email lane@local
-git remote set-url origin "$(git -C {src} remote get-url origin)"
-timeout 120 git fetch -q origin
-target="$(jq -er .target_branch {src}/.ntkrc)"
+target={shlex.quote(target)}
 GIT_LFS_SKIP_SMUDGE=1 git checkout -q --detach "origin/$target"
 if [ -d {src}/.git/lfs/objects ] && command -v git-lfs >/dev/null; then
   mkdir -p .git/lfs && cp -r {src}/.git/lfs/objects .git/lfs/ && git lfs checkout >/dev/null
@@ -385,31 +513,15 @@ def run_plan(box, plan, logfile):
     return True, "", results
 
 
-def push(box, target, logfile):
-    """Push the train; retry transport failures (the git host drops ssh from this network)."""
+def push(config, box, repo, target, before, logfile):
+    """Publish through the host courier; retry transport failures (the git host drops ssh from this network)."""
     for attempt in range(3):
-        state, detail = push_once(box, target, logfile)
+        state, detail = publish(config, repo, os.path.join(box.work, "repo"), target, before, logfile)
         if state != "error":
             return state, detail
         log(f"push attempt {attempt + 1} failed: {detail.splitlines()[-1] if detail else ''}")
         time.sleep(20)
     return state, detail
-
-
-def push_once(box, target, logfile):
-    script = f"""
-before="$(git ls-remote origin refs/heads/{target} | awk '{{print $1}}')"
-git merge-base --is-ancestor "$before" HEAD || exit 3
-git push -q origin HEAD:refs/heads/{target}
-[ "$(git ls-remote origin refs/heads/{target} | awk '{{print $1}}')" = "$(git rev-parse HEAD)" ]
-git rev-parse HEAD
-"""
-    proc = box.sh(script, logfile)
-    if proc.returncode == 3:
-        return "moved", ""
-    if proc.returncode:
-        return "error", (proc.stderr or proc.stdout).strip()[-500:]
-    return "ok", proc.stdout.strip().splitlines()[-1]
 
 
 def finish(config, item, status, detail, train_dir):
@@ -656,7 +768,7 @@ def land(config, items, train_dir, depth=0):
     logfile = os.path.join(train_dir, f"git-{depth}-{items[0]['ticket']}.log")
     work = os.path.join(train_dir, "work")
     os.makedirs(work, exist_ok=True)
-    box = Box(config, work)
+    box = Box(config, work, mirror_dir(config, repo))
     try:
         for attempt in range(3):
             target, base = prepare(box, config, repo, logfile)
@@ -692,7 +804,9 @@ def land(config, items, train_dir, depth=0):
             if DRY:
                 log(f"DRY: gates passed for {len(items)}; no push")
                 return []
-            state, sha = push(box, target, logfile)
+            state, sha = push(config, box, repo, target, before, logfile)
+            if state == "refused":
+                raise RuntimeError(f"publication refused: {sha}; nothing pushed; see {logfile}")
             if state == "ok":
                 log(f"landed {len(items)} on {target} at {sha[:10]}")
                 for item in items:
