@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
-import {save, read, herdr} from './runtime.mjs';
+import {save, read, herdr, queuedOutcome} from './runtime.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
@@ -71,6 +71,8 @@ try {
     child.once('close', (code, receivedSignal) => resolve({code, signal: receivedSignal || signal}));
   });
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
+  // A queued train candidate exits 0 but has not landed: record the pending outcome.
+  if (outcome.code === 0 && queuedOutcome(run.runFolder)) result.outcome = 'queued';
   if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
   const message = run.claim || signal ? error.message :
@@ -80,7 +82,7 @@ try {
     error: message};
   process.exitCode = 2;
 } finally {
-  announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
+  announce(`[lane] ${result.outcome === 'queued' ? 'QUEUED (pending landing)' : result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
   if (result.status !== 'exited' && run.claim) {
     const adopted = fs.existsSync(run.runFolder) && fs.readdirSync(run.runFolder).some(name => {
       try {

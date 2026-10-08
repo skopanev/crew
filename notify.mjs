@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const events = new Set(['READY', 'FAILED', 'BLOCKED', 'TIMEOUT']);
+const events = new Set(['READY', 'QUEUED', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
 
 export function reasonCode(event) {
-  if (event.event === 'READY') return '';
+  if (event.event === 'READY' || event.event === 'QUEUED') return '';
   if (event.event === 'TIMEOUT') return 'TIMEOUT';
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(event.signal || '') ? event.signal :
     /^([A-Z][A-Z0-9_]+):/.exec(event.summary || '')?.[1] ||
@@ -27,7 +27,9 @@ export async function notify(config, event) {
   }
   const stage = [event.node, event.event === 'TIMEOUT' ? event.model : undefined]
     .filter(Boolean).map(clean).join(' · ');
-  const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
+  // A queued train candidate is pending: never shown as READY or landed.
+  const header = event.event === 'QUEUED' ? '⏳ QUEUED (pending landing)' :
+    `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
   const reason = reasonCode(event);
@@ -73,6 +75,7 @@ export function completionEvent(run, result, artifacts) {
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
   if (result.blocked) return {...event, event: 'BLOCKED', signal: 'WORKTREE_PREEXISTED', summary: result.error};
+  if (result.code === 0 && result.outcome === 'queued') return {...event, event: 'QUEUED', summary: 'pending landing'};
   if (result.code === 0) return event;
   if (!artifacts) {
     // Startup refusals have no Medulla journal. Keep the complete refusal lines.
@@ -124,8 +127,8 @@ export async function notifyCompletion(run, result, artifacts) {
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   try {
     const [configFile, event, id, signal, node, model] = process.argv.slice(2);
-    if (!configFile || !event || !id || (event !== 'READY' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(signal || ''))) {
-      throw new Error('Usage: node notify.mjs config.json READY|FAILED|BLOCKED|TIMEOUT ticket-id [reason-code node model]');
+    if (!configFile || !event || !id || (event !== 'READY' && event !== 'QUEUED' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(signal || ''))) {
+      throw new Error('Usage: node notify.mjs config.json READY|QUEUED|FAILED|BLOCKED|TIMEOUT ticket-id [reason-code node model]');
     }
     const sent = await notify(JSON.parse(fs.readFileSync(configFile, 'utf8')), {event, id, signal, node, model});
     if (!sent) throw new Error('Notifications are not configured');

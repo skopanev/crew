@@ -1,5 +1,6 @@
 """The real success node persists landing results without a message bus."""
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -43,6 +44,8 @@ class SuccessOutcomeTests(unittest.TestCase):
             )
             self.assertFalse((root / "bus-called").exists())
             report = artifacts / "outcome.txt"
+            pending = artifacts / "outcome.json"
+            self.pending = json.loads(pending.read_text()) if pending.is_file() else None
             return result, report.read_text() if report.is_file() else None
 
     def test_landing_succeeds_without_bus_or_with_broken_bus(self):
@@ -53,6 +56,20 @@ class SuccessOutcomeTests(unittest.TestCase):
                 self.assertIn("deadbeef on develop", report)
                 self.assertIn("NTK findings: fixture-finding", report)
                 self.assertEqual(result.stdout, report)
+
+    def test_queued_lane_records_pending_outcome_not_ready(self):
+        result, report = self.run_success("QUEUED")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.pending["status"], "queued")
+        self.assertTrue(report.startswith("fixture-task QUEUED (pending landing), not landed:"), report)
+        self.assertNotIn("READY", report)
+        # Findings wait for the lander: the ticket is still in progress.
+        self.assertNotIn("NTK findings", report)
+
+    def test_landed_lane_writes_no_pending_outcome(self):
+        result, _ = self.run_success("LANDED")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(self.pending)
 
     def test_landing_with_failed_state_write_cannot_report_success(self):
         result, report = self.run_success("LANDED_TICKET_STUCK")

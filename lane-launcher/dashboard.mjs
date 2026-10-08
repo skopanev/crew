@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {readRun, alive, runDirectories} from './runtime.mjs';
+import {readRun, alive, runDirectories, queuedOutcome} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 
 export function duration(start, end = Date.now()) {
@@ -57,12 +57,19 @@ function stageFor(run) {
   }
 }
 
-function statusFor({result, worker}) {
-  return result ? result.code === 0 && result.status === 'exited' ? 'READY' :
+export function statusFor({result, worker}) {
+  return result ? result.code === 0 && result.status === 'exited' && result.outcome === 'queued' ? 'QUEUED' :
+    result.code === 0 && result.status === 'exited' ? 'READY' :
     result.blocked ? 'BLOCKED' : result.status === 'interrupted' ? 'INTERRUPTED' :
     result.error?.startsWith('CLAIM_REFUSED:') ? 'CLAIM_REFUSED' :
     result.error?.startsWith('CLAIM_UNCERTAIN:') ? 'CLAIM_UNCERTAIN' : 'FAILED' :
     worker ? alive(worker.pid) ? 'RUNNING' : 'LOST' : 'STARTING';
+}
+
+// Pending until the landing train writes its result; then show that result (landed, gate_failed, ...).
+export function queuedStage(run) {
+  const train = queuedOutcome(run.runFolder)?.train;
+  return train?.status ? `train: ${train.status}` : 'pending landing';
 }
 
 function reasonFor(run) {
@@ -117,8 +124,9 @@ export function createDashboard(config, paint) {
     for (const run of visible) {
       const {result, worker} = run;
       const status = statusFor(run);
-      const tone = status === 'READY' ? 'ready' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'blue';
-      const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
+      const tone = status === 'READY' ? 'ready' : status === 'BLOCKED' || status === 'QUEUED' ? 'yellow' : result ? 'red' : 'blue';
+      const stage = status === 'QUEUED' ? queuedStage(run) :
+        result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       const runId = path.basename(run.dir);
       const start = worker?.startedAt || run.createdAt;
       const date = new Date(start);
