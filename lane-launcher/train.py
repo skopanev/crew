@@ -87,6 +87,17 @@ def load_config(path):
                 or os.path.normpath(mount["inside"]).startswith("/workspace/train")):
             sys.exit(f"train.py: invalid train.persistentMounts entry {mount!r}: "
                      "need absolute host and inside paths, no ':', not under /workspace/train")
+    if mounts:
+        # One overlap rule for every writable mount: the launcher's, from runtime.mjs.
+        check = subprocess.run(["node", "--input-type=module", "-e", """
+import {pathToFileURL} from "node:url";
+const {validatePersistentMounts} = await import(pathToFileURL(process.argv[1]));
+try { validatePersistentMounts(JSON.parse(process.argv[2])); }
+catch (error) { console.error(error.message); process.exit(2); }
+""", os.path.join(HERE, "runtime.mjs"), json.dumps(config)], capture_output=True, text=True)
+        if check.returncode:
+            sys.exit(f"train.py: {(check.stderr or check.stdout).strip()}")
+    for mount in mounts:
         os.makedirs(mount["host"], exist_ok=True)
         mount["host"] = os.path.realpath(mount["host"])
     setup = train.get("setup")

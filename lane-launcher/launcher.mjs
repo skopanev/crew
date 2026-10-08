@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {nextTicket, countTickets, credentials} from './ntk.mjs';
-import {save, read, readRun, alive, quote, command, herdr, laneArgs, runDirectories, validateWritableDirs} from './runtime.mjs';
+import {save, read, readRun, alive, quote, command, herdr, laneArgs, runDirectories, validateWritableDirs, validatePersistentMounts} from './runtime.mjs';
 import {scopeDirectory, runScope, validateId} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 
@@ -76,6 +76,7 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
     }
   }
   validateWritableDirs(config);
+  validatePersistentMounts(config);
   if (typeof config.cbmMcpCommand !== 'string' || !path.isAbsolute(config.cbmMcpCommand) ||
       !fs.statSync(config.cbmMcpCommand).isFile()) {
     throw new Error('Config needs cbmMcpCommand: absolute path to the native host CBM executable');
