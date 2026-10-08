@@ -174,6 +174,11 @@ nodes:
       if [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
         mkdir -p "$HOME/.gradle" && nice -n 19 ionice -c 3 cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
       fi
+      # Agents think far longer than Gradle builds; an idle daemon must not hold
+      # its heap meanwhile. User-home properties override the repository's.
+      if [ -d "$HOME/.gradle" ] && ! grep -q '^org.gradle.daemon.idletimeout=' "$HOME/.gradle/gradle.properties" 2>/dev/null; then
+        printf '%s\n' 'org.gradle.daemon.idletimeout=120000' 'kotlin.compiler.execution.strategy=in-process' >> "$HOME/.gradle/gradle.properties"
+      fi
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
         bash scripts/install-git-hooks.sh
