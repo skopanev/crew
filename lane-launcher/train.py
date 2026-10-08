@@ -99,6 +99,13 @@ def due(config, rows):
 def gradle_home(config):
     home = os.path.join(config["trainDir"], "gradle-home")
     os.makedirs(home, exist_ok=True)
+    # The box outlives its gates while tickets are finished; idle daemons must
+    # not hold their heap meanwhile. User-home properties override the repository's.
+    props = os.path.join(home, "gradle.properties")
+    text = open(props).read() if os.path.exists(props) else ""
+    if "org.gradle.daemon.idletimeout=" not in text:
+        with open(props, "a") as fh:
+            fh.write("org.gradle.daemon.idletimeout=120000\nkotlin.compiler.execution.strategy=in-process\n")
     return home
 
 
