@@ -115,7 +115,7 @@ def prepare_opencode(read_paths):
     source_env = {**os.environ, "OPENCODE_DISABLE_PROJECT_CONFIG": "true"}
     command = [os.environ.get("OPENCODE_BIN", "opencode"), "--pure", "debug", "config"]
     def query(environment, phase):
-        result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=45)
+        result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=120)
         require(result.returncode == 0,
                 f"OpenCode {phase} config query failed (exit {result.returncode}):\n"
                 + (result.stderr.strip() or "OpenCode returned no error details on stderr"))
