@@ -102,11 +102,19 @@ class SetupHookTests(Fixture):
             for word in words:
                 self.assertNotIn(word, text, f"{word} in {name}")
 
+    def protected_layout(self):
+        dirs = {name: self.root / name for name in ("ssh", "cbm", "context", "rw-cache", "lander")}
+        for path in dirs.values():
+            path.mkdir()
+        self.config.update(sshDir=str(dirs["ssh"]), cbmCacheDir=str(dirs["cbm"]), image="fixture-image",
+                           readOnlyRepos=[str(dirs["context"])], readWriteDirs=[str(dirs["rw-cache"])])
+        (self.root / "alias").symlink_to(self.source, target_is_directory=True)
+        return dirs
+
     def test_persistent_mounts_are_validated_and_mounted(self):
-        cache = self.root / "lander-cache"
+        dirs = self.protected_layout()
+        cache = dirs["lander"] / "cache"
         self.config["train"]["persistentMounts"] = [{"host": str(cache), "inside": "/home/medulla/.cache-x"}]
-        self.config["sshDir"] = str(self.root)
-        self.config["image"] = "fixture-image"
         config = self.write_config()
         self.assertTrue(cache.is_dir())
         calls = []
@@ -123,6 +131,30 @@ class SetupHookTests(Fixture):
                 self.config["train"]["persistentMounts"] = [bad]
                 with self.assertRaises(SystemExit):
                     self.write_config()
+
+    def test_persistent_mounts_may_not_alias_protected_or_writable_dirs(self):
+        dirs = self.protected_layout()
+        aliases = {"sourceRoot": self.source, "child of sourceRoot": self.source / "repo",
+                   "parent of sourceRoot": self.root, "symlink to sourceRoot": self.root / "alias",
+                   "missing child of sourceRoot": self.source / "new/cache",
+                   "sshDir": dirs["ssh"], "child of cbmCacheDir": dirs["cbm"] / "x",
+                   "readOnlyRepos": dirs["context"], "child of readWriteDirs": dirs["rw-cache"] / "sub"}
+        for case, host in aliases.items():
+            with self.subTest(case=case):
+                self.config["train"]["persistentMounts"] = [{"host": str(host), "inside": "/cache"}]
+                with self.assertRaises(SystemExit) as refused:
+                    self.write_config()
+                self.assertIn("overlaps", str(refused.exception))
+                self.assertFalse((self.source / "new").exists())
+        with self.subTest(case="two mounts overlap each other"):
+            self.config["train"]["persistentMounts"] = [{"host": str(dirs["lander"]), "inside": "/a"},
+                                                        {"host": str(dirs["lander"] / "b"), "inside": "/b"}]
+            with self.assertRaises(SystemExit):
+                self.write_config()
+        self.config["train"]["persistentMounts"] = [{"host": str(dirs["lander"] / "a"), "inside": "/a"},
+                                                    {"host": str(self.root / "elsewhere"), "inside": "/b"}]
+        config = self.write_config()
+        self.assertEqual(len(config["train"]["persistentMounts"]), 2)
 
     def test_train_setup_runs_before_candidates_and_may_not_dirty_the_checkout(self):
         self.config["train"]["setup"] = 'mkdir -p cache && echo "$LANDING_TRAIN" > cache/marker'

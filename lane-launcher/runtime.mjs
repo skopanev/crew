@@ -55,17 +55,29 @@ export function laneArgs(config, ticket) {
     ...(config.readWriteDirs || []).flatMap(dir => ['--mount-rw', dir]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];
 }
+// Equal, child or parent: the overlap rule for every writable mount.
+const inside = (a, b) => {
+  const relative = path.relative(b, a);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+};
+const protectedOf = config => [config.sourceRoot, config.sshDir, config.cbmCacheDir,
+  ...(config.readOnlyRepos || [])].filter(Boolean).map(dir => fs.realpathSync(dir));
+// realpath of a directory that may not exist yet: resolve its nearest existing parent.
+function resolveFuture(dir) {
+  const missing = [];
+  let current = path.resolve(dir);
+  while (!fs.existsSync(current)) {
+    missing.unshift(path.basename(current));
+    current = path.dirname(current);
+  }
+  return path.join(fs.realpathSync(current), ...missing);
+}
 export function validateWritableDirs(config, ticket) {
   if (!config.readWriteDirs?.length) return;
-  const protectedDirs = [config.sourceRoot, config.sshDir, config.cbmCacheDir,
-    ...(config.readOnlyRepos || [])].filter(Boolean).map(dir => fs.realpathSync(dir));
+  const protectedDirs = protectedOf(config);
   const names = new Set([config.sourceRoot, config.sshDir, ...(config.readOnlyRepos || [])]
     .filter(Boolean).map(dir => path.basename(fs.realpathSync(dir))));
   if (ticket) names.add(ticket);
-  const inside = (a, b) => {
-    const relative = path.relative(b, a);
-    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-  };
   for (const folder of config.readWriteDirs) {
     const dir = fs.realpathSync(folder);
     if (protectedDirs.some(other => inside(dir, other) || inside(other, dir))) {
@@ -74,6 +86,24 @@ export function validateWritableDirs(config, ticket) {
     const name = path.basename(dir);
     if (names.has(name)) throw new Error(`Writable mount name is already in use: ${name}`);
     names.add(name);
+    protectedDirs.push(dir);
+  }
+}
+// The lander's train.persistentMounts are writable too: the same overlap rule applies,
+// against the protected directories, the lanes' readWriteDirs and each other.
+export function validatePersistentMounts(config) {
+  const mounts = config.train?.persistentMounts;
+  if (mounts == null) return;
+  if (!Array.isArray(mounts)) throw new Error('train.persistentMounts must be an array of {host, inside}');
+  const protectedDirs = [...protectedOf(config), ...(config.readWriteDirs || []).map(dir => fs.realpathSync(dir))];
+  for (const mount of mounts) {
+    if (!mount || typeof mount.host !== 'string' || !path.isAbsolute(mount.host)) {
+      throw new Error(`train.persistentMounts host must be an absolute path: ${JSON.stringify(mount)}`);
+    }
+    const dir = resolveFuture(mount.host);
+    if (protectedDirs.some(other => inside(dir, other) || inside(other, dir))) {
+      throw new Error(`train.persistentMounts host overlaps a protected or writable directory: ${mount.host}`);
+    }
     protectedDirs.push(dir);
   }
 }

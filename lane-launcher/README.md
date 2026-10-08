@@ -161,7 +161,7 @@ Optional train keys, all project-owned:
 
 | Key | Meaning |
 | --- | --- |
-| `train.persistentMounts` | `[{"host": "/abs/dir", "inside": "/abs/path"}]`: writable directories that only the lander uses and that persist across trains. Created when missing |
+| `train.persistentMounts` | `[{"host": "/abs/dir", "inside": "/abs/path"}]`: writable directories that only the lander uses and that persist across trains. Created when missing. Like `readWriteDirs`, a host may not equal, contain or sit inside `sourceRoot`, `sshDir`, `cbmCacheDir`, `readOnlyRepos`, `readWriteDirs` or another persistent mount (after resolving symlinks); both the launcher and `train.py` refuse it |
 | `train.setup` | Shell command run in the integration clone after checkout and before candidates are applied. It runs with `LANDING_TRAIN=true` and `LANE_WORKTREE` set; it may only touch ignored files, or the train stops |
 
 Crew itself carries no build-tool policy. Cache seeding, daemon settings and
