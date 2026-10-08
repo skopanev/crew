@@ -82,8 +82,9 @@ class Fixture(unittest.TestCase):
         self.config = {"id": "fixture", "workspace": "fixture", "sourceRoot": str(self.source),
                        "stateDir": str(self.root / "state"), "gateCommands": ["true"],
                        "train": {"gateCommands": ["test -f code.txt"]}}
-        self.train_dir = self.root / "train-dir"
-        self.train_dir.mkdir()
+        # Trains live under the lander's train directory, as main() creates them.
+        self.train_dir = self.root / "state/crew-dispatchers/fixture/train/train-1"
+        self.train_dir.mkdir(parents=True)
 
     def write_config(self):
         path = self.root / "dolber.json"
@@ -320,6 +321,52 @@ class TrainVerificationTests(TrainFixture):
         self.assertIn({"command": "test ! -e b.txt", "owners": ["a (carried)"]}, alone_b["plan"])
         gate_log = Path(alone_b["gate_log"]).read_text()
         self.assertIn("test ! -e b.txt", gate_log)
+
+    def test_split_obligations_survive_a_restart(self):
+        # Reviewer reproduction: a lands from the failed pair, b's prepare raises once, the lander restarts.
+        a = self.lane("a", {"a.txt": "a\n"}, deferred=True, ticket_checks=[], coder_checks=["test ! -e b.txt"])
+        b = self.lane("b", {"b.txt": "b\n"})
+        self.queue_at(a, "2026-01-01T00:00:00Z")
+        self.queue_at(b, "2026-01-01T00:00:01Z")
+        real_prepare, calls = train.prepare, []
+
+        def flaky_prepare(box, config, repo, logfile):
+            calls.append(1)
+            if len(calls) == 3:  # combined train, a alone, then b alone: fail once
+                raise RuntimeError("integration setup failed (fixture)")
+            return real_prepare(box, config, repo, logfile)
+        config = self.write_config()
+        with mock.patch.object(train, "prepare", flaky_prepare):
+            with self.assertRaisesRegex(RuntimeError, "fixture"):
+                train.land_queue(config, train.queued(config), str(self.train_dir))
+        self.assertEqual(self.result(a)["status"], "landed")
+        self.assertIsNone(self.result(b))
+        # Restart: a new train directory; a has a result and is no longer queued.
+        restart = self.train_dir.parent / "train-2"
+        restart.mkdir()
+        config = self.write_config()
+        self.assertEqual([r["ticket"] for r in train.queued(config)], ["b"])
+        train.land_queue(config, train.queued(config), str(restart))
+        result_b = self.result(b)
+        self.assertEqual(result_b["status"], "gate_failed")
+        self.assertIn("test ! -e b.txt", result_b["detail"])
+        self.assertEqual(git(self.origin, "ls-tree", "--name-only", self.remote_head()).split().count("b.txt"), 0)
+        [receipt] = [json.loads(p.read_text()) for p in restart.glob("receipt-*.json")]
+        self.assertIn({"command": "test ! -e b.txt", "owner": "a", "landed": True}, receipt["carried"])
+        self.assertEqual(len(receipt["failed_batches"]), 1)
+        # Both members resolved: the record is closed and binds nothing any more.
+        [record] = [json.loads(p.read_text()) for p in self.train_dir.glob("failed-batch-*.json")]
+        self.assertEqual(record["status"], "closed")
+        self.assertEqual(record["results"], {"a": "landed", "b": "gate_failed"})
+        self.assertEqual(train.open_batches(config), [])
+
+    def test_unreadable_failed_batch_record_stops_the_train(self):
+        artifacts = self.lane("a", {"a.txt": "a\n"})
+        (self.root / "state/crew-dispatchers/fixture/train/old").mkdir()
+        (self.root / "state/crew-dispatchers/fixture/train/old/failed-batch-0-x.json").write_text("{broken")
+        with self.assertRaisesRegex(RuntimeError, "unreadable failed-batch record"):
+            self.land()
+        self.assertIsNone(self.result(artifacts))
 
     def test_carried_obligations_only_come_from_landed_candidates(self):
         # Neither member lands from the failed pair: nothing is carried into the second half.
