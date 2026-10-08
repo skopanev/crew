@@ -142,6 +142,190 @@ class SetupHookTests(Fixture):
             train.prepare(FakeBox(config, str(self.root / "work")), config, str(self.train_dir / "log"))
 
 
+class TrainFixture(Fixture):
+    """Lanes queue real requests through the workflow's git_landing node; the lander uses a fake Box."""
+
+    def setUp(self):
+        super().setUp()
+        self.config.update(gateCommands=["test -f code.txt"], testCommand=["bash"])
+        self.config["train"] = {"gateCommands": ["true"]}
+        self.bins = self.root / "bin"
+        self.bins.mkdir()
+        self.calls = self.root / "calls.txt"
+        for name in ("node", "ntk"):
+            tool = self.bins / name
+            tool.write_text(f'#!/bin/sh\necho "{name} $*" >> "{self.calls}"\n')
+            tool.chmod(0o755)
+        patcher = mock.patch.dict(os.environ, {"PATH": f"{self.bins}{os.pathsep}{os.environ['PATH']}"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        box = mock.patch.object(train, "Box", FakeBox)
+        box.start()
+        self.addCleanup(box.stop)
+
+    def lane(self, ticket, files, *, deferred=False, ticket_checks=None, coder_checks=None):
+        """Run one lane's tail for real: commit, gates.py run, git_landing in train mode."""
+        config = self.write_config()
+        wt = self.source / ".worktrees" / ticket
+        wt.parent.mkdir(exist_ok=True)
+        subprocess.run(["git", "clone", "-q", str(self.repo), str(wt)], check=True, env=GIT_ENV)
+        git(wt, "remote", "set-url", "origin", str(self.origin))
+        git(wt, "fetch", "-q", "origin")
+        for name, text in files.items():
+            (wt / name).write_text(text)
+        git(wt, "add", "-A")
+        git(wt, "commit", "-qm", f"{ticket}: change")
+        run = Path(config["scopeDir"]) / "runs" / f"launch-{ticket}" / "lane" / "run-1"
+        artifacts = run / "artifacts"
+        artifacts.mkdir(parents=True)
+        if ticket_checks is not None:
+            (artifacts / "ticket-checks.json").write_text(json.dumps(ticket_checks))
+        if coder_checks is not None:
+            (artifacts / "coder-checks.json").write_text(json.dumps(coder_checks))
+        env = dict(GIT_ENV, MEDULLA_RUN_DIR=str(run), ticket_id=ticket, project_dir=str(self.repo),
+                   module_name="repo", gate_commands=json.dumps(self.config["gateCommands"]),
+                   ticket_test_command=json.dumps(self.config["testCommand"]),
+                   TRAIN_GATES_ONLY="true" if deferred else "false", VERIFY_ONLY="false",
+                   LAND_MODE="train", TOOLING_ROOT=str(TOOLING), LANE_WORKTREE=str(wt),
+                   GIT_SSH_COMMAND="", project_name="fixture", ticket_title=ticket)
+        gate = subprocess.run([sys.executable, str(TOOLING / "lane/bin/gates.py"), "run"], cwd=wt, env=env,
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(gate.returncode, 0, gate.stderr)
+        (artifacts / "reviewed-tree.txt").write_text(git(wt, "write-tree") + "\n" + git(wt, "rev-parse", "HEAD"))
+        landing = subprocess.run(["bash", "-c", shell_body("git_landing")], cwd=wt, env=env,
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(landing.returncode, 0, landing.stderr)
+        self.assertIn("<signal:QUEUED>", landing.stdout)
+        return artifacts
+
+    def request(self, artifacts):
+        return json.loads((artifacts / "train-request.json").read_text())
+
+    def result(self, artifacts):
+        path = artifacts / "train-result.json"
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def land(self):
+        config = self.write_config()
+        train.land(config, train.queued(config), str(self.train_dir))
+        return config
+
+    def remote_head(self):
+        return git(self.repo, "ls-remote", str(self.origin), "refs/heads/develop").split()[0]
+
+    def receipts(self):
+        return [json.loads(p.read_text()) for p in sorted(self.train_dir.glob("receipt-*.json"))]
+
+
+class TrainVerificationTests(TrainFixture):
+    """Items 3 and 2: every candidate's receipt is verified and its own plan runs on the integrated tree."""
+
+    def test_request_binds_receipt_digest_repository_and_module(self):
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        request = self.request(artifacts)
+        self.assertEqual(request["gate_receipt_sha256"],
+                         hashlib.sha256(Path(request["gate_receipt"]).read_bytes()).hexdigest())
+        self.assertEqual(request["project_dir"], str(self.repo))
+        self.assertEqual(request["module"], "repo")
+        self.assertNotIn("gate_plan", request)
+
+    def test_train_runs_union_of_train_gates_and_every_candidate_plan(self):
+        structured = {"ac": "AC1", "argv": ["git", "ls-files", "--", "b.txt"], "stdout": "b.txt\n"}
+        normal = self.lane("t1", {"a.txt": "a\n"})
+        deferred = self.lane("t2", {"b.txt": "b\n", "t.sh": "test -f b.txt\n"}, deferred=True,
+                             ticket_checks=["t.sh", structured], coder_checks=["test -f a.txt"])
+        before = self.remote_head()
+        self.land()
+        self.assertEqual(self.result(normal)["status"], "landed")
+        self.assertEqual(self.result(deferred)["status"], "landed")
+        self.assertNotEqual(self.remote_head(), before)
+        [receipt] = self.receipts()
+        self.assertTrue(receipt["passed"])
+        ran = [(c["command"], c["owners"], c["exit_code"], c["stdout_matches"]) for c in receipt["checks"]]
+        self.assertEqual(ran, [("true", ["train"], 0, True),
+                               ("test -f code.txt", ["t1", "t2"], 0, True),
+                               ("bash ./t.sh", ["t2"], 0, True),
+                               (structured, ["t2"], 0, True),
+                               ("test -f a.txt", ["t2"], 0, True)])
+        self.assertTrue(all(c["receipt_verified"] for c in receipt["candidates"]))
+
+    def test_candidate_check_failing_on_integrated_tree_fails_the_train(self):
+        self.lane("t1", {"a.txt": "a\n"}, deferred=True, ticket_checks=[], coder_checks=["test ! -e b.txt"])
+        self.lane("t2", {"b.txt": "b\n"})
+        self.land()
+        first = self.receipts()[0]
+        self.assertFalse(first["passed"])
+        self.assertEqual(first["failed_command"], "test ! -e b.txt")
+        self.assertEqual(len(first["candidates"]), 2)
+
+    def test_tampered_receipt_digest_is_refused(self):
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        request = self.request(artifacts)
+        receipt = Path(request["gate_receipt"])
+        data = json.loads(receipt.read_text())
+        data["passed"] = True
+        data["commands"] = ["true"]
+        receipt.write_text(json.dumps(data))
+        before = self.remote_head()
+        self.land()
+        result = self.result(artifacts)
+        self.assertEqual(result["status"], "receipt_refused")
+        self.assertIn("digest", result["detail"])
+        self.assertEqual(self.remote_head(), before)
+        self.assertTrue((self.source / ".worktrees/t1/.git").is_dir())
+        self.assertIn("-s blocked", self.calls.read_text())
+        self.assertNotIn("to-test", self.calls.read_text())
+
+    def test_receipt_tree_differing_from_request_is_refused(self):
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        request = self.request(artifacts)
+        request["tree"] = git(self.repo, "rev-parse", "HEAD^{tree}")
+        (artifacts / "train-request.json").write_text(json.dumps(request))
+        before = self.remote_head()
+        self.land()
+        result = self.result(artifacts)
+        self.assertEqual(result["status"], "receipt_refused")
+        self.assertIn("tree", result["detail"])
+        self.assertEqual(self.remote_head(), before)
+        self.assertTrue((self.source / ".worktrees/t1/.git").is_dir())
+
+    def test_missing_digest_or_moved_checkout_is_refused(self):
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        request = self.request(artifacts)
+        del request["gate_receipt_sha256"]
+        (artifacts / "train-request.json").write_text(json.dumps(request))
+        self.land()
+        self.assertEqual(self.result(artifacts)["status"], "receipt_refused")
+        other = self.lane("t2", {"b.txt": "b\n"})
+        wt = self.source / ".worktrees/t2"
+        (wt / "b.txt").write_text("changed after queueing\n")
+        git(wt, "commit", "-qam", "later")
+        self.land()
+        self.assertEqual(self.result(other)["status"], "receipt_refused")
+        self.assertIn("changed after it was queued", self.result(other)["detail"])
+
+    def test_deferred_plan_missing_ticket_checks_is_detected(self):
+        # The lane recorded its plan before the ticket checks were known; the train rebuilds the plan.
+        artifacts = self.lane("t1", {"a.txt": "a\n"}, deferred=True, ticket_checks=[])
+        (artifacts / "ticket-checks.json").write_text(json.dumps([{"ac": "AC1", "argv": ["test", "-f", "a.txt"]}]))
+        before = self.remote_head()
+        self.land()
+        result = self.result(artifacts)
+        self.assertEqual(result["status"], "receipt_refused")
+        self.assertIn("required plan", result["detail"])
+        self.assertEqual(self.remote_head(), before)
+
+    def test_gate_that_edits_a_tracked_file_fails_the_train(self):
+        self.config["train"]["gateCommands"] = ["echo edited > code.txt"]
+        artifacts = self.lane("t1", {"a.txt": "a\n"})
+        before = self.remote_head()
+        self.land()
+        self.assertEqual(self.result(artifacts)["status"], "gate_failed")
+        self.assertIn("changed the integrated candidate", self.result(artifacts)["detail"])
+        self.assertEqual(self.remote_head(), before)
+        self.assertFalse(self.receipts()[0]["passed"])
+
+
 class LaneSetupTests(unittest.TestCase):
     """The workflow runs laneSetup inside the lane after checkout; failure stops the lane."""
 

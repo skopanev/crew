@@ -128,11 +128,23 @@ python3 lane-launcher/train.py lane-launcher/dolber.json --dry-run  # no push
 
 The lander is the only writer to the target branch. When `train.size`
 candidates are queued, the oldest waited `train.waitSeconds`, or no lane runs,
-it applies every candidate onto a fresh target in one clone, runs
-`train.gateCommands` once in a lane-image container, and pushes. A conflicting
-candidate leaves the train; a failing train splits in halves until the failing
-candidate is found. Left-out tickets reopen with a note; their commits stay as
-a bundle in the train directory (`<stateDir>/crew-dispatchers/<id>/train`).
+it applies every candidate onto a fresh target in one clone, runs the checks
+once in a lane-image container, and pushes. A conflicting candidate leaves the
+train; a failing train splits in halves until the failing candidate is found.
+Left-out tickets reopen with a note; their commits stay as a bundle in the
+train directory (`<stateDir>/crew-dispatchers/<id>/train`).
+
+Each request carries the SHA-256 of the lane's gate receipt. Before a train,
+the lander verifies every candidate: the digest, the receipt's task,
+repository, module, run and tree against the request, the candidate commit's
+tree, an unchanged retained checkout, and the receipt plan against the plan
+rebuilt from `gateCommands`, `testCommand` and the run's
+`ticket-checks.json`/`coder-checks.json`. A refused candidate gets
+`train-result.json` status `receipt_refused`, is not landed, its ticket is
+set to `blocked` and its checkout is kept. The checks that run on the
+integrated tree are `train.gateCommands` plus every candidate's own plan, with
+the same semantics as `lane/bin/gates.py`; each result, with the tickets that
+required it, is recorded in the train receipt (`receipt-*.json`).
 
 ```json
 "limit": 3,

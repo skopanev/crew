@@ -568,10 +568,12 @@ nodes:
         jq -n --arg ticket "$ticket_id" --arg sha "$(git rev-parse HEAD)" --arg tree "$have_tree" \
           --arg target "$target" --arg worktree "${LANE_WORKTREE}" \
           --arg queued_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          --arg receipt "$gate_receipt" --arg deferred "${TRAIN_GATES_ONLY:-false}" \
-          --argjson plan "$(jq -c '.commands' "$gate_receipt")" \
+          --arg receipt "$gate_receipt" --arg digest "$(sha256sum "$gate_receipt" | cut -d' ' -f1)" \
+          --arg deferred "${TRAIN_GATES_ONLY:-false}" \
+          --arg project_dir "$project_dir" --arg module "$module_name" \
           '{ticket: $ticket, sha: $sha, tree: $tree, target: $target, worktree: $worktree, queued_at: $queued_at,
-            gate_receipt: $receipt, gate_plan: $plan, checks_deferred: ($deferred == "true")}' \
+            gate_receipt: $receipt, gate_receipt_sha256: $digest, checks_deferred: ($deferred == "true"),
+            project_dir: $project_dir, module: $module}' \
           > "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp"
         mv "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp" "$MEDULLA_RUN_DIR/artifacts/train-request.json"
         if [ "${TRAIN_GATES_ONLY:-false}" = "true" ]; then
