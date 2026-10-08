@@ -64,6 +64,46 @@ def acceptance_check(check, root=None):
     return check
 
 
+def ticket_checks(required):
+    """The ticket's acceptance checks from ticket-checks.json, as verification runs them."""
+    tests = json.loads((Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts/ticket-checks.json").read_text())
+    if not isinstance(tests, list) or (required and not tests):
+        raise ValueError("verification requires checks in ticket-checks.json")
+    root = Path.cwd().resolve()
+    paths, checks = [], []
+    for test in tests:
+        if isinstance(test, dict):
+            checks.append(acceptance_check(test))
+            continue
+        if not isinstance(test, str) or not test.strip():
+            raise ValueError("verification requires test paths or acceptance checks")
+        path = Path(test)
+        if path.is_absolute() or not path.is_file() or not path.resolve().is_relative_to(root):
+            raise ValueError(f"test must be an existing file inside this checkout: {test}")
+        paths.append("./" + str(path.resolve().relative_to(root)))
+    if paths:
+        runner = json.loads(os.environ.get("ticket_test_command", "[]"))
+        if not isinstance(runner, list) or not runner or any(
+            not isinstance(arg, str) or not arg.strip() for arg in runner
+        ):
+            raise ValueError("verification requires testCommand in dispatcher config")
+        checks.insert(0, shlex.join([*runner, *dict.fromkeys(paths)]))
+    return checks
+
+
+def coder_checks():
+    """Extra check commands the coder declared in coder-checks.json (optional file)."""
+    path = Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts/coder-checks.json"
+    if not path.exists():
+        return []
+    commands = json.loads(path.read_text())
+    if not isinstance(commands, list) or any(
+        not isinstance(command, str) or not command.strip() for command in commands
+    ):
+        raise ValueError("coder-checks.json must be a JSON list of nonempty command strings")
+    return commands
+
+
 def plan():
     commands = json.loads(os.environ.get("gate_commands", "[]"))
     if not isinstance(commands, list) or not commands or any(
@@ -71,30 +111,12 @@ def plan():
     ):
         raise ValueError("no valid gate commands declared by the launcher")
     if os.environ.get("VERIFY_ONLY") == "true":
-        tests = json.loads((Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts/ticket-checks.json").read_text())
-        if not isinstance(tests, list) or not tests:
-            raise ValueError("verification requires checks in ticket-checks.json")
-        root = Path.cwd().resolve()
-        paths, checks = [], []
-        for test in tests:
-            if isinstance(test, dict):
-                checks.append(acceptance_check(test))
-                continue
-            if not isinstance(test, str) or not test.strip():
-                raise ValueError("verification requires test paths or acceptance checks")
-            path = Path(test)
-            if path.is_absolute() or not path.is_file() or not path.resolve().is_relative_to(root):
-                raise ValueError(f"test must be an existing file inside this checkout: {test}")
-            paths.append("./" + str(path.resolve().relative_to(root)))
-        if paths:
-            runner = json.loads(os.environ.get("ticket_test_command", "[]"))
-            if not isinstance(runner, list) or not runner or any(
-                not isinstance(arg, str) or not arg.strip() for arg in runner
-            ):
-                raise ValueError("verification requires testCommand in dispatcher config")
-            checks.insert(0, shlex.join([*runner, *dict.fromkeys(paths)]))
         # Verification has no change set. Run the ticket's acceptance checks.
-        commands = checks
+        commands = ticket_checks(required=True)
+    elif deferred():
+        # The train must run everything a lane would have required: the configured
+        # gates, the ticket's acceptance checks and the coder's declared checks.
+        commands = [*commands, *ticket_checks(required=False), *coder_checks()]
     unique = []
     for command in commands:
         if command not in unique:

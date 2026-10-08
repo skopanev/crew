@@ -236,8 +236,11 @@ nodes:
         printf 'РАЗВЕДЧИК НЕ ОСТАВИЛ ОТЧЁТА. Всё, что от него есть:\n%s\n' \
           "${MEDULLA_LAST_MESSAGE:-}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
       fi
-      if [ "${MEDULLA_LAST_SIGNAL:-}" = "DUPLICATE" ]; then
+      # Verification and deferred (trainGatesOnly) plans read the scout's checks.
+      if [ "${MEDULLA_LAST_SIGNAL:-}" = "DUPLICATE" ] || [ "${TRAIN_GATES_ONLY:-false}" = "true" ]; then
         printf '%s\n' "$TICKET_CHECKS" > "$MEDULLA_RUN_DIR/artifacts/ticket-checks.json"
+      fi
+      if [ "${MEDULLA_LAST_SIGNAL:-}" = "DUPLICATE" ]; then
         echo '<signal:var key=VERIFY_ONLY>true</signal:var>'
         echo "<signal:VERIFY_EXISTING>Check existing implementation at $(git rev-parse HEAD). ${deps:-}</signal:VERIFY_EXISTING>"
         exit 0

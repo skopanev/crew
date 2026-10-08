@@ -352,7 +352,7 @@ equill_vars=(
 if $train_gates_only; then
   equill_vars+=(
     --var "TRAIN_GATES_ONLY=true"
-    --var "GATES_NOTE_CODER=Checks run later in the landing train on the integrated tree. Add or update the tests and checks this ticket needs, but do not run builds, test suites or gate commands in this lane. State in your report which checks the train must run."
+    --var "GATES_NOTE_CODER=Checks run later in the landing train on the integrated tree. Add or update the tests and checks this ticket needs, but do not run builds, test suites or gate commands in this lane. The train runs the configured gates and the ticket acceptance checks. List any further check commands the train must run in coder-checks.json in the Artifacts directory, as a JSON list of shell command strings run from the repository root; write [] when there are none."
     --var "GATES_NOTE_QA=Checks are PENDING for the landing train; none ran in this lane. Review the code provisionally. Never state or imply that any check passed. Name missing tests as findings."
   )
 fi
