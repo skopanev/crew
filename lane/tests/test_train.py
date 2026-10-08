@@ -259,6 +259,50 @@ class TrainVerificationTests(TrainFixture):
         self.assertEqual(first["failed_command"], "test ! -e b.txt")
         self.assertEqual(len(first["candidates"]), 2)
 
+    def queue_at(self, artifacts, stamp):
+        request = self.request(artifacts)
+        request["queued_at"] = stamp
+        (artifacts / "train-request.json").write_text(json.dumps(request))
+
+    def test_split_carries_landed_check_obligations_to_later_subsets(self):
+        # Reviewer reproduction: a (queued first) requires b.txt absent; b adds b.txt.
+        a = self.lane("a", {"a.txt": "a\n"}, deferred=True, ticket_checks=[], coder_checks=["test ! -e b.txt"])
+        b = self.lane("b", {"b.txt": "b\n"})
+        self.queue_at(a, "2026-01-01T00:00:00Z")
+        self.queue_at(b, "2026-01-01T00:00:01Z")
+        self.land()
+        self.assertEqual(self.result(a)["status"], "landed")
+        result_b = self.result(b)
+        self.assertEqual(result_b["status"], "gate_failed")
+        self.assertIn("test ! -e b.txt", result_b["detail"])
+        self.assertIn("carried from landed a", result_b["detail"])
+        # The target keeps a's known check satisfied: b.txt never landed.
+        self.assertEqual(git(self.origin, "ls-tree", "--name-only", self.remote_head()).split().count("b.txt"), 0)
+        receipts = {(r["candidates"][0]["ticket"], len(r["candidates"])): r for r in self.receipts()}
+        self.assertFalse(receipts[("a", 2)]["passed"])
+        self.assertTrue(receipts[("a", 1)]["passed"])
+        alone_b = receipts[("b", 1)]
+        self.assertFalse(alone_b["passed"])
+        self.assertEqual(alone_b["carried"], [{"command": "test -f code.txt", "owner": "a", "landed": True},
+                                              {"command": "test ! -e b.txt", "owner": "a", "landed": True}])
+        self.assertIn({"command": "test ! -e b.txt", "owners": ["a (carried)"]}, alone_b["plan"])
+        gate_log = Path(alone_b["gate_log"]).read_text()
+        self.assertIn("test ! -e b.txt", gate_log)
+
+    def test_carried_obligations_only_come_from_landed_candidates(self):
+        # Neither member lands from the failed pair: nothing is carried into the second half.
+        self.config["train"]["gateCommands"] = ["test ! -e a.txt || test ! -e b.txt"]
+        a = self.lane("a", {"a.txt": "a\n", "code.txt": "a-change\n"}, coder_checks=None)
+        b = self.lane("b", {"b.txt": "b\n"})
+        self.queue_at(a, "2026-01-01T00:00:00Z")
+        self.queue_at(b, "2026-01-01T00:00:01Z")
+        self.land()
+        self.assertEqual(self.result(a)["status"], "landed")
+        self.assertEqual(self.result(b)["status"], "gate_failed")
+        for receipt in self.receipts():
+            if receipt["candidates"][0]["ticket"] == "a":
+                self.assertEqual(receipt["carried"], [])
+
     def test_tampered_receipt_digest_is_refused(self):
         artifacts = self.lane("t1", {"a.txt": "a\n"})
         request = self.request(artifacts)
