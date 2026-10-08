@@ -170,6 +170,54 @@ class GateTests(unittest.TestCase):
         self.gate("verify")
         self.assertEqual(self.receipt()["tree"], self.git("rev-parse", "HEAD^{tree}"))
 
+    def deferred_fixture(self):
+        self.env.update(TRAIN_GATES_ONLY="true", ticket_test_command='["bash"]')
+        artifacts = self.root / "run/artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (self.repo / "t.sh").write_text("true\n")
+        self.git("add", ".")
+        return artifacts
+
+    def test_deferred_plan_includes_gates_ticket_and_coder_checks(self):
+        artifacts = self.deferred_fixture()
+        structured = {"ac": "AC1", "argv": ["test", "-f", "code.txt"]}
+        (artifacts / "ticket-checks.json").write_text(json.dumps(["t.sh", structured]))
+        (artifacts / "coder-checks.json").write_text('["echo extra"]')
+        self.gate("run")
+        receipt = self.receipt()
+        self.assertEqual(receipt["deferred"], "train")
+        self.assertEqual(receipt["checks"], [])
+        self.assertEqual(receipt["commands"], ["printf passed", "bash ./t.sh", structured, "echo extra"])
+        self.gate("verify")
+        # The plan is bound: a later coder declaration invalidates the receipt.
+        (artifacts / "coder-checks.json").write_text('["echo extra", "echo more"]')
+        self.gate("verify", succeeds=False)
+
+    def test_deferred_plan_missing_ticket_checks_is_refused(self):
+        artifacts = self.deferred_fixture()
+        result = self.gate("run", succeeds=False)
+        self.assertIn("ticket-checks.json", result.stderr)
+        self.assertFalse((artifacts / "gates/current.json").exists())
+        for bad in ('["echo ok", ""]', '"echo ok"', '[1]'):
+            with self.subTest(coder_checks=bad):
+                (artifacts / "ticket-checks.json").write_text("[]")
+                (artifacts / "coder-checks.json").write_text(bad)
+                self.gate("run", succeeds=False)
+
+    def test_verify_only_plan_ignores_gates_and_coder_checks(self):
+        artifacts = self.root / "run/artifacts"
+        artifacts.mkdir(parents=True)
+        self.git("commit", "-qm", "existing")
+        (artifacts / "ticket-checks.json").write_text(
+            json.dumps([{"ac": "AC1", "argv": ["test", "-f", "code.txt"]}]))
+        (artifacts / "coder-checks.json").write_text('["exit 9"]')
+        self.env.update(VERIFY_ONLY="true", TRAIN_GATES_ONLY="true")
+        self.gate("run")
+        self.assertEqual(self.receipt()["commands"], [{"ac": "AC1", "argv": ["test", "-f", "code.txt"]}])
+        self.assertNotIn("deferred", self.receipt())
+        (artifacts / "ticket-checks.json").write_text("[]")
+        self.gate("run", succeeds=False)
+
     def test_launcher_refuses_missing_checks_before_reading_queue(self):
         self.env["LANE_RUNS_FOLDER"] = str(self.root / "launcher-runs")
         (self.root / "shared-cbm.py").write_text("# fixture connector\n")
