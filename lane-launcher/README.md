@@ -39,6 +39,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `gateCommands` | Required check commands run against the lane's candidate |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
+| `laneSetup` | Optional project-owned shell command run inside each lane right after checkout (see below); `null` or absent runs nothing |
 
 The entire `sourceRoot`, including canonical Git metadata, is read-only.
 The first component of the ticket's NTK module names its source repository
@@ -48,8 +49,8 @@ metadata. It is an independent checkout with its own `.git`, exposed inside the
 container at `/workspace/<ticket>`. Run artifacts and configured `readWriteDirs` are writable separately.
 A retained nonempty checkout is preserved; startup fails and reopens the confirmed claim.
 
-For a shared Gradle cache, set `"readWriteDirs": ["/absolute/path/gradle-cache"]`.
-Create that directory before launch. Set `GRADLE_USER_HOME=/workspace/gradle-cache` in the project's check command.
+For a shared build cache, set `"readWriteDirs": ["/absolute/path/build-cache"]`.
+Create that directory before launch and point the project's check command at `/workspace/build-cache`.
 Writable directories must not overlap the source workspace, read-only folders, SSH directory or CBM store.
 Their directory names must be unique across mounts and must differ from the ticket ID.
 
@@ -136,6 +137,31 @@ a bundle in the train directory (`<stateDir>/crew-dispatchers/<id>/train`).
 ```json
 "limit": 3,
 "train": {"size": 3, "waitSeconds": 900, "gateCommands": ["..."]}
+```
+
+Optional train keys, all project-owned:
+
+| Key | Meaning |
+| --- | --- |
+| `train.persistentMounts` | `[{"host": "/abs/dir", "inside": "/abs/path"}]`: writable directories that only the lander uses and that persist across trains. Created when missing |
+| `train.setup` | Shell command run in the integration clone after checkout and before candidates are applied. It runs with `LANDING_TRAIN=true` and `LANE_WORKTREE` set; it may only touch ignored files, or the train stops |
+
+Crew itself carries no build-tool policy. Cache seeding, daemon settings and
+similar setup belong to the project, through `laneSetup` for lanes and
+`train.setup`/`train.persistentMounts` for the lander. `laneSetup` runs in the
+lane checkout after `git checkout`, before repository hooks and preflight, under
+`bash -euo pipefail`, with `HOME`, `LANE_WORKTREE` and `TRAIN_GATES_ONLY` in
+its environment; a failure stops the lane (log: `artifacts/lane-setup.txt`).
+An example that seeds a private build cache from a shared read-only copy
+mounted through `readOnlyRepos`, and skips it in lanes that run no checks:
+
+```json
+"laneSetup": "[ \"$TRAIN_GATES_ONLY\" = true ] || [ -d \"$HOME/.build-cache\" ] || cp -a /workspace/build-cache-seed/. \"$HOME/.build-cache/\"",
+"train": {
+  "gateCommands": ["..."],
+  "persistentMounts": [{"host": "/srv/lander-cache", "inside": "/home/medulla/.build-cache"}],
+  "setup": "[ -n \"$(ls -A \"$HOME/.build-cache\")\" ] || cp -a /workspace/build-cache-seed/. \"$HOME/.build-cache/\""
+}
 ```
 
 Keep checks that use one shared external checkout (for example a remote build

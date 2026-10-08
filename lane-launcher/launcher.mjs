@@ -48,6 +48,9 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
       throw new Error(`${field} must be a nonempty string or null`);
     }
   }
+  if (config.laneSetup != null && (typeof config.laneSetup !== 'string' || !config.laneSetup.trim())) {
+    throw new Error('laneSetup must be a nonempty shell command string or null');
+  }
   if ('tag' in config) throw new Error('Use tags: ["crew"] in dolber.json instead of tag');
   if (config.repo) throw new Error('repo was removed; set sourceRoot to the source workspace');
   if (typeof config.stateDir !== 'string' || !path.isAbsolute(config.stateDir)) throw new Error('stateDir must be absolute');

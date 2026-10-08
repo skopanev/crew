@@ -15,6 +15,8 @@ vars:
   # true (only with LAND_MODE train): the lane builds nothing; the train runs the
   # whole check plan on the integrated tree. Notes tell the coder and reviewers.
   TRAIN_GATES_ONLY: 'false'
+  # Optional project-owned shell command run in create_worktree after checkout.
+  LANE_SETUP: ''
   GATES_NOTE_CODER: ''
   GATES_NOTE_QA: ''
   ticket_test_command: '[]'
@@ -131,6 +133,7 @@ nodes:
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
       TRAIN_GATES_ONLY: '{{var:TRAIN_GATES_ONLY}}'
+      LANE_SETUP: '{{var:LANE_SETUP}}'
     timeout: 2400
     on_signal:
       READY: implement_code
@@ -174,16 +177,15 @@ nodes:
       fi
       git checkout -B "ticket-${ticket_id}" "origin/${target}"
       git rev-parse HEAD > .git/lane-base
-      # Parallel lanes must not share one Gradle home: its cache locks cannot be
-      # released across containers and a second build times out. Seed a private
-      # home from the mounted cache once; the mounted cache stays a read-only seed.
-      if [ "${TRAIN_GATES_ONLY:-false}" != "true" ] && [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
-        mkdir -p "$HOME/.gradle" && nice -n 19 ionice -c 2 -n 7 cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
-      fi
-      # Agents think far longer than Gradle builds; an idle daemon must not hold
-      # its heap meanwhile. User-home properties override the repository's.
-      if [ -d "$HOME/.gradle" ] && ! grep -q '^org.gradle.daemon.idletimeout=' "$HOME/.gradle/gradle.properties" 2>/dev/null; then
-        printf '%s\n' 'org.gradle.daemon.idletimeout=120000' 'kotlin.compiler.execution.strategy=in-process' >> "$HOME/.gradle/gradle.properties"
+      # Optional project-owned setup (dispatcher laneSetup), for example seeding a
+      # private build cache. Crew carries no tool-specific policy of its own.
+      if [ -n "${LANE_SETUP:-}" ]; then
+        if ! (cd "${LANE_WORKTREE}" && LANE_WORKTREE="${LANE_WORKTREE}" TRAIN_GATES_ONLY="${TRAIN_GATES_ONLY:-false}" \
+              bash -euo pipefail -c "$LANE_SETUP") > "$MEDULLA_RUN_DIR/artifacts/lane-setup.txt" 2>&1; then
+          cat "$MEDULLA_RUN_DIR/artifacts/lane-setup.txt" >&2
+          echo "Lane setup (laneSetup) failed; see artifacts/lane-setup.txt" >&2
+          exit 1
+        fi
       fi
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
