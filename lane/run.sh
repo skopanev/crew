@@ -9,7 +9,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --test-command '["runner", "args"]'
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
-              [--image <image>] [--docker-engine] [--land-mode direct|train]
+              [--image <image>] [--docker-engine] [--land-mode direct|train] [--train-gates-only]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
@@ -48,7 +48,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
-planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}" land_mode="direct"
+planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}" land_mode="direct" train_gates_only=false
 test_command='[]'
 also=()
 writable=()
@@ -75,6 +75,7 @@ while (( $# )); do
     --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
     --land-mode) land_mode="${2:-}"; shift 2 ;;
+    --train-gates-only) train_gates_only=true; shift ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -88,6 +89,10 @@ fi
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
 [[ "$land_mode" == direct || "$land_mode" == train ]] || { say "run.sh: --land-mode must be direct or train"; usage; }
+# Deferring every check to the train is only sound when the train runs them.
+if $train_gates_only && [[ "$land_mode" != train ]]; then
+  say "run.sh: --train-gates-only requires --land-mode train"; exit 2
+fi
 [[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
 [[ -x "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an executable host CBM server"; exit 2; }
 [[ -n "$cbm_cache" && -d "$cbm_cache" ]] || { say "run.sh: --cbm-cache-dir must name the existing shared CBM store"; exit 2; }
@@ -339,6 +344,13 @@ equill_vars=(
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
     --var "LAND_MODE=$land_mode"
 )
+if $train_gates_only; then
+  equill_vars+=(
+    --var "TRAIN_GATES_ONLY=true"
+    --var "GATES_NOTE_CODER=Checks run later in the landing train on the integrated tree. Add or update the tests and checks this ticket needs, but do not run builds, test suites or gate commands in this lane. State in your report which checks the train must run."
+    --var "GATES_NOTE_QA=Checks are PENDING for the landing train; none ran in this lane. Review the code provisionally. Never state or imply that any check passed. Name missing tests as findings."
+  )
+fi
 say "run.sh: memory on (equill bridge pid $bridge_pid)"
 
 # Code and Git writes use this ticket directory. Clone happens after claim.

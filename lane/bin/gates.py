@@ -110,6 +110,11 @@ def identity():
             "cwd": str(Path.cwd().resolve())}
 
 
+def deferred():
+    """trainGatesOnly lanes defer check execution to the landing train (verification lanes still run)."""
+    return os.environ.get("TRAIN_GATES_ONLY") == "true" and os.environ.get("VERIFY_ONLY") != "true"
+
+
 def unchanged(tree):
     return (git("write-tree") == tree
             and not git("diff", "--name-only")
@@ -138,6 +143,19 @@ def run(root):
                              "bash": subprocess.check_output(
                                  ["bash", "--version"], text=True).splitlines()[0]},
                "checks": [], "passed": False}
+    if deferred():
+        # Nothing ran: the receipt records the plan the train must pass on the integrated tree.
+        receipt["deferred"] = "train"
+        path = folder / "receipt.json"
+        with path.open("x") as output:
+            json.dump(receipt, output, indent=2)
+            output.write("\n")
+        print(path)
+        temporary = root / "current.tmp"
+        temporary.write_text(json.dumps({"receipt": str(path), "sha256": digest(path), "deferred": "train"}))
+        temporary.replace(current)
+        print("checks deferred to the landing train; none ran in this lane", file=sys.stderr)
+        return
     for index, command in enumerate(commands):
         log = folder / f"{index + 1}.log"
         started = time.time()
@@ -191,7 +209,10 @@ def verify(root):
     if not path.is_relative_to(root.resolve()) or digest(path) != pointer["sha256"]:
         raise ValueError("gate receipt is outside this run or has changed")
     receipt = json.loads(path.read_text())
-    if not receipt["passed"] or receipt["commands"] != plan():
+    is_deferred = receipt.get("deferred") == "train"
+    if is_deferred != deferred():
+        raise ValueError("gate receipt mode does not match this lane (deferred vs executed)")
+    if (not is_deferred and not receipt["passed"]) or receipt["commands"] != plan():
         raise ValueError("no passing receipt for the declared gate plan")
     if any(receipt.get(key) != value for key, value in identity().items()):
         raise ValueError("gate receipt belongs to another task, run, or repository scope")
@@ -205,6 +226,11 @@ def verify(root):
         raise ValueError("candidate history changed after gate execution")
     if git("rev-parse", receipt["candidate_sha"] + "^{tree}") != receipt["tree"]:
         raise ValueError("candidate SHA does not identify the checked tree")
+    if is_deferred:
+        if receipt["checks"] or receipt["passed"]:
+            raise ValueError("a deferred receipt cannot carry results")
+        print(path)
+        return
     if len(receipt["checks"]) != len(receipt["commands"]):
         raise ValueError("missing gate results")
     for command, check in zip(receipt["commands"], receipt["checks"]):

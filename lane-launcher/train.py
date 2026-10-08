@@ -293,8 +293,42 @@ def finish(config, item, status, detail, train_dir):
     log(f"  {item['ticket']}: {status} {detail}")
 
 
+def covered(config, items, train_dir):
+    """A lane that deferred its checks may land only if the train runs its whole plan."""
+    plan = set(config["train"]["gateCommands"])
+    keep = []
+    for item in items:
+        missing = [c for c in (item.get("gate_plan") or []) if c not in plan] if item.get("checks_deferred") else []
+        if item.get("checks_deferred") and not item.get("gate_plan"):
+            missing = ["(no gate plan recorded)"]
+        if missing:
+            finish(config, item, "plan_not_covered",
+                   f"The train does not run these deferred checks: {'; '.join(map(str, missing))[:200]}", train_dir)
+        else:
+            keep.append(item)
+    return keep
+
+
+def train_receipt(config, box, train_dir, depth, items, target, base, ok, failed, gate_log):
+    """Bind the gate result to the exact integrated tree and to every candidate in it."""
+    head = box.sh("git rev-parse HEAD").stdout.strip()
+    receipt = {"schema": 1, "target": target, "base": base, "integrated_head": head,
+               "integrated_tree": box.sh("git rev-parse HEAD^{tree}").stdout.strip(),
+               "gate_commands": config["train"]["gateCommands"], "passed": ok, "failed_command": failed or None,
+               "gate_log": gate_log,
+               "candidates": [{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt", "checks_deferred")}
+                              for item in items]}
+    path = os.path.join(train_dir, f"receipt-{depth}-{items[0]['ticket']}.json")
+    with open(path, "w") as fh:
+        json.dump(receipt, fh, indent=2)
+    return path
+
+
 def land(config, items, train_dir, depth=0):
     """Land items together; split on a gate failure."""
+    items = covered(config, items, train_dir)
+    if not items:
+        return
     logfile = os.path.join(train_dir, f"git-{depth}-{items[0]['ticket']}.log")
     work = os.path.join(train_dir, "work")
     os.makedirs(work, exist_ok=True)
@@ -315,6 +349,7 @@ def land(config, items, train_dir, depth=0):
                 return
             gate_log = os.path.join(train_dir, f"gates-{depth}-{items[0]['ticket']}.log")
             ok, failed = run_gates(box, config, gate_log)
+            receipt = train_receipt(config, box, train_dir, depth, items, target, base, ok, failed, gate_log)
             if not ok:
                 break
             if DRY:
@@ -324,7 +359,7 @@ def land(config, items, train_dir, depth=0):
             if state == "ok":
                 log(f"landed {len(items)} on {target} at {sha[:10]}")
                 for item in items:
-                    finish(config, item, "landed", f"{target}@{sha}", train_dir)
+                    finish(config, item, "landed", f"{target}@{sha}; train receipt {receipt}", train_dir)
                 return
             if state != "moved":
                 raise TrainDeferred(f"push failed: {sha.splitlines()[-1] if sha else ''}; see {logfile}")
@@ -334,7 +369,9 @@ def land(config, items, train_dir, depth=0):
     finally:
         box.close()
     if len(items) == 1:
-        finish(config, items[0], "gate_failed", f"Gate failed: {failed}. Log: {gate_log}", train_dir)
+        # Alone on the integrated tree, this candidate is the evidence for its own failure.
+        finish(config, items[0], "gate_failed",
+               f"Gate failed alone on {target}@{base[:10]}: {failed}. Log: {gate_log}. Receipt: {receipt}", train_dir)
         return
     half = len(items) // 2
     log(f"gate failed on {len(items)}: splitting {half}+{len(items) - half}")

@@ -12,6 +12,11 @@ vars:
   # direct: the lane pushes its candidate. train: it queues the checked
   # candidate for lane-launcher/train.py, which lands batches with one gate run.
   LAND_MODE: direct
+  # true (only with LAND_MODE train): the lane builds nothing; the train runs the
+  # whole check plan on the integrated tree. Notes tell the coder and reviewers.
+  TRAIN_GATES_ONLY: 'false'
+  GATES_NOTE_CODER: ''
+  GATES_NOTE_QA: ''
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
   CBM_PROJECT: ''
@@ -125,6 +130,7 @@ nodes:
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
+      TRAIN_GATES_ONLY: '{{var:TRAIN_GATES_ONLY}}'
     timeout: 2400
     on_signal:
       READY: implement_code
@@ -171,7 +177,7 @@ nodes:
       # Parallel lanes must not share one Gradle home: its cache locks cannot be
       # released across containers and a second build times out. Seed a private
       # home from the mounted cache once; the mounted cache stays a read-only seed.
-      if [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
+      if [ "${TRAIN_GATES_ONLY:-false}" != "true" ] && [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
         mkdir -p "$HOME/.gradle" && nice -n 19 ionice -c 2 -n 7 cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
       fi
       # Agents think far longer than Gradle builds; an idle daemon must not hold
@@ -276,6 +282,7 @@ nodes:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       Read {{var:RUN_ARTIFACTS}}/scout.txt.
       Artifacts: {{var:RUN_ARTIFACTS}}.
+      {{var:GATES_NOTE_CODER}}
 
   prepare_review:
     env:
@@ -284,6 +291,7 @@ nodes:
       ticket_title: '{{var:ticket_title}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       gate_commands: '{{var:gate_commands}}'
+      TRAIN_GATES_ONLY: '{{var:TRAIN_GATES_ONLY}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
@@ -338,7 +346,11 @@ nodes:
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
       if [ "${MEDULLA_LAST_NODE:-}" = "git_landing" ] && [ "${MEDULLA_LAST_SIGNAL:-}" = "REBASED" ]; then
-        echo "<signal:CHECKED>Clean rebase checks passed; land the checked candidate.</signal:CHECKED>"
+        if [ "${TRAIN_GATES_ONLY:-false}" = "true" ] && [ "${VERIFY_ONLY}" != "true" ]; then
+          echo "<signal:CHECKED>Clean rebase; checks stay pending for the landing train (none ran here).</signal:CHECKED>"
+        else
+          echo "<signal:CHECKED>Clean rebase checks passed; land the checked candidate.</signal:CHECKED>"
+        fi
         exit 0
       fi
       # Share one Equill contract across all review harnesses and rounds.
@@ -359,7 +371,11 @@ nodes:
         fi
         rm -f "$qa.err"
       fi
-      echo "<signal:SNAPSHOT>snapshot: $tree. Declared checks passed on this tree; commands, exit codes and logs: $receipt</signal:SNAPSHOT>"
+      if [ "${TRAIN_GATES_ONLY:-false}" = "true" ] && [ "${VERIFY_ONLY}" != "true" ]; then
+        echo "<signal:SNAPSHOT>snapshot: $tree. Checks are PENDING: none ran in this lane; the landing train runs the plan in $receipt on the integrated tree. Review is provisional.</signal:SNAPSHOT>"
+      else
+        echo "<signal:SNAPSHOT>snapshot: $tree. Declared checks passed on this tree; commands, exit codes and logs: $receipt</signal:SNAPSHOT>"
+      fi
   expert_review:
     timeout: 1800
     max_parallel: 3
@@ -413,6 +429,7 @@ nodes:
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
       {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
       {{var:RUN_ARTIFACTS}}/diff.patch.
+      {{var:GATES_NOTE_QA}}
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
@@ -485,6 +502,7 @@ nodes:
     env:
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       LAND_MODE: '{{var:LAND_MODE}}'
+      TRAIN_GATES_ONLY: '{{var:TRAIN_GATES_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
@@ -523,7 +541,7 @@ nodes:
         echo "<signal:LAND_FAILED>untracked files appeared after review: ${new_files}</signal:LAND_FAILED>"; exit 0; }
       have_tree="$(git write-tree)"
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
-      python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
+      gate_receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)" || {
         echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
 
       if [ "${VERIFY_ONLY}" = "true" ]; then
@@ -545,10 +563,17 @@ nodes:
         jq -n --arg ticket "$ticket_id" --arg sha "$(git rev-parse HEAD)" --arg tree "$have_tree" \
           --arg target "$target" --arg worktree "${LANE_WORKTREE}" \
           --arg queued_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          '{ticket: $ticket, sha: $sha, tree: $tree, target: $target, worktree: $worktree, queued_at: $queued_at}' \
+          --arg receipt "$gate_receipt" --arg deferred "${TRAIN_GATES_ONLY:-false}" \
+          --argjson plan "$(jq -c '.commands' "$gate_receipt")" \
+          '{ticket: $ticket, sha: $sha, tree: $tree, target: $target, worktree: $worktree, queued_at: $queued_at,
+            gate_receipt: $receipt, gate_plan: $plan, checks_deferred: ($deferred == "true")}' \
           > "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp"
         mv "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp" "$MEDULLA_RUN_DIR/artifacts/train-request.json"
-        echo "<signal:QUEUED>Checked candidate $(git rev-parse --short HEAD) queued for the landing train.</signal:QUEUED>"
+        if [ "${TRAIN_GATES_ONLY:-false}" = "true" ]; then
+          echo "<signal:QUEUED>Candidate $(git rev-parse --short HEAD) queued for the landing train; its checks are pending there. Not landed.</signal:QUEUED>"
+        else
+          echo "<signal:QUEUED>Checked candidate $(git rev-parse --short HEAD) queued for the landing train.</signal:QUEUED>"
+        fi
         exit 0
       fi
 
