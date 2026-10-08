@@ -20,6 +20,8 @@ vars:
   GATES_NOTE_CODER: ''
   GATES_NOTE_QA: ''
   ticket_test_command: '[]'
+  # The ticket's repository relative to the source root; the train lands per repository.
+  repository: ''
   TICKET_CHECKS: '[]'
   CBM_PROJECT: ''
   TOOLING_ROOT: /workspace
@@ -508,6 +510,7 @@ nodes:
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       LAND_MODE: '{{var:LAND_MODE}}'
       TRAIN_GATES_ONLY: '{{var:TRAIN_GATES_ONLY}}'
+      repository: '{{var:repository}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
@@ -570,10 +573,10 @@ nodes:
           --arg queued_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           --arg receipt "$gate_receipt" --arg digest "$(sha256sum "$gate_receipt" | cut -d' ' -f1)" \
           --arg deferred "${TRAIN_GATES_ONLY:-false}" \
-          --arg project_dir "$project_dir" --arg module "$module_name" \
+          --arg project_dir "$project_dir" --arg module "$module_name" --arg repository "${repository:-}" \
           '{ticket: $ticket, sha: $sha, tree: $tree, target: $target, worktree: $worktree, queued_at: $queued_at,
             gate_receipt: $receipt, gate_receipt_sha256: $digest, checks_deferred: ($deferred == "true"),
-            project_dir: $project_dir, module: $module}' \
+            repository: $repository, project_dir: $project_dir, module: $module}' \
           > "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp"
         mv "$MEDULLA_RUN_DIR/artifacts/train-request.json.tmp" "$MEDULLA_RUN_DIR/artifacts/train-request.json"
         if [ "${TRAIN_GATES_ONLY:-false}" = "true" ]; then

@@ -128,18 +128,18 @@ class SetupHookTests(Fixture):
         self.config["train"]["setup"] = 'mkdir -p cache && echo "$LANDING_TRAIN" > cache/marker'
         config = self.write_config()
         box = FakeBox(config, str(self.root / "work"))
-        target, base = train.prepare(box, config, str(self.train_dir / "log"))
+        target, base = train.prepare(box, config, "repo", str(self.train_dir / "log"))
         self.assertEqual(target, "develop")
         self.assertEqual((self.root / "work/repo/cache/marker").read_text(), "true\n")
         # MUST-REFUSE: setup that edits a tracked file stops the train.
         self.config["train"]["setup"] = "echo changed > code.txt"
         config = self.write_config()
         with self.assertRaisesRegex(RuntimeError, "changed the checkout"):
-            train.prepare(FakeBox(config, str(self.root / "work")), config, str(self.train_dir / "log"))
+            train.prepare(FakeBox(config, str(self.root / "work")), config, "repo", str(self.train_dir / "log"))
         self.config["train"]["setup"] = "exit 7"
         config = self.write_config()
         with self.assertRaisesRegex(RuntimeError, "train.setup failed"):
-            train.prepare(FakeBox(config, str(self.root / "work")), config, str(self.train_dir / "log"))
+            train.prepare(FakeBox(config, str(self.root / "work")), config, "repo", str(self.train_dir / "log"))
 
 
 class TrainFixture(Fixture):
@@ -163,13 +163,14 @@ class TrainFixture(Fixture):
         box.start()
         self.addCleanup(box.stop)
 
-    def lane(self, ticket, files, *, deferred=False, ticket_checks=None, coder_checks=None):
+    def lane(self, ticket, files, *, deferred=False, ticket_checks=None, coder_checks=None, repo=None):
         """Run one lane's tail for real: commit, gates.py run, git_landing in train mode."""
         config = self.write_config()
+        repo = repo or self.repo
         wt = self.source / ".worktrees" / ticket
         wt.parent.mkdir(exist_ok=True)
-        subprocess.run(["git", "clone", "-q", str(self.repo), str(wt)], check=True, env=GIT_ENV)
-        git(wt, "remote", "set-url", "origin", str(self.origin))
+        subprocess.run(["git", "clone", "-q", str(repo), str(wt)], check=True, env=GIT_ENV)
+        git(wt, "remote", "set-url", "origin", git(repo, "remote", "get-url", "origin"))
         git(wt, "fetch", "-q", "origin")
         for name, text in files.items():
             (wt / name).write_text(text)
@@ -182,8 +183,8 @@ class TrainFixture(Fixture):
             (artifacts / "ticket-checks.json").write_text(json.dumps(ticket_checks))
         if coder_checks is not None:
             (artifacts / "coder-checks.json").write_text(json.dumps(coder_checks))
-        env = dict(GIT_ENV, MEDULLA_RUN_DIR=str(run), ticket_id=ticket, project_dir=str(self.repo),
-                   module_name="repo", gate_commands=json.dumps(self.config["gateCommands"]),
+        env = dict(GIT_ENV, MEDULLA_RUN_DIR=str(run), ticket_id=ticket, project_dir=str(repo),
+                   module_name=repo.name, repository=repo.name, gate_commands=json.dumps(self.config["gateCommands"]),
                    ticket_test_command=json.dumps(self.config["testCommand"]),
                    TRAIN_GATES_ONLY="true" if deferred else "false", VERIFY_ONLY="false",
                    LAND_MODE="train", TOOLING_ROOT=str(TOOLING), LANE_WORKTREE=str(wt),
@@ -207,7 +208,7 @@ class TrainFixture(Fixture):
 
     def land(self):
         config = self.write_config()
-        train.land(config, train.queued(config), str(self.train_dir))
+        train.land_queue(config, train.queued(config), str(self.train_dir))
         return config
 
     def remote_head(self):
@@ -324,6 +325,55 @@ class TrainVerificationTests(TrainFixture):
         self.assertIn("changed the integrated candidate", self.result(artifacts)["detail"])
         self.assertEqual(self.remote_head(), before)
         self.assertFalse(self.receipts()[0]["passed"])
+
+
+class RepositoryTests(TrainFixture):
+    """Item 4: the request names its repository; batches are single-repository."""
+
+    def second_repository(self):
+        origin, repo = self.root / "origin2.git", self.source / "repo2"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True, env=GIT_ENV)
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".ntkrc").write_text('{"target_branch":"main"}\n')
+        (repo / "code.txt").write_text("other base\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "base")
+        git(repo, "remote", "add", "origin", str(origin))
+        git(repo, "push", "-q", "origin", "main")
+        return repo, origin
+
+    def test_queue_is_split_by_repository_and_each_lands_on_its_own_target(self):
+        repo2, origin2 = self.second_repository()
+        first = self.lane("t1", {"a.txt": "a\n"})
+        second = self.lane("t2", {"b.txt": "b\n"}, repo=repo2)
+        self.assertEqual(self.request(second)["repository"], "repo2")
+        before1 = self.remote_head()
+        before2 = git(repo2, "ls-remote", str(origin2), "refs/heads/main").split()[0]
+        self.land()
+        self.assertEqual(self.result(first)["status"], "landed")
+        self.assertEqual(self.result(second)["status"], "landed")
+        self.assertNotEqual(self.remote_head(), before1)
+        after2 = git(repo2, "ls-remote", str(origin2), "refs/heads/main").split()[0]
+        self.assertNotEqual(after2, before2)
+        receipts = self.receipts()
+        self.assertEqual(sorted(len(r["candidates"]) for r in receipts), [1, 1])
+        self.assertEqual(sorted(r["target"] for r in receipts), ["develop", "main"])
+
+    def test_mixed_batch_is_rejected_and_bad_repository_is_refused(self):
+        repo2, _ = self.second_repository()
+        first = self.lane("t1", {"a.txt": "a\n"})
+        second = self.lane("t2", {"b.txt": "b\n"}, repo=repo2)
+        config = self.write_config()
+        with self.assertRaisesRegex(RuntimeError, "one repository"):
+            train.land(config, train.queued(config), str(self.train_dir))
+        for bad in ("", "../repo", ".worktrees/t1", "missing", "repo2"):
+            with self.subTest(repository=bad):
+                request = self.request(first)
+                request["repository"] = bad
+                (first / "train-request.json").write_text(json.dumps(request))
+                with self.assertRaises(ValueError):
+                    train.check_receipt(config, next(r for r in train.queued(config) if r["ticket"] == "t1"))
 
 
 class LaneSetupTests(unittest.TestCase):
