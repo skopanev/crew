@@ -447,9 +447,10 @@ def publish(plan, reviews):
     return result
 
 
-def fail(reason=None):
+def fail(reason=None, preflight=False):
     target = shared.artifacts()
     source_drift = isinstance(reason, SourceDrift)
+    preflight_timeout = preflight and isinstance(reason, subprocess.TimeoutExpired)
     reason = str(reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "Planning did not complete")
     errors = [read(path) for path in target.glob("error-*.json")]
     if errors:
@@ -465,6 +466,8 @@ def fail(reason=None):
                   "ticket_unchanged": False, "publication_uncertain": True}
     else:
         result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
+        if preflight_timeout:
+            result["preflight_timeout"] = True
         if source_drift:
             result["source_drift"] = True
         # Only the exact freshness failure counts: the source moved while this
@@ -492,5 +495,5 @@ if __name__ == "__main__":
             file = shared.capture_error_file(kind)
             write(file, {"stage": kind, "branch": file.stem.split("-")[-1], "reason": str(error)})
         else:
-            fail(error)
+            fail(error, preflight=command == "prepare")
         sys.exit(1)
