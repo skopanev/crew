@@ -134,7 +134,10 @@ train; a failing train splits in halves until the failing candidate is found.
 Left-out tickets reopen with a note; their commits stay as a bundle in the
 train directory (`<stateDir>/crew-dispatchers/<id>/train`).
 
-Each request carries the SHA-256 of the lane's gate receipt. Before a train,
+Each request names its repository (relative to `sourceRoot`, from the ticket
+module) and module; the lander splits the queue by repository, and every train
+holds candidates of one repository and lands on that repository's
+`.ntkrc` target. Each request carries the SHA-256 of the lane's gate receipt. Before a train,
 the lander verifies every candidate: the digest, the receipt's task,
 repository, module, run and tree against the request, the candidate commit's
 tree, an unchanged retained checkout, and the receipt plan against the plan

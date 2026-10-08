@@ -7,8 +7,9 @@ retained. This lander is the only writer to the target branch:
 
 1. Wait until the queue holds train.size candidates, the oldest one waited
    train.waitSeconds, or no lane is running.
-2. Apply each candidate's commits onto a fresh target in one integration
-   clone. A conflicting candidate leaves the train and is reopened.
+2. Group the queue by repository (train-request.json names it); per
+   repository, apply each candidate's commits onto a fresh target in one
+   integration clone. A conflicting candidate leaves the train and is reopened.
    Before that, every candidate's gate receipt is verified against its
    request (digest, task, repository, module, run, tree, candidate commit);
    a refused receipt blocks the ticket and keeps its checkout.
@@ -173,20 +174,20 @@ class Box:
         subprocess.run(["docker", "rm", "-f", self.id], capture_output=True)
 
 
-def project_repo(config):
-    """The repository the lanes work in: the single repo under sourceRoot."""
-    module = config.get("module") or ""
-    repos = [d for d in os.listdir(config["sourceRoot"])
-             if not d.startswith(".") and os.path.isdir(os.path.join(config["sourceRoot"], d, ".git"))]
-    if module and module.split("/")[0] in repos:
-        return module.split("/")[0]
-    if len(repos) != 1:
-        sys.exit(f"train.py: expected one repository under sourceRoot, found {repos}")
-    return repos[0]
+def repository_dir(config, item):
+    """The candidate's own repository: a Git checkout directly addressed under sourceRoot."""
+    repository = item.get("repository")
+    root = os.path.realpath(config["sourceRoot"])
+    if (not isinstance(repository, str) or not repository or os.path.isabs(repository)
+            or ".." in repository.split("/") or repository.startswith(".")):
+        raise ValueError("the request lacks a repository relative to sourceRoot")
+    path = os.path.realpath(os.path.join(root, repository))
+    if not path.startswith(root + os.sep) or not os.path.isdir(os.path.join(path, ".git")):
+        raise ValueError(f"the request repository is not a checkout under sourceRoot: {repository}")
+    return repository
 
 
-def prepare(box, config, logfile):
-    repo = project_repo(config)
+def prepare(box, config, repo, logfile):
     src = f"{box.source}/{repo}"
     script = f"""
 rm -rf /workspace/train/repo; mkdir -p /workspace/train/repo; cd /workspace/train/repo
@@ -412,6 +413,9 @@ def check_receipt(config, item):
     for key in ("ticket", "sha", "tree", "target", "gate_receipt", "gate_receipt_sha256", "project_dir", "module"):
         if not isinstance(item.get(key), str) or not item[key]:
             raise ValueError(f"the request lacks {key}")
+    repository = repository_dir(config, item)
+    if not item["project_dir"].endswith("/" + repository):
+        raise ValueError("the request repository and project_dir disagree")
     gates_dir = os.path.join(os.path.realpath(item["artifacts"]), "gates")
     path = os.path.realpath(item["gate_receipt"])
     if not path.startswith(gates_dir + os.sep):
@@ -501,7 +505,7 @@ def train_receipt(config, train_dir, depth, items, target, base, ok, failed, gat
                "passed": ok, "failed_command": failed or None, "gate_log": gate_log,
                "candidates": [{**{k: item.get(k) for k in ("ticket", "sha", "tree", "gate_receipt",
                                                            "gate_receipt_sha256", "checks_deferred",
-                                                           "project_dir", "module")},
+                                                           "repository", "project_dir", "module")},
                                "receipt_verified": True}
                               for item in items]}
     path = os.path.join(train_dir, f"receipt-{depth}-{items[0]['ticket']}.json")
@@ -543,14 +547,18 @@ def land(config, items, train_dir, depth=0):
     items = verified(config, items, train_dir)
     if not items:
         return
+    repos = {item["repository"] for item in items}
+    if len(repos) != 1:
+        raise RuntimeError(f"a train must hold one repository, got {sorted(repos)}")
+    repo = repos.pop()
     logfile = os.path.join(train_dir, f"git-{depth}-{items[0]['ticket']}.log")
     work = os.path.join(train_dir, "work")
     os.makedirs(work, exist_ok=True)
     box = Box(config, work)
     try:
         for attempt in range(3):
-            target, base = prepare(box, config, logfile)
-            log(f"train of {len(items)} on {target}@{base[:10]}: {' '.join(i['ticket'] for i in items)}")
+            target, base = prepare(box, config, repo, logfile)
+            log(f"train of {len(items)} in {repo} on {target}@{base[:10]}: {' '.join(i['ticket'] for i in items)}")
             applied = []
             for item in items:
                 if item["target"] != target:
@@ -604,6 +612,16 @@ def land(config, items, train_dir, depth=0):
     land(config, items[half:], train_dir, depth + 1)
 
 
+def land_queue(config, rows, train_dir):
+    """One train per repository, oldest request first; a batch never mixes repositories."""
+    groups = {}
+    for row in rows:
+        key = row.get("repository") if isinstance(row.get("repository"), str) else ""
+        groups.setdefault(key, []).append(row)
+    for group in groups.values():
+        land(config, group, train_dir)
+
+
 def main(argv):
     path = os.path.join(HERE, "dolber.json")
     once = False
@@ -638,7 +656,7 @@ def main(argv):
                 with open(os.path.join(train_dir, "manifest.json"), "w") as fh:
                     json.dump(rows, fh, indent=2)
                 try:
-                    land(config, rows, train_dir)
+                    land_queue(config, rows, train_dir)
                 except TrainDeferred as error:
                     # Nothing landed and no result was written: the queue is intact.
                     log(f"TRAIN DEFERRED: {error}")

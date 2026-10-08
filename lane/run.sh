@@ -391,6 +391,7 @@ medulla \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
   --var "module_name=$module" \
+  --var "repository=${repo#"$source_root/"}" \
   --var "gate_commands=$gate_json" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
