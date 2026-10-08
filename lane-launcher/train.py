@@ -54,6 +54,21 @@ def load_config(path):
     if not gates:
         sys.exit("train.py: train.gateCommands (or gateCommands) is required")
     train["gateCommands"] = gates
+    mounts = train.setdefault("persistentMounts", [])
+    if not isinstance(mounts, list):
+        sys.exit("train.py: train.persistentMounts must be a list of {host, inside}")
+    for mount in mounts:
+        if (not isinstance(mount, dict) or set(mount) != {"host", "inside"}
+                or not all(isinstance(mount[k], str) and os.path.isabs(mount[k]) and ":" not in mount[k]
+                           for k in ("host", "inside"))
+                or os.path.normpath(mount["inside"]).startswith("/workspace/train")):
+            sys.exit(f"train.py: invalid train.persistentMounts entry {mount!r}: "
+                     "need absolute host and inside paths, no ':', not under /workspace/train")
+        os.makedirs(mount["host"], exist_ok=True)
+        mount["host"] = os.path.realpath(mount["host"])
+    setup = train.get("setup")
+    if setup is not None and (not isinstance(setup, str) or not setup.strip()):
+        sys.exit("train.py: train.setup must be a nonempty shell command string")
     state = os.path.join(config.get("stateDir", os.path.expanduser("~/.medulla/lane-launcher")),
                          "crew-dispatchers", config["id"].lower())
     config["scopeDir"] = state
@@ -96,19 +111,6 @@ def due(config, rows):
     return not lanes_running()
 
 
-def gradle_home(config):
-    home = os.path.join(config["trainDir"], "gradle-home")
-    os.makedirs(home, exist_ok=True)
-    # The box outlives its gates while tickets are finished; idle daemons must
-    # not hold their heap meanwhile. User-home properties override the repository's.
-    props = os.path.join(home, "gradle.properties")
-    text = open(props).read() if os.path.exists(props) else ""
-    if "org.gradle.daemon.idletimeout=" not in text:
-        with open(props, "a") as fh:
-            fh.write("org.gradle.daemon.idletimeout=120000\nkotlin.compiler.execution.strategy=in-process\n")
-    return home
-
-
 class TrainDeferred(Exception):
     """A transient failure: retry the same queue on the next tick."""
 
@@ -121,10 +123,9 @@ class Box:
         source = os.path.realpath(config["sourceRoot"])
         mounts = [(source, f"/workspace/{os.path.basename(source)}", "ro"),
                   (work, "/workspace/train", "rw"),
-                  (os.path.realpath(config["sshDir"]), "/workspace/lane-ssh", "ro"),
-                  # The lander is the only user of its Gradle home: keep it across
-                  # trains so the shared cache is copied once, not per train.
-                  (gradle_home(config), "/home/medulla/.gradle", "rw")]
+                  (os.path.realpath(config["sshDir"]), "/workspace/lane-ssh", "ro")]
+        # Project-owned directories the lander alone keeps across trains (train.persistentMounts).
+        mounts += [(m["host"], m["inside"], "rw") for m in config["train"]["persistentMounts"]]
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "ro")
                    for d in config.get("readOnlyRepos", [])]
         mounts += [(os.path.realpath(d), f"/workspace/{os.path.basename(os.path.realpath(d))}", "rw")
@@ -179,15 +180,21 @@ if [ -d {src}/.git/lfs/objects ] && command -v git-lfs >/dev/null; then
   mkdir -p .git/lfs && cp -r {src}/.git/lfs/objects .git/lfs/ && git lfs checkout >/dev/null
 fi
 if [ -f scripts/install-git-hooks.sh ]; then bash scripts/install-git-hooks.sh >/dev/null; fi
-if [ -d /workspace/gradle-cache/caches ] && [ ! -d "$HOME/.gradle/caches" ]; then
-  mkdir -p "$HOME/.gradle" && cp -a /workspace/gradle-cache/. "$HOME/.gradle/" && rm -rf "$HOME/.gradle/daemon"
-fi
 echo "$target $(git rev-parse HEAD)"
 """
     proc = box.sh(script, logfile, cwd="/workspace/train")
     if proc.returncode:
         raise RuntimeError(f"integration setup failed; see {logfile}")
     target, base = proc.stdout.split()[-2:]
+    setup = config["train"].get("setup")
+    if setup:
+        # Project-owned preparation (train.setup), e.g. seeding a private build cache.
+        proc = box.sh("export LANDING_TRAIN=true LANE_WORKTREE=/workspace/train/repo; " + setup, logfile)
+        if proc.returncode:
+            raise RuntimeError(f"train.setup failed (rc={proc.returncode}); see {logfile}")
+        dirty = box.sh("git status --porcelain --untracked-files=normal")
+        if dirty.returncode or dirty.stdout.strip():
+            raise RuntimeError(f"train.setup changed the checkout; it may only touch ignored files. See {logfile}")
     return target, base
 
 

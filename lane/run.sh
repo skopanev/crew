@@ -10,6 +10,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine] [--land-mode direct|train] [--train-gates-only]
+              [--lane-setup <shell command>]
               [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
@@ -28,6 +29,8 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
   --test-command  required runner argument array for existing-code verification.
+  --lane-setup  optional project-owned shell command run inside the lane after
+                checkout (for example to seed a private build cache).
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
@@ -48,7 +51,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
-planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}" land_mode="direct" train_gates_only=false
+planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}" land_mode="direct" train_gates_only=false lane_setup=""
 test_command='[]'
 also=()
 writable=()
@@ -76,6 +79,7 @@ while (( $# )); do
     --image) image="${2:-}"; shift 2 ;;
     --land-mode) land_mode="${2:-}"; shift 2 ;;
     --train-gates-only) train_gates_only=true; shift ;;
+    --lane-setup) lane_setup="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) passthrough+=("$1"); shift ;;
   esac
@@ -343,6 +347,7 @@ equill_vars=(
     --var "EQUILL_MODULE=$module"
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
     --var "LAND_MODE=$land_mode"
+    --var "LANE_SETUP=$lane_setup"
 )
 if $train_gates_only; then
   equill_vars+=(
