@@ -38,14 +38,25 @@ export async function request(method, route, query, body, auth = credentials()) 
     if (response.status === 204) return null;
     const text = await response.text();
     if (!response.ok) {
-      let reason = '';
-      try { reason = JSON.parse(text).error || ''; } catch { /* Do not echo proxy HTML. */ }
-      throw new Error(`NTK HTTP ${response.status}${reason ? `: ${reason}` : ''}; no automatic retry`);
+      let reason = '', body;
+      try { body = JSON.parse(text); reason = body?.error || ''; } catch { /* Do not echo proxy HTML. */ }
+      throw Object.assign(new Error(`NTK HTTP ${response.status}${reason ? `: ${reason}` : ''}; no automatic retry`),
+        {status: response.status, ...(body === undefined ? {} : {body})});
     }
     return JSON.parse(text);
   } catch (error) {
     // Do not echo credentials even if a misconfigured server echoes the request.
-    throw new Error(String(error.message).split(auth.key).join('[redacted]'));
+    const redact = value => {
+      if (typeof value === 'string') return value.split(auth.key).join('[redacted]');
+      if (Array.isArray(value)) return value.map(redact);
+      if (value && typeof value === 'object') return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [redact(key), redact(item)]));
+      return value;
+    };
+    throw Object.assign(new Error(redact(String(error.message))), {
+      ...(Number.isInteger(error.status) ? {status: error.status} : {}),
+      ...(Object.hasOwn(error, 'body') ? {body: redact(error.body)} : {}),
+    });
   }
 }
 

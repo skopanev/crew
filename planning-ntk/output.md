@@ -34,6 +34,16 @@ needed to divide this source. Do not design all child implementations now.
 Allow at most three decomposition levels. Use the maximum coordinator distance in ntk.deps.down.
 At that limit, prepare one leaf or return a concrete blocker.
 Critics check coverage, boundaries, and dependencies for decompose.
+Before review, the adapter adds creation_candidates to the frozen plan.
+Each candidate includes its full ticket, revision and similarity score.
+Both critics must add creation_checks to their JSON response:
+[{"task":"task-1","id":"existing-ticket-id","distinct":true,"reason":"The work differs because ..."}].
+Return one decision for every candidate of every child. Compare outcomes and
+acceptance criteria, not titles. A completed ticket can already cover the work.
+For the same work, set distinct to false and add a blocking finding naming the
+existing ticket. Design uses the existing revision round to remove duplicated
+work or return NOT_READY. Never edit or reopen another ticket to make a plan fit.
+When there are no candidates, creation_checks can be empty.
 For a leaf, they check mechanisms and observable acceptance checks.
 Files, functions, test placement and build wiring belong to lane.
 

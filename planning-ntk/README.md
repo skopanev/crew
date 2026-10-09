@@ -126,6 +126,19 @@ A simultaneous human edit can still occur between the final read and write.
 
 Child creation records each POST before sending it in a stable `publication.json`.
 An uncertain POST stops. It never creates a replacement child automatically.
+
+Before child creation, NTK searches for similar tickets in every status.
+Both existing critics compare each candidate's full scope with the proposed child.
+Each critic records a distinct-work decision and its reason. The adapter checks
+these decisions, candidate scope, and current search results before publication.
+It repeats the scope and search checks before each child POST. Only reviewed
+creation can bypass NTK's second similarity search. An unavailable search stops
+before publication. These checks add no agent node or review round.
+
+A confirmed similarity refusal creates no child. The adapter removes that
+attempt's marker. If no children exist, it also removes the empty publication
+receipt and boundary marker. A timeout retains the markers because NTK may have
+created the child. Partial publication still requires inspection.
 If NTK refuses a duplicate, inspect the refusal and receipt before another attempt.
 Partial publication leaves unactivated children blocked without the dispatch tag.
 Decomposition children start without tags. The workflow restores all source and dispatch tags after it confirms the parent.
