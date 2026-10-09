@@ -36,6 +36,10 @@ At that limit, prepare one leaf or return a concrete blocker.
 Critics check coverage, boundaries, and dependencies for decompose.
 Before review, the adapter adds creation_candidates to the frozen plan.
 Each candidate includes its full ticket, revision and similarity score.
+creation_search records available or disabled for each child. Disabled means
+the workspace explicitly disabled vectorisation. It does not mean that no
+similar work exists. Check overlap from the supplied research and plan.
+Publication uses normal NTK creation without skip_search when search is disabled.
 Both critics must add creation_checks to their JSON response:
 [{"task":"task-1","id":"existing-ticket-id","distinct":true,"reason":"The work differs because ..."}].
 Return one decision for every candidate of every child. Compare outcomes and
