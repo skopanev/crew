@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 
 def prepare(command, source_root, cache_dir, output):
-    # Broker box bridge API verified against broker 8ce3468.
     sys.path.insert(0, str(Path.home() / ".local/lib/broker"))
-    from broker.box.mcp import HOST_GATEWAY, SHIM_TEMPLATE, _start_bridge
+    from broker.box.mcp import HOST_GATEWAY, _start_bridge
+    from broker.box.shim import SHIM_TEMPLATE
 
     root = str(Path(source_root).resolve(strict=True))
     cache = str(Path(cache_dir).resolve(strict=True))
