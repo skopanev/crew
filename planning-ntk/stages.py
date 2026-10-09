@@ -385,8 +385,10 @@ def needs_human():
 def review_input():
     target = shared.artifacts()
     plan = read(target / "plan.json")
-    plan["creation_candidates"] = ntk("similar", {"workspace": config()["workspace"], "plan": plan,
-                                                "source": read(target / "input.json")["ticket"]})
+    search = ntk("similar", {"workspace": config()["workspace"], "plan": plan,
+                            "source": read(target / "input.json")["ticket"]})
+    plan["creation_candidates"] = search["candidates"]
+    plan["creation_search"] = search["search"]
     write(target / "plan.json", plan)
     shared.emit_var("plan", plan)
     shared.emit_var("plan_digest", digest(plan))

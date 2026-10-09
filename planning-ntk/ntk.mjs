@@ -101,21 +101,30 @@ const splits = (plan, source) => plan.disposition === 'decompose' ||
 
 async function find(task, workspace) {
   // POST /find reads tickets. It does not start publication.
-  const result = await httpRequest('POST', '/v1/find', {},
-    {workspace, text: task.title, body: task.body, limit: 5});
-  require(Array.isArray(result?.similar), 'NTK returned no similarity search result');
-  return result.similar;
+  try {
+    const result = await httpRequest('POST', '/v1/find', {},
+      {workspace, text: task.title, body: task.body, limit: 5});
+    require(Array.isArray(result?.similar), 'NTK returned no similarity search result');
+    return {status: 'available', hits: result.similar};
+  } catch (error) {
+    if (error.status === 409 && error.body?.error ===
+      'vectorisation is switched off in this workspace: there is nothing to search') {
+      return {status: 'disabled', hits: []};
+    }
+    throw error;
+  }
 }
 
 async function similar({workspace, plan, source}) {
-  if (plan.ntk.verdict !== 'READY' || !splits(plan, source)) return {};
+  if (plan.ntk.verdict !== 'READY' || !splits(plan, source)) return {candidates: {}, search: {}};
   const entries = await Promise.all(plan.tasks.map(async task => {
-    const hits = await find(task, workspace);
-    const candidates = await Promise.all(hits.filter(hit => hit.id !== source.id).map(async hit =>
+    const search = await find(task, workspace);
+    const candidates = await Promise.all(search.hits.filter(hit => hit.id !== source.id).map(async hit =>
       ({...await ticket(hit.id, workspace), score: hit.score})));
-    return [task.id, candidates];
+    return [task.id, candidates, search.status];
   }));
-  return Object.fromEntries(entries);
+  return {candidates: Object.fromEntries(entries.map(([id, candidates]) => [id, candidates])),
+    search: Object.fromEntries(entries.map(([id, , status]) => [id, status]))};
 }
 
 async function unchangedCandidates(items, workspace) {
@@ -133,6 +142,10 @@ async function reviewedCreation(input, source, receipt) {
     'Child creation needs a reviewed similarity search');
   const ignored = new Set([source.id, ...Object.values(receipt.children).map(child => child.id).filter(Boolean)]);
   for (const task of plan.tasks) {
+    const searchState = plan.creation_search?.[task.id] || 'available';
+    require(['available', 'disabled'].includes(searchState) &&
+      (searchState !== 'disabled' || candidates[task.id].length === 0),
+      'Invalid reviewed similarity search state');
     const known = new Set(candidates[task.id].map(item => item.ticket.id));
     for (const seat of ['simplicity', 'correctness']) {
       const review = reviews[seat];
@@ -144,7 +157,7 @@ async function reviewedCreation(input, source, receipt) {
           typeof check.reason === 'string' && check.reason.trim()), 'Similar work was not reviewed as distinct');
     }
     await unchangedCandidates(candidates[task.id], workspace);
-    const hits = await find(task, workspace);
+    const {hits} = await find(task, workspace);
     fresh(hits.every(hit => ignored.has(hit.id) || known.has(hit.id)),
       'New similar work appeared after review; re-plan before child creation');
   }
@@ -278,7 +291,8 @@ async function publish(input) {
     if (!child) {
       const allowed = new Set([source.id, ...plan.creation_candidates[task.id].map(item => item.ticket.id),
         ...Object.values(receipt.children).map(item => item.id).filter(Boolean)]);
-      fresh((await find(task, workspace)).every(hit => allowed.has(hit.id)),
+      const search = await find(task, workspace);
+      fresh(search.hits.every(hit => allowed.has(hit.id)),
         'New similar work appeared before child creation; inspect the publication');
       await unchangedCandidates(plan.creation_candidates[task.id], workspace);
       const deps = [...task.external_dependencies, ...task.depends_on.map(key => receipt.children[key].id)];
@@ -290,7 +304,8 @@ async function publish(input) {
         workspace, project: task.project, title: task.title, body: task.body, module: task.module,
         status: 'blocked', tags: stagedTags,
         deps,
-        skip_search: true,
+        ...(search.status === 'available' && plan.creation_search?.[task.id] !== 'disabled'
+          ? {skip_search: true} : {}),
         ...(source.priority ? {priority: source.priority} : {}),
       }); } catch (error) {
         if (error.status === 409 && Array.isArray(error.body?.similar)) {
