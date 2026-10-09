@@ -326,7 +326,12 @@ def validate_plan(plan, assignment):
 
 def capture(kind):
     if kind != "plan":
-        return shared.capture(kind)
+        shared.capture(kind)
+        if kind == "critic":
+            seat = json.loads(os.environ["MEDULLA_INPUT"])["slug"]
+            validate_creation_review(read(shared.artifacts() / "plan.json"),
+                                     read(shared.artifacts() / f"critic-{seat}.json"))
+        return
     shared.capture_error_file(kind).unlink(missing_ok=True)
     result, _ = shared.body_result()
     shared.bind_necessity(result)
@@ -378,10 +383,30 @@ def needs_human():
 
 
 def review_input():
-    plan = read(shared.artifacts() / "plan.json")
+    target = shared.artifacts()
+    plan = read(target / "plan.json")
+    plan["creation_candidates"] = ntk("similar", {"workspace": config()["workspace"], "plan": plan,
+                                                "source": read(target / "input.json")["ticket"]})
+    write(target / "plan.json", plan)
     shared.emit_var("plan", plan)
     shared.emit_var("plan_digest", digest(plan))
     signal("REVIEW", "Frozen NTK result sent to independent critics")
+
+
+def validate_creation_review(plan, review):
+    expected = {(task, item["ticket"]["id"]) for task, items in plan.get("creation_candidates", {}).items()
+                for item in items}
+    checks = review.get("creation_checks", [])
+    require(isinstance(checks, list), "creation_checks must be an array")
+    seen = set()
+    for check in checks:
+        pair = (check.get("task"), check.get("id"))
+        require(pair in expected and pair not in seen, "Unknown or repeated similarity decision")
+        require(type(check.get("distinct")) is bool, "Similarity decision needs distinct")
+        text(check.get("reason"), "similarity reason")
+        require(check["distinct"] or review["verdict"] == "reject", "Same work must block new creation")
+        seen.add(pair)
+    require(seen == expected, "Review every similar ticket before child creation")
 
 
 def publication_input():
@@ -411,6 +436,7 @@ def finish():
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for review in reviews.values():
         validation.critique(review, digest(plan))
+        validate_creation_review(plan, review)
     # A plan the critics still reject is a verdict about the ticket, not a failed
     # run: publish NOT_READY with the findings, so the ticket records why and the
     # dispatcher moves on.
@@ -436,6 +462,7 @@ def finish():
 def publish(plan, reviews):
     target = shared.artifacts()
     result = ntk("publish", {**publication_input(), "plan": plan, "reviews": reviews,
+                             "reviewDigest": digest(plan),
                              "necessity": shared.require_necessity(allow_owner_gaps=True),
                              "publicationMarker": str(target / "publication-started.json")})
     # Published on a base the critics cleared after a clean advance: keep the audit trail.

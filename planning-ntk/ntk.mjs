@@ -96,6 +96,60 @@ async function snapshot({id, workspace}) {
   return {source, meta, deps, attachments: reports, prerequisites, parents, referenced};
 }
 
+const splits = (plan, source) => plan.disposition === 'decompose' ||
+  (plan.disposition === 'implement' && (plan.tasks.length > 1 || plan.tasks[0].project !== source.project));
+
+async function find(task, workspace) {
+  // POST /find reads tickets. It does not start publication.
+  const result = await httpRequest('POST', '/v1/find', {},
+    {workspace, text: task.title, body: task.body, limit: 5});
+  require(Array.isArray(result?.similar), 'NTK returned no similarity search result');
+  return result.similar;
+}
+
+async function similar({workspace, plan, source}) {
+  if (plan.ntk.verdict !== 'READY' || !splits(plan, source)) return {};
+  const entries = await Promise.all(plan.tasks.map(async task => {
+    const hits = await find(task, workspace);
+    const candidates = await Promise.all(hits.filter(hit => hit.id !== source.id).map(async hit =>
+      ({...await ticket(hit.id, workspace), score: hit.score})));
+    return [task.id, candidates];
+  }));
+  return Object.fromEntries(entries);
+}
+
+async function unchangedCandidates(items, workspace) {
+  const scope = item => hash([item.project, item.module, item.title, item.body]);
+  for (const item of items) {
+    const current = await ticket(item.ticket.id, workspace);
+    fresh(scope(current.ticket) === scope(item.ticket), 'Similar ticket scope changed after review: ' + item.ticket.id);
+  }
+}
+
+async function reviewedCreation(input, source, receipt) {
+  const {plan, workspace, reviews} = input;
+  const candidates = plan.creation_candidates;
+  require(candidates && plan.tasks.every(task => Array.isArray(candidates[task.id])),
+    'Child creation needs a reviewed similarity search');
+  const ignored = new Set([source.id, ...Object.values(receipt.children).map(child => child.id).filter(Boolean)]);
+  for (const task of plan.tasks) {
+    const known = new Set(candidates[task.id].map(item => item.ticket.id));
+    for (const seat of ['simplicity', 'correctness']) {
+      const review = reviews[seat];
+      require(typeof input.reviewDigest === 'string' && review?.verdict === 'clear' &&
+        review.plan_digest === input.reviewDigest, 'Child creation needs both clear reviews');
+      const checks = (review.creation_checks || []).filter(check => check.task === task.id);
+      require(checks.length === known.size && known.size === new Set(checks.map(check => check.id)).size &&
+        checks.every(check => known.has(check.id) && check.distinct === true &&
+          typeof check.reason === 'string' && check.reason.trim()), 'Similar work was not reviewed as distinct');
+    }
+    await unchangedCandidates(candidates[task.id], workspace);
+    const hits = await find(task, workspace);
+    fresh(hits.every(hit => ignored.has(hit.id) || known.has(hit.id)),
+      'New similar work appeared after review; re-plan before child creation');
+  }
+}
+
 async function unchanged(input) {
   const {source, prerequisites, deps} = input.snapshot;
   for (const item of prerequisites) {
@@ -189,7 +243,7 @@ async function publish(input) {
   const tasks = plan.tasks;
   const decomposing = plan.disposition === 'decompose';
   const stagedTags = decomposing ? [] : tags.filter(tag => tag !== dispatchTag);
-  const split = decomposing || (plan.disposition === 'implement' && (tasks.length > 1 || tasks[0].project !== source.project));
+  const split = splits(plan, source);
 
   if (plan.ntk.verdict !== 'READY') {
     const human = plan.ntk.verdict === 'NEEDS_HUMAN';
@@ -217,20 +271,41 @@ async function publish(input) {
     return {verdict: 'READY', id: source.id, children: []};
   }
 
+  await reviewedCreation(input, source, receipt);
   // Mark each POST before sending. An uncertain response must never create another child.
   for (const task of tasks) {
     let child = receipt.children[task.id];
     if (!child) {
+      const allowed = new Set([source.id, ...plan.creation_candidates[task.id].map(item => item.ticket.id),
+        ...Object.values(receipt.children).map(item => item.id).filter(Boolean)]);
+      fresh((await find(task, workspace)).every(hit => allowed.has(hit.id)),
+        'New similar work appeared before child creation; inspect the publication');
+      await unchangedCandidates(plan.creation_candidates[task.id], workspace);
       const deps = [...task.external_dependencies, ...task.depends_on.map(key => receipt.children[key].id)];
       child = {task: hash(task)};
       receipt.children[task.id] = child;
       save(receiptFile, receipt);
-      const created = await request('POST', '/v1/tickets', {}, {
+      let created;
+      try { created = await request('POST', '/v1/tickets', {}, {
         workspace, project: task.project, title: task.title, body: task.body, module: task.module,
         status: 'blocked', tags: stagedTags,
         deps,
+        skip_search: true,
         ...(source.priority ? {priority: source.priority} : {}),
-      });
+      }); } catch (error) {
+        if (error.status === 409 && Array.isArray(error.body?.similar)) {
+          // This response confirms that NTK created no child.
+          delete receipt.children[task.id];
+          save(receiptFile, receipt);
+          if (!Object.keys(receipt.children).length) {
+            fs.unlinkSync(receiptFile);
+            fs.unlinkSync(publication.file);
+            publication.started = false;
+          }
+          error.code = 'SIMILAR';
+        }
+        throw error;
+      }
       require(typeof created?.id === 'string', 'Child creation is uncertain; inspect NTK and publication.json');
       child.id = created.id;
       save(receiptFile, receipt);
@@ -273,10 +348,11 @@ async function publish(input) {
 try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const action = process.argv[2];
-  const result = await ({snapshot, publish}[action])(input);
+  const result = await ({snapshot, similar, publish}[action])(input);
   process.stdout.write(JSON.stringify(result) + '\n');
 } catch (error) {
-  process.stdout.write(JSON.stringify({error: {code: error.code || 'FAILED', message: error.message}}) + '\n');
+  process.stdout.write(JSON.stringify({error: {code: error.code || 'FAILED', message: error.message,
+    ...(error.status ? {status: error.status} : {}), ...(error.body?.similar ? {similar: error.body.similar} : {})}}) + '\n');
   console.error(`planning-ntk: ${error.message}`);
   process.exitCode = 1;
 }
