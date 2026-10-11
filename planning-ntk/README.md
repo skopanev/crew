@@ -49,9 +49,11 @@ Applicable owner decisions and Equill rules still govern its checks.
 1. Read the ticket, prerequisite graph, NTK metadata, attachments, and available Lane failure artifacts.
 2. Inspect current source, Git history, shared CBM, Equill knowledge, and repository `.ntkrc` contracts.
 3. Run parallel code, knowledge, and external research. Assess need, minimum scope, reuse, and required owner decisions before design.
-   A required owner decision produces NEEDS_HUMAN before design. Otherwise, the designer receives the assessment and prepares mechanisms.
+   A required owner decision produces NEEDS_HUMAN before design. Necessity also decides whether the ticket needs decomposition.
+   A split goes directly to the existing critics and publication. The designer receives only a leaf assessment.
 4. Ask independent simplicity and correctness critics to check the plan against that assessment.
-   A rejected plan returns to design once. These two critics check the revision. Necessity does not repeat.
+   A rejected leaf plan returns to design once. A rejected split ends NOT_READY without design.
+   Its report preserves critic findings in the source attachments for a later planning pass.
 5. Confirm source versions and live role contracts before any publication. Publish the result to NTK.
 
 The models and critic seats are the same as [Planning](../planning/README.md).
@@ -76,7 +78,7 @@ Attachments carry the full plan, necessity assessment, and reviews. They do not 
 | NOT_READY | Keep the source `blocked`, remove its dispatch tag, and attach the concrete reason. |
 | Valid READY plan with blocked research | Review and publish NOT_READY with the research blockers. Do not stop the queue. |
 | Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
-| NEEDS_HUMAN | Set `blocked`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
+| NEEDS_HUMAN | Set `blocked`, add `human`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
 | Planning did not complete (tool, agent or environment failure) | Defer the ticket unchanged and continue the queue. Record nothing as processed. |
 | Publication started and failed | Hold that ticket and continue the queue. An operator inspects NTK before another run. |
 | Input changed before any NTK write | Defer the ticket and continue the queue. Retry it in a later cycle. |
@@ -94,6 +96,8 @@ A split parent gets `[CLOSE AT NO DEPS] <original title>` and depends on all chi
 Generated prefixes fit the NTK title limit. The report keeps the full original title.
 Children never depend on the parent. Each child has one module and its own acceptance criteria.
 One pass divides only one level or prepares one Task with mechanism steps.
+The NTK adapter reads the decomposition from the necessity result. The shared graph routes SPLIT directly to review.
+Other tracker adapters must validate and bind that result before using this route. Joppa retains its current design route.
 Decomposition children have no implementation steps or executable checks yet.
 They stay blocked, so Dolber cannot execute them. The planner selects each child in a later pass.
 It divides that child again or prepares it for the lane. Each split must reduce the scope.
@@ -102,7 +106,7 @@ This conservative bound can also count a coordinator reached through a sibling p
 External prerequisites go only to children that need them.
 Each dependency has a concrete reason in the child's body. Independent children remain parallel.
 The planner removes `[HUMAN]` when the next verdict no longer needs a person.
-After the decision, record it in the ticket and restore the dispatch tag to plan it again.
+After the decision, record it in the ticket body, remove `human`, and restore the dispatch tag to plan it again.
 All children get dispatch tags, including children waiting for prerequisites.
 Decomposition returns `DECOMPOSED`. A prepared leaf returns `READY`; NTK dependencies still control execution.
 Each child reads coordinator bodies and attachments through the existing dependency graph.
@@ -179,7 +183,7 @@ It uses Dolber's configuration. Each tick it reads `blocked` tickets with the
 planner tag filter. A failed lane keeps the dispatch tag. A published NOT_READY
 removes that tag. Other planner tags can still match the ticket, but the dispatcher
 skips it until the ticket changes.
-A `[HUMAN]` ticket stays out until its configured dispatch tag is added again.
+A ticket with `human` stays out regardless of its other tags. An older `[HUMAN]` ticket without that tag stays out until its dispatch tag returns.
 An empty tag list is rejected. The dispatcher alternates decomposition children and other blocked tickets, oldest within each group.
 It runs this workflow in a run directory it names, then reads that run's
 result. A ticket unchanged since the last completed attempt is skipped.

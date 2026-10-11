@@ -16,7 +16,9 @@ For each Task, also return:
 "acceptance": ["observable criteria for this Task"],
 "covers": ["exact source acceptance criteria covered by this Task"]
 
-One pass plans only the selected ticket. Choose one result:
+One pass plans only the selected ticket. Necessity prepares decomposition before design.
+The designer prepares only implement, verify_existing or blocked results.
+The reviewers can receive any of these results:
 
 - implement: prepare exactly one Task with mechanism steps in one module.
 - verify_existing: prepare checks for the selected ticket, with no Tasks.
@@ -33,7 +35,8 @@ Each child receives its own planning pass later. Research only the boundaries
 needed to divide this source. Do not design all child implementations now.
 Allow at most three decomposition levels. Use the maximum coordinator distance in ntk.deps.down.
 At that limit, prepare one leaf or return a concrete blocker.
-Critics check coverage, boundaries, and dependencies for decompose.
+For decompose, critics check only coverage, boundaries, reuse and dependencies.
+Do not require child mechanisms or executable checks.
 Before review, the adapter adds creation_candidates to the frozen plan.
 Each candidate includes its full ticket, revision and similarity score.
 creation_search records available or disabled for each child. Disabled means

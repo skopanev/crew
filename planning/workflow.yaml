@@ -13,6 +13,7 @@ vars:
   DESIGN_MODEL: claude-opus-5-5
   PLANNING_PYTHON: python3
   OUTPUT_CONTRACT: ''
+  NECESSITY_OUTPUT_CONTRACT: ''
   critique: ''
 nodes:
   prepare:
@@ -104,9 +105,11 @@ nodes:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
+      Additional output contract: {{var:NECESSITY_OUTPUT_CONTRACT}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture necessity'
     on_signal:
       ASSESSED: design
+      SPLIT: review_input
       NEEDS_HUMAN: needs_human
       __failed__: failed
       __default__: failed

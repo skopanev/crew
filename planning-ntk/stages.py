@@ -207,6 +207,9 @@ def prepare():
     shared.emit_var("OUTPUT_CONTRACT", (HERE / "output.md").read_text()
         .replace("{body_budget}", str(limits["body"] * 85 // 100)).replace("{body_limit}", str(limits["body"]))
         .replace("{title_limit}", str(limits["title"])))
+    shared.emit_var("NECESSITY_OUTPUT_CONTRACT", (HERE / "necessity-output.md").read_text()
+        .replace("{body_budget}", str(limits["body"] * 85 // 100))
+        .replace("{title_limit}", str(limits["title"])))
     read_paths = [settings["sourceRoot"], *settings.get("readOnlyRepos", [])]
     if assignment["lane_failure"]:
         read_paths.append(assignment["lane_failure"]["run"])
@@ -331,6 +334,24 @@ def validate_plan(plan, assignment):
 
 
 def capture(kind):
+    if kind == "necessity":
+        shared.capture_error_file(kind).unlink(missing_ok=True)
+        result, _ = shared.body_result()
+        require(isinstance(result, dict) and "decomposition" in result,
+                "NTK necessity must return decomposition: null or a shallow split plan")
+        plan = result.pop("decomposition")
+        shared.save_necessity(result)
+        if result["owner_gaps"]:
+            signal("NEEDS_HUMAN", "Required owner decision precedes decomposition")
+        elif plan is None:
+            signal("ASSESSED", "One leaf proceeds to design")
+        else:
+            require(isinstance(plan, dict) and plan.get("disposition") == "decompose"
+                    and plan.get("ntk", {}).get("verdict") == "READY",
+                    "Necessity decomposition must be a READY shallow split")
+            save_plan(plan)
+            signal("SPLIT", "Shallow split proceeds to review without design")
+        return
     if kind != "plan":
         shared.capture(kind)
         if kind == "critic":
@@ -340,6 +361,12 @@ def capture(kind):
         return
     shared.capture_error_file(kind).unlink(missing_ok=True)
     result, _ = shared.body_result()
+    require(result.get("disposition") != "decompose", "Necessity owns decomposition before design")
+    save_plan(result)
+    signal("PLANNED", "NTK plan validated")
+
+
+def save_plan(result):
     shared.bind_necessity(result)
     require(result.get("ntk", {}).get("verdict") != "NEEDS_HUMAN",
             "NEEDS_HUMAN requires an owner gap from the necessity assessment")
@@ -353,13 +380,14 @@ def capture(kind):
                     for branch, report in reports.items() if report["status"] == "blocked"
                     for claim in (report["blockers"] or [report["summary"]])]
         if blockers:
+            require(result["disposition"] != "decompose",
+                    "Missing mandatory research prevents decomposition: " + "; ".join(blockers))
             result = {**result, "disposition": "blocked", "tasks": [],
                       "acceptance_checks": [], "blockers": blockers,
                       "ntk": {**result["ntk"], "verdict": "NOT_READY", "failure_class": "plan",
                               "owner": "", "decision": "", "body": ""}}
             validate_plan(result, read(shared.artifacts() / "input.json"))
     write(shared.artifacts() / "plan.json", result)
-    signal("PLANNED", "NTK plan validated")
 
 
 def research_join():
@@ -426,6 +454,13 @@ def publication_input():
     return {"workspace": settings["workspace"], "snapshot": read(shared.artifacts() / "ntk-input.json"),
         "dispatchTag": settings.get("planning", {}).get("dispatchTag", "crew"), "dispatchTags": settings["tags"],
         "stateDir": os.environ["PLANNING_STATE"], "runId": Path(os.environ["MEDULLA_RUN_DIR"]).name}
+
+
+def critique_join():
+    if read(shared.artifacts() / "plan.json").get("disposition") == "decompose":
+        signal("REVIEWED", "Split reviews go to publication or NOT_READY; no design round")
+    else:
+        shared.critique_join()
 
 
 def rejected_plan(plan, reviews):
@@ -526,7 +561,7 @@ if __name__ == "__main__":
             capture(sys.argv[2])
         else:
             {"prepare": prepare, "prepare_critic": shared.prepare_critic, "research_join": research_join, "needs_human": needs_human, "review_input": review_input,
-             "critique_join": shared.critique_join, "finish": finish, "fail": fail}[command]()
+             "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
     except shared.DriftReview as review:
         signal("DRIFT", review)
     except Exception as error:
