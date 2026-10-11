@@ -30,6 +30,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --test-command  required runner argument array for existing-code verification.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
+  --shared-lock-dir  a shared lock directory directly under the source root, mounted writable.
   --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
              optional known_hosts. No default: landing needs a key and a
              made-up path that nobody created is worse than none. The whole
@@ -68,6 +69,7 @@ while (( $# )); do
     --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --mount-rw) writable+=("${2:-}"); shift 2 ;;
+    --shared-lock-dir) shared_lock_dir="${2:-}"; shift 2 ;;
     --ssh-dir) ssh_dir="${2:-}"; shift 2 ;;
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
@@ -184,13 +186,17 @@ mounts=(--mount "$source_root")
 node --input-type=module -e '
   import {pathToFileURL} from "node:url";
   const {validateWritableDirs} = await import(pathToFileURL(process.argv[1]));
-  const [sourceRoot, sshDir, cbmCacheDir, ticket, ...dirs] = process.argv.slice(2);
+  const [sourceRoot, sshDir, cbmCacheDir, ticket, sharedLockDir, ...dirs] = process.argv.slice(2);
   const split = dirs.indexOf("--");
   try { validateWritableDirs({sourceRoot, sshDir, cbmCacheDir,
-    readOnlyRepos: dirs.slice(0, split), readWriteDirs: dirs.slice(split + 1)}, ticket); }
+    sharedLockDir: sharedLockDir || null, readOnlyRepos: dirs.slice(0, split), readWriteDirs: dirs.slice(split + 1)}, ticket); }
   catch (error) { console.error(`run.sh: ${error.message}`); process.exit(2); }
-' "$TOOLING_ROOT/lane-launcher/runtime.mjs" "$source_root" "$ssh_dir" "$cbm_cache" "$ticket" \
+' "$TOOLING_ROOT/lane-launcher/runtime.mjs" "$source_root" "$ssh_dir" "$cbm_cache" "$ticket" "${shared_lock_dir:-}" \
   ${also[@]+"${also[@]}"} -- ${writable[@]+"${writable[@]}"}
+if [[ -n "${shared_lock_dir:-}" ]]; then
+  shared_lock_dir="$(cd "$shared_lock_dir" && pwd -P)"
+  writable+=("$shared_lock_dir")
+fi
 for extra in ${also[@]+"${also[@]}"}; do
   [[ -d "$extra" ]] || { say "run.sh: --mount-ro is not a directory: $extra"; exit 2; }
   extra="$(cd "$extra" && pwd -P)"
