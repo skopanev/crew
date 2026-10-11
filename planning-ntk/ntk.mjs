@@ -213,18 +213,22 @@ export async function closeParents(config, state) {
       if (!children.length || !children.every(child => typeof child === 'string' && child.trim())) continue;
       const current = await httpRequest('GET', route(id), {workspace: config.workspace});
       if (current.ticket?.id !== id || current.ticket.removed || current.ticket.removed_at ||
+          current.ticket.status !== 'to_review' || current.ticket.title.includes('[HUMAN]') ||
           !current.ticket.title.startsWith('[CLOSE AT NO DEPS] ') ||
-          !sameFields(current.ticket, receipt.parent) || !Number.isSafeInteger(current.revision_count) ||
-          current.revision_count !== receipt.parentRevision) continue;
+          !Number.isSafeInteger(current.revision_count)) continue;
       const graph = await httpRequest('GET', `${route(id)}/deps`, {workspace: config.workspace});
       require(Array.isArray(graph.up), 'NTK returned no dependency graph');
       const direct = graph.up.filter(item => item.depth === 1);
       const ids = direct.map(item => item.id);
-      if (!direct.length || direct.some(item => item.removed || item.status !== 'done') ||
-          hash([...ids].sort()) !== hash([...(current.ticket.deps || [])].sort()) ||
-          !children.every(child => ids.includes(child))) continue;
+      if (direct.some(item => item.removed || item.status !== 'done') ||
+          hash([...ids].sort()) !== hash([...(current.ticket.deps || [])].sort())) continue;
+      const detached = await Promise.all(children.filter(child => !ids.includes(child)).map(async child => {
+        const response = await httpRequest('GET', route(child), {workspace: config.workspace});
+        return response.ticket?.id === child ? response.ticket : null;
+      }));
+      if (detached.some(child => !child || child.removed || child.removed_at || child.status !== 'done')) continue;
       const latest = await httpRequest('GET', route(id), {workspace: config.workspace});
-      if (latest.revision_count !== current.revision_count || !sameFields(latest.ticket, receipt.parent)) continue;
+      if (latest.revision_count !== current.revision_count || !sameFields(latest.ticket, current.ticket)) continue;
       await httpRequest('PATCH', route(id), {}, {workspace: config.workspace, status: 'done'});
       const confirmed = await httpRequest('GET', route(id), {workspace: config.workspace});
       require(confirmed.ticket?.status === 'done', 'Parent completion was not confirmed');
