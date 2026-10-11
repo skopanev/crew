@@ -1,0 +1,150 @@
+"""Read one criterion and its current Joppa context."""
+import json
+from pathlib import Path
+
+from common import digest, read, require, text, validate_input
+from mcp import Joppa
+
+
+def configuration(path):
+    config = read(path)
+    for key in ("workspace", "url", "token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+        text(config.get(key), "config." + key)
+    require(isinstance(config.get("repositories"), list) and config["repositories"], "config.repositories required")
+    root = Path(path).resolve().parent
+    for key in ("token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+        value = Path(config[key]).expanduser()
+        config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
+    for repo in config["repositories"]:
+        text(repo.get("project"), "repository.project address")
+        require(":" in repo["project"], "repository.project must be a full object address")
+        value = Path(text(repo.get("path"), "repository.path")).expanduser()
+        repo["path"] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
+    require(len({r["id"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate repository ID")
+    require(len({r["project"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate project mapping")
+    require(all(not Path(config["runs_folder"]).is_relative_to(Path(r["path"])) for r in config["repositories"]),
+            "runs_folder must be outside inspected repositories")
+    placeholder = {"id": "config-check", "text": "Validate configuration.", "revision": 1}
+    validate_input({"workspace": config["workspace"], "domain": placeholder, "capability": placeholder,
+                    "requirement": placeholder, "ac": placeholder, "decisions": [], "repositories": config["repositories"]})
+    return config
+
+
+def client(config):
+    return Joppa(config["url"], config["token_file"])
+
+
+def object_read(api, workspace, address):
+    result = api.call("joppa_objects", {"workspace": workspace, "address": address})
+    require(result.get("document", {}).get("present") is True, f"object is absent: {address}")
+    require(result.get("historical") is False, f"current object required: {address}")
+    return result
+
+
+def source(object):
+    """Ignore journal position and our own planning claim. Keep meaningful state."""
+    process = {key: value for key, value in object.get("process", {}).items() if key != "planning_claim"}
+    return {key: object.get(key) for key in ("address", "kind", "current_revision", "document", "annotations",
+                                           "files", "references", "review_required", "work_ready")} | {"process": process}
+
+
+def snapshot_source(object, types):
+    current = source(object)
+    if types[object["kind"]].get("role") == "task":
+        # Worker claims and releases append revisions without changing the work contract.
+        current.pop("current_revision")
+        current.pop("process")
+        current.pop("work_ready")
+        current.pop("review_required")
+        current["document"] = {key: value for key, value in current["document"].items()
+                               if key in ("data", "parent", "links", "present", "schema_revision")}
+    return current
+
+
+def load(api, config, ac_id):
+    workspace = config["workspace"]
+    tree = api.call("joppa_tree", {"workspace": workspace})
+    types = tree["schema"]["types"]
+    ac_types = [kind for kind, value in types.items() if value.get("role") == "ac"]
+    if ":" not in ac_id:
+        require(len(ac_types) == 1, "use a full criterion address when the schema has multiple criterion types")
+        ac_id = ac_types[0] + ":" + ac_id
+    objects = {}
+    def get(address):
+        if address not in objects:
+            objects[address] = object_read(api, workspace, address)
+        return objects[address]
+    ac = get(ac_id)
+    require(types[ac["kind"]]["role"] == "ac", "input must be a criterion")
+    parents, seen = [], {ac_id}
+    parent = ac["document"].get("parent")
+    while parent:
+        require(parent not in seen, "parent cycle in criterion context")
+        seen.add(parent)
+        item = get(parent)
+        parents.append(item)
+        parent = item["document"].get("parent")
+    req = next((item for item in parents if types[item["kind"]].get("role") == "requirement"), None)
+    require(req is not None, "criterion needs a requirement ancestor")
+    task_types = [kind for kind, value in types.items()
+                  if value.get("role") == "task" and ac["kind"] in value.get("parents", [])]
+    require(len(task_types) == 1, "criterion needs exactly one direct Task type")
+    task_kind = task_types[0]
+    require(types[task_kind].get("question"), "Task type needs a configured question")
+    project_ref = types[task_kind].get("references", {}).get("projects")
+    require(project_ref and project_ref.get("multiple") is True, "Task type needs a projects reference list")
+    tasks, cursor = [], None
+    while True:
+        args = {"workspace": workspace, "parent": ac_id, "kind": task_kind, "limit": 100}
+        if cursor:
+            args["cursor"] = cursor
+        page = api.call("joppa_objects", args)
+        require(page["position"] == tree["position"], "workspace changed during context read")
+        tasks.extend(get(item["address"]) for item in page["items"])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
+    # Read explicit references. Do not traverse unrelated tickets or infer ownership.
+    for item in [ac, *parents, *tasks]:
+        for link in item["document"].get("links", []):
+            get(link["target"])
+        for reference in item.get("references", []):
+            if isinstance(reference, dict) and reference.get("target"):
+                get(reference["target"])
+    for repo in config["repositories"]:
+        project = get(repo["project"])
+        require(project["kind"] == project_ref["target"], "repository project type differs from Task schema")
+    requirement = api.call("joppa_read", {"workspace": workspace, "req": req["address"]})
+    require(requirement["position"] == tree["position"], "workspace changed during requirement read")
+    req_detail = requirement["requirement"]
+    revisions = req_detail.get("revisions")
+    require(isinstance(revisions, list) and len(revisions) == 1, "current Requirement read must return exactly one revision")
+    revision = revisions[0]
+    require(revision.get("number") == req_detail["current_revision"], "Requirement read returned another revision")
+    # Current verification decisions belong to the Requirement, not the AC document revision.
+    meaning = {key: value for key, value in revision.items() if key not in ("tasks", "runs")}
+    meaning["comments"] = req_detail.get("comments")
+    require(all(item["position"] == tree["position"] for item in objects.values()), "workspace changed during object read")
+    require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
+            "workspace changed during context read")
+    groups = [item for item in parents if types[item["kind"]].get("role") == "group"]
+    context = lambda item: {"id": item["address"], "revision": item["current_revision"],
+                            "text": json.dumps(source(item), ensure_ascii=False)}
+    scope = context(req)
+    assignment = {"kind": "joppa", "workspace": workspace, "ac": context(ac), "requirement": scope,
+                  "capability": context(groups[0]) if groups else scope,
+                  "domain": context(groups[-1]) if groups else scope,
+                  "decisions": [json.dumps(meaning, ensure_ascii=False)],
+                  "repositories": config["repositories"],
+                  "joppa": {"parents": [source(item) for item in parents], "tasks": [source(item) for item in tasks],
+                            "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
+                            "task_schema": types[task_kind]},
+                  "knowledge_query": ac["document"]["data"].get("description") or ac["document"]["data"]["title"]}
+    snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types) for key, item in objects.items()},
+                "requirement": meaning}
+    validate_input(assignment)
+    return assignment, snapshot, ac
+
+
+def unchanged(old, new):
+    require(digest(old) == digest(new), "Joppa context changed during planning; read the criterion again")
