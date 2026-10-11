@@ -179,6 +179,12 @@ sh ./lane-launcher/planner-ntk.sh /path/to/config.json             # loop
 ```
 
 Run these commands from the Crew repository root, as you run Dolber.
+In a terminal, continuous mode shows the latest 30 runs in an updating table.
+Active runs appear first. Each row shows the start time, ticket, status, stage or reason code, run ID, and duration.
+The table updates every five seconds. A small terminal shows fewer rows to keep the table on screen.
+The dashboard reads existing logs and run results. It adds no history files.
+`--once`, `--dry-run`, and redirected output keep the text output.
+Ctrl+C stops the current planning process before it releases the dispatcher lock.
 It uses Dolber's configuration. Each tick it reads `blocked` tickets with the
 planner tag filter. A failed lane keeps the dispatch tag. A published NOT_READY
 removes that tag. Other planner tags can still match the ticket, but the dispatcher
@@ -190,7 +196,7 @@ result. A ticket unchanged since the last completed attempt is skipped.
 If preflight fails before planning starts, continuous mode takes the next ticket.
 It retries skipped tickets in the next cycle after the configured interval.
 It does not mark these tickets processed. Invalid startup settings and an existing dispatcher lock still stop startup.
-The existing sync log records the failure. With `--once`, the dispatcher exits
+The existing dispatch log records the preflight output and failure. With `--once`, the dispatcher exits
 unsuccessfully instead of repeating the attempt.
 If a repository only advanced by commits while a run planned (clean tree before
 and after, old HEAD an ancestor of the new one), finish first sends the landed
