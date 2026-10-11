@@ -13,15 +13,16 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {request} from '../lane-launcher/ntk.mjs';
 import {closeParents} from './ntk.mjs';
+import {createPlannerDashboard, tail} from './dashboard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = stream => !process.env.NO_COLOR && process.env.FORCE_COLOR !== '0' &&
   (stream.isTTY || (process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== '0'));
-const tones = {blue: '1;34', green: '1;32', yellow: '1;33', red: '1;31', title: 33, label: 37, line: 36, ticket: '1;36'};
+const tones = {blue: '1;34', green: '1;32', yellow: '1;33', red: '1;31', title: 33, label: 37, line: 36, ticket: '1;36', ready: '1;38;2;70;230;90', finished: 37, accent: '1;36'};
 const paint = (tone, text, stream = process.stdout) => useColor(stream) ? `\x1b[${tones[tone]}m${text}\x1b[0m` : String(text);
 const field = (label, value) => console.log(`  ${paint('label', `${label}:`)} ${value}`);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
@@ -125,7 +126,47 @@ export function lock(stateDir, pid = process.pid) {
 // canonical repository and re-index it, through the lane image. Planning reads
 // the canonical worktrees and CBM, so without it plans stale code and research
 // blocks on metadata_changed.
-function syncSources(config, logs) {
+// Keep child output in the existing log while the terminal remains responsive.
+export async function runLogged(command, args, log, {signal, env = process.env} = {}) {
+  signal?.throwIfAborted();
+  const fd = fs.openSync(log, 'a');
+  try {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(command, args, {stdio: ['ignore', fd, fd], env, detached: true});
+      const kill = sig => {
+        if (!child.pid) return false;
+        try { process.kill(-child.pid, sig); return true; }
+        catch (error) { if (error.code !== 'ESRCH') throw error; return false; }
+      };
+      let termination;
+      const abort = () => {
+        termination ??= (async () => {
+          if (!kill('SIGTERM')) return;
+          const deadline = Date.now() + 5000;
+          while (kill(0) && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          kill('SIGKILL');
+        })();
+      };
+      signal?.addEventListener('abort', abort, {once: true});
+      if (signal?.aborted) abort();
+      const complete = async (error, status, childSignal) => {
+        signal?.removeEventListener('abort', abort);
+        try {
+          await termination;
+          if (signal?.aborted) reject(signal.reason);
+          else if (error) reject(error);
+          else resolve({status, signal: childSignal});
+        } catch (error) { reject(error); }
+      };
+      child.once('error', error => { void complete(error); });
+      child.once('close', (status, childSignal) => { void complete(null, status, childSignal); });
+    });
+  } finally { fs.closeSync(fd); }
+}
+
+async function syncSources(config, log, signal) {
   for (const key of ['cbmCommand', 'cbmCache', 'image']) {
     if (!config[key]) throw new Error(`Config needs ${{cbmCommand: 'cbmMcpCommand', cbmCache: 'cbmCacheDir', image: 'image'}[key]} to refresh sources`);
   }
@@ -138,21 +179,14 @@ function syncSources(config, logs) {
       [[path.join(crew, 'lane-launcher/safe-sync.py'), config.sourceRoot, connector, config.image], 'source and CBM refresh'],
     ]) {
       if (label === 'source and CBM refresh') fs.chmodSync(connector, 0o600);
-      const run = spawnSync('python3', args, {encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});
+      const run = await runLogged('python3', args, log, {signal});
       if (run.status !== 0) {
-        // Keep the whole output: the last line rarely names the cause.
-        fs.mkdirSync(logs, {recursive: true});
-        const log = path.join(logs, `sync-${Date.now()}.log`);
-        fs.writeFileSync(log, `${label}\n${run.stdout || ''}${run.stderr || ''}`);
-        const reason = `${label} failed: ${run.error?.message ||
-          (run.stderr || run.stdout || '').trim().split('\n').pop() || run.signal || run.status}`;
+        const reason = `${label} failed: ${tail(log).trim().split('\n').pop() || run.signal || run.status}`;
         if (run.status === 75) return {log, reason};
         throw new Error(`${reason}; see ${log}`);
       }
     }
-  } finally {
-    fs.rmSync(dir, {recursive: true, force: true});
-  }
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
 
 // The result of the planning run this tick started. The dispatcher names the
@@ -197,7 +231,12 @@ export function deferForDrift(result) {
     result.ticket_unchanged === true && result.published === false && result.publication_uncertain !== true;
 }
 
-export async function tick(configFile, config, {dryRun = false, deferred = new Set(), retryPoll = false} = {}) {
+async function tickOnce(configFile, config, {dryRun = false, deferred = new Set(), retryPoll = false, dashboard, signal, progress} = {}) {
+  const print = (...args) => { if (dashboard) dashboard.state.message = args.join(' ').trim(); else console.log(...args); };
+  const field = (label, value) => {
+    if (dashboard && ['Log', 'Started'].includes(label)) return;
+    print(`  ${paint('label', `${label}:`)} ${value}`);
+  };
   const state = readState(config);
   state.tickets ??= {};
   restoreChildren(config, state);
@@ -205,20 +244,21 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   let tickets;
   try { tickets = await blockedTickets(config); } catch (error) {
     if (!retryPoll || !['fetch failed', 'The operation was aborted due to timeout'].includes(error.message)) throw error;
-    console.log(paint('yellow', `DEFERRED · NTK queue poll failed: ${error.message}`));
+    print(paint('yellow', `DEFERRED · NTK queue poll failed: ${error.message}`));
     return null;
   }
   const {ready, held, childIds} = candidates(tickets, state);
-  divider();
-  console.log(paint('blue', 'PLANNER'));
-  field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
-  field('Tickets', `${paint('green', `${ready.length} ready to plan`)} · ${paint('yellow', `${held.length} held`)}`);
+  if (dashboard) { dashboard.state.counts = {ready: ready.length, held: held.length}; dashboard.state.error = null; }
+  if (!dashboard) divider();
+  if (!dashboard) print(paint('blue', 'PLANNER'));
+  if (!dashboard) field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
+  if (!dashboard) field('Tickets', `${paint('green', `${ready.length} ready to plan`)} · ${paint('yellow', `${held.length} held`)}`);
   for (const ticket of held) {
     if (state.tickets[ticket.id]?.held !== ticket.updated_at) {
       const drift = state.tickets[ticket.id]?.deferrals;
       const uncertain = state.tickets[ticket.id]?.failed?.uncertain;
-      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${uncertain ? 'PUBLICATION_UNCERTAIN' : `${drift.reason_code || 'INPUT_CHANGED'} · ${drift.count} deferrals`}`);
-      console.log(uncertain ? '  Inspect NTK and the publication receipt before resuming this run.' :
+      print(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${uncertain ? 'PUBLICATION_UNCERTAIN' : `${drift.reason_code || 'INPUT_CHANGED'} · ${drift.count} deferrals`}`);
+      print(uncertain ? '  Inspect NTK and the publication receipt before resuming this run.' :
         '  Check the failed run. Update the ticket when it is ready for another attempt.');
       if (!dryRun) state.tickets[ticket.id] = {...state.tickets[ticket.id], held: ticket.updated_at};
     }
@@ -226,8 +266,8 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   if (dryRun) {
     field('Mode', 'dry-run · tickets unchanged');
     for (const ticket of ready) {
-      console.log(`  ${paint('ticket', ticket.id)} · blocked since ${ticket.current_status_at || ticket.updated_at}`);
-      console.log(`    ${paint('title', ticket.title)}`);
+      print(`  ${paint('ticket', ticket.id)} · blocked since ${ticket.current_status_at || ticket.updated_at}`);
+      print(`    ${paint('title', ticket.title)}`);
     }
     return null;
   }
@@ -235,67 +275,71 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   const ticket = ready.find(item => !deferred.has(item.id));
   if (!ticket) {
     const pending = ready.filter(item => deferred.has(item.id)).length;
-    console.log(paint('label', pending ? `IDLE · ${pending} deferred until next cycle` :
+    print(paint('label', pending ? `IDLE · ${pending} deferred until next cycle` :
       'IDLE · no changed blocked tickets to plan'));
     return null;
   }
   const started = Date.now();
-  console.log(`\n${paint('blue', 'RUNNING')} ${paint('ticket', ticket.id)}`);
-  console.log(`  ${paint('title', ticket.title)}`);
+  print(`\n${paint('blue', 'RUNNING')} ${paint('ticket', ticket.id)}`);
+  print(`  ${paint('title', ticket.title)}`);
   field('Started', new Date(started).toISOString());
   const logs = path.join(config.stateDir, 'dispatch-logs');
   fs.mkdirSync(logs, {recursive: true});
   let run, runName, log, result;
   for (let attempt = 0; ; attempt++) {
-    field('Stage', paint('blue', 'preflight · Git and CBM'));
-    let preflight;
-    try { preflight = syncSources(config, logs); }
-    catch (error) { preflight = {reason: error.message, log: logs}; }
-    if (preflight) {
-      console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preflight failed`);
-      field('Reason', paint('yellow', preflight.reason));
-      field('Log', preflight.log);
-      return {id: ticket.id, environment: true, preflight: true, log: preflight.log};
-    }
-    field('Stage', paint('blue', 'planning · research, design and review'));
     runName = `dispatch-${ticket.id}-${Date.now()}`;
     log = path.join(logs, `${runName}.log`);
+    progress.current = {ticket: ticket.id, runId: runName, start: new Date().toISOString(), stage: 'preflight', log};
+    fs.appendFileSync(log, `[planner] START ${progress.current.start}\n`);
+    if (dashboard) dashboard.state.current = progress.current;
+    field('Stage', paint('blue', 'preflight · Git and CBM'));
+    let preflight;
+    try { preflight = await syncSources(config, log, signal); }
+    catch (error) { if (signal?.aborted) throw error; preflight = {reason: error.message, log}; }
+    if (preflight) {
+      print(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preflight failed`);
+      field('Reason', paint('yellow', preflight.reason));
+      field('Log', preflight.log);
+      return {id: ticket.id, environment: true, preflight: true, log: preflight.log, reasonCode: 'PREFLIGHT_FAILED'};
+    }
+    field('Stage', paint('blue', 'planning · research, design and review'));
+    progress.current.stage = 'planning';
     field('Log', log);
     // Keep this ticket held if launch or result handling fails unexpectedly.
     state.tickets[ticket.id] = {...state.tickets[ticket.id],
       failed: {at: new Date().toISOString(), log, uncertain: true}};
     state.preferChildren = !childIds.has(ticket.id);
     saveState(config, state);
-    run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
-      {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
-    fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
+    run = await runLogged('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id], log,
+      {signal, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
     result = runResult(config, runName);
     if (result?.preflight_timeout === true && result.ticket_unchanged === true && result.published === false &&
         result.publication_uncertain !== true && !fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json'))) {
-      console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preparation timed out`);
+      print(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preparation timed out`);
       field('Reason', paint('yellow', result.reason));
       field('Log', log);
       delete state.tickets[ticket.id].failed;
       saveState(config, state);
-      return {id: ticket.id, environment: true, preflight: true, reason: result.reason, log};
+      return {id: ticket.id, environment: true, preflight: true, reason: result.reason, reasonCode: 'PREFLIGHT_TIMEOUT', log};
     }
     if (run.status === 75 && !fs.existsSync(path.join(config.stateDir, 'runs', runName))) {
-      console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · role check timed out`);
+      print(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · role check timed out`);
       field('Log', log);
       delete state.tickets[ticket.id].failed;
       saveState(config, state);
-      return {id: ticket.id, environment: true, preflight: true, log};
+      return {id: ticket.id, environment: true, preflight: true, reasonCode: 'PREFLIGHT_TIMEOUT', log};
     }
     if (run.status === 0 || !replanForDrift(result, attempt) ||
         fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json'))) break;
     delete state.tickets[ticket.id].failed;
     saveState(config, state);
+    finishLog(progress, {status: 'DEFERRED', reasonCode: 'INPUT_CHANGED'});
     field('Stage', paint('yellow', 'source changed during planning · planning once more against current code'));
   }
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
-  const last = (run.stderr || run.stdout || '').trim().split('\n').pop() || '';
+  const last = tail(log).trim().split('\n').pop() || '';
   // Do not mark an incomplete run processed. Defer or hold that ticket.
   // Continuous mode serves the remaining queue. A published
   // NOT_READY is a verdict and is recorded like any other.
@@ -304,8 +348,10 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
     fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json')));
   const postpone = !uncertain && (deferForDrift(result) || incompleteRun);
   const verdict = deferForDrift(result) ? 'DEFERRED' : incompleteRun ? 'FAILED' : result.verdict ?? 'UNKNOWN';
+  progress.verdict = verdict;
+  progress.reasonCode = deferForDrift(result) ? 'INPUT_CHANGED' : result?.failure_class || (verdict === 'NEEDS_HUMAN' ? 'HUMAN' : incompleteRun ? 'PLANNING_FAILED' : verdict === 'NOT_READY' ? 'NOT_READY' : '');
   const tone = verdict === 'READY' ? 'green' : verdict === 'DECOMPOSED' ? 'blue' : ['NOT_READY', 'NEEDS_HUMAN', 'DEFERRED'].includes(verdict) ? 'yellow' : 'red';
-  console.log(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  print(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
   field('Exit', run.status ?? run.signal ?? run.error?.message ?? 'unknown');
   if (result?.reason || (run.status !== 0 && last)) field('Reason', paint(tone, result?.reason || last));
   if (verdict === 'NEEDS_HUMAN') {
@@ -336,47 +382,105 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   return {id: ticket.id, exit: run.status};
 }
 
+function finishLog(progress, {status, reasonCode = ''}) {
+  if (!progress.current) return;
+  fs.appendFileSync(progress.current.log, `[planner] FINISH ${JSON.stringify({status, reasonCode, finishedAt: new Date().toISOString()})}\n`);
+  progress.current = null;
+}
+
+export async function tick(configFile, config, options = {}) {
+  const progress = {};
+  try {
+    const result = await tickOnce(configFile, config, {...options, progress});
+    finishLog(progress, {status: progress.verdict || (result?.preflight ? 'DEFERRED' : 'FAILED'),
+      reasonCode: progress.reasonCode ?? result?.reasonCode ?? 'PLANNING_FAILED'});
+    return result;
+  } catch (error) {
+    finishLog(progress, {status: options.signal?.aborted ? 'INTERRUPTED' : 'FAILED',
+      reasonCode: options.signal?.aborted ? 'INTERRUPTED' : 'PLANNING_FAILED'});
+    throw error;
+  } finally { if (options.dashboard) options.dashboard.state.current = null; }
+}
+
 async function main(argv) {
   const configFile = argv.find(arg => !arg.startsWith('--'));
   if (!configFile) throw new Error('usage: dispatch.mjs CONFIG.json [--once] [--dry-run]');
   const file = path.resolve(configFile);
   const config = settings(file);
-  const dryRun = argv.includes('--dry-run');
-  if (dryRun) return tick(file, config, {dryRun});
+  if (argv.includes('--dry-run')) return tick(file, config, {dryRun: true});
+  const once = argv.includes('--once');
   const held = lock(config.stateDir);
-  process.on('exit', () => { try { if (fs.readFileSync(held, 'utf8') === String(process.pid)) fs.unlinkSync(held); } catch {} });
-  process.on('SIGINT', () => process.exit(130));
-  process.on('SIGTERM', () => process.exit(143));
+  const unlock = () => { try { if (fs.readFileSync(held, 'utf8') === String(process.pid)) fs.unlinkSync(held); } catch {} };
+  process.once('exit', unlock);
+  const controller = new AbortController();
+  let stopped = false, wake, deadline;
+  const stop = code => { stopped = true; process.exitCode = code; controller.abort(); wake?.(); };
+  const interrupt = () => stop(130);
+  const terminate = () => stop(143);
+  process.on('SIGINT', interrupt);
+  process.on('SIGTERM', terminate);
+  const dashboard = process.stdout.isTTY && !once ? createPlannerDashboard(config, paint) : null;
+  const draw = () => {
+    try { dashboard?.draw(deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null); }
+    catch (error) { if (dashboard) dashboard.state.error = `Display error: ${error.message}`; }
+  };
+  const ticker = dashboard ? setInterval(draw, 5000) : null;
+  const report = message => {
+    if (dashboard) dashboard.state.fail(message);
+    else console.error(paint('red', message, process.stderr));
+  };
   const deferred = new Set();
-  do {
-    let result;
-    try { result = await tick(file, config, {deferred, retryPoll: !argv.includes('--once')}); }
-    catch (error) {
-      if (argv.includes('--once')) throw error;
-      console.error(paint('red', `PLANNER FAILED · ${error.message}`, process.stderr));
+  try {
+    draw();
+    while (!stopped) {
+      let result;
+      try { result = await tick(file, config, {deferred, retryPoll: !once, dashboard, signal: controller.signal}); }
+      catch (error) {
+        if (stopped) break;
+        if (once) throw error;
+        report(`PLANNER FAILED · ${error.message}`);
+      }
+      draw();
+      if (stopped) break;
+      if (result?.deferred) {
+        deferred.add(result.id);
+        if (once) { if (result.exit !== 0) process.exitCode = 1; break; }
+        continue;
+      }
+      if (result?.uncertain) {
+        report(`HELD · publication for ${result.id} started and did not confirm; ` +
+          (result.reason ? `${result.reason}; ` : '') + `inspect the ticket in NTK before any other run of it; see ${result.log}`);
+        if (once) { process.exitCode = 1; break; }
+        continue;
+      }
+      if (result?.environment) {
+        if (once) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
+        deferred.add(result.id);
+        continue;
+      }
+      if (once) break;
+      deferred.clear();
+      deadline = Date.now() + config.interval * 1000;
+      if (!dashboard) console.log(`\n${paint('blue', `Pause ${config.interval}s`)} · Ctrl+C to stop\n`);
+      draw();
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, config.interval * 1000);
+        wake = () => { clearTimeout(timer); resolve(); };
+        if (stopped) wake();
+      });
+      wake = null;
+      deadline = null;
     }
-    if (result?.deferred) {
-      deferred.add(result.id);
-      if (argv.includes('--once')) { if (result.exit !== 0) process.exitCode = 1; break; }
-      continue;
+  } finally {
+    clearInterval(ticker);
+    try { dashboard?.close(); }
+    finally {
+      process.off('SIGINT', interrupt);
+      process.off('SIGTERM', terminate);
+      process.off('exit', unlock);
+      unlock();
     }
-    if (result?.uncertain) {
-      console.error(paint('red', `HELD · publication for ${result.id} started and did not confirm; ` +
-        (result.reason ? `${result.reason}; ` : '') + `inspect the ticket in NTK ` +
-        `before any other run of it; see ${result.log}`, process.stderr));
-      if (argv.includes('--once')) { process.exitCode = 1; break; }
-      continue;
-    }
-    if (result?.environment) {
-      if (argv.includes('--once')) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
-      deferred.add(result.id);
-      continue;
-    }
-    if (argv.includes('--once')) break;
-    deferred.clear();
-    console.log(`\n${paint('blue', `Pause ${config.interval}s`)} · Ctrl+C to stop\n`);
-    await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
-  } while (true);
+  }
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -77,6 +77,54 @@ function reasonFor(run) {
   return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
+export function renderRunTable(rows, paint, reserved = 7) {
+  const width = Math.max(30, process.stdout.columns || 80);
+  const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
+    Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
+  const statusWidth = Math.min(8, Math.max(6, ...recent.map(row => row.status.length)));
+  const ticketWidth = Math.max(6, ...recent.map(row => Array.from(plain(row.ticket)).length));
+  const stageWidth = 24;
+  const runWidth = Math.max(36, ...recent.map(row => row.runId.length));
+  const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 37) / width);
+  const visible = recent.slice(0, Math.max(0,
+    Math.floor(((process.stdout.rows || 24) - reserved - rowHeight) / rowHeight)));
+  const output = [`${'STARTED'.padEnd(19)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+  for (const row of visible) {
+    const date = new Date(row.start);
+    const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
+    const identity = `${started.padEnd(19)}  ${clip(row.ticket, ticketWidth).padEnd(ticketWidth)}`;
+    const label = clip(row.status, statusWidth).padEnd(statusWidth);
+    const details = `${clip(row.stage || '', stageWidth).padEnd(stageWidth)}  ${row.runId.padEnd(runWidth)}  ${duration(row.start, row.end || Date.now())}`;
+    const success = ['READY', 'DECOMPOSED'].includes(row.status);
+    const tone = row.active ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED', 'HELD'].includes(row.status) ? 'yellow' : 'red';
+    output.push(success ? paint('ready', `${identity}  ${label}  ${details}`) :
+      `${row.active ? identity : paint('finished', identity)}  ${paint(tone, label)}  ${row.active ? details : paint('finished', details)}`);
+  }
+  if (!rows.length) output.push('No runs yet');
+  return output;
+}
+
+export function createScreen(state, paint, render) {
+  const restore = () => process.stdout.write('\x1b[?25h\x1b[?1049l');
+  state.fail = message => {
+    if (state.error === message) return;
+    state.error = message;
+    restore();
+    console.error(`${new Date().toISOString()} ${paint('red', message)}`);
+    process.stdout.write('\x1b[?1049h\x1b[?25l');
+  };
+  process.once('exit', restore);
+  process.stdout.write('\x1b[?1049h\x1b[?25l');
+  return {
+    draw(left) { process.stdout.write('\x1b[H\x1b[J' + render(left)); },
+    close() {
+      restore();
+      process.off('exit', restore);
+      process.stdout.write(render(null, true) + '\n');
+    },
+  };
+}
+
 export function createDashboard(config, paint) {
   const state = {containers: [], counts: null, message: 'Checking tickets', error: null};
   let runs = [];
@@ -93,12 +141,6 @@ export function createDashboard(config, paint) {
     }
     runs.sort((a, b) => Number(Boolean(a.result)) - Number(Boolean(b.result)) ||
       Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    const recent = runs.slice(0, 15);
-    const statusWidth = Math.min(8, Math.max(6, ...recent.map(run => statusFor(run).length)));
-    const stageWidth = 24;
-    const ticketWidth = Math.max(6, ...recent.map(run => Array.from(plain(run.ticket)).length));
-    const runWidth = 36;
-    const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 37) / width);
     const folders = new Set(runs.map(run => run.runFolder));
     const active = runs.filter(run => !run.result).length +
       state.containers.filter(container => !folders.has(container.runFolder)).length;
@@ -108,53 +150,24 @@ export function createDashboard(config, paint) {
       clip(`workspace: ${config.workspace} · tags: ${config.tags.join(', ') || '(any)'} · strict: ${config.strict}`, width),
       counts ? clip(`Tickets: ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
       clip(`prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
-      '─'.repeat(width),
-      `${'STARTED'.padEnd(19)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+      '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
-    // Account for wrapped rows without shortening the ticket or run ID.
-    const visible = runs.slice(0, Math.min(15,
-      Math.max(0, Math.floor(((process.stdout.rows || 24) - 7 - footer.length - rowHeight) / rowHeight))));
-    for (const run of visible) {
+    const rows = runs.slice(0, 30).map(run => {
       const {result, worker} = run;
       const status = statusFor(run);
-      const tone = status === 'READY' ? 'ready' : status === 'BLOCKED' ? 'yellow' : result ? 'red' : 'blue';
       const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
-      const runId = path.basename(run.dir);
-      const start = worker?.startedAt || run.createdAt;
-      const date = new Date(start);
-      const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
-      const label = clip(status, statusWidth).padEnd(statusWidth);
-      const identity = `${started.padEnd(19)}  ${clip(run.ticket, ticketWidth).padEnd(ticketWidth)}`;
-      const details = `${clip(stage, stageWidth).padEnd(stageWidth)}  ${runId.padEnd(runWidth)}  ${duration(start, result?.finishedAt || Date.now())}`;
-      output.push(status === 'READY'
-        ? paint('ready', `${identity}  ${label}  ${details}`)
-        : `${result ? paint('finished', identity) : identity}  ${paint(status === 'LOST' ? 'red' : tone, label)}  ${result ? paint('finished', details) : details}`);
-    }
-    if (!runs.length) output.push('No lane runs yet');
+      return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
+        start: worker?.startedAt || run.createdAt, end: result?.finishedAt, active: !result && status !== 'LOST'};
+    });
+    output.push(...renderRunTable(rows, paint, 7 + footer.length));
     output.push(...footer);
     output.push(stopped ? 'Stopped' : left == null ? 'Checking tickets · Ctrl+C to stop' :
       `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);
     return output.join('\n');
   }
   refresh();
-  const restore = () => process.stdout.write('\x1b[?25h\x1b[?1049l');
-  state.fail = message => {
-    if (state.error === message) return;
-    state.error = message;
-    // Keep full dispatcher errors in the normal terminal scrollback.
-    restore();
-    console.error(`${new Date().toISOString()} ${paint('red', message)}`);
-    process.stdout.write('\x1b[?1049h\x1b[?25l');
-  };
-  process.once('exit', restore);
-  process.stdout.write('\x1b[?1049h\x1b[?25l');
   return {
     state, refresh,
-    draw(left) { process.stdout.write('\x1b[H\x1b[J' + lines(left)); },
-    close() {
-      restore();
-      process.off('exit', restore);
-      process.stdout.write(lines(null, true) + '\n');
-    },
+    ...createScreen(state, paint, lines),
   };
 }
