@@ -86,7 +86,11 @@ async function blockedTickets(config) {
 
 const stateFile = config => path.join(config.stateDir, 'dispatch.json');
 function readState(config) {
-  try { return JSON.parse(fs.readFileSync(stateFile(config), 'utf8')); } catch { return {tickets: {}}; }
+  try { return JSON.parse(fs.readFileSync(stateFile(config), 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT') return {tickets: {}};
+    throw new Error(`Cannot read planner state ${stateFile(config)}: ${error.message}`);
+  }
 }
 function saveState(config, state) {
   fs.mkdirSync(config.stateDir, {recursive: true});

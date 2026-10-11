@@ -204,6 +204,7 @@ also defers its ticket, including similarity service and agent failures.
 The same three-deferral limit applies. The failed run has no processed stamp.
 Preflight failures skip the selected ticket for the current cycle.
 Queue polling errors wait for the configured interval without exiting continuous mode.
+Unreadable or malformed dispatcher state also pauses selection. It never resets recorded publication holds.
 `--once` still exits unsuccessfully after a failed attempt.
 Uncertain publication holds only that ticket, including after a dispatcher restart.
 Other tickets continue. Inspect the ticket and receipt before another run.
