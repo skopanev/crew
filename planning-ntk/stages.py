@@ -414,7 +414,10 @@ def validate_creation_review(plan, review):
         text(check.get("reason"), "similarity reason")
         require(check["distinct"] or review["verdict"] == "reject", "Same work must block new creation")
         seen.add(pair)
-    require(seen == expected, "Review every similar ticket before child creation")
+    missing = sorted(expected - seen)
+    if missing:
+        raise ValueError("Missing similarity decisions: " +
+                         ", ".join(f"{task}/{id}" for task, id in missing))
 
 
 def publication_input():

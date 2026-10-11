@@ -77,14 +77,16 @@ Attachments carry the full plan, necessity assessment, and reviews. They do not 
 | Valid READY plan with blocked research | Review and publish NOT_READY with the research blockers. Do not stop the queue. |
 | Critics reject the revised plan | Publish NOT_READY: the blocking findings become the reason, and the reviews go in the attachment. |
 | NEEDS_HUMAN | Set `blocked`, prefix the title with `[HUMAN]`, assign the named person, remove its dispatch tag, and attach the exact decision. |
-| Planning did not complete (tool, agent or environment failure) | Leave the ticket unchanged and record nothing as processed. Fix the cause and plan again. |
-| Publication started and failed | Record `publication_uncertain`; part of the result may be in NTK. An operator inspects the ticket before another run. |
+| Planning did not complete (tool, agent or environment failure) | Defer the ticket unchanged and continue the queue. Record nothing as processed. |
+| Publication started and failed | Hold that ticket and continue the queue. An operator inspects NTK before another run. |
 | Input changed before any NTK write | Defer the ticket and continue the queue. Retry it in a later cycle. |
 
 The adapter marks publication before its first NTK write. Attachment uploads count as writes.
 Existing child receipts also require inspection after a failed resume.
 Deferred tickets keep their tags and have no processed stamp. A cycle does not select a deferred ticket again.
 After three deferrals, the ticket waits for an operator. Other tickets continue.
+Missing candidate decisions name each omitted task and ticket ID in the retry error.
+Incomplete reviews never permit publication. Agent failures also leave the ticket unchanged.
 Check the changing inputs, then update the ticket to permit another attempt.
 `--once` returns after its selected ticket, including a deferral.
 
@@ -176,9 +178,9 @@ A `[HUMAN]` ticket stays out until its configured dispatch tag is added again.
 An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
 and runs this workflow for it in a run directory it names, then reads that run's
 result. A ticket unchanged since the last completed attempt is skipped.
-If the CBM connection times out before planning starts, continuous mode waits
-the configured interval and retries.
-It does not mark the ticket processed. Configuration and repository faults still stop the dispatcher.
+If preflight fails before planning starts, continuous mode takes the next ticket.
+It retries skipped tickets in the next cycle after the configured interval.
+It does not mark these tickets processed. Invalid startup settings and an existing dispatcher lock still stop startup.
 The existing sync log records the failure. With `--once`, the dispatcher exits
 unsuccessfully instead of repeating the attempt.
 If a repository only advanced by commits while a run planned (clean tree before
@@ -197,15 +199,17 @@ the role contracts load, immediately before publication; that check is not
 atomic with the NTK write.
 If the source changed while a run planned (`code_drift`, nothing published), the
 dispatcher refreshes sources and plans the same ticket once more. A second drift
-defers that ticket while the queue continues. A confirmed similarity service outage
-before publication pauses continuous mode. The dispatcher probes the same workspace
-at the configured interval. It starts no agents while the service remains unavailable.
-When search responds, the dispatcher plans again against current inputs.
-The failed run remains available. It has no processed stamp and changes no ticket.
-Disabled search also permits the queue to continue. `--once` still exits unsuccessfully.
-Other runs without a verdict stop the loop and have no processed stamp: the
-environment failed before publication, or a publication started and did not
-confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
+defers that ticket while the queue continues. Every incomplete run before publication
+also defers its ticket, including similarity service and agent failures.
+The same three-deferral limit applies. The failed run has no processed stamp.
+Preflight failures skip the selected ticket for the current cycle.
+Queue polling errors wait for the configured interval without exiting continuous mode.
+`--once` still exits unsuccessfully after a failed attempt.
+Uncertain publication holds only that ticket, including after a dispatcher restart.
+Other tickets continue. Inspect the ticket and receipt before another run.
+Before launching a run, the dispatcher saves a conservative hold in its existing state.
+It clears the hold after a confirmed result or a handled failure without a publication marker.
+An unexpected error after launch keeps the hold and prevents automatic publication repeats.
 After `publication_uncertain`, compare the ticket and `publication.json` in NTK
 before any other run; resume only a confirmed parent publication.
 A ticket with a retained `<sourceRoot>/.worktrees/<ticket>` is reported once and

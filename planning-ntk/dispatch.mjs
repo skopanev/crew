@@ -16,7 +16,6 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {request} from '../lane-launcher/ntk.mjs';
-import {find} from './ntk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = stream => !process.env.NO_COLOR && process.env.FORCE_COLOR !== '0' &&
@@ -55,6 +54,10 @@ export const MAX_DEFERRALS = 3;
 export function candidates(tickets, state) {
   const ready = [], held = [];
   for (const ticket of tickets) {
+    if (state.tickets?.[ticket.id]?.failed?.uncertain) {
+      held.push(ticket);
+      continue;
+    }
     if (state.tickets?.[ticket.id]?.stamp === ticket.updated_at) continue;
     const deferred = state.tickets?.[ticket.id]?.deferrals;
     const exhausted = deferred?.stamp === ticket.updated_at && deferred.count >= MAX_DEFERRALS;
@@ -152,8 +155,8 @@ export function runResult(config, name) {
 
 // A run that left no verdict: the environment failed before publication
 // (ticket_unchanged), or a publication started and did not confirm. Neither
-// is marked processed. Uncertain publication stops for an operator.
-// A search outage pauses continuous mode until a read-only probe succeeds.
+// is marked processed. Uncertain publication holds that ticket for an operator.
+// Other failed runs defer that ticket while continuous mode serves the queue.
 // Code moved under a run that published nothing: plan it again once against
 // current code. A second drift defers the ticket until a later cycle.
 export const DRIFT_RETRIES = 1;
@@ -163,7 +166,7 @@ export function replanForDrift(result, attempt) {
 }
 
 export function incomplete(result) {
-  return !result || result.ticket_unchanged === true || result.publication_uncertain === true;
+  return !result?.verdict || result.ticket_unchanged === true || result.publication_uncertain === true;
 }
 
 export function deferForDrift(result) {
@@ -188,8 +191,10 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   for (const ticket of held) {
     if (state.tickets[ticket.id]?.held !== ticket.updated_at) {
       const drift = state.tickets[ticket.id]?.deferrals;
-      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${drift.count} input changes`);
-      console.log('  Check the changing inputs. Update the ticket when it is ready for another attempt.');
+      const uncertain = state.tickets[ticket.id]?.failed?.uncertain;
+      console.log(`${paint('yellow', 'HELD')} ${paint('ticket', ticket.id)} · ${uncertain ? 'PUBLICATION_UNCERTAIN' : `${drift.reason_code || 'INPUT_CHANGED'} · ${drift.count} deferrals`}`);
+      console.log(uncertain ? '  Inspect NTK and the publication receipt before resuming this run.' :
+        '  Check the failed run. Update the ticket when it is ready for another attempt.');
       if (!dryRun) state.tickets[ticket.id] = {...state.tickets[ticket.id], held: ticket.updated_at};
     }
   }
@@ -205,7 +210,7 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   const ticket = ready.find(item => !deferred.has(item.id));
   if (!ticket) {
     const pending = ready.filter(item => deferred.has(item.id)).length;
-    console.log(paint('label', pending ? `IDLE · ${pending} deferred for drift until next cycle` :
+    console.log(paint('label', pending ? `IDLE · ${pending} deferred until next cycle` :
       'IDLE · no changed blocked tickets to plan'));
     return null;
   }
@@ -218,7 +223,9 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   let run, runName, log, result;
   for (let attempt = 0; ; attempt++) {
     field('Stage', paint('blue', 'preflight · Git and CBM'));
-    const preflight = syncSources(config, logs);
+    let preflight;
+    try { preflight = syncSources(config, logs); }
+    catch (error) { preflight = {reason: error.message, log: logs}; }
     if (preflight) {
       console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preflight failed`);
       field('Reason', paint('yellow', preflight.reason));
@@ -229,6 +236,10 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
     runName = `dispatch-${ticket.id}-${Date.now()}`;
     log = path.join(logs, `${runName}.log`);
     field('Log', log);
+    // Keep this ticket held if launch or result handling fails unexpectedly.
+    state.tickets[ticket.id] = {...state.tickets[ticket.id],
+      failed: {at: new Date().toISOString(), log, uncertain: true}};
+    saveState(config, state);
     run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
       {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
     fs.writeFileSync(log, (run.stdout || '') + (run.stderr || ''));
@@ -238,25 +249,35 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
       console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · preparation timed out`);
       field('Reason', paint('yellow', result.reason));
       field('Log', log);
+      delete state.tickets[ticket.id].failed;
+      saveState(config, state);
       return {id: ticket.id, environment: true, preflight: true, reason: result.reason, log};
     }
     if (run.status === 75 && !fs.existsSync(path.join(config.stateDir, 'runs', runName))) {
       console.log(`\n${paint('yellow', 'DEFERRED')} ${paint('ticket', ticket.id)} · role check timed out`);
       field('Log', log);
+      delete state.tickets[ticket.id].failed;
+      saveState(config, state);
       return {id: ticket.id, environment: true, preflight: true, log};
     }
-    if (run.status === 0 || !replanForDrift(result, attempt)) break;
+    if (run.status === 0 || !replanForDrift(result, attempt) ||
+        fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json'))) break;
+    delete state.tickets[ticket.id].failed;
+    saveState(config, state);
     field('Stage', paint('yellow', 'source changed during planning · planning once more against current code'));
   }
   // Record the ticket as it is after planning, so only a later change brings it back.
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
   const last = (run.stderr || run.stdout || '').trim().split('\n').pop() || '';
-  // Do not mark an incomplete run processed. A search outage pauses the queue.
-  // Other environment failures stop the loop. A published
+  // Do not mark an incomplete run processed. Defer or hold that ticket.
+  // Continuous mode serves the remaining queue. A published
   // NOT_READY is a verdict and is recorded like any other.
-  const postpone = deferForDrift(result);
-  const verdict = postpone ? 'DEFERRED' : incomplete(result) ? 'FAILED' : result.verdict ?? 'UNKNOWN';
+  const incompleteRun = incomplete(result);
+  const uncertain = incompleteRun && (result?.publication_uncertain === true ||
+    fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json')));
+  const postpone = !uncertain && (deferForDrift(result) || incompleteRun);
+  const verdict = deferForDrift(result) ? 'DEFERRED' : incompleteRun ? 'FAILED' : result.verdict ?? 'UNKNOWN';
   const tone = verdict === 'READY' ? 'green' : verdict === 'DECOMPOSED' ? 'blue' : ['NOT_READY', 'NEEDS_HUMAN', 'DEFERRED'].includes(verdict) ? 'yellow' : 'red';
   console.log(`\n${paint(tone, verdict)} ${paint('ticket', ticket.id)} · ${((Date.now() - started) / 1000).toFixed(1)}s`);
   field('Exit', run.status ?? run.signal ?? run.error?.message ?? 'unknown');
@@ -266,40 +287,25 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
     field('Decision', result.decision);
   }
   if (postpone) {
+    delete state.tickets[ticket.id].failed;
     const previous = state.tickets[ticket.id]?.deferrals;
     const count = (previous?.stamp === ticket.updated_at ? previous.count : 0) + 1;
     state.tickets[ticket.id] = {...state.tickets[ticket.id],
-      deferrals: {count, stamp: after, at: new Date().toISOString(), log}};
+      deferrals: {count, stamp: after, at: new Date().toISOString(), log,
+        reason_code: deferForDrift(result) ? 'INPUT_CHANGED' : 'PLANNING_FAILED'}};
     saveState(config, state);
-    return {id: ticket.id, deferred: true, log};
+    return {id: ticket.id, deferred: true, exit: incompleteRun && run.status === 0 ? 1 : run.status, log};
   }
-  if (run.status !== 0 && incomplete(result)) {
+  if (incompleteRun) {
     state.tickets[ticket.id] = {...state.tickets[ticket.id], failed: {exit: run.status, at: new Date().toISOString(), log,
-      uncertain: result?.publication_uncertain === true}};
+      uncertain}};
     saveState(config, state);
-    return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true,
-      searchUnavailable: result?.search_unavailable === true && result.ticket_unchanged === true &&
-        result.published === false &&
-        !fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json')),
+    return {id: ticket.id, exit: run.status, environment: true, uncertain,
       title: ticket.title, reason: result?.reason, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
   saveState(config, state);
   return {id: ticket.id, exit: run.status};
-}
-
-async function waitForSearch(config, title) {
-  for (;;) {
-    console.log(paint('yellow', `PAUSED · NTK similarity search unavailable · retry in ${config.interval}s · Ctrl+C to stop`));
-    await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
-    try {
-      await find({title}, config.workspace, 1);
-      console.log(paint('green', 'NTK similarity search ready · continuing planning'));
-      return;
-    } catch (error) {
-      if (error.code !== 'SEARCH_UNAVAILABLE') throw error;
-    }
-  }
 }
 
 async function main(argv) {
@@ -315,23 +321,28 @@ async function main(argv) {
   process.on('SIGTERM', () => process.exit(143));
   const deferred = new Set();
   do {
-    const result = await tick(file, config, {deferred, retryPoll: !argv.includes('--once')});
+    let result;
+    try { result = await tick(file, config, {deferred, retryPoll: !argv.includes('--once')}); }
+    catch (error) {
+      if (argv.includes('--once')) throw error;
+      console.error(paint('red', `PLANNER FAILED · ${error.message}`, process.stderr));
+    }
     if (result?.deferred) {
       deferred.add(result.id);
-      if (argv.includes('--once')) break;
+      if (argv.includes('--once')) { if (result.exit !== 0) process.exitCode = 1; break; }
       continue;
     }
     if (result?.uncertain) {
-      throw new Error(`publication for ${result.id} started and did not confirm; ` +
+      console.error(paint('red', `HELD · publication for ${result.id} started and did not confirm; ` +
         (result.reason ? `${result.reason}; ` : '') + `inspect the ticket in NTK ` +
-        `before any other run of it, and do not resume blindly; see ${result.log}`);
-    }
-    if (result?.searchUnavailable && !argv.includes('--once')) {
-      await waitForSearch(config, result.title);
+        `before any other run of it; see ${result.log}`, process.stderr));
+      if (argv.includes('--once')) { process.exitCode = 1; break; }
       continue;
     }
-    if (result?.environment && (!result.preflight || argv.includes('--once'))) {
-      throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
+    if (result?.environment) {
+      if (argv.includes('--once')) throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);
+      deferred.add(result.id);
+      continue;
     }
     if (argv.includes('--once')) break;
     deferred.clear();
