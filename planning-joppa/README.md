@@ -32,6 +32,10 @@ Keep required dependencies explicit. Do not remove them to bypass this prerequis
 Dry-run validates configuration without MCP calls, agent calls or writes.
 This entry point handles one AC. It does not run a dispatcher or change NTK planning.
 
+Crew planning updates only unclaimed implementation Tasks. It preserves human and other-purpose work.
+It skips unchanged documents and pins dependencies from the fresh context.
+Before each claim, it checks previous receipts for this endpoint, workspace and AC.
+Unresolved receipts block a new run. They require explicit recovery.
 Confirmed failures release this run's planning claim. Uncertain mutations retain their request receipts.
 Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
