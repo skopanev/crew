@@ -201,6 +201,40 @@ function sameFields(actual, wanted) {
     ? hash([...(actual[key] || [])].sort()) === hash([...value].sort()) : actual[key] === value);
 }
 
+export async function closeParents(config, state) {
+  for (const [id, entry] of Object.entries(state.tickets || {})) {
+    if (entry.exit !== 0 || entry.failed?.uncertain) continue;
+    try {
+      let receipt;
+      try { receipt = read(path.join(config.stateDir, id, 'publication.json')); }
+      catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+      if (receipt.complete !== true || receipt.parent?.status !== 'to_review') continue;
+      const children = Object.values(receipt.children || {}).map(child => child.id);
+      if (!children.length || !children.every(child => typeof child === 'string' && child.trim())) continue;
+      const current = await httpRequest('GET', route(id), {workspace: config.workspace});
+      if (current.ticket?.id !== id || current.ticket.removed || current.ticket.removed_at ||
+          !current.ticket.title.startsWith('[CLOSE AT NO DEPS] ') ||
+          !sameFields(current.ticket, receipt.parent) || !Number.isSafeInteger(current.revision_count) ||
+          current.revision_count !== receipt.parentRevision) continue;
+      const graph = await httpRequest('GET', `${route(id)}/deps`, {workspace: config.workspace});
+      require(Array.isArray(graph.up), 'NTK returned no dependency graph');
+      const direct = graph.up.filter(item => item.depth === 1);
+      const ids = direct.map(item => item.id);
+      if (!direct.length || direct.some(item => item.removed || item.status !== 'done') ||
+          hash([...ids].sort()) !== hash([...(current.ticket.deps || [])].sort()) ||
+          !children.every(child => ids.includes(child))) continue;
+      const latest = await httpRequest('GET', route(id), {workspace: config.workspace});
+      if (latest.revision_count !== current.revision_count || !sameFields(latest.ticket, receipt.parent)) continue;
+      await httpRequest('PATCH', route(id), {}, {workspace: config.workspace, status: 'done'});
+      const confirmed = await httpRequest('GET', route(id), {workspace: config.workspace});
+      require(confirmed.ticket?.status === 'done', 'Parent completion was not confirmed');
+      console.log(`CLOSED ${id} · all dependencies are done`);
+    } catch (error) {
+      console.error(`Parent completion deferred for ${id}: ${error.message}`);
+    }
+  }
+}
+
 async function activate(input, receipt, file, source) {
   const {workspace, plan} = input;
   const decomposing = plan.disposition === 'decompose';
@@ -280,7 +314,7 @@ async function publish(input) {
     await attachReport(source.id, workspace, `planning-ntk-${hash(plan).slice(0, 16)}.json`, report);
     await unchanged(input);
     const body = task?.body || plan.ntk.body, module = task?.module || source.module;
-    const deps = [...new Set([...(source.deps || []), ...(task?.external_dependencies || [])])];
+    const deps = [...new Set(task ? task.external_dependencies : source.deps || [])];
     await update(source.id, {status: 'open', title, body,
       module, dep_set: deps,
       tag_edits: input.dispatchTags.map(tag => `+${tag}`)});

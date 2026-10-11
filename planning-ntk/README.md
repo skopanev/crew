@@ -107,7 +107,9 @@ All children get dispatch tags, including children waiting for prerequisites.
 Decomposition returns `DECOMPOSED`. A prepared leaf returns `READY`; NTK dependencies still control execution.
 Each child reads coordinator bodies and attachments through the existing dependency graph.
 Source reports remain on their original tickets. The planner does not copy or nest attachment content.
-The workflow does not close the parent automatically.
+Before selecting work, the dispatcher closes its unchanged tracking parents when all direct dependencies are `done`.
+It requires a complete publication receipt and checks every recorded child.
+It leaves changed parents, uncertain publications and pending dependencies unchanged.
 
 ## Failure and retry
 
@@ -175,8 +177,8 @@ planner tag filter. A failed lane keeps the dispatch tag. A published NOT_READY
 removes that tag. Other planner tags can still match the ticket, but the dispatcher
 skips it until the ticket changes.
 A `[HUMAN]` ticket stays out until its configured dispatch tag is added again.
-An empty tag list is rejected. The dispatcher takes the longest-blocked ticket
-and runs this workflow for it in a run directory it names, then reads that run's
+An empty tag list is rejected. The dispatcher alternates decomposition children and other blocked tickets, oldest within each group.
+It runs this workflow in a run directory it names, then reads that run's
 result. A ticket unchanged since the last completed attempt is skipped.
 If preflight fails before planning starts, continuous mode takes the next ticket.
 It retries skipped tickets in the next cycle after the configured interval.
