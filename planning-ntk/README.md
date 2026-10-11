@@ -107,10 +107,12 @@ All children get dispatch tags, including children waiting for prerequisites.
 Decomposition returns `DECOMPOSED`. A prepared leaf returns `READY`; NTK dependencies still control execution.
 Each child reads coordinator bodies and attachments through the existing dependency graph.
 Source reports remain on their original tickets. The planner does not copy or nest attachment content.
-Before selecting work, the dispatcher closes its unchanged tracking parents when all direct dependencies are `done`.
-It requires a complete publication receipt and checks every recorded child.
-It leaves changed parents, uncertain publications and pending dependencies unchanged.
-Parents edited after publication, or receipts without `parentRevision`, require manual completion after dependency verification.
+Before selecting work, the dispatcher closes its tracking parents when all current direct dependencies are `done`.
+`[CLOSE AT NO DEPS]` identifies a tracking parent. Its current dependencies define completion.
+The dispatcher requires a complete publication receipt and checks the current parent again before closing it.
+Every recorded child must also be `done`, including children whose dependency edges were removed.
+Later edits and receipts without `parentRevision` do not require manual completion.
+`[HUMAN]` parents require a person. Uncertain publications and pending dependencies remain held.
 
 ## Failure and retry
 
