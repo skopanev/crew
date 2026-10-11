@@ -18,7 +18,7 @@ const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.st
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
 export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [], readWriteDirs: [], testCommand: [], image: 'medulla-crew:latest', dockerEngine: false,
+    preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};

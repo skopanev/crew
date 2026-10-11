@@ -48,12 +48,16 @@ export function laneArgs(config, ticket) {
     '--cbm-mcp-command', config.cbmMcpCommand, '--cbm-cache-dir', config.cbmCacheDir,
     '--test-command', JSON.stringify(config.testCommand || []),
     '--ssh-dir', config.sshDir,
+    ...(config.sharedLockDir ? ['--shared-lock-dir', config.sharedLockDir] : []),
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
     ...(config.readWriteDirs || []).flatMap(dir => ['--mount-rw', dir]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];
 }
 export function validateWritableDirs(config, ticket) {
-  if (!config.readWriteDirs?.length) return;
+  if (config.sharedLockDir != null && (typeof config.sharedLockDir !== 'string' || !config.sharedLockDir)) {
+    throw new Error('sharedLockDir must be an existing absolute directory');
+  }
+  if (!config.readWriteDirs?.length && !config.sharedLockDir) return;
   const protectedDirs = [config.sourceRoot, config.sshDir, config.cbmCacheDir,
     ...(config.readOnlyRepos || [])].filter(Boolean).map(dir => fs.realpathSync(dir));
   const names = new Set([config.sourceRoot, config.sshDir, ...(config.readOnlyRepos || [])]
@@ -63,7 +67,7 @@ export function validateWritableDirs(config, ticket) {
     const relative = path.relative(b, a);
     return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
   };
-  for (const folder of config.readWriteDirs) {
+  for (const folder of config.readWriteDirs || []) {
     const dir = fs.realpathSync(folder);
     if (protectedDirs.some(other => inside(dir, other) || inside(other, dir))) {
       throw new Error(`Writable directory overlaps a protected directory: ${folder}`);
@@ -72,6 +76,19 @@ export function validateWritableDirs(config, ticket) {
     if (names.has(name)) throw new Error(`Writable mount name is already in use: ${name}`);
     names.add(name);
     protectedDirs.push(dir);
+  }
+  if (config.sharedLockDir) {
+    const folder = config.sharedLockDir;
+    if (typeof folder !== 'string' || !path.isAbsolute(folder) || !fs.statSync(folder).isDirectory()) {
+      throw new Error('sharedLockDir must be an existing absolute directory');
+    }
+    const dir = fs.realpathSync(folder), root = fs.realpathSync(config.sourceRoot);
+    // The mount name must match the lock path above the lane checkout.
+    if (path.dirname(dir) !== root || protectedDirs.slice(1).some(other => inside(dir, other) || inside(other, dir)) ||
+        fs.existsSync(path.join(dir, '.git')) || ['.git', '.worktrees'].includes(path.basename(dir))) {
+      throw new Error(`Shared lock directory must be a direct child of sourceRoot outside protected directories: ${folder}`);
+    }
+    if (names.has(path.basename(dir))) throw new Error(`Writable mount name is already in use: ${path.basename(dir)}`);
   }
 }
 export function runDirectories(stateDir) {

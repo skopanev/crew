@@ -36,6 +36,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `cbmCacheDir` | Absolute path to the existing shared CBM store, matching the active CBM daemon. No store is created or copied |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `readWriteDirs` | Existing absolute directories mounted writable at `/workspace/<directory-name>`; defaults to `[]` |
+| `sharedLockDir` | One shared lock directory directly under `sourceRoot`, mounted writable at `/workspace/<directory-name>`; defaults to `null` |
 | `gateCommands` | Required check commands run against the lane's candidate |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
@@ -49,6 +50,8 @@ container at `/workspace/<ticket>`. Run artifacts and configured `readWriteDirs`
 A retained nonempty checkout is preserved; startup fails and reopens the confirmed claim.
 
 For a shared Gradle cache, set `"readWriteDirs": ["/absolute/path/gradle-cache"]`.
+For a shared tooling lock, set `sharedLockDir` to its existing parent directory under `sourceRoot`.
+That directory holds the lock and its queue. Repository, key and CBM directories remain protected.
 Create that directory before launch. Set `GRADLE_USER_HOME=/workspace/gradle-cache` in the project's check command.
 Writable directories must not overlap the source workspace, read-only folders, SSH directory or CBM store.
 Their directory names must be unique across mounts and must differ from the ticket ID.
