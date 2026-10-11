@@ -29,7 +29,7 @@ def item(address, parent=None, data=None, process=None, role=None):
 def assignment():
     task = context.source(item("work:old", "criterion:a", {"title": "Existing", "owner": "document-owner",
         "purpose": "implementation", "contract": "Existing contract", "projects": ["other"], "custom": "preserve"},
-        {"assignee": "worker", "status": "in_progress", "done": None, "retired": None}))
+        {"assignee": None, "status": "open", "done": None, "retired": None}))
     task["document"]["links"] = [{"target": "record:note", "relation": "related", "revision": 3, "blocking": False}]
     ac = context.source(item("criterion:a", "rule:r"))
     dependency = context.source(item("work:dependency", "criterion:b"))
@@ -160,6 +160,68 @@ class ProviderTests(unittest.TestCase):
         self.assertIn({"target": "work:dependency", "revision": 3, "relation": "depends_on", "blocking": True}, saved["links"])
         self.assertIn("1. Use the existing mechanism", saved["data"]["contract"])
         self.assertEqual(data, original)
+
+    def test_refuses_occupied_and_human_work(self):
+        value = plan()
+        value["tasks"][0].update(action="update", target="work:old", revision=3)
+        for field, setting in (("assignee", "worker"), ("claim", {"actor": "worker"}), ("status", "in_progress")):
+            data = assignment()
+            data["joppa"]["tasks"][0]["process"][field] = setting
+            with self.assertRaisesRegex(ValueError, "claimed Tasks"):
+                publication.operations(value, data)
+        for purpose in ("decision", "manual", "custom"):
+            data = assignment()
+            data["joppa"]["tasks"][0]["document"]["data"]["purpose"] = purpose
+            with self.assertRaisesRegex(ValueError, "only implementation"):
+                publication.operations(value, data)
+
+    def test_noop_prerequisite_keeps_fresh_reference_without_save(self):
+        data = assignment()
+        value = plan()
+        first = value["tasks"][0]
+        first.update(action="update", target="work:old", revision=3)
+        original = data["joppa"]["tasks"][0]
+        original["document"]["data"].update(title=first["title"], contract=publication.contract(first, value),
+                                             projects=["other", "p"])
+        second = deepcopy(first)
+        second.update(id="consumer", action="create", title="Consume existing work", depends_on=["first"])
+        del second["target"], second["revision"]
+        value["tasks"].append(second)
+        commands = publication.operations(value, data)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0]["command"]["data"]["title"], "Consume existing work")
+        self.assertIn({"target": "work:old", "revision": 3, "relation": "depends_on", "blocking": True},
+                      commands[0]["command"]["links"])
+        value["tasks"] = [first]
+        self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["finish_planning"])
+
+    def test_restart_refuses_unresolved_receipts_for_the_same_ac(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old" / "artifacts"
+            old.mkdir(parents=True)
+            claim = {"status": "confirmed", "server": "https://one.example/mcp", "arguments": {
+                "workspace": "example", "command": {"ac": "criterion:a"}}, "result": {"position": 22}}
+            (old / "claim.json").write_text(json.dumps(claim))
+            (old / "publication.json").write_text(json.dumps({"status": "uncertain"}))
+            current = root / "new" / "artifacts"
+            check = lambda url="https://one.example/mcp", ac="criterion:a": publication.ensure_recovered(
+                root, current, url, "example", ac)
+            with self.assertRaisesRegex(ValueError, "receipt recovery"):
+                check()
+            check("https://two.example/mcp")
+            check(ac="criterion:b")
+            (old / "publication.json").write_text(json.dumps({"status": "confirmed"}))
+            with self.assertRaisesRegex(ValueError, "publication needs recovery"):
+                check()
+            (old / "result.json").write_text(json.dumps({"status": "published"}))
+            check()
+            (old / "publication.json").unlink()
+            (old / "result.json").unlink()
+            with self.assertRaisesRegex(ValueError, "claim or publication"):
+                check()
+            (old / "release.json").write_text(json.dumps({"status": "confirmed"}))
+            check()
 
     def test_verification_creates_scoped_work_not_acceptance(self):
         value = plan()

@@ -1,10 +1,43 @@
 """Validate and publish reviewed Task mechanisms in one Joppa transaction."""
 from copy import deepcopy
+from pathlib import Path
 from uuid import uuid4
 
 from common import digest, read, require, strings, text, write
 from mcp import Rejected
 import validation
+
+
+def editable(task):
+    process = task["process"]
+    require(not process.get("done") and not process.get("retired"),
+            "completed or retired Tasks cannot be rewritten")
+    require(not process.get("assignee") and not process.get("claim")
+            and process.get("status") != "in_progress", "claimed Tasks cannot be rewritten by Crew planning")
+    require(task["document"]["data"].get("purpose") == "implementation",
+            "only implementation Tasks can be rewritten by Crew planning")
+
+
+def ensure_recovered(root, current, server, workspace, ac):
+    """Refuse another claim while an earlier run needs receipt recovery."""
+    for claim_file in Path(root).glob("*/artifacts/claim.json"):
+        target = claim_file.parent
+        if target.resolve() == current.resolve():
+            continue
+        claim = read(claim_file)
+        args = claim.get("arguments", {})
+        if args.get("workspace") != workspace or args.get("command", {}).get("ac") != ac:
+            continue
+        if claim.get("server") and claim["server"] != server:
+            continue
+        receipts = [read(target / name) for name in ("claim.json", "publication.json", "release.json")
+                    if (target / name).exists()]
+        require(not any(item.get("status") in ("pending", "uncertain") for item in receipts),
+                f"earlier run needs receipt recovery: {target}")
+        if claim.get("status") == "confirmed":
+            released = (target / "release.json").exists() and read(target / "release.json").get("status") == "confirmed"
+            finished = (target / "result.json").exists() and read(target / "result.json").get("status") == "published"
+            require(released or finished, f"earlier claim or publication needs recovery: {target}")
 
 
 def ordered_tasks(tasks):
@@ -52,8 +85,7 @@ def validate(plan, assignment):
             address = text(task.get("target"), "Task target")
             require(address in inventory and address not in targets, "update must target one existing Task under this AC")
             existing = inventory[address]
-            require(not existing["process"].get("done") and not existing["process"].get("retired"),
-                    "completed or retired Tasks cannot be rewritten")
+            editable(existing)
             require(task.get("revision") == existing["current_revision"], "Task source revision differs from the input")
             targets.add(address)
         else:
@@ -116,8 +148,8 @@ def operations(plan, assignment):
             if dependency in refs:
                 target, revision = {"$ref": refs[dependency] + "/address"}, {"$ref": refs[dependency] + "/saved_revision"}
             else:
-                require(dependency in objects, f"unknown dependency: {dependency}")
-                target, revision = dependency, objects[dependency]["current_revision"]
+                require(canonical in objects, f"unknown dependency: {dependency}")
+                target, revision = canonical, objects[canonical]["current_revision"]
             candidate = {"target": target, "revision": revision, "relation": "depends_on", "blocking": True}
             # An explicit dependency in this plan replaces its earlier revision pin.
             links = [link for link in links if not (link.get("relation") == "depends_on"
@@ -129,6 +161,9 @@ def operations(plan, assignment):
                    "reason": "Publish the reviewed mechanism for this criterion.", "question_checked": schema["question"]}
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
+            document = existing["document"]
+            if data == document["data"] and links == document["links"] and ac == document["parent"]:
+                continue
         ref = "task" + str(number)
         result.append({"ref": ref, "command": command})
         refs[task["id"]] = ref
@@ -144,7 +179,7 @@ def mutate(api, target, name, arguments):
     require(not target.exists(), f"mutation already attempted: inspect {target.name}; no automatic retry")
     args = deepcopy(arguments)
     args["request_id"] = "crew-planning-" + str(uuid4())
-    record = {"tool": name, "arguments": args, "status": "pending"}
+    record = {"tool": name, "arguments": args, "status": "pending", "server": getattr(api, "url", None)}
     write(target, record)
     try:
         result = api.call(name, args)

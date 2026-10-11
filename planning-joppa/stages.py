@@ -29,6 +29,7 @@ def prepare():
     require(all(name in advertised for name in ("claim_planning", "finish_planning", "release_planning")),
             "Joppa planning commands are not deployed; no claim was attempted")
     assignment, snapshot, ac = context.load(api, config, os.environ["PLANNING_JOPPA_AC"])
+    publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], ac["address"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", snapshot)
     receipt = publication.mutate(api, target / "claim.json", "joppa_command", {"workspace": config["workspace"],
@@ -107,12 +108,19 @@ def finish():
         if task["action"] == "update":
             actual = current_tasks.get(task["target"])
             require(actual and actual["current_revision"] == task["revision"], "target Task revision changed during planning")
-            require(not actual["process"].get("done") and not actual["process"].get("retired"),
-                    "target Task completed or retired during planning")
+            publication.editable(actual)
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])
-    operations = publication.operations(plan, assignment)
+    operations = publication.operations(plan, fresh)
+    if len(operations) == 1:
+        released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
+                                       "Reviewed Task contracts are unchanged.")
+        require(released, "unchanged Tasks require confirmed claim release")
+        write(target / "result.json", {"status": "unchanged", "ac": assignment["ac"]["id"],
+              "acceptance_verified": False, "claim_released": True, "task_count": 0})
+        signal("READY", "Existing Task contracts match the reviewed plan. Planning claim released.")
+        return
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
         "workspace": config["workspace"], "operations": operations})
     results = result.get("results")
@@ -120,7 +128,7 @@ def finish():
             and results[-1].get("command", {}).get("op") == "finish_planning",
             "publication response is incomplete; inspect publication.json before another run")
     write(target / "result.json", {"status": "published", "scope": "planned_tasks", "ac": assignment["ac"]["id"],
-          "acceptance_verified": False, "task_count": len(plan["tasks"]), "plan_digest": digest(plan),
+          "acceptance_verified": False, "task_count": len(operations) - 1, "plan_digest": digest(plan),
           "snapshots": snapshots, "contracts": {key: value["bundle_digest"] for key, value in contracts.items()},
           "reviews": reviews, "publication": result})
     signal("READY", "Reviewed Tasks published. The criterion still requires implementation and verification.")
@@ -143,10 +151,13 @@ def fail(reason=None):
         release_error = str(error)
     uncertain = any(path.exists() and read(path)["status"] in ("pending", "uncertain")
                     for path in (target / "claim.json", target / "publication.json", target / "release.json"))
+    publication_path = target / "publication.json"
+    incomplete = publication_path.exists() and read(publication_path)["status"] == "confirmed"
     write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason,
-          "claim_released": released, "release_error": release_error, "needs_recovery": uncertain or bool(release_error),
+          "claim_released": released, "release_error": release_error,
+          "needs_recovery": uncertain or incomplete or bool(release_error),
           "acceptance_verified": False})
-    signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if uncertain or release_error else ""))
+    signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if uncertain or incomplete or release_error else ""))
 
 
 def needs_human():
