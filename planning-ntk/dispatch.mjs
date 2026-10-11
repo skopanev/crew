@@ -3,8 +3,8 @@
 //
 // Dolber starts lanes for open tickets. A failed lane leaves its ticket
 // `blocked`, and the review panel files its findings as `blocked` tickets
-// too. Nothing walked that pile. This loop does: on each tick it takes the
-// longest-blocked ticket with the dispatcher's tags and hands it to
+// too. This loop alternates between decomposition children and other
+// blocked tickets, oldest first within each group. It hands each ticket to
 // planning-ntk, which diagnoses it and publishes READY (back in the queue),
 // NOT_READY (stays blocked, with the reason) or NEEDS_HUMAN (blocked, with
 // the exact decision). One ticket at a time: planning-ntk holds one lock per
@@ -53,6 +53,7 @@ export function settings(file) {
 export const MAX_DEFERRALS = 3;
 export function candidates(tickets, state) {
   const ready = [], held = [];
+  const childIds = new Set(Object.values(state.tickets ?? {}).flatMap(entry => entry.children ?? []));
   for (const ticket of tickets) {
     if (state.tickets?.[ticket.id]?.failed?.uncertain) {
       held.push(ticket);
@@ -64,8 +65,9 @@ export function candidates(tickets, state) {
     (exhausted ? held : ready).push(ticket);
   }
   const age = ticket => ticket.current_status_at || ticket.updated_at || '';
-  ready.sort((a, b) => age(a).localeCompare(age(b)) || a.id.localeCompare(b.id));
-  return {ready, held};
+  const priority = ticket => childIds.has(ticket.id) === (state.preferChildren !== false) ? 0 : 1;
+  ready.sort((a, b) => priority(a) - priority(b) || age(a).localeCompare(age(b)) || a.id.localeCompare(b.id));
+  return {ready, held, childIds};
 }
 
 async function blockedTickets(config) {
@@ -157,6 +159,21 @@ export function runResult(config, name) {
   try { return JSON.parse(fs.readFileSync(path.join(config.stateDir, 'runs', name, 'artifacts/result.json'), 'utf8')); } catch { return null; }
 }
 
+function decomposedChildren(result, id) {
+  return result?.id === id && result.verdict === 'DECOMPOSED' && !incomplete(result) &&
+    Array.isArray(result.children) && result.children.length > 0 &&
+    result.children.every(child => typeof child === 'string' && child.trim()) ? result.children : null;
+}
+
+// Restore child IDs from confirmed runs made before the dispatcher saved them.
+function restoreChildren(config, state) {
+  for (const [id, entry] of Object.entries(state.tickets)) {
+    if (entry.children || entry.exit !== 0 || entry.failed?.uncertain || !entry.log) continue;
+    const children = decomposedChildren(runResult(config, path.basename(entry.log, '.log')), id);
+    if (children) entry.children = children;
+  }
+}
+
 // A run that left no verdict: the environment failed before publication
 // (ticket_unchanged), or a publication started and did not confirm. Neither
 // is marked processed. Uncertain publication holds that ticket for an operator.
@@ -181,13 +198,14 @@ export function deferForDrift(result) {
 export async function tick(configFile, config, {dryRun = false, deferred = new Set(), retryPoll = false} = {}) {
   const state = readState(config);
   state.tickets ??= {};
+  restoreChildren(config, state);
   let tickets;
   try { tickets = await blockedTickets(config); } catch (error) {
     if (!retryPoll || !['fetch failed', 'The operation was aborted due to timeout'].includes(error.message)) throw error;
     console.log(paint('yellow', `DEFERRED · NTK queue poll failed: ${error.message}`));
     return null;
   }
-  const {ready, held} = candidates(tickets, state);
+  const {ready, held, childIds} = candidates(tickets, state);
   divider();
   console.log(paint('blue', 'PLANNER'));
   field('Filter', `workspace=${config.workspace}, tags=${config.filterTags.join(config.tagMatch === 'any' ? ' OR ' : ' AND ')}, strict=${config.strict}`);
@@ -243,6 +261,7 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
     // Keep this ticket held if launch or result handling fails unexpectedly.
     state.tickets[ticket.id] = {...state.tickets[ticket.id],
       failed: {at: new Date().toISOString(), log, uncertain: true}};
+    state.preferChildren = !childIds.has(ticket.id);
     saveState(config, state);
     run = spawnSync('sh', [path.join(here, 'run.sh'), '--config', configFile, '--ticket-id', ticket.id],
       {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: {...process.env, MEDULLA_RUN_DIR_NAME: runName}});
@@ -308,6 +327,8 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
       title: ticket.title, reason: result?.reason, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
+  const children = run.status === 0 ? decomposedChildren(result, ticket.id) : null;
+  if (children) state.tickets[ticket.id].children = children;
   saveState(config, state);
   return {id: ticket.id, exit: run.status};
 }
