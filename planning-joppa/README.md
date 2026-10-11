@@ -32,7 +32,7 @@ Keep required dependencies explicit. Do not remove them to bypass this prerequis
 Dry-run validates configuration without MCP calls, agent calls or writes.
 This entry point handles one AC. It does not run a dispatcher or change NTK planning.
 
-Crew planning updates only unclaimed implementation Tasks. It preserves human and other-purpose work.
+Crew planning updates only unclaimed implementation Tasks. It preserves Tasks with another purpose.
 It skips unchanged documents and pins dependencies from the fresh context.
 Before each claim, it checks previous receipts for this endpoint, workspace and AC.
 Unresolved receipts block a new run. They require explicit recovery.
@@ -41,6 +41,12 @@ Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
 Never start another mutation blindly. Planning claims do not expire.
 An interrupted process can retain a claim. Release it explicitly after checking its publication receipt.
+
+Current limits:
+
+- A human can edit an unclaimed implementation Task. Crew can replace that contract if its reviewed revision still matches.
+- A plan with unchanged Task contracts releases the claim. It does not finish planning, so another run can select the AC.
+- Receipt checks compare endpoint URLs exactly. Keep the same URL, including its trailing slash, across runs.
 
 Run the focused provider checks:
 
