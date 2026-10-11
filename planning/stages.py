@@ -214,13 +214,7 @@ def capture(kind):
         write(target / "plan.json", result)
         signal("PLANNED", "Structured implementation plan validated")
     elif kind == "necessity":
-        expected = assessment_digest()
-        require(os.environ.get("PLANNING_ASSESSMENT_DIGEST") == expected,
-                "input or research changed during necessity assessment")
-        result.setdefault("input_digest", expected)
-        validation.necessity(result, expected, read(target / "input.json"))
-        write(target / "necessity.json", result)
-        emit_var("necessity", result)
+        save_necessity(result)
         signal("NEEDS_HUMAN" if result["owner_gaps"] else "ASSESSED", "Necessity assessment validated")
     elif kind in ("critic", "drift"):
         # A drift review uses the critic seats; only the bound digest and the verdict shape differ.
@@ -237,6 +231,17 @@ def capture(kind):
         result["reviewer"] = {"harness": seat["harness"], "model": seat["model"]}
         (validation.critique if kind == "critic" else validation.drift)(result, expected)
         write(target / f"{kind}-{seat['slug']}.json", result)
+
+def save_necessity(result):
+    target = artifacts()
+    expected = assessment_digest()
+    require(os.environ.get("PLANNING_ASSESSMENT_DIGEST") == expected,
+            "input or research changed during necessity assessment")
+    result.setdefault("input_digest", expected)
+    validation.necessity(result, expected, read(target / "input.json"))
+    write(target / "necessity.json", result)
+    emit_var("necessity", result)
+
 
 def research_join():
     target = artifacts()

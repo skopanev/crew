@@ -214,6 +214,7 @@ export async function closeParents(config, state) {
       const current = await httpRequest('GET', route(id), {workspace: config.workspace});
       if (current.ticket?.id !== id || current.ticket.removed || current.ticket.removed_at ||
           current.ticket.status !== 'to_review' || current.ticket.title.includes('[HUMAN]') ||
+          current.ticket.tags?.includes('human') ||
           !current.ticket.title.startsWith('[CLOSE AT NO DEPS] ') ||
           !Number.isSafeInteger(current.revision_count)) continue;
       const graph = await httpRequest('GET', `${route(id)}/deps`, {workspace: config.workspace});
@@ -252,7 +253,7 @@ async function activate(input, receipt, file, source) {
     const {tags: originalTags, ...content} = child.fields;
     require(sameFields(current.ticket, content), 'Child content changed during publication; unchanged');
     const readyTags = [...new Set([...child.fields.tags, ...input.dispatchTags,
-      ...(decomposing ? source.tags || [] : [])])];
+      ...(decomposing ? (source.tags || []).filter(tag => tag !== 'human') : [])])];
     if (current.ticket.status === 'blocked' && sameFields(current.ticket, {tags: originalTags})) {
       require(current.revision_count === child.revision && sameFields(current.ticket, {tags: originalTags}), 'Blocked child changed; unchanged');
       await request('PATCH', route(child.id), {}, {workspace, status: decomposing ? 'blocked' : 'open',
@@ -296,7 +297,7 @@ async function publish(input) {
       .slice(0, limit - Array.from(prefix).length).join('');
   };
   const update = (id, fields) => request('PATCH', route(id), {}, {workspace, ...fields});
-  const tags = [...new Set([...(source.tags || []), ...input.dispatchTags])];
+  const tags = [...new Set([...(source.tags || []).filter(tag => tag !== 'human'), ...input.dispatchTags])];
   const tasks = plan.tasks;
   const decomposing = plan.disposition === 'decompose';
   const stagedTags = decomposing ? [] : tags.filter(tag => tag !== dispatchTag);
@@ -309,7 +310,7 @@ async function publish(input) {
     await unchanged(input);
     await update(source.id, {status: 'blocked', title: blockedTitle,
       ...(human ? {assignee: plan.ntk.owner} : {}),
-      tag_edits: [`-${dispatchTag}`]});
+      tag_edits: [`-${dispatchTag}`, human ? '+human' : '-human']});
     return {verdict: plan.ntk.verdict, id: source.id, reason: plan.blockers.join('\n'), owner: plan.ntk.owner, decision: plan.ntk.decision};
   }
 
@@ -321,7 +322,7 @@ async function publish(input) {
     const deps = [...new Set(task ? task.external_dependencies : source.deps || [])];
     await update(source.id, {status: 'open', title, body,
       module, dep_set: deps,
-      tag_edits: input.dispatchTags.map(tag => `+${tag}`)});
+      tag_edits: ['-human', ...input.dispatchTags.map(tag => `+${tag}`)]});
     const confirmed = await ticket(source.id, workspace);
     require(['open', 'in_progress', 'to_test', 'done'].includes(confirmed.ticket.status) &&
       sameFields(confirmed.ticket, {title, body, module, deps, tags}), 'Prepared ticket fields were not confirmed');
@@ -393,11 +394,11 @@ async function publish(input) {
   await unchanged(input);
   const coordinatorTitle = prefixedTitle('[CLOSE AT NO DEPS] ');
   await update(source.id, {status: 'to_review', title: coordinatorTitle,
-    dep_set: [...new Set([...(source.deps || []), ...ids])], tag_edits: [`-${dispatchTag}`]});
+    dep_set: [...new Set([...(source.deps || []), ...ids])], tag_edits: [`-${dispatchTag}`, '-human']});
   const parent = await ticket(source.id, workspace);
   receipt.parent = {status: 'to_review', title: coordinatorTitle,
     body: source.body, module: source.module, deps: [...new Set([...(source.deps || []), ...ids])],
-    tags: (source.tags || []).filter(tag => tag !== dispatchTag)};
+    tags: (source.tags || []).filter(tag => tag !== dispatchTag && tag !== 'human')};
   require(sameFields(parent.ticket, receipt.parent), 'Parent publication was not confirmed');
   receipt.parentRevision = parent.revision_count;
   save(receiptFile, receipt);

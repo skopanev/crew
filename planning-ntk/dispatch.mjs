@@ -56,6 +56,7 @@ export function candidates(tickets, state) {
   const ready = [], held = [];
   const childIds = new Set(Object.values(state.tickets ?? {}).flatMap(entry => entry.children ?? []));
   for (const ticket of tickets) {
+    if (ticket.tags?.includes('human')) continue;
     if (state.tickets?.[ticket.id]?.failed?.uncertain) {
       held.push(ticket);
       continue;
