@@ -1,6 +1,9 @@
 For NTK, add decomposition to the assessment JSON.
 Use null for one cohesive leaf or a required owner decision.
 For a split, return the existing plan shape inside decomposition:
+Set decomposition.acceptance_checks to [].
+Never add any check there: no commands, review procedures or operator walks.
+Plan each child's checks in its later planning pass.
 
 {"disposition":"decompose",
  "outcome":"Complete source outcome",

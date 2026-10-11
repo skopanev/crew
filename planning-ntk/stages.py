@@ -257,7 +257,8 @@ def validate_decomposition(plan, assignment):
         text(plan.get(key), "plan." + key)
     strings(plan.get("alternatives"), "plan.alternatives")
     require(plan.get("blockers") == [], "Blocked work cannot be decomposed")
-    require(plan.get("acceptance_checks") == [], "Decomposition does not define executable checks")
+    require(plan.get("acceptance_checks") == [],
+            "decomposition.acceptance_checks must be []; plan each child's executable checks in its later planning pass")
     tasks = plan.get("tasks")
     require(isinstance(tasks, list) and len(tasks) >= 2, "Decomposition needs at least two smaller children")
     seen, outcomes, bodies = set(), set(), set()
