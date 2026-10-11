@@ -133,7 +133,9 @@ Each critic records a distinct-work decision and its reason. The adapter checks
 these decisions, candidate scope, and current search results before publication.
 It repeats the scope and search checks before each child POST. Only reviewed
 creation can bypass NTK's second similarity search. An unavailable search stops
-before publication. These checks add no agent node or review round.
+before publication. HTTP 502, 503 and 504 permit up to three read-only search attempts.
+The adapter waits one second, then two seconds, between attempts.
+It never retries ticket writes. These checks add no agent node or review round.
 
 A confirmed similarity refusal creates no child. The adapter removes that
 attempt's marker. If no children exist, it also removes the empty publication
@@ -195,7 +197,13 @@ the role contracts load, immediately before publication; that check is not
 atomic with the NTK write.
 If the source changed while a run planned (`code_drift`, nothing published), the
 dispatcher refreshes sources and plans the same ticket once more. A second drift
-defers that ticket while the queue continues. Other runs without a verdict stop the loop and have no processed stamp: the
+defers that ticket while the queue continues. A confirmed similarity service outage
+before publication pauses continuous mode. The dispatcher probes the same workspace
+at the configured interval. It starts no agents while the service remains unavailable.
+When search responds, the dispatcher plans again against current inputs.
+The failed run remains available. It has no processed stamp and changes no ticket.
+Disabled search also permits the queue to continue. `--once` still exits unsuccessfully.
+Other runs without a verdict stop the loop and have no processed stamp: the
 environment failed before publication, or a publication started and did not
 confirm (`publication_uncertain`). Inspect the ticket, fix the cause, start again.
 After `publication_uncertain`, compare the ticket and `publication.json` in NTK

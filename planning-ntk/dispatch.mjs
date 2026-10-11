@@ -16,6 +16,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {request} from '../lane-launcher/ntk.mjs';
+import {find} from './ntk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = stream => !process.env.NO_COLOR && process.env.FORCE_COLOR !== '0' &&
@@ -151,7 +152,8 @@ export function runResult(config, name) {
 
 // A run that left no verdict: the environment failed before publication
 // (ticket_unchanged), or a publication started and did not confirm. Neither
-// is marked processed; both stop the loop for an operator.
+// is marked processed. Uncertain publication stops for an operator.
+// A search outage pauses continuous mode until a read-only probe succeeds.
 // Code moved under a run that published nothing: plan it again once against
 // current code. A second drift defers the ticket until a later cycle.
 export const DRIFT_RETRIES = 1;
@@ -250,8 +252,8 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   let after = ticket.updated_at;
   try { after = (await request('GET', `/v1/tickets/${encodeURIComponent(ticket.id)}`, {workspace: config.workspace}))?.ticket?.updated_at ?? after; } catch {}
   const last = (run.stderr || run.stdout || '').trim().split('\n').pop() || '';
-  // Do not mark an incomplete run attempted, and stop the loop, so the same
-  // fault does not walk the whole queue. Fix it, then start again. A published
+  // Do not mark an incomplete run processed. A search outage pauses the queue.
+  // Other environment failures stop the loop. A published
   // NOT_READY is a verdict and is recorded like any other.
   const postpone = deferForDrift(result);
   const verdict = postpone ? 'DEFERRED' : incomplete(result) ? 'FAILED' : result.verdict ?? 'UNKNOWN';
@@ -276,11 +278,28 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
       uncertain: result?.publication_uncertain === true}};
     saveState(config, state);
     return {id: ticket.id, exit: run.status, environment: true, uncertain: result?.publication_uncertain === true,
-      reason: result?.reason, log};
+      searchUnavailable: result?.search_unavailable === true && result.ticket_unchanged === true &&
+        result.published === false &&
+        !fs.existsSync(path.join(config.stateDir, 'runs', runName, 'artifacts/publication-started.json')),
+      title: ticket.title, reason: result?.reason, log};
   }
   state.tickets[ticket.id] = {stamp: after, exit: run.status, at: new Date().toISOString(), log};
   saveState(config, state);
   return {id: ticket.id, exit: run.status};
+}
+
+async function waitForSearch(config, title) {
+  for (;;) {
+    console.log(paint('yellow', `PAUSED · NTK similarity search unavailable · retry in ${config.interval}s · Ctrl+C to stop`));
+    await new Promise(resolve => setTimeout(resolve, config.interval * 1000));
+    try {
+      await find({title}, config.workspace, 1);
+      console.log(paint('green', 'NTK similarity search ready · continuing planning'));
+      return;
+    } catch (error) {
+      if (error.code !== 'SEARCH_UNAVAILABLE') throw error;
+    }
+  }
 }
 
 async function main(argv) {
@@ -306,6 +325,10 @@ async function main(argv) {
       throw new Error(`publication for ${result.id} started and did not confirm; ` +
         (result.reason ? `${result.reason}; ` : '') + `inspect the ticket in NTK ` +
         `before any other run of it, and do not resume blindly; see ${result.log}`);
+    }
+    if (result?.searchUnavailable && !argv.includes('--once')) {
+      await waitForSearch(config, result.title);
+      continue;
     }
     if (result?.environment && (!result.preflight || argv.includes('--once'))) {
       throw new Error(`planning failed before it touched ${result.id}; see ${result.log}`);

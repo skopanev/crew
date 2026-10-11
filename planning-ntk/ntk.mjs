@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 import {request as httpRequest, attachReport as uploadReport} from '../lane-launcher/ntk.mjs';
 
 const route = id => `/v1/tickets/${encodeURIComponent(id)}`;
@@ -99,19 +100,24 @@ async function snapshot({id, workspace}) {
 const splits = (plan, source) => plan.disposition === 'decompose' ||
   (plan.disposition === 'implement' && (plan.tasks.length > 1 || plan.tasks[0].project !== source.project));
 
-async function find(task, workspace) {
+export async function find(task, workspace, attempts = 3) {
   // POST /find reads tickets. It does not start publication.
-  try {
-    const result = await httpRequest('POST', '/v1/find', {},
-      {workspace, text: task.title, body: task.body, limit: 5});
-    require(Array.isArray(result?.similar), 'NTK returned no similarity search result');
-    return {status: 'available', hits: result.similar};
-  } catch (error) {
-    if (error.status === 409 && error.body?.error ===
-      'vectorisation is switched off in this workspace: there is nothing to search') {
-      return {status: 'disabled', hits: []};
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const result = await httpRequest('POST', '/v1/find', {},
+        {workspace, text: task.title, body: task.body, limit: 5});
+      require(Array.isArray(result?.similar), 'NTK returned no similarity search result');
+      return {status: 'available', hits: result.similar};
+    } catch (error) {
+      if (error.status === 409 && error.body?.error ===
+        'vectorisation is switched off in this workspace: there is nothing to search') {
+        return {status: 'disabled', hits: []};
+      }
+      if (![502, 503, 504].includes(error.status)) throw error;
+      if (attempt >= attempts) throw Object.assign(error, {code: 'SEARCH_UNAVAILABLE'});
+      console.error(`NTK similarity search HTTP ${error.status}; retry ${attempt + 1} of ${attempts}`);
+      await new Promise(resolve => setTimeout(resolve, attempt * 1000));
     }
-    throw error;
   }
 }
 
@@ -360,7 +366,7 @@ async function publish(input) {
   return activate(input, receipt, receiptFile, source);
 }
 
-try {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const action = process.argv[2];
   const result = await ({snapshot, similar, publish}[action])(input);

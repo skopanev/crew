@@ -24,6 +24,10 @@ class SourceDrift(ValueError):
     pass
 
 
+class SearchUnavailable(ValueError):
+    pass
+
+
 def ntk(action, value):
     result = subprocess.run(["node", str(HERE / "ntk.mjs"), action],
                             input=json.dumps(value), capture_output=True, text=True, timeout=600)
@@ -34,6 +38,8 @@ def ntk(action, value):
             error = {}
         if error.get("code") == "STALE_INPUT":
             raise SourceDrift(error["message"])
+        if error.get("code") == "SEARCH_UNAVAILABLE":
+            raise SearchUnavailable(error["message"])
     require(result.returncode == 0, result.stderr.strip() or "NTK planning operation failed")
     return json.loads(result.stdout)
 
@@ -479,6 +485,7 @@ def publish(plan, reviews):
 def fail(reason=None, preflight=False):
     target = shared.artifacts()
     source_drift = isinstance(reason, SourceDrift)
+    search_unavailable = isinstance(reason, SearchUnavailable)
     preflight_timeout = preflight and isinstance(reason, subprocess.TimeoutExpired)
     reason = str(reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "Planning did not complete")
     errors = [read(path) for path in target.glob("error-*.json")]
@@ -495,6 +502,8 @@ def fail(reason=None, preflight=False):
                   "ticket_unchanged": False, "publication_uncertain": True}
     else:
         result = {"verdict": "NOT_READY", "reason": reason, "published": False, "ticket_unchanged": True}
+        if search_unavailable:
+            result["search_unavailable"] = True
         if preflight_timeout:
             result["preflight_timeout"] = True
         if source_drift:

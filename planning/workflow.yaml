@@ -4,7 +4,8 @@ start: prepare
 # rounds of design 1200 + critics 1200, + publication. At 1800 s a real run died
 # in the critics pool; a rejected plan gets one revision round (critique_join),
 # and a clean base advance at finish gets one drift review of 600.
-timeout: 9300
+# Two search stages can each use 90 additional seconds for retries.
+timeout: 9480
 defaults:
   timeout: 60
 vars:
@@ -149,6 +150,8 @@ nodes:
       __failed__: failed
       __default__: failed
   review_input:
+    # Three 30-second search attempts, two delays, and candidate reads.
+    timeout: 150
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" review_input'
     on_signal:
       REVIEW: critics
