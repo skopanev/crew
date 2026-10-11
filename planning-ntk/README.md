@@ -110,6 +110,7 @@ Source reports remain on their original tickets. The planner does not copy or ne
 Before selecting work, the dispatcher closes its unchanged tracking parents when all direct dependencies are `done`.
 It requires a complete publication receipt and checks every recorded child.
 It leaves changed parents, uncertain publications and pending dependencies unchanged.
+Parents edited after publication, or receipts without `parentRevision`, require manual completion after dependency verification.
 
 ## Failure and retry
 
