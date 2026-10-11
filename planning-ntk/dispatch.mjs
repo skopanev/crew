@@ -16,6 +16,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {request} from '../lane-launcher/ntk.mjs';
+import {closeParents} from './ntk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = stream => !process.env.NO_COLOR && process.env.FORCE_COLOR !== '0' &&
@@ -199,6 +200,7 @@ export async function tick(configFile, config, {dryRun = false, deferred = new S
   const state = readState(config);
   state.tickets ??= {};
   restoreChildren(config, state);
+  if (!dryRun) await closeParents(config, state);
   let tickets;
   try { tickets = await blockedTickets(config); } catch (error) {
     if (!retryPoll || !['fetch failed', 'The operation was aborted due to timeout'].includes(error.message)) throw error;
