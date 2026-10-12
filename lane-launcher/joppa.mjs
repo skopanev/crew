@@ -58,6 +58,8 @@ export function validateJoppa(config) {
       modules.add(name);
     }
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
+    require(repo.gateTimeoutSeconds == null || (Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0),
+      'Repository gateTimeoutSeconds must be a positive integer');
     require(Array.isArray(repo.testCommand) && repo.testCommand.length && repo.testCommand.every(text), 'Repository needs testCommand');
     require(repo.preflight === null || (text(repo.preflight) && !path.isAbsolute(repo.preflight) &&
       inside(path.resolve(folder, repo.preflight), folder)), 'Repository needs preflight: relative executable path or null');

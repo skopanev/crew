@@ -19,7 +19,7 @@ const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.st
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
 export function configFrom(file, env = process.env, {dryRun = false, source = 'ntk'} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], image: 'medulla-crew:latest', dockerEngine: false,
+    preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
@@ -59,7 +59,7 @@ export function configFrom(file, env = process.env, {dryRun = false, source = 'n
   if ('tag' in config) throw new Error('Use tags: ["crew"] in dolber.json instead of tag');
   if (config.repo) throw new Error('repo was removed; set sourceRoot to the source workspace');
   if (typeof config.stateDir !== 'string' || !path.isAbsolute(config.stateDir)) throw new Error('stateDir must be absolute');
-  for (const field of ['limit', 'intervalSeconds']) {
+  for (const field of ['limit', 'intervalSeconds', 'gateTimeoutSeconds']) {
     if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
   }
   // A stable dispatcher identity owns its lock, reservations and containers.

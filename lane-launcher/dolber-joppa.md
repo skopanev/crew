@@ -48,6 +48,7 @@ Completion failures also write a Joppa note. Each retry uses a separate candidat
 | `joppa.project` | Select Tasks for one Joppa project address |
 | `joppa.workers` | Separate actors and host token files for parallel lanes |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
+| `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `delivery` | Publish a candidate branch, or land on the configured target |
 
