@@ -228,8 +228,9 @@ export async function main(argv) {
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, source === 'joppa' ? 'dolber-joppa.example.json' : 'dolber.example.json')} to this path and fill in workspace.`);
   const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', source});
-  fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   preflight(config);
+  if (mode === 'dry-run') { await tick(config); return; }
+  fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   const lock = path.join(config.stateDir, 'dispatcher.lock');
   try { fs.mkdirSync(lock); }
   catch (error) {
