@@ -12,6 +12,7 @@ vars:
   TARGET_BRANCH: ''
   REPOSITORY_PREFLIGHT: __ntkrc__
   DELIVERY: target
+  DELIVERY_BRANCH: ''
   VERIFY_ONLY: 'false'
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
@@ -480,6 +481,7 @@ nodes:
     env:
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       DELIVERY: '{{var:DELIVERY}}'
+      DELIVERY_BRANCH: '{{var:DELIVERY_BRANCH}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
@@ -543,7 +545,7 @@ nodes:
       }
 
       if [ "$DELIVERY" = branch ]; then
-        target="ticket-${ticket_id}"
+        target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
         land
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
@@ -581,6 +583,7 @@ nodes:
     env:
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       DELIVERY: '{{var:DELIVERY}}'
+      DELIVERY_BRANCH: '{{var:DELIVERY_BRANCH}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
@@ -599,7 +602,7 @@ nodes:
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
       target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
-      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = branch ]; then target="ticket-${ticket_id}"; fi
+      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = branch ]; then target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"; fi
       cd "${project_dir}"
       if [ "${VERIFY_ONLY}" = "true" ]; then
         touch "${LANE_WORKTREE}/.git/lane-verified"

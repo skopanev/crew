@@ -248,7 +248,7 @@ cleanup() {
     elif [[ "$code" -eq 0 ]]; then
       cleanup_target="$target"
       if [[ "$ticket_source" == joppa && "${LANE_DELIVERY:-branch}" == branch ]]; then
-        cleanup_target="ticket-$ticket"
+        cleanup_target="${LANE_DELIVERY_BRANCH:-ticket-$ticket}"
         [[ ! -f "$worktree/.git/lane-verified" ]] || cleanup_target="$target"
       fi
       if [[ -n "$cleanup_target" ]] \
@@ -399,6 +399,7 @@ medulla \
   --var "TARGET_BRANCH=$target" \
   --var "REPOSITORY_PREFLIGHT=$repository_preflight" \
   --var "DELIVERY=${LANE_DELIVERY:-target}" \
+  --var "DELIVERY_BRANCH=${LANE_DELIVERY_BRANCH:-}" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
