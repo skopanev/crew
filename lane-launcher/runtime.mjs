@@ -47,6 +47,7 @@ export function laneArgs(config, ticket) {
     ...(config.dockerEngine ? ['--docker-engine'] : []),
     '--cbm-mcp-command', config.cbmMcpCommand, '--cbm-cache-dir', config.cbmCacheDir,
     '--test-command', JSON.stringify(config.testCommand || []),
+    '--gate-timeout', String(config.gateTimeoutSeconds ?? 900),
     '--ssh-dir', config.sshDir,
     ...(config.sharedLockDir ? ['--shared-lock-dir', config.sharedLockDir] : []),
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),

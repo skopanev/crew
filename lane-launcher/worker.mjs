@@ -68,7 +68,8 @@ try {
   save(stateFile, run);
   announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (joppa) {
-    run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand}, run.executionId);
+    run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
+      gateTimeoutSeconds: run.repository.gateTimeoutSeconds ?? run.config.gateTimeoutSeconds}, run.executionId);
     save(stateFile, run);
   }
   if (signal) throw new Error(`Startup interrupted by ${signal}`);

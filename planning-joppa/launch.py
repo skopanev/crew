@@ -13,7 +13,7 @@ import context
 
 OUTPUT_CONTRACT = """This is Joppa planning. Plan exactly the supplied AC.
 Use the standard plan shape. Each Task also needs action: create or update.
-For update, include target (an existing Task address) and revision (its current document revision).
+For update, include target (an existing Task under the supplied AC) and revision (its current document revision).
 Preserve its owner, worker assignment, parent and other document fields.
 Reuse existing suitable Tasks instead of duplicating their work. Omit unchanged, done and retired Tasks.
 An implement plan needs complete mechanism steps, reuse choices and observable checks for every Task.
