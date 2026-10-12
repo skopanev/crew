@@ -4,15 +4,32 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
-import {save, read, herdr} from './runtime.mjs';
+import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
+import {claimTask, finishTask} from './joppa.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
 // The worker owns this state after dispatch. The launcher must not change it while the worker lives.
-const run = read(stateFile);
+let run = read(stateFile);
+const joppa = run.config.source === 'joppa';
+if (joppa) {
+  const lock = path.join(dir, 'worker.lock');
+  try { fs.mkdirSync(lock); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    console.error('Joppa worker lock exists. Inspect the current run before retrying.');
+    process.exit(2);
+  }
+  process.once('exit', () => fs.rmdirSync(lock));
+  run = read(stateFile);
+  if (run.worker || run.claimRequest || run.result) {
+    console.error('Joppa run already started. Inspect its claim and publication before retrying.');
+    process.exit(2);
+  }
+}
 const log = fs.openSync(path.join(dir, 'output.log'), 'a', 0o600);
 const color = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
   (process.stdout.isTTY || process.env.FORCE_COLOR === '1');
@@ -40,20 +57,27 @@ try {
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   announce(`[lane] CLAIM ${run.ticket}`);
-  const claimed = run.claim || await claimTicket(run.ticket, run.workspace);
+  const claimed = run.claim || await (joppa ? claimTask(run, () => save(stateFile, run)) : claimTicket(run.ticket, run.workspace));
   if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
-      String(claimed.id).toLowerCase() !== String(run.ticket).toLowerCase()) {
+      String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
     delete run.claim;
     claimRefused = true;
-    throw new Error(`NTK did not confirm claim for ${run.ticket}`);
+    throw new Error(`${joppa ? 'Joppa' : 'NTK'} did not confirm claim for ${run.ticket}`);
   }
   run.claim = {...claimed, workspace: run.workspace};
   save(stateFile, run);
   announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
+  if (joppa) {
+    run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand}, run.executionId);
+    save(stateFile, run);
+  }
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
+      ...(joppa ? {LANE_SOURCE: 'joppa', LANE_REPOSITORY_JSON: JSON.stringify(run.repository),
+        LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
+        LANE_DELIVERY: run.config.delivery, EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       ...(run.claim ? {LANE_CLAIM_JSON: JSON.stringify(run.claim)} : {})}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
@@ -74,14 +98,14 @@ try {
   if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
   const message = run.claim || signal ? error.message :
-    claimRefused || /^NTK HTTP 4\d\d/.test(error.message) ? `CLAIM_REFUSED: ${error.message}` :
-      `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in NTK before retrying`;
+    claimRefused || error.rejected || /^NTK HTTP 4\d\d/.test(error.message) ? `CLAIM_REFUSED: ${error.message}` :
+      `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in ${joppa ? 'Joppa' : 'NTK'} before retrying`;
   result = {status: 'failed', code: 2,
     error: message};
   process.exitCode = 2;
 } finally {
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
-  if (result.status !== 'exited' && run.claim) {
+  if (!joppa && result.status !== 'exited' && run.claim) {
     const adopted = fs.existsSync(run.runFolder) && fs.readdirSync(run.runFolder).some(name => {
       try {
         const claim = read(path.join(run.runFolder, name, 'artifacts/claim.json'));
@@ -141,8 +165,22 @@ try {
       }
     } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }
   }
+  if (joppa) {
+    try {
+      artifacts ||= fs.existsSync(run.runFolder) ? fs.readdirSync(run.runFolder).sort().reverse()
+        .map(name => path.join(run.runFolder, name, 'artifacts'))
+        .find(folder => fs.existsSync(path.join(folder, 'landing.txt')) || fs.existsSync(path.join(folder, 'verification.txt'))) : null;
+      await finishTask(run, stateFile, result, artifacts);
+      if (result.completed) announce(`[lane] DONE ${run.task} · Joppa confirmed`);
+      if (result.held) announce(`[lane] HELD ${run.task} · claim retained with failure evidence`);
+    } catch (error) {
+      result = {...result, status: 'failed', code: 2, blocked: Boolean(run.claim), error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
+      announce(`[lane] ${result.error}`);
+    }
+  }
   // Record completion first: closing this pane can terminate this process immediately.
   run.result = {...result, finishedAt: new Date().toISOString()};
+  if (joppa) process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);
   save(stateFile, run);
   try {
     if (await notifyCompletion(run, result, artifacts)) {
