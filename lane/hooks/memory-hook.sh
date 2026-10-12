@@ -96,23 +96,10 @@ if [[ "$event" == Stop ]]; then
   fi
 fi
 
-# PostToolUse ОТДАЁТ ОДИН ИНСТРУМЕНТ, а весь разбор ниже написан под список
-# `tool_calls[]`. Нормализуем здесь, один раз, чтобы не править четыре jq-запроса
-# и не разъехаться между ними.
-#
-# ЗАРЕГИСТРИРОВАНЫ ОБА СОБЫТИЯ, И ЭТО НЕ ПЕРЕСТРАХОВКА. PostToolBatch
-# задокументирован - срабатывает один раз после ПАРТИИ инструментов, вход
-# tool_calls[]. PostToolUse отдаёт ОДИН инструмент. Схемы разные, поддержка
-# зависит от версии клиента, и проверяется она замером, а не чтением файлов.
-#
-# Я утверждал, что PostToolBatch "не существует", на том основании, что имя
-# встречается только в этих двух файлах. Это вывод из отсутствия, а не замер;
-# Equill PM показал документацию. Настоящей причиной пустой квитанции было
-# другое - блок записи стоял ниже по файлу, за тремя `exit 0`, и управление
-# до него не доходило.
-if [[ "$event" == PostToolUse ]]; then   # PostToolBatch уже отдаёт список
+# Normalize single-tool events to the batch shape. Preserve the tool ID for deduplication.
+if [[ "$event" == PostToolUse ]]; then
   input="$("$jq_bin" -c 'if has("tool_calls") then . else
-      . + {tool_calls: [ {tool_name: (.tool_name // ""),
+      . + {tool_calls: [ {tool_use_id: (.tool_use_id // .tool_call_id // .id // null), tool_name: (.tool_name // ""),
                           tool_input: (.tool_input // {}),
                           tool_response: (.tool_response // "")} ]} end' \
     <<<"$input" 2>/dev/null || printf '%s' "$input")"
@@ -264,6 +251,37 @@ fi
 profile="${EQUILL_PROMPT_PROFILE:-}"
 [[ -n "$profile" ]] || quiet          # unset profile disables retrieval, baseline stays
 
+# Each session and role retrieves once per tool call. Keep unseen calls from mixed batches.
+if [[ "$event" == PostToolUse || "$event" == PostToolBatch ]]; then
+  input="$(python3 -c '
+import fcntl, hashlib, json, os, sys
+data = json.load(sys.stdin)
+scope = [os.environ.get(k, "") for k in ("MEDULLA_RUN_DIR", "EQUILL_TICKET", "EQUILL_ROLE", "EQUILL_PROCESS")]
+scope.append(data.get("session_id") or data.get("transcript_path") or "")
+key = hashlib.sha256(json.dumps(scope).encode()).hexdigest()
+file = os.path.join(os.environ.get("TMPDIR", "/tmp"), "lane-memory-seen." + key)
+with open(file, "a+", encoding="utf-8") as cache:
+    fcntl.flock(cache, fcntl.LOCK_EX)
+    cache.seek(0)
+    try: seen = json.load(cache)
+    except (ValueError, OSError): seen = []
+    fresh = []
+    for tool in data.get("tool_calls", []):
+        identity = tool.get("tool_use_id") or tool.get("tool_call_id") or tool.get("id")
+        payload = [tool.get("tool_name", ""), tool.get("tool_input", {}), tool.get("tool_response", "")]
+        item = "id:" + str(identity) if identity else "content:" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if item not in seen:
+            fresh.append(tool)
+            seen.append(item)
+    cache.seek(0)
+    cache.truncate()
+    json.dump(seen[-256:], cache)
+data["tool_calls"] = fresh
+print(json.dumps(data))
+' <<<"$input")" || { emit "$event" "" "lane memory: cannot deduplicate tool events"; exit 0; }
+  [[ "$("$jq_bin" '.tool_calls | length' <<<"$input")" != 0 ]] || quiet
+fi
+
 if [[ "$event" == UserPromptSubmit ]]; then
   query="$("$jq_bin" -r '.prompt // empty' <<<"$input")"
 else
@@ -350,15 +368,6 @@ fi
 # front of the string, which is where the descriptions are.
 query="$(printf '%s' "$query" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
 [[ -n "${query// /}" ]] || quiet
-
-# A batch that asks what the last one asked retrieves what the last one got.
-# Seen live: "Typecheck the notification package EXIT=0" fired twice in a row.
-if [[ ( "$event" == PostToolUse || "$event" == PostToolBatch ) && -n "${EQUILL_TICKET:-}" ]]; then
-  last_f="${TMPDIR:-/tmp}/lane-memory-last.${EQUILL_TICKET}"
-  now_h="$(printf '%s' "$query" | shasum -a 256 2>/dev/null | cut -d" " -f1)"
-  [[ -z "$now_h" || "$now_h" != "$(cat "$last_f" 2>/dev/null)" ]] || quiet
-  [[ -z "$now_h" ]] || printf '%s' "$now_h" > "$last_f" 2>/dev/null || true
-fi
 
 # Retrieval asks under the memory role, not the contract role - see above. The
 # array is rebuilt rather than edited because --role appears once and a sed on
