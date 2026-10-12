@@ -11,9 +11,9 @@ Review a blocked or human-decision result for the accuracy of its diagnosis.
 
 Gate commands are written for the lane, where configured directories appear at
 `/workspace/<name>`. Read those files at the host paths in `lane_mounts`.
-The working directory is the source root, not a repository. Start every shell
-command with `cd <repository path from the assignment> && `; a command run from
-the source root fails and costs a turn.
+The working directory is the source root. If you use shell commands, start each
+command with `cd <repository path from the assignment> && `. Commands from the
+source root can fail.
 
 Apply the supplied Equill writing rules to new prose in every output field.
 
