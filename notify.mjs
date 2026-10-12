@@ -68,11 +68,11 @@ export async function notify(config, event) {
 }
 
 export function completionEvent(run, result, artifacts) {
-  const event = {event: result.code === 0 ? 'READY' : 'FAILED', id: run.ticket,
+  const event = {event: result.code === 0 ? 'READY' : result.blocked ? 'BLOCKED' : 'FAILED', id: run.ticket,
     runId: path.basename(path.dirname(run.runFolder)),
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
-  if (result.blocked) return {...event, event: 'BLOCKED', signal: 'WORKTREE_PREEXISTED', summary: result.error};
+  if (result.blocked && result.code === 73) return {...event, signal: 'WORKTREE_PREEXISTED', summary: result.error};
   if (result.code === 0) return event;
   if (!artifacts) {
     // Startup refusals have no Medulla journal. Keep the complete refusal lines.
