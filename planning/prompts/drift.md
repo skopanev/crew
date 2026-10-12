@@ -18,8 +18,9 @@ Do not critique the plan again. Answer only whether the landed diff affects it:
 - absence_claims: the diff adds something that the plan or research says does
   not exist, or already solves part of the planned work.
 
-The working directory is the source root, not a repository. Start every shell
-command with `cd <repository path from the assignment> && `.
+The working directory is the source root. If you use shell commands, start each
+command with `cd <repository path from the assignment> && `. Commands from the
+source root can fail.
 
 Every question needs evidence that names what you compared. Each entry has a
 `source`: a changed path from the diff, or a path, unit or check exactly as the

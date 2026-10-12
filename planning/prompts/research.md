@@ -49,6 +49,7 @@ CBM reports as not_tracked is not a blocker: CBM does not index it, so read it i
 the worktree and list it in inspected_paths.
 Even clean metadata is only a best-effort signal about CBM's indexed root:
 read and verify the actual worktree files and any relevant uncommitted changes.
+Use one citation per evidence item.
 Code file evidence.source must use the exact registered repository id followed
 by :path:line (for example crew:lane/run.sh:10). Every cited file must appear in
 inspected_paths; include at least one file citation. Git commit references may
