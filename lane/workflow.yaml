@@ -119,6 +119,8 @@ nodes:
       Module: {{var:module_name}}.
       Source checkout: {{var:project_dir}}.
       CBM project: {{var:CBM_PROJECT}}.
+      Repository checks: {{var:gate_commands}}
+      Test command: {{var:ticket_test_command}}
       Read the ticket:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
 
@@ -273,6 +275,8 @@ nodes:
     prompt: |
       Follow your Equill contract.
       Current handoff: {{last.message}}
+      Repository checks: {{var:gate_commands}}
+      Test command: {{var:ticket_test_command}}
       Ticket {{var:ticket_id}} in workspace {{var:project_name}}:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       Read {{var:RUN_ARTIFACTS}}/scout.txt.
