@@ -71,9 +71,9 @@ export function validateJoppa(config) {
   if (fs.existsSync(config.worktreeRoot)) require(fs.realpathSync(config.worktreeRoot) === path.resolve(config.worktreeRoot), 'worktreeRoot must not be a symlink');
 }
 
-export function api(config, worker, tool, arguments_) {
+export function api(config, worker, tool, arguments_, {signal} = {}) {
   return new Promise((resolve, reject) => {
-    const child = execFile(config.python || 'python3', [bridge], {encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024},
+    const child = execFile(config.python || 'python3', [bridge], {encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024, signal},
       (error, stdout) => {
         let reply;
         try { reply = JSON.parse(stdout); } catch { return reject(new Error('Joppa client failed without a response')); }

@@ -1,7 +1,7 @@
 # Joppa planning
 
-Status: native launch, role loading, claim and confirmed failure release passed a live run.
-Task publication has not passed a complete live run yet.
+Status: planning published Tasks in a live run. Lane confirmed completion of both Tasks.
+Task completion does not confirm criterion acceptance.
 
 Run from the Crew repository:
 
@@ -21,14 +21,20 @@ sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json
 sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json --ac-id ac:criterion-id
 ```
 
-The first command monitors existing runs. The second also starts one AC.
+The first command selects ready ACs and plans one at a time. The second starts one AC.
+Use `--monitor` to show existing runs without starting work.
 The table shows the start time, Requirement and AC titles, status, stage or reason code, run ID and duration.
 Active runs appear first. The screen updates every five seconds.
-Use `--once` for one snapshot or to exit after the selected AC finishes.
+Use `--once` to select at most one AC and exit after it finishes.
+Use `--monitor --once` for one display snapshot.
 The table reads existing Medulla journals and results. It creates no history database.
 New runs save their output in `output.log` inside the Medulla run folder.
 Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
-This entry point does not select another AC automatically.
+The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in the config to change this interval.
+It selects criteria in the configured workspace. Repository mappings bound Task publication.
+It excludes criteria with active or completed Tasks to avoid repeating existing work.
+It skips failed AC revisions for the rest of the process. Restart to try an unchanged revision again.
+Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
 The input is one AC. The planner reads its Requirement, parents, decisions and existing Tasks.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
@@ -46,7 +52,7 @@ Task claim and completion change document revisions and invalidate dependency pi
 The confirmed initial scope permits independent verification Tasks.
 Keep required dependencies explicit. Do not remove them to bypass this prerequisite.
 Dry-run validates configuration without MCP calls, agent calls or writes.
-This entry point handles one AC. It does not run a dispatcher or change NTK planning.
+The planning engine handles one AC per run. The dashboard selects the next AC after each run.
 
 Crew planning updates only unclaimed implementation Tasks. It preserves Tasks with another purpose.
 It skips unchanged documents and pins dependencies from the fresh context.

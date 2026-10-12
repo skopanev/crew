@@ -4,6 +4,8 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {tail} from '../planning-ntk/dashboard.mjs';
+import {api} from '../lane-launcher/joppa.mjs';
+import {lock as dispatcherLock} from '../planning-ntk/dispatch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tones = {blue: '1;34', yellow: '1;33', red: '1;31', ready: '1;38;2;70;230;90', finished: '37'};
@@ -23,7 +25,7 @@ const modified = file => {
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
 };
 
-export function plannerRows(root, current = null) {
+export function plannerRows(root, current = null, limit = 30, scope = null) {
   let folders;
   try { folders = fs.readdirSync(root, {withFileTypes: true}); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
@@ -52,6 +54,8 @@ export function plannerRows(root, current = null) {
       const active = !result && (current?.folder === folder ? !current.ended : alive(pid));
       const released = json(path.join(artifacts, 'release.json'));
       const claim = json(path.join(artifacts, 'claim.json'));
+      if (scope && (input?.workspace && input.workspace !== scope.workspace ||
+          claim?.server && claim.server !== scope.url)) return [];
       const publication = json(path.join(artifacts, 'publication.json'));
       const recovery = result?.needs_recovery || !result && (
         [claim, publication, released].some(receipt => ['pending', 'uncertain'].includes(receipt?.status)) ||
@@ -80,7 +84,7 @@ export function plannerRows(root, current = null) {
       return [{ticket: label, requirementTitle: input ? title(input.requirement) : '',
         acTitle: input ? title(input.ac) : '', ac,
         runId: match?.[5] || entry.name, start, end, active, status, stage}];
-    }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
+    }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 
 export function titleCell(row, width) {
@@ -93,6 +97,39 @@ export function titleCell(row, width) {
   const requirementWidth = Math.min(Array.from(row.requirementTitle).length,
     Math.max(Math.floor(budget / 2), budget - Array.from(row.acTitle).length));
   return `${clip(row.requirementTitle, requirementWidth)} : ${clip(row.acTitle, budget - requirementWidth)}`;
+}
+
+export async function readyCriteria(config, tokenFile, signal) {
+  const rows = [];
+  let cursor;
+  do {
+    const page = await api({python: process.env.PLANNING_PYTHON,
+      joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
+      workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
+      ...(cursor ? {cursor} : {}),
+    }, {signal});
+    const pending = [];
+    for (const row of page.items) {
+      const work = row.work_summary;
+      if (row.work_ready === true && !row.review_required && !row.process?.planning_claim &&
+          work?.active === 0 && work.done === 0) pending.push(row);
+    }
+    if (pending.length) {
+      const checks = await api({python: process.env.PLANNING_PYTHON,
+        joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
+        workspace: config.workspace, ac: pending.map(row => row.address).join(','),
+      }, {signal});
+      const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
+      for (const row of pending) {
+        if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
+        const status = statuses.get(row.address);
+        if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
+        if (status !== 'green') rows.push(row);
+      }
+    }
+    cursor = page.next_cursor;
+  } while (cursor);
+  return rows;
 }
 
 export async function main(argv) {
@@ -108,9 +145,10 @@ export async function main(argv) {
   const file = option('--config') || positional;
   const ac = option('--ac-id');
   const once = argv.includes('--once');
+  const monitor = argv.includes('--monitor');
   const dryRun = argv.includes('--dry-run');
-  if (!file || argv.some(value => !['--once', '--dry-run'].includes(value))) {
-    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--ac-id AC] [--once] [--dry-run]');
+  if (!file || argv.some(value => !['--once', '--dry-run', '--monitor'].includes(value)) || monitor && ac) {
+    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--ac-id AC | --monitor] [--once] [--dry-run]');
   }
   if (dryRun && !ac) throw new Error('--dry-run needs --ac-id');
   const configFile = path.resolve(file);
@@ -119,14 +157,18 @@ export async function main(argv) {
   const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
   const configuredRoot = path.resolve(path.dirname(configFile), expand(config.runs_folder));
   const root = fs.existsSync(configuredRoot) ? fs.realpathSync(configuredRoot) : configuredRoot;
+  const interval = config.interval_seconds ?? 60;
+  if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
+  const tokenFile = config.token_file ? path.resolve(path.dirname(configFile), expand(config.token_file)) : null;
+  if (!ac && !monitor && !tokenFile) throw new Error('Config needs token_file for automatic selection');
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {
     const child = spawn('sh', args, {stdio: 'inherit'});
     process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
     return;
   }
-  const state = {message: ac ? `Planning ${ac}` : 'Monitoring existing runs', error: null};
-  let current = null, screen, child, stopped = false, wake, termination;
+  const state = {message: ac ? `Planning ${ac}` : monitor ? 'Monitoring existing runs' : 'Checking ready criteria', error: null};
+  let current = null, screen, child, stopped = false, wake, termination, selection;
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
@@ -149,6 +191,7 @@ export async function main(argv) {
   };
   const stop = signal => {
     stopped = true;
+    selection?.abort();
     process.exitCode = signal === 'SIGTERM' ? 143 : 130;
     termination ??= (async () => {
       if (!groupSignal(signal)) return;
@@ -162,50 +205,88 @@ export async function main(argv) {
   const terminate = () => stop('SIGTERM');
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', terminate);
-  let ticker;
+  let ticker, lock;
+  const attempted = new Set();
+  const pause = () => new Promise(resolve => {
+    const timer = setTimeout(() => { wake = null; resolve(); }, interval * 1000);
+    wake = () => { clearTimeout(timer); wake = null; resolve(); };
+    if (stopped) wake();
+  });
   try {
+    if (!ac && !monitor) {
+      lock = dispatcherLock(root);
+    }
     if (process.stdout.isTTY) screen = createScreen(state, paint, render);
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
-    if (ac) {
-      child = spawn('sh', args, {stdio: ['ignore', 'pipe', 'pipe'], detached: true});
-      let pending = '', buffered = '';
-      const output = data => {
-        const text = data.toString();
-        if (current?.folder) fs.appendFileSync(path.join(current.folder, 'output.log'), text);
-        else {
-          buffered = (buffered + text).slice(-65536);
-          pending += text;
-          const lines = pending.split('\n');
-          pending = lines.pop();
-          for (const line of lines) {
-            const folder = line.trim();
-            const canonicalRoot = fs.existsSync(root) ? fs.realpathSync(root) : root;
-            if ((folder.startsWith(root + path.sep) || folder.startsWith(canonicalRoot + path.sep)) && fs.existsSync(folder)) {
-              current = {folder, ended: false};
-              fs.appendFileSync(path.join(folder, 'output.log'), buffered);
-              buffered = '';
-              state.message = '';
-              break;
-            }
-            if (line.startsWith('planning-joppa:')) state.error = line.trim();
+    do {
+      let selected = ac;
+      if (!ac && !monitor) {
+        current = null;
+        state.error = null;
+        try {
+          if (plannerRows(root, null, Infinity, config).some(row => row.status === 'HELD')) {
+            state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
+          } else {
+            selection = new AbortController();
+            const candidates = await readyCriteria(config, tokenFile, selection.signal);
+            selection = null;
+            const next = candidates.find(row => !attempted.has(`${row.address}:${row.revision}`));
+            if (next) {
+              selected = next.address;
+              attempted.add(`${next.address}:${next.revision}`);
+              state.message = `Planning ${next.address} · ${next.title}`;
+            } else state.message = `Criteria: ${candidates.length} unstarted · no unattempted criteria · next check in ${interval}s`;
           }
-        }
-      };
-      child.stdout.on('data', output);
-      child.stderr.on('data', output);
-      const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-      await termination;
-      if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
-      if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
-      if (!stopped) process.exitCode = code ?? 2;
-      draw();
-    }
-    if (!once && !stopped) await new Promise(resolve => { wake = resolve; });
+        } catch (error) { state.error = `Selection failed: ${error.message}`; }
+        if (state.error && once && !stopped) process.exitCode = 2;
+        draw();
+      }
+      if (stopped) break;
+      if (selected) {
+        const runArgs = ac ? args : [...args, '--ac-id', selected];
+        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true});
+        let pending = '', buffered = '';
+        const output = data => {
+          const text = data.toString();
+          if (current?.folder) fs.appendFileSync(path.join(current.folder, 'output.log'), text);
+          else {
+            buffered = (buffered + text).slice(-65536);
+            pending += text;
+            const lines = pending.split('\n');
+            pending = lines.pop();
+            for (const line of lines) {
+              const folder = line.trim();
+              const canonicalRoot = fs.existsSync(root) ? fs.realpathSync(root) : root;
+              if ((folder.startsWith(root + path.sep) || folder.startsWith(canonicalRoot + path.sep)) && fs.existsSync(folder)) {
+                current = {folder, ended: false};
+                fs.appendFileSync(path.join(folder, 'output.log'), buffered);
+                buffered = '';
+                state.message = '';
+                break;
+              }
+              if (line.startsWith('planning-joppa:')) state.error = line.trim();
+            }
+          }
+        };
+        child.stdout.on('data', output);
+        child.stderr.on('data', output);
+        const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+        await termination;
+        if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
+        if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
+        if (!stopped && (once || ac)) process.exitCode = code ?? 2;
+        draw();
+      }
+      if (once || stopped || ac || monitor) break;
+      await pause();
+    } while (!stopped);
+    if (!once && !stopped && (ac || monitor)) await new Promise(resolve => { wake = resolve; });
   } finally {
     clearInterval(ticker);
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', terminate);
+    if (lock && fs.readFileSync(lock, 'utf8') === String(process.pid)) fs.unlinkSync(lock);
     screen?.close();
   }
 }
