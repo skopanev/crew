@@ -14,6 +14,22 @@ Use `config.example.json` as the shape of the private configuration.
 Map Joppa Project addresses to local repositories and CBM indexes in that configuration.
 Keep credentials and private configuration outside this repository.
 
+Show the last 30 planning runs in a terminal table:
+
+```sh
+sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json
+sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json --ac-id ac:criterion-id
+```
+
+The first command monitors existing runs. The second also starts one AC.
+The table shows the start time, Requirement and AC titles, status, stage or reason code, run ID and duration.
+Active runs appear first. The screen updates every five seconds.
+Use `--once` for one snapshot or to exit after the selected AC finishes.
+The table reads existing Medulla journals and results. It creates no history database.
+New runs save their output in `output.log` inside the Medulla run folder.
+Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
+This entry point does not select another AC automatically.
+
 The input is one AC. The planner reads its Requirement, parents, decisions and existing Tasks.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
 Research checks reuse. Necessity checks the minimum scope. Design supplies mechanisms.

@@ -77,18 +77,18 @@ function reasonFor(run) {
   return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
-export function renderRunTable(rows, paint, reserved = 7) {
+export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth} = {}) {
   const width = Math.max(30, process.stdout.columns || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
   const statusWidth = Math.min(8, Math.max(6, ...recent.map(row => row.status.length)));
-  const ticketWidth = Math.max(6, ...recent.map(row => Array.from(plain(row.ticket)).length));
+  const ticketWidth = identityWidth || Math.max(6, ...recent.map(row => Array.from(plain(row.ticket)).length));
   const stageWidth = 24;
   const runWidth = Math.max(36, ...recent.map(row => row.runId.length));
   const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 37) / width);
   const visible = recent.slice(0, Math.max(0,
     Math.floor(((process.stdout.rows || 24) - reserved - rowHeight) / rowHeight)));
-  const output = [`${'STARTED'.padEnd(19)}  ${'TICKET'.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
+  const output = [`${'STARTED'.padEnd(19)}  ${identityLabel.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
   for (const row of visible) {
     const date = new Date(row.start);
     const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';

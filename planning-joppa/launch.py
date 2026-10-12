@@ -50,7 +50,7 @@ def main():
                  "EQUILL_ACTOR": "planning", "OPENCODE_BIN": shutil.which("opencode") or "opencode",
                  "AGY_BIN": shutil.which("agy") or "agy"}
     executable = os.environ.get("MEDULLA_BIN", "medulla")
-    command = [executable, "-w", str(workflow), "--runs-folder", config["runs_folder"]]
+    command = [executable, "-w", str(workflow), "--runs-folder", config["runs_folder"], "--print-run-dir"]
     if args.dry_run:
         print("AC: " + args.ac_id)
         print("Graph: prepare → research → necessity → design → critics → finish")
