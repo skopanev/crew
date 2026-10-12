@@ -19,6 +19,33 @@ def settings():
     return config
 
 
+def reader_servers():
+    return {"joppa": {"command": os.environ["PLANNING_PYTHON"], "args": [
+        str(Path(__file__).resolve().with_name("mcp.py")), "--config", os.environ["PLANNING_JOPPA_CONFIG"],
+        "--artifacts", str(shared.artifacts())]}}
+
+
+def prepare_reader():
+    servers = reader_servers()
+    config = Path(os.environ["AGY_PROFILE_HOME"]) / "joppa-reader.json"
+    write(config, {"mcpServers": servers})
+    config.chmod(0o600)
+    shared.emit_var("PLANNING_MCP_CONFIG", str(config))
+    server = servers["joppa"]
+    shared.emit_var("PLANNING_MCP_OPTION", "-c")
+    shared.emit_var("PLANNING_MCP_TOML", "mcp_servers.joppa={command=" + json.dumps(server["command"])
+                    + ",args=" + json.dumps(server["args"]) + ",required=true}")
+    return servers
+
+
+def prepare_critic():
+    codex = os.environ["MEDULLA_HARNESS"] == "codex"
+    shared.emit_var("PLANNING_CRITIC_MCP_OPTION", "-c" if codex else "")
+    shared.emit_var("PLANNING_CRITIC_MCP_TOML", os.environ["PLANNING_MCP_TOML"] if codex else "")
+    if os.environ["MEDULLA_HARNESS"] == "agy":
+        shared.prepare_agy(mcp_servers=reader_servers())
+
+
 def prepare():
     target = shared.artifacts()
     target.mkdir(parents=True, exist_ok=True)
@@ -40,7 +67,7 @@ def prepare():
     # Claiming does not change authored context. Check that no other writer changed it.
     _, current, _ = context.load(api, config, ac["address"])
     context.unchanged(snapshot, current)
-    shared.prepare_context(prompt_assignment(assignment))
+    shared.prepare_context(prompt_assignment(assignment), mcp_servers=prepare_reader())
 
 
 def prompt_assignment(assignment):
@@ -86,7 +113,8 @@ def capture(kind):
         shared.save_necessity(result)
         signal("NEEDS_HUMAN" if result["owner_gaps"] else "ASSESSED", "Necessity assessment validated")
     else:
-        publication.validate(result, read(target / "input.json"))
+        config = settings()
+        publication.validate(result, context.read_assignment(context.client(config), config, target))
         shared.bind_necessity(result)
         write(target / "plan.json", result)
         signal("PLANNED", "Task mechanisms validated for the selected criterion")
@@ -94,14 +122,14 @@ def capture(kind):
 
 def finish():
     target = shared.artifacts()
-    assignment = read(target / "input.json")
+    config = settings()
+    api = context.client(config)
+    assignment = context.read_assignment(api, config, target)
     plan = read(target / "plan.json")
     publication.validate(plan, assignment)
     reviews, snapshots, contracts = shared.verify_context(assignment, plan)
-    config = settings()
-    api = context.client(config)
     fresh, current, _ = context.load(api, config, assignment["ac"]["id"])
-    context.unchanged(read(target / "joppa-snapshot.json"), current)
+    context.refresh_reads(api, config, fresh, current, read(target / "joppa-snapshot.json"))
     # Update only the exact Task document reviewed by this plan.
     current_tasks = {item["address"]: item for item in fresh["joppa"]["tasks"]}
     for task in plan["tasks"]:
@@ -173,7 +201,8 @@ def main():
         if command == "capture":
             capture(sys.argv[2])
         else:
-            own = {"prepare": prepare, "finish": finish, "fail": fail, "needs_human": needs_human}
+            own = {"prepare": prepare, "finish": finish, "fail": fail, "needs_human": needs_human,
+                   "prepare_critic": prepare_critic}
             (own.get(command) or getattr(shared, command))()
     except shared.DriftReview as review:
         signal("DRIFT", review)

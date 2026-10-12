@@ -38,6 +38,12 @@ Unresolved planning receipts prevent another automatic claim. Recover these rece
 
 The input is one AC. The planner reads its Requirement, parents, decisions and existing Tasks.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
+All planning agents can query Joppa for relevant context across the configured workspace.
+The reader exposes eight read tools. It rejects writes and reads of other workspaces.
+Search results locate objects. Read a full current object before reuse or a dependency.
+The existing snapshot records these reads and checks them again before publication.
+Runtime MCP configs contain the credential file path, never its value.
+Publication remains a separate workflow stage.
 Research checks reuse. Necessity checks the minimum scope. Design supplies mechanisms.
 Two independent critics review the plan. Publication saves Tasks and finishes the claim in one transaction.
 The plan enters each Task contract. A verification Task checks existing behavior.
