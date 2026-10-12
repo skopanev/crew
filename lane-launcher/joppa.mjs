@@ -144,6 +144,16 @@ export async function claimTask(run, persist) {
   persist();
   require(object.work_ready === true && object.review_required === false, 'Claimed Task needs dependency or contract review before execution');
   const input = taskInput(run.config, object);
+  if (object.document.parent) {
+    const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
+      {workspace: run.workspace, address: object.document.parent});
+    require(parent.address === object.document.parent && parent.document?.present === true && parent.historical === false &&
+      Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0,
+      'Task parent context is absent or historical');
+    input.ticket.parentContext = {use: 'Acceptance reference. Execute only the Task contract.',
+      address: parent.address, revision: parent.current_revision, data: parent.document.data};
+    run.claim.parent = {address: parent.address, digest: contractDigest(parent)};
+  }
   run.claim.ticket = input.ticket;
   run.repository = input.repo;
   persist();
@@ -176,6 +186,12 @@ export async function finishTask(run, stateFile, result, artifacts) {
     } else require(remote === sha, 'Remote branch does not confirm the checked SHA; Task remains held');
     const followups = path.join(artifacts, 'followups.txt');
     const findings = fs.existsSync(followups) ? fs.readFileSync(followups, 'utf8').trim() : '';
+    if (run.claim.parent) {
+      const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
+        {workspace: run.workspace, address: run.claim.parent.address});
+      require(parent.address === run.claim.parent.address && parent.document?.present === true && parent.historical === false &&
+        contractDigest(parent) === run.claim.parent.digest, 'Task parent context changed during execution; completion refused');
+    }
     run.completionRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
       op: 'complete_task', id: run.task, revision: object.current_revision,
       evidence: `${evidence.trim()}\nRequired gates and independent review passed. Run: ${path.basename(path.dirname(stateFile))}${findings ? '\nNonblocking findings:\n' + findings : ''}`}};

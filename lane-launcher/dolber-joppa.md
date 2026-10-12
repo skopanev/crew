@@ -22,6 +22,8 @@ The continuous dispatcher still checks for other work.
 The Task contract must declare exactly one `Repository:` line and one `Module:` line.
 These names select entries in the config. Module paths remain inside the selected repository.
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
+The snapshot includes the direct parent as acceptance context. The Task contract defines the execution scope.
+Completion checks that both authored documents remain unchanged.
 The existing lane runs discovery, implementation or verification, configured checks and independent review.
 
 `delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
