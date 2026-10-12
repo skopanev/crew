@@ -7,6 +7,7 @@ vars:
   REJECT_ROUNDS: '3'
   ticket_title: ''
   gate_commands: '[]'
+  gate_timeout_seconds: '900'
   LAUNCH_CLAIM: ''
   TICKET_SOURCE: ntk
   TARGET_BRANCH: ''
@@ -285,6 +286,7 @@ nodes:
       ticket_title: '{{var:ticket_title}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       gate_commands: '{{var:gate_commands}}'
+      gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'

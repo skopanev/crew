@@ -121,6 +121,10 @@ def run(root):
     current = root / "current.json"
     current.unlink(missing_ok=True)
     commands = plan()
+    timeout_text = os.environ.get("gate_timeout_seconds", "900")
+    if not re.fullmatch(r"[1-9][0-9]*", timeout_text):
+        raise ValueError("gate_timeout_seconds must be a positive integer")
+    timeout_seconds = int(timeout_text)
     who = identity()
     tree, base = git("write-tree"), git("rev-parse", "HEAD")
     if not unchanged(tree):
@@ -132,6 +136,7 @@ def run(root):
     folder.mkdir()
     receipt = {"schema": 1, **who, "tree": tree, "base": base,
                "candidate_sha": candidate, "commands": commands,
+               "timeout_seconds": timeout_seconds,
                "toolchain": {"python": platform.python_version(),
                              "platform": platform.platform(),
                              "git": git("--version"),
@@ -151,7 +156,7 @@ def run(root):
                                        stdout=output, stderr=errors if structured else subprocess.STDOUT,
                                        start_new_session=True)
             try:
-                rc = process.wait(timeout=900)
+                rc = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()

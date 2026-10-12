@@ -6,7 +6,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
               --gate-command <shell command> [...]
-              --test-command '["runner", "args"]'
+              --test-command '["runner", "args"]' [--gate-timeout <seconds>]
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
@@ -28,6 +28,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
   --test-command  required runner argument array for existing-code verification.
+  --gate-timeout  maximum seconds per check; defaults to 900.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
   --shared-lock-dir  a shared lock directory directly under the source root, mounted writable.
@@ -51,6 +52,7 @@ TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 test_command='[]'
+gate_timeout=900
 also=()
 writable=()
 gate_commands=()
@@ -74,6 +76,7 @@ while (( $# )); do
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
+    --gate-timeout) gate_timeout="${2:-}"; shift 2 ;;
     --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
@@ -99,6 +102,9 @@ done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
 jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$test_command" >/dev/null || {
   say 'run.sh: --test-command must be a nonempty JSON argument array'; exit 2; }
+
+[[ "$gate_timeout" =~ ^[1-9][0-9]*$ ]] || {
+  say 'run.sh: --gate-timeout must be a positive integer'; exit 2; }
 
 # The host worker owns NTK claims; no Docker or preflight without its receipt.
 jq -e -s --arg id "$ticket" --arg ws "$project" '
@@ -405,6 +411,7 @@ medulla \
   --var "project_dir=$project_dir" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
+  --var "gate_timeout_seconds=$gate_timeout" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   ${equill_vars[@]+"${equill_vars[@]}"} \
