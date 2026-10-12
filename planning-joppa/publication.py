@@ -2,6 +2,7 @@
 from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
+import re
 
 from common import digest, read, require, strings, text, write
 from mcp import Rejected
@@ -110,7 +111,8 @@ def validate(plan, assignment):
 def contract(task, plan):
     lines = [task["outcome"], "", "Approach: " + plan["approach"],
              f"Repository: {task['repository']}", f"Module: {task['module']}", "", "Steps:"]
-    lines.extend(f"{number}. {step}" for number, step in enumerate(task["steps"], 1))
+    lines.extend(f"{number}. " + re.sub(r"^\s*\d+\.\s+", "", step)
+                 for number, step in enumerate(task["steps"], 1))
     lines += ["", "Reuse:", *(task["reuse"] or ["No existing mechanism applies."]), "", "Checks:"]
     for check in task["checks"]:
         method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
