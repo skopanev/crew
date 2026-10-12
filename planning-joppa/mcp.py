@@ -114,7 +114,18 @@ class Reader:
         self.api, self.workspace, self.target = api, workspace, target
 
     def tools(self):
-        return [tool for tool in self.api.tools() if tool["name"] in READ_TOOLS]
+        tools = []
+        for tool in self.api.tools():
+            if tool["name"] not in READ_TOOLS:
+                continue
+            tool = dict(tool)
+            tool["annotations"] = {**tool.get("annotations", {}), "readOnlyHint": True, "destructiveHint": False}
+            schema = tool["inputSchema"]
+            if "workspace" in schema.get("properties", {}):
+                tool["inputSchema"] = {**schema, "properties": {**schema["properties"],
+                    "workspace": {"type": "string", "enum": [self.workspace], "default": self.workspace}}}
+            tools.append(tool)
+        return tools
 
     def call(self, name, arguments):
         if name not in READ_TOOLS:
@@ -173,14 +184,14 @@ def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
 if __name__ == "__main__":
     import argparse
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
-    import context
     parser = argparse.ArgumentParser(description="Read the configured Joppa workspace through MCP stdio.")
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--url", required=True)
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--token-file", required=True)
     parser.add_argument("--artifacts", required=True)
     args = parser.parse_args()
     try:
-        config = context.configuration(args.config)
-        serve(Reader(context.client(config), config["workspace"], Path(args.artifacts)))
+        serve(Reader(Joppa(args.url, args.token_file), args.workspace, Path(args.artifacts)))
     except (MCPError, ValueError, OSError) as error:
         print("Joppa reader: " + str(error), file=sys.stderr)
         sys.exit(1)

@@ -13,6 +13,9 @@ sh ./planning-joppa/run.sh --config /path/to/private/config.json --ac-id ac:crit
 Use `config.example.json` as the shape of the private configuration.
 Map Joppa Project addresses to local repositories and CBM indexes in that configuration.
 Keep credentials and private configuration outside this repository.
+Set `reader_token_file` to a Joppa token that permits only reads.
+Keep `token_file` for the workflow publication stage. Do not reuse this token for agent MCP.
+The planner refuses before claiming if the reader token file is absent.
 
 Show the last 30 planning runs in a terminal table:
 

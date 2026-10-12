@@ -14,7 +14,9 @@ def configuration(path):
         text(config.get(key), "config." + key)
     require(isinstance(config.get("repositories"), list) and config["repositories"], "config.repositories required")
     root = Path(path).resolve().parent
-    for key in ("token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+    for key in ("token_file", "reader_token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+        if key == "reader_token_file" and key not in config:
+            continue
         value = Path(config[key]).expanduser()
         config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
     for repo in config["repositories"]:

@@ -18,6 +18,8 @@ vars:
   PLANNING_MCP_OPTION: ''
   PLANNING_MCP_TOML: ''
   PLANNING_MCP_CONFIG: '{"mcpServers":{}}'
+  PLANNING_MCP_TOOLS_OPTION: ''
+  PLANNING_MCP_TOOLS: ''
 nodes:
   prepare:
     timeout: 480
@@ -145,6 +147,8 @@ nodes:
         - --setting-sources=
         - --mcp-config
         - '{{var:PLANNING_MCP_CONFIG}}'
+        - '{{var:PLANNING_MCP_TOOLS_OPTION}}'
+        - '{{var:PLANNING_MCP_TOOLS}}'
     prompt: |
       {{file:prompts/design.md}}
       Mandatory Equill contract:
