@@ -93,7 +93,9 @@ export function validateWritableDirs(config, ticket) {
 }
 export function runDirectories(stateDir) {
   const root = path.join(stateDir, 'runs');
-  fs.mkdirSync(root, {recursive: true, mode: 0o700});
-  return fs.readdirSync(root).map(name => path.join(root, name))
+  let names;
+  try { names = fs.readdirSync(root); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  return names.map(name => path.join(root, name))
     .filter(dir => fs.statSync(dir).isDirectory());
 }
