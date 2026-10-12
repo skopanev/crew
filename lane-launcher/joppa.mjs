@@ -163,12 +163,17 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const evidence = fs.readFileSync(report, 'utf8');
     const sha = evidence.match(/(?:Landed SHA|Verified existing SHA): ([0-9a-f]{40,64})\b/)?.[1];
     const target = evidence.match(/^Target: (.+)$/m)?.[1];
-    const expected = report.endsWith('verification.txt') || run.config.delivery === 'target' ? run.repository.targetBranch : `ticket-${run.executionId}`;
+    const expected = report.endsWith('verification.txt') || run.config.delivery === 'target' ? run.repository.targetBranch : run.deliveryBranch || `ticket-${run.executionId}`;
     require(sha && target === expected, 'Publication evidence does not match the configured delivery');
     const env = {...process.env, GIT_SSH_COMMAND: `ssh -F /dev/null -i ${quote(path.join(run.config.sshDir, 'id_ed25519'))} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${quote(path.join(run.config.sshDir, 'known_hosts'))}`};
     const remote = await new Promise((resolve, reject) => execFile('git', ['-C', run.repository.path, 'ls-remote', 'origin', `refs/heads/${target}`],
       {env, encoding: 'utf8', timeout: 120_000}, (error, output) => error ? reject(new Error('Cannot confirm published SHA')) : resolve(output.trim().split(/\s/)[0])));
-    require(remote === sha, 'Remote branch does not confirm the checked SHA; Task remains held');
+    if (remote !== sha && remote && expected === run.repository.targetBranch) {
+      const git = args => new Promise((resolve, reject) => execFile('git', ['-C', run.repository.path, ...args],
+        {env, encoding: 'utf8', timeout: 120_000}, error => error ? reject(new Error('Remote branch does not contain the checked SHA; Task remains held')) : resolve()));
+      await git(['fetch', '--no-write-fetch-head', 'origin', remote]);
+      await git(['merge-base', '--is-ancestor', sha, remote]);
+    } else require(remote === sha, 'Remote branch does not confirm the checked SHA; Task remains held');
     const followups = path.join(artifacts, 'followups.txt');
     const findings = fs.existsSync(followups) ? fs.readFileSync(followups, 'utf8').trim() : '';
     run.completionRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
@@ -184,11 +189,16 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const startup = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8').split('\n')
       .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
     const failure = artifacts && fs.existsSync(path.join(artifacts, 'failure.txt')) ? fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8') : startup || result.error;
-    run.failureRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note', target: run.task,
-      id: randomUUID(), text: `${failure || 'Lane failed'}\nRun: ${path.basename(path.dirname(stateFile))}\nExecution claim retained. Inspect evidence before retrying.`, reply_to: null}};
-    persist();
-    await api(run.config, run.joppaWorker, 'joppa_command', run.failureRequest);
+    await noteHeldTask(run, stateFile, failure || 'Lane failed');
     // Joppa has no failed/blocked Task transition. A release would immediately requeue failed work.
     result.held = true;
   }
+}
+
+export async function noteHeldTask(run, stateFile, reason) {
+  // Preserve the request ID if the server response is lost. Do not release or rerun the Task.
+  run.failureRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note', target: run.task,
+    id: randomUUID(), text: `${reason}\nRun: ${path.basename(path.dirname(stateFile))}\nOutcome not confirmed. Inspect evidence before retrying.`, reply_to: null}};
+  save(stateFile, run);
+  await api(run.config, run.joppaWorker, 'joppa_command', run.failureRequest);
 }

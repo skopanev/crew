@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
-import {claimTask, finishTask} from './joppa.mjs';
+import {claimTask, finishTask, noteHeldTask} from './joppa.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -77,7 +77,8 @@ try {
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
       ...(joppa ? {LANE_SOURCE: 'joppa', LANE_REPOSITORY_JSON: JSON.stringify(run.repository),
         LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
-        LANE_DELIVERY: run.config.delivery, EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
+        LANE_DELIVERY: run.config.delivery, LANE_DELIVERY_BRANCH: run.deliveryBranch || '',
+        EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       ...(run.claim ? {LANE_CLAIM_JSON: JSON.stringify(run.claim)} : {})}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
@@ -176,6 +177,16 @@ try {
     } catch (error) {
       result = {...result, status: 'failed', code: 2, blocked: Boolean(run.claim), error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
       announce(`[lane] ${result.error}`);
+      if (run.claim && !run.failureRequest) {
+        try {
+          await noteHeldTask(run, stateFile, result.error);
+          result.held = true;
+          announce(`[lane] HELD ${run.task} · outcome note recorded`);
+        } catch (noteError) {
+          result.noteError = noteError.message;
+          announce(`[lane] Cannot record outcome note: ${noteError.message}`);
+        }
+      }
     }
   }
   // Record completion first: closing this pane can terminate this process immediately.

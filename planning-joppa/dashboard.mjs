@@ -84,11 +84,11 @@ export function plannerRows(root, current = null) {
 }
 
 export function titleCell(row, width) {
-  if (!row.requirementTitle || !row.acTitle) return row.ticket;
   const clip = (text, size) => {
     const chars = Array.from(text.replace(/[\x00-\x1f\x7f]/g, ' '));
     return chars.length > size ? chars.slice(0, size - 1).join('') + '…' : chars.join('');
   };
+  if (!row.requirementTitle || !row.acTitle) return clip(row.ticket, width);
   const budget = width - 3;
   const requirementWidth = Math.min(Array.from(row.requirementTitle).length,
     Math.max(Math.floor(budget / 2), budget - Array.from(row.acTitle).length));
@@ -117,7 +117,8 @@ export async function main(argv) {
   const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
   if (typeof config.workspace !== 'string' || typeof config.runs_folder !== 'string') throw new Error('Config needs workspace and runs_folder');
   const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
-  const root = path.resolve(path.dirname(configFile), expand(config.runs_folder));
+  const configuredRoot = path.resolve(path.dirname(configFile), expand(config.runs_folder));
+  const root = fs.existsSync(configuredRoot) ? fs.realpathSync(configuredRoot) : configuredRoot;
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {
     const child = spawn('sh', args, {stdio: 'inherit'});
@@ -179,7 +180,8 @@ export async function main(argv) {
           pending = lines.pop();
           for (const line of lines) {
             const folder = line.trim();
-            if (folder.startsWith(root + path.sep) && fs.existsSync(folder)) {
+            const canonicalRoot = fs.existsSync(root) ? fs.realpathSync(root) : root;
+            if ((folder.startsWith(root + path.sep) || folder.startsWith(canonicalRoot + path.sep)) && fs.existsSync(folder)) {
               current = {folder, ended: false};
               fs.appendFileSync(path.join(folder, 'output.log'), buffered);
               buffered = '';

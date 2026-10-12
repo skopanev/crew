@@ -24,9 +24,10 @@ These names select entries in the config. Module paths remain inside the selecte
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
 The existing lane runs discovery, implementation or verification, configured checks and independent review.
 
-`delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>`. It does not merge or deploy.
+`delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
 `delivery: "target"` lands the candidate on the configured `targetBranch`.
 The host confirms the exact remote SHA before it calls `complete_task`.
+For target delivery, it also accepts the checked SHA as an ancestor of the current target.
 Joppa `done` records execution. It does not accept the AC or Requirement.
 
 ## Failure
@@ -36,6 +37,7 @@ Dolber records a failure note and retains the confirmed claim. It does not relea
 That worker actor cannot take another Task until its claim is resolved.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.
 A lost completion response requires inspection. Do not rerun code which was already published.
+Completion failures also write a Joppa note. Each retry uses a separate candidate branch.
 
 ## Config fields
 
