@@ -130,6 +130,8 @@ class Reader:
     def call(self, name, arguments):
         if name not in READ_TOOLS:
             raise MCPError("The planning reader does not permit this tool")
+        if not isinstance(arguments, dict):
+            raise MCPError("Tool arguments must be an object")
         args = dict(arguments)
         if args.get("item_id"):
             raise MCPError("Use workspace and a full object address instead of item_id")
@@ -152,12 +154,25 @@ class Reader:
 def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
     """Serve the MCP stdio protocol without forwarding mutation methods."""
     for line in input_stream:
-        request = json.loads(line)
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            output_stream.write(json.dumps({"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32700, "message": "Invalid JSON"}}) + "\n")
+            output_stream.flush()
+            continue
+        if not isinstance(request, dict):
+            output_stream.write(json.dumps({"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "Request must be an object"}}) + "\n")
+            output_stream.flush()
+            continue
         if "id" not in request:
             continue
         response = {"jsonrpc": "2.0", "id": request["id"]}
         method, params = request.get("method"), request.get("params", {})
         try:
+            if not isinstance(params, dict):
+                raise MCPError("Request params must be an object")
             if method == "initialize":
                 result = {"protocolVersion": params.get("protocolVersion", "2025-03-26"),
                           "capabilities": {"tools": {}}, "serverInfo": {"name": "crew-joppa-reader", "version": "1"}}
