@@ -77,8 +77,22 @@ export function plannerRows(root, current = null) {
       const end = active ? undefined : current?.folder === folder && current.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, ac, runId: match?.[5] || entry.name, start, end, active, status, stage}];
+      return [{ticket: label, requirementTitle: input ? title(input.requirement) : '',
+        acTitle: input ? title(input.ac) : '', ac,
+        runId: match?.[5] || entry.name, start, end, active, status, stage}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
+}
+
+export function titleCell(row, width) {
+  if (!row.requirementTitle || !row.acTitle) return row.ticket;
+  const clip = (text, size) => {
+    const chars = Array.from(text.replace(/[\x00-\x1f\x7f]/g, ' '));
+    return chars.length > size ? chars.slice(0, size - 1).join('') + '…' : chars.join('');
+  };
+  const budget = width - 3;
+  const requirementWidth = Math.min(Array.from(row.requirementTitle).length,
+    Math.max(Math.floor(budget / 2), budget - Array.from(row.acTitle).length));
+  return `${clip(row.requirementTitle, requirementWidth)} : ${clip(row.acTitle, budget - requirementWidth)}`;
 }
 
 export async function main(argv) {
@@ -115,7 +129,9 @@ export async function main(argv) {
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
-    const table = renderRunTable(rows, paint, 6, {identityLabel: 'REQ : AC', identityWidth: 48});
+    const identityWidth = Math.max(20, Math.min(Math.floor(width * 0.55), width - 106));
+    const table = renderRunTable(rows.map(row => ({...row, ticket: titleCell(row, identityWidth)})),
+      paint, 6, {identityLabel: 'REQ : AC', identityWidth});
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
