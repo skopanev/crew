@@ -156,6 +156,11 @@ nodes:
       # No shared objects, hardlinks, worktree registration or canonical Git writes.
       git clone --no-hardlinks --no-checkout "$project_dir" "$LANE_WORKTREE"
       cd "$LANE_WORKTREE"
+      if [ -f "$project_dir/.git/info/exclude" ]; then
+        mkdir -p .git/info
+        printf '\n' >> .git/info/exclude
+        cat "$project_dir/.git/info/exclude" >> .git/info/exclude
+      fi
       git config user.name lane
       git config user.email lane@local
       git remote set-url origin "$origin"
