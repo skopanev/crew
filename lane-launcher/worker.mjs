@@ -174,6 +174,7 @@ try {
         .find(folder => fs.existsSync(path.join(folder, 'landing.txt')) || fs.existsSync(path.join(folder, 'verification.txt'))) : null;
       await finishTask(run, stateFile, result, artifacts);
       if (result.completed) announce(`[lane] DONE ${run.task} · Joppa confirmed`);
+      if (result.blockConfirmed) announce(`[lane] BLOCKED ${run.task} · Joppa confirmed; claim released`);
       if (result.held) announce(`[lane] HELD ${run.task} · claim retained with failure evidence`);
     } catch (error) {
       result = {...result, status: 'failed', code: 2, blocked: Boolean(run.claim), error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
@@ -181,8 +182,7 @@ try {
       if (run.claim && !run.failureRequest) {
         try {
           await noteHeldTask(run, stateFile, result.error);
-          result.held = true;
-          announce(`[lane] HELD ${run.task} · outcome note recorded`);
+          announce(`[lane] ${run.task} · unconfirmed outcome note recorded`);
         } catch (noteError) {
           result.noteError = noteError.message;
           announce(`[lane] Cannot record outcome note: ${noteError.message}`);

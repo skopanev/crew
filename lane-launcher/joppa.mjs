@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
+import {completionEvent, reasonCode} from '../notify.mjs';
 
 const bridge = fileURLToPath(new URL('./joppa-api.py', import.meta.url));
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -207,9 +208,20 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const startup = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8').split('\n')
       .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
     const failure = artifacts && fs.existsSync(path.join(artifacts, 'failure.txt')) ? fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8') : startup || result.error;
-    await noteHeldTask(run, stateFile, failure || 'Lane failed');
-    // Joppa has no failed/blocked Task transition. A release would immediately requeue failed work.
-    result.held = true;
+    run.blockRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
+      op: 'block_task', id: run.task, revision: object.current_revision,
+      reason: reasonCode(completionEvent(run, result, artifacts)),
+      evidence: `${failure || 'Lane failed'}\nRun: ${path.basename(path.dirname(stateFile))}`}};
+    persist();
+    await api(run.config, run.joppaWorker, 'joppa_command', run.blockRequest);
+    const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: run.task});
+    const blocked = confirmed.process?.blocked;
+    require(confirmed.address === run.task && confirmed.process?.status === 'open' &&
+      confirmed.process.assignee === null && blocked?.actor === run.joppaWorker.actor &&
+      blocked.reason === run.blockRequest.command.reason && blocked.evidence === run.blockRequest.command.evidence &&
+      Number.isSafeInteger(blocked.position) && blocked.position > 0,
+      'Joppa did not confirm the Task block; outcome requires inspection');
+    result.blockConfirmed = true;
   }
 }
 

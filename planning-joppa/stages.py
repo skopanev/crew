@@ -62,7 +62,7 @@ def prompt_assignment(assignment):
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
         "tasks": [{"address": task["address"], "revision": task["current_revision"],
                    "data": task["document"]["data"], "links": task["document"]["links"],
-                   "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired")}}
+                   "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                   for task in tasks],
         "objects": {address: {"revision": item["current_revision"], "data": item["document"]["data"],
                               "links": item["document"]["links"], "annotations": item["annotations"]}
