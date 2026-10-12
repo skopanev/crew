@@ -18,7 +18,9 @@ Preserve its owner, worker assignment, parent and other document fields.
 Reuse existing suitable Tasks instead of duplicating their work. Omit unchanged, done and retired Tasks.
 An implement plan needs complete mechanism steps, reuse choices and observable checks for every Task.
 Do not emit shallow implementation Tasks. Lane decides files, functions and test placement.
-Use earlier local Task IDs or full object addresses from joppa.objects for depends_on.
+Use Joppa MCP to inspect relevant Tasks, ACs, Requirements, capabilities and domains in the configured workspace.
+Search before creating Tasks. Read the full current object before reuse or a dependency.
+Use earlier local Task IDs or full object addresses read through Joppa MCP for depends_on.
 Add dependencies only when one output is required for another Task.
 Unlike the default plan shape, verify_existing requires at least one scoped verification Task.
 Set purpose: verification on each such Task. Give observable checks. Do not claim that acceptance passed.
@@ -43,7 +45,7 @@ def main():
                  "OUTPUT_CONTRACT": OUTPUT_CONTRACT,
                  "NECESSITY_OUTPUT_CONTRACT": "Assess the selected AC. Existing owner decisions remain authoritative. "
                     "Do not produce shallow Tasks or wait for implementation dependencies to land. "
-                    "Describe the minimum mechanism scope. The designer then prepares complete Tasks.",
+                    "Use Joppa MCP to inspect related work and its context as needed. Describe the minimum mechanism scope. The designer then prepares complete Tasks.",
                  "CBM_CACHE_DIR": config["cbm_store"], "CBM_ALLOWED_ROOT": config["cbm_root"],
                  "CBM_BIN": shutil.which(os.environ.get("CBM_BIN", "codebase-memory-mcp")) or "codebase-memory-mcp",
                  "EQUILL_STORE": config["equill_store"], "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),

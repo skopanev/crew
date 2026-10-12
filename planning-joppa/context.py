@@ -1,5 +1,7 @@
 """Read one criterion and its current Joppa context."""
 import json
+import fcntl
+import os
 from pathlib import Path
 
 from common import digest, read, require, text, validate_input
@@ -148,3 +150,52 @@ def load(api, config, ac_id):
 
 def unchanged(old, new):
     require(digest(old) == digest(new), "Joppa context changed during planning; read the criterion again")
+
+
+def capture_object(target, workspace, object):
+    """Keep the first full read. Serialize readers on the existing snapshot file."""
+    path = Path(target) / "joppa-snapshot.json"
+    with path.open("r+") as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        snapshot = json.load(file)
+        assignment = read(Path(target) / "input.json")
+        require(assignment["workspace"] == workspace, "reader workspace differs from the run")
+        require(object.get("document", {}).get("present") is True and object.get("historical") is False,
+                "reader requires a full current object")
+        address = text(object.get("address"), "object.address")
+        types = snapshot["schema"]["types"]
+        require(object.get("kind") in types, "object schema changed during planning")
+        current = snapshot_source(object, types)
+        if address in snapshot["objects"]:
+            unchanged(snapshot["objects"][address], current)
+            return
+        snapshot["objects"][address] = current
+        # Keep the lock inode stable. Every reader uses this same file.
+        file.seek(0)
+        json.dump(snapshot, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+        file.truncate()
+        file.flush()
+        os.fsync(file.fileno())
+
+
+def refresh_reads(api, config, assignment, snapshot, original):
+    """Check every captured contract and hydrate publication dependencies."""
+    for address in original["objects"]:
+        if address not in snapshot["objects"]:
+            object = object_read(api, config["workspace"], address)
+            assignment["joppa"]["objects"][address] = source(object)
+            snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"])
+    unchanged(original, snapshot)
+
+
+def read_assignment(api, config, target):
+    """Hydrate additional reads without changing the fixed assessment input."""
+    assignment = read(Path(target) / "input.json")
+    snapshot = read(Path(target) / "joppa-snapshot.json")
+    for address, expected in snapshot["objects"].items():
+        if address not in assignment["joppa"]["objects"]:
+            object = object_read(api, config["workspace"], address)
+            unchanged(expected, snapshot_source(object, snapshot["schema"]["types"]))
+            assignment["joppa"]["objects"][address] = source(object)
+    return assignment

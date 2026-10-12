@@ -15,6 +15,9 @@ vars:
   OUTPUT_CONTRACT: ''
   NECESSITY_OUTPUT_CONTRACT: ''
   critique: ''
+  PLANNING_MCP_OPTION: ''
+  PLANNING_MCP_TOML: ''
+  PLANNING_MCP_CONFIG: '{"mcpServers":{}}'
 nodes:
   prepare:
     timeout: 480
@@ -51,6 +54,8 @@ nodes:
       sandbox: read-only
       args:
         - --ignore-user-config
+        - '{{var:PLANNING_MCP_OPTION}}'
+        - '{{var:PLANNING_MCP_TOML}}'
         - -c
         - 'mcp_servers.codebase-memory.command={{var:CBM_BIN_TOML}}'
         - -c
@@ -99,6 +104,8 @@ nodes:
       sandbox: read-only
       args:
         - --ignore-user-config
+        - '{{var:PLANNING_MCP_OPTION}}'
+        - '{{var:PLANNING_MCP_TOML}}'
     prompt: |
       {{file:prompts/necessity.md}}
       Mandatory Equill contract:
@@ -137,7 +144,7 @@ nodes:
         - --strict-mcp-config
         - --setting-sources=
         - --mcp-config
-        - '{"mcpServers":{}}'
+        - '{{var:PLANNING_MCP_CONFIG}}'
     prompt: |
       {{file:prompts/design.md}}
       Mandatory Equill contract:
@@ -203,6 +210,8 @@ nodes:
       sandbox: read-only
       args:
         - '{{input.flag:-}}'
+        - '{{var:PLANNING_CRITIC_MCP_OPTION:-}}'
+        - '{{var:PLANNING_CRITIC_MCP_TOML:-}}'
     prompt: |
       {{file:prompts/critic.md}}
       Mandatory Equill contract:
