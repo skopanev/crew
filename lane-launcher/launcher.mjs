@@ -8,6 +8,7 @@ import {nextTicket, countTickets, credentials} from './ntk.mjs';
 import {save, read, readRun, alive, quote, command, herdr, laneArgs, runDirectories, validateWritableDirs} from './runtime.mjs';
 import {scopeDirectory, runScope, validateId} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
+import {validateJoppa, nextTask, executionId} from './joppa.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
@@ -16,12 +17,19 @@ const tones = {red: 31, blue: '1;34', yellow: '1;33', description: 33, ready: '1
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
-export function configFrom(file, env = process.env, {dryRun = false} = {}) {
+export function configFrom(file, env = process.env, {dryRun = false, source = 'ntk'} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
     preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
+  config.source = source;
+  if (source === 'joppa') {
+    config.delivery ??= 'branch';
+    validateJoppa(config);
+    config.gateCommands = config.repositories[0].gateCommands;
+    config.testCommand = config.repositories[0].testCommand;
+  }
   if (dryRun) config.launchLanes = false;
   config.id = validateId(config.id);
   // The terminal running dolber owns the destination workspace.
@@ -109,6 +117,7 @@ export function activeCount(config, containers, panes) {
 }
 
 function snapshots(config) {
+  if (config.source === 'joppa' && !config.launchLanes) return {containers: [], panes: null};
   // Read labels individually: Docker's comma-joined .Labels corrupts paths
   // containing commas. JSON quoting also preserves spaces and escapes.
   const format = '{"workflow":{{json (.Label "medulla.workflow")}},"runFolder":{{json (.Label "medulla.runs_under")}}}';
@@ -120,7 +129,7 @@ function snapshots(config) {
 }
 
 function preflight(config) {
-  credentials();
+  if (config.source !== 'joppa') credentials();
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
   }
@@ -144,13 +153,15 @@ export async function tick(config, display = null) {
     prefer: config.preferTags.length ? config.preferTags.join(',') : undefined,
     module: config.module ?? undefined, assignee: config.assignee ?? undefined,
     strict: config.strict, has_module: true, dry_run: true};
-  const candidate = await nextTicket(query);
+  const selected = config.source === 'joppa' ? await nextTask(config) : null;
+  const candidate = selected ? selected.candidate : await nextTicket(query);
   try {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
-    const open = await countTickets({...filter, status: 'open'});
-    const ready = candidate ? '≥1' : '0';
-    if (display) display.counts = {open, ready, blocked: candidate === null && open > 0};
-    else print(`Tickets with tags [${countFilter}]: ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
+    const open = selected ? selected.available : await countTickets({...filter, status: 'open'});
+    const ready = selected ? String(selected.available) : candidate ? '≥1' : '0';
+    if (display) display.counts = {open, ready, held: selected?.held, blocked: candidate === null && open > 0};
+    else print(selected ? `Joppa Tasks [workspace=${config.workspace}, project=${config.joppa.project}]: ${ready} available · ${selected.held} held workers` :
+      `Tickets with tags [${countFilter}]: ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
   } catch (error) {
     const message = `Tickets with tags [${countFilter}]: unavailable (${error.message})`;
     if (display) { display.counts = null; display.fail(message); }
@@ -158,8 +169,11 @@ export async function tick(config, display = null) {
   }
   if (!display) {
     print('checking params:');
-    print(`  tags: ${config.tags.join(', ') || '(any)'}`);
-    print(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
+    if (selected) print(`  project: ${config.joppa.project} · purpose: implementation`);
+    else {
+      print(`  tags: ${config.tags.join(', ') || '(any)'}`);
+      print(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
+    }
   }
   if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('NTK returned a ticket without an id');
@@ -171,7 +185,8 @@ export async function tick(config, display = null) {
   const runFolder = path.join(fs.realpathSync(dir), 'lane');
   fs.mkdirSync(runFolder);
   const run = {ticket: candidate.id, workspace: config.workspace, config,
-    runFolder, args: laneArgs(config, candidate.id), createdAt: new Date().toISOString()};
+    runFolder, args: selected ? null : laneArgs(config, candidate.id), createdAt: new Date().toISOString(),
+    ...(selected ? {task: candidate.id, taskRevision: candidate.revision, executionId: executionId(candidate.id), joppaWorker: selected.worker} : {})};
   const stateFile = path.join(dir, 'launch.json');
   save(stateFile, run);
   // Reserve capacity before opening the tab; its worker claims before startup.
@@ -197,9 +212,10 @@ export async function tick(config, display = null) {
 }
 
 export async function main(argv) {
-  let file = path.join(here, 'dolber.json'), mode = 'loop', selectedConfig = false;
+  let file = path.join(here, 'dolber.json'), mode = 'loop', selectedConfig = false, source = 'ntk';
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--config' && argv[i + 1] && !argv[i + 1].startsWith('-') && !selectedConfig) {
+    if (argv[i] === '--source' && argv[i + 1] === 'joppa') { source = argv[++i]; file = path.join(here, 'dolber-joppa.json'); }
+    else if (argv[i] === '--config' && argv[i + 1] && !argv[i + 1].startsWith('-') && !selectedConfig) {
       file = path.resolve(argv[++i]); selectedConfig = true;
     }
     else if (!argv[i].startsWith('-') && !selectedConfig) {
@@ -209,8 +225,8 @@ export async function main(argv) {
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
   }
-  if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber.example.json')} to this path and fill in workspace.`);
-  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
+  if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, source === 'joppa' ? 'dolber-joppa.example.json' : 'dolber.example.json')} to this path and fill in workspace.`);
+  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', source});
   fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   preflight(config);
   const lock = path.join(config.stateDir, 'dispatcher.lock');

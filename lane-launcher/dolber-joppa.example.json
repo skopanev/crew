@@ -1,0 +1,39 @@
+{
+  "id": "my-project-joppa",
+  "workspace": "my-workspace",
+  "joppa": {
+    "url": "https://joppa.example.com/mcp",
+    "project": "project:my-project",
+    "workers": [
+      {"actor": "crew-lane-1", "tokenFile": "/absolute/private/crew-lane-1.token"}
+    ]
+  },
+  "limit": 1,
+  "intervalSeconds": 60,
+  "launchLanes": false,
+  "closeTabOnExit": true,
+  "delivery": "branch",
+  "sourceRoot": "/absolute/source-workspace",
+  "worktreeRoot": "/absolute/source-workspace/.worktrees",
+  "stateDir": "/absolute/project-runs/lane-launcher",
+  "image": "medulla-crew:latest",
+  "dockerEngine": false,
+  "cbmMcpCommand": "/absolute/bin/codebase-memory",
+  "cbmCacheDir": "/absolute/shared-cbm-store",
+  "sshDir": "/absolute/lane-git-key",
+  "readOnlyRepos": [],
+  "readWriteDirs": [],
+  "repositories": [
+    {
+      "id": "application",
+      "path": "/absolute/source-workspace/application",
+      "targetBranch": "develop",
+      "cbmProject": "application",
+      "modules": [{"name": "core", "path": "src"}, {"name": "tests", "path": "tests"}],
+      "preflight": null,
+      "gateCommands": ["bun run typecheck", "bun run test"],
+      "testCommand": ["bun", "run", "test"]
+    }
+  ],
+  "notify": null
+}

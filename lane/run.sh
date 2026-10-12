@@ -122,7 +122,10 @@ check_mountpoint() {
     fi
   fi
 }
-if ! ticket_json="$(node --input-type=module -e '
+ticket_source="${LANE_SOURCE:-ntk}"
+if [[ "$ticket_source" == joppa ]]; then
+  ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' <<<"$LANE_CLAIM_JSON")"
+elif ! ticket_json="$(node --input-type=module -e '
   import {pathToFileURL} from "node:url";
   const {getTicket} = await import(pathToFileURL(process.argv[1]));
   try { console.log(JSON.stringify(await getTicket(process.argv[2], process.argv[3]))); }
@@ -142,6 +145,15 @@ module="$stored"
 # The ticket declares its repository as the first component of its module.
 # No project filter, repository map or fallback to a different repository.
 source_root="$(cd "$source_root" && pwd -P)"
+if [[ "$ticket_source" == joppa ]]; then
+  repo="$(jq -er '.path' <<<"$LANE_REPOSITORY_JSON")"
+  repo="$(cd "$repo" && pwd -P)"
+  target="$(jq -er '.targetBranch' <<<"$LANE_REPOSITORY_JSON")"
+  repository_preflight="$(jq -r '.preflight // empty' <<<"$LANE_REPOSITORY_JSON")"
+  worktree_root="${LANE_WORKTREE_ROOT:?Joppa needs worktreeRoot}"
+  [[ "$repo" == "$source_root" || "$repo" == "$source_root/"* ]] || {
+    say 'run.sh: configured repository escapes sourceRoot'; exit 2; }
+else
 component="${module%%/*}"
 [[ -n "$component" && "$component" != . && "$component" != .. ]] || {
   say "run.sh: module must name a repository or repository/path inside --source-root"; exit 2; }
@@ -153,11 +165,15 @@ repo="$(cd "$repo" && pwd -P)"
 target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$repo/.ntkrc" 2>/dev/null)" \
   && [[ "$target" != -* && "$target" != HEAD ]] && git check-ref-format "refs/heads/$target" || {
   say "run.sh: $repo/.ntkrc must set target_branch to a legal branch name"; exit 2; }
+  repository_preflight="__ntkrc__"
+  worktree_root="$source_root/.worktrees"
+fi
 source_root_in="/workspace/$(basename "$source_root")"
-project_dir="$source_root_in/${repo#"$source_root/"}"
-worktree="$source_root/.worktrees/$ticket"
+if [[ "$repo" == "$source_root" ]]; then project_dir="$source_root_in";
+else project_dir="$source_root_in/${repo#"$source_root/"}"; fi
+worktree="$worktree_root/$ticket"
 # Retained or foreign work must never be reset by a fresh dispatch.
-[[ ! -L "$source_root/.worktrees" && ! -L "$worktree" ]] || {
+[[ ! -L "$worktree_root" && ! -L "$worktree" ]] || {
   say "run.sh: worktree path is a symlink; startup refused"; exit 2; }
 if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73
@@ -225,15 +241,20 @@ else
 fi
 
 cleanup() {
-  local code=$? base head changes target
+  local code=$? base head changes cleanup_target
   if [[ "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
     if [[ -z "$(ls -A "$worktree")" ]]; then
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
     elif [[ "$code" -eq 0 ]]; then
-      if target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$worktree/.ntkrc" 2>/dev/null)" \
+      cleanup_target="$target"
+      if [[ "$ticket_source" == joppa && "${LANE_DELIVERY:-branch}" == branch ]]; then
+        cleanup_target="ticket-$ticket"
+        [[ ! -f "$worktree/.git/lane-verified" ]] || cleanup_target="$target"
+      fi
+      if [[ -n "$cleanup_target" ]] \
         && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
         && [[ -z "$changes" ]] \
-        && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$target"; then
+        && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$cleanup_target"; then
         if rm -rf -- "$worktree"; then
           printf 'run.sh: removed completed worktree: %s\r\n' "$worktree"
         else
@@ -279,7 +300,8 @@ cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
 cbm_connector="$cbm_connector_dir/mcp.py"
 python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector"
 chmod 600 "$cbm_connector"
-cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"
+if [[ "$ticket_source" == joppa ]]; then cbm_project="$(jq -er '.cbmProject' <<<"$LANE_REPOSITORY_JSON")";
+else cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"; fi
 # Read-only Medulla checks do not update canonical sources or CBM.
 sync_sources=true
 for arg in ${passthrough[@]+"${passthrough[@]}"}; do
@@ -373,6 +395,10 @@ medulla \
   --var "CBM_PROJECT=$cbm_project" \
   --var "ticket_id=$ticket" \
   --var "LAUNCH_CLAIM=${LANE_CLAIM_JSON:-}" \
+  --var "TICKET_SOURCE=$ticket_source" \
+  --var "TARGET_BRANCH=$target" \
+  --var "REPOSITORY_PREFLIGHT=$repository_preflight" \
+  --var "DELIVERY=${LANE_DELIVERY:-target}" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \

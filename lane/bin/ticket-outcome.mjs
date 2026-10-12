@@ -14,6 +14,7 @@ function requireClaim() {
       claim.id?.toLowerCase() !== id.toLowerCase() || claim.workspace !== workspace || claim.run_dir !== runDir) {
     throw new Error('No confirmed claim for this ticket and run; NTK was not modified');
   }
+  return claim;
 }
 
 async function recordFindings() {
@@ -80,7 +81,13 @@ async function recordFinding(finding) {
 }
 
 async function main(mode) {
-  requireClaim();
+  const claim = requireClaim();
+  if (claim.source === 'joppa') {
+    if (!['to-test', 'blocked', 'findings'].includes(mode)) throw new Error('Expected to-test, blocked or findings');
+    console.log(mode === 'findings' ? 'Joppa findings remain in followups.txt for the host completion evidence' :
+      `Joppa ${mode}: host worker records the outcome for ${claim.address}`);
+    return;
+  }
   if (mode === 'findings') return recordFindings();
   if (mode === 'to-test') {
     const errors = [];

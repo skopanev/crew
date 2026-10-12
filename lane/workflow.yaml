@@ -8,6 +8,10 @@ vars:
   ticket_title: ''
   gate_commands: '[]'
   LAUNCH_CLAIM: ''
+  TICKET_SOURCE: ntk
+  TARGET_BRANCH: ''
+  REPOSITORY_PREFLIGHT: __ntkrc__
+  DELIVERY: target
   VERIFY_ONLY: 'false'
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
@@ -109,7 +113,7 @@ nodes:
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
       Artifacts: {{var:RUN_ARTIFACTS}}.
-      Ticket: {{var:ticket_id}}. NTK workspace: {{var:project_name}}.
+      Task: {{var:ticket_id}}. Source: {{var:TICKET_SOURCE}}. Workspace: {{var:project_name}}.
       Module: {{var:module_name}}.
       Source checkout: {{var:project_dir}}.
       CBM project: {{var:CBM_PROJECT}}.
@@ -118,6 +122,9 @@ nodes:
 
   create_worktree:
     env:
+      TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
+      REPOSITORY_PREFLIGHT: '{{var:REPOSITORY_PREFLIGHT}}'
+      TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       TICKET_CHECKS: '{{var:TICKET_CHECKS}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_dir: '{{var:project_dir}}'
@@ -158,7 +165,7 @@ nodes:
         echo "<signal:FETCH_FAILED>git fetch origin exited ${rc}; full log: ${MEDULLA_RUN_DIR}/artifacts/fetch.txt</signal:FETCH_FAILED>"
         exit 0
       fi
-      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$project_dir/.ntkrc")"
+      target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
       if ! git rev-parse --verify --quiet "refs/remotes/origin/${target}" >/dev/null; then
         echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after fetch</signal:NO_TARGET_BRANCH>"
         exit 0
@@ -183,7 +190,8 @@ nodes:
       export PATH="/home/medulla/.bun/bin:${PATH}"
       # A repository may own dependency setup through .ntkrc preflight.
       deps=""
-      pf="$(jq -r '.preflight // empty' "${project_dir}/.ntkrc" 2>/dev/null || true)"
+      pf="${REPOSITORY_PREFLIGHT-__ntkrc__}"
+      if [ "$pf" = __ntkrc__ ]; then pf="$(jq -r '.preflight // empty' "${project_dir}/.ntkrc" 2>/dev/null || true)"; fi
       if [ -n "$pf" ]; then
         if [ -x "${LANE_WORKTREE}/$pf" ]; then
           if (cd "${LANE_WORKTREE}" && timeout 600 "./$pf" \
@@ -265,6 +273,7 @@ nodes:
 
   prepare_review:
     env:
+      TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
@@ -297,7 +306,7 @@ nodes:
         exit 0
       fi
       # A resolved rebase may have commits to land with an empty index.
-      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
+      target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
       if [ "${VERIFY_ONLY}" != "true" ] && git diff --cached --quiet "$base" -- 2>/dev/null \
          && [ -z "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ]; then
         echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
@@ -469,6 +478,8 @@ nodes:
       PY
   git_landing:
     env:
+      TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
+      DELIVERY: '{{var:DELIVERY}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
@@ -492,7 +503,7 @@ nodes:
       set -euo pipefail
       cd "${LANE_WORKTREE}" || {
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
-      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
+      target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
 
       # Push the checked candidate. A clean rebase retains the panel approval.
       snap="$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
@@ -531,6 +542,12 @@ nodes:
         cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
       }
 
+      if [ "$DELIVERY" = branch ]; then
+        target="ticket-${ticket_id}"
+        land
+        [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
+        exit 0
+      fi
       land
       if [ "$rc" -eq 3 ]; then
         # Ветка ушла вперёд, пока шло ревью: при параллельных полосах это норма.
@@ -562,6 +579,8 @@ nodes:
       [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
   cleanup:
     env:
+      TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
+      DELIVERY: '{{var:DELIVERY}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
@@ -579,9 +598,11 @@ nodes:
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
-      target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "${project_dir}/.ntkrc")"
+      target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
+      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = branch ]; then target="ticket-${ticket_id}"; fi
       cd "${project_dir}"
       if [ "${VERIFY_ONLY}" = "true" ]; then
+        touch "${LANE_WORKTREE}/.git/lane-verified"
         printf 'Ticket: %s\nVerified existing SHA: %s\nTarget: %s\nChecks and review passed; no commit or push.\n' \
           "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/verification.txt"
       else
@@ -692,6 +713,7 @@ nodes:
   git_fix:
     timeout: 900
     env:
+      TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       EQUILL_ROLE: crew-lane-coder
       EQUILL_RULES: none
       EQUILL_PROMPT_PROFILE: agent.memory.hybrid
@@ -723,8 +745,8 @@ nodes:
     prompt: |
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
-      1. In {{var:LANE_WORKTREE}}, read target_branch from
-         {{var:project_dir}}/.ntkrc. The failed rebase was aborted;
+      1. In {{var:LANE_WORKTREE}}, read the target with
+         bash /workspace/lane/bin/target.sh {{var:project_dir}}. The failed rebase was aborted;
          restart git rebase onto origin/<target_branch>.
       2. Resolve conflicts preserving the ticket's AC and target-branch changes,
          stage resolved files and complete the rebase.
