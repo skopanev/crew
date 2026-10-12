@@ -20,8 +20,12 @@ def settings():
 
 
 def reader_servers():
+    config = settings()
+    token_file = config.get("reader_token_file")
+    require(token_file and Path(token_file).is_file(), "config.reader_token_file must name a read-only Joppa token")
     return {"joppa": {"command": os.environ["PLANNING_PYTHON"], "args": [
-        str(Path(__file__).resolve().with_name("mcp.py")), "--config", os.environ["PLANNING_JOPPA_CONFIG"],
+        str(Path(__file__).resolve().with_name("mcp.py")), "--url", config["url"],
+        "--workspace", config["workspace"], "--token-file", token_file,
         "--artifacts", str(shared.artifacts())]}}
 
 
@@ -31,6 +35,8 @@ def prepare_reader():
     write(config, {"mcpServers": servers})
     config.chmod(0o600)
     shared.emit_var("PLANNING_MCP_CONFIG", str(config))
+    shared.emit_var("PLANNING_MCP_TOOLS_OPTION", "--allowedTools")
+    shared.emit_var("PLANNING_MCP_TOOLS", "mcp__joppa__*")
     server = servers["joppa"]
     shared.emit_var("PLANNING_MCP_OPTION", "-c")
     shared.emit_var("PLANNING_MCP_TOML", "mcp_servers.joppa={command=" + json.dumps(server["command"])
@@ -50,6 +56,7 @@ def prepare():
     target = shared.artifacts()
     target.mkdir(parents=True, exist_ok=True)
     config = settings()
+    reader_servers()
     api = context.client(config)
     help = api.call("joppa_help", {"workspace": config["workspace"]})
     advertised = json.dumps(help)
