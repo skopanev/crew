@@ -135,7 +135,7 @@ export async function main(argv) {
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
-      closed ? 'Stopped' : 'Refresh 5s · Ctrl+C to stop'].join('\n');
+      closed ? (stopped ? 'Stopped' : 'Completed') : 'Refresh 5s · Ctrl+C to stop'].join('\n');
   };
   const draw = () => {
     try { if (screen) screen.draw(); else process.stdout.write(render() + '\n'); }
