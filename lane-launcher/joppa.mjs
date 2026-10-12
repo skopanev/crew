@@ -128,7 +128,7 @@ export function taskInput(config, object) {
   require(modulePath, 'Task module is not configured');
   return {repo, ticket: {id: executionId(object.address), address: object.address, title: data.title,
     body: data.contract, module: modulePath, moduleId: module, repository: repo.id, revision: object.current_revision, source: 'joppa',
-    parent: object.document.parent, links: object.document.links, acceptance: data.contract}};
+    parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: data.contract}};
 }
 
 export async function claimTask(run, persist) {
