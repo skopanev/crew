@@ -159,7 +159,7 @@ export function createDashboard(config, paint) {
       const status = statusFor(run);
       const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
-        start: worker?.startedAt || run.createdAt, end: result?.finishedAt, active: !result && status !== 'LOST'};
+        start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
     output.push(...renderRunTable(rows, paint, 7 + footer.length));
     output.push(...footer);
