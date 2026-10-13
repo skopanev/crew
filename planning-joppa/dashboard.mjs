@@ -103,8 +103,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const rows = [];
   let cursor;
   do {
-    const page = await api({python: process.env.PLANNING_PYTHON,
-      joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
+    const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
       ...(cursor ? {cursor} : {}),
     }, {signal});
@@ -115,8 +114,7 @@ export async function readyCriteria(config, tokenFile, signal) {
           work?.active === 0 && work.done === 0) pending.push(row);
     }
     if (pending.length) {
-      const checks = await api({python: process.env.PLANNING_PYTHON,
-        joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
+      const checks = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
         workspace: config.workspace, ac: pending.map(row => row.address).join(','),
       }, {signal});
       const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
