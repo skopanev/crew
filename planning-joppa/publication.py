@@ -207,12 +207,14 @@ def operations(plan, assignment):
     return result
 
 
-def mutate(api, target, name, arguments):
+def mutate(api, target, name, arguments, *, retain_claim=False):
     """Record each request before its only attempt. Retain uncertain results."""
     require(not target.exists(), f"mutation already attempted: inspect {target.name}; no automatic retry")
     args = deepcopy(arguments)
     args["request_id"] = "crew-planning-" + str(uuid4())
     record = {"tool": name, "arguments": args, "status": "pending", "server": getattr(api, "url", None)}
+    if retain_claim:
+        record["retain_claim"] = True
     write(target, record)
     try:
         result = api.call(name, args)
@@ -244,7 +246,8 @@ def release(api, target, workspace, ac, reason):
     publication = target / "publication.json"
     if publication.exists():
         result = read(publication)
-        if result["status"] != "rejected" or result.get("error") == "blocked Task needs a new contract or retirement":
+        if (result["status"] != "rejected" or result.get("retain_claim")
+                or result.get("error") == "blocked Task needs a new contract or retirement"):
             return False
     prior = target / "release.json"
     if prior.exists():

@@ -148,8 +148,10 @@ def finish():
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])
     operations = publication.operations(plan, fresh)
-    if len(operations) == 1 and not any(isinstance(task["process"].get("blocked"), dict)
-                                        for task in fresh["joppa"]["tasks"]):
+    blocked = any(isinstance(task["process"].get("blocked"), dict)
+                  and not task["process"].get("done") and not task["process"].get("retired")
+                  for task in fresh["joppa"]["tasks"])
+    if len(operations) == 1 and not blocked:
         released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
                                        "Reviewed Task contracts are unchanged.")
         require(released, "unchanged Tasks require confirmed claim release")
@@ -158,7 +160,7 @@ def finish():
         signal("READY", "Existing Task contracts match the reviewed plan. Planning claim released.")
         return
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
-        "workspace": config["workspace"], "operations": operations})
+        "workspace": config["workspace"], "operations": operations}, retain_claim=blocked)
     results = result.get("results")
     require(isinstance(results, list) and len(results) == len(operations)
             and results[-1].get("command", {}).get("op") == "finish_planning",
