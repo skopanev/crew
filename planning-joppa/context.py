@@ -71,8 +71,9 @@ def snapshot_source(object, types, selected_ac=None):
         if isinstance(comments, dict):
             annotations["comments"] = {key: comment for key, comment in comments.items()
                                        if comment.get("actor_type") != "agent"}
-        if not annotations.get("comments"):
-            annotations.pop("comments", None)
+        for key in ("comments", "description", "attachments"):
+            if not annotations.get(key):
+                annotations.pop(key, None)
         current["annotations"] = annotations
     return current
 
