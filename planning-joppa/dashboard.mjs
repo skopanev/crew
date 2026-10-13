@@ -122,8 +122,8 @@ export async function readyCriteria(config, tokenFile, signal) {
       if ((!ids || ids.includes(row.address)) && row.work_ready === true && !row.review_required &&
           !row.process?.planning_claim && work?.active === 0) pending.push(row);
     }
-    if (pending.some(row => row.work_summary.done > 0) && !blocked) {
-      blocked = new Set();
+    if (pending.length && !blocked) {
+      blocked = new Map();
       let waitingCursor;
       do {
         const waiting = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
@@ -131,7 +131,13 @@ export async function readyCriteria(config, tokenFile, signal) {
           ...(waitingCursor ? {cursor: waitingCursor} : {}),
         }, {signal});
         for (const task of waiting.tasks) {
-          if (task.waiting_reason === 'Task is blocked for planning') blocked.add(task.ac);
+          if (task.waiting_reason !== 'Task is blocked for planning') continue;
+          if (typeof task.ac !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
+            throw new Error('Blocked Task is missing its criterion, address or revision');
+          }
+          const tasks = blocked.get(task.ac) || [];
+          tasks.push(`${task.address}:${task.revision}`);
+          blocked.set(task.ac, tasks);
         }
         waitingCursor = waiting.next_cursor;
       } while (waitingCursor);
@@ -146,12 +152,17 @@ export async function readyCriteria(config, tokenFile, signal) {
         if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
         const status = statuses.get(row.address);
         if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
-        if (status !== 'green') rows.push(row);
+        if (status !== 'green') {
+          const failures = (blocked?.get(row.address) || []).sort();
+          rows.push({...row, failedTaskCount: failures.length,
+            attemptKey: JSON.stringify([row.address, row.revision, failures])});
+        }
       }
     }
     cursor = page.next_cursor;
   } while (cursor);
-  return ids ? rows.sort((a, b) => ids.indexOf(a.address) - ids.indexOf(b.address)) : rows;
+  return rows.sort((a, b) => Number(b.failedTaskCount > 0) - Number(a.failedTaskCount > 0) ||
+    (ids ? ids.indexOf(a.address) - ids.indexOf(b.address) : 0));
 }
 
 export async function main(argv) {
@@ -255,10 +266,10 @@ export async function main(argv) {
             selection = new AbortController();
             const candidates = await readyCriteria(config, tokenFile, selection.signal);
             selection = null;
-            const next = candidates.find(row => !attempted.has(`${row.address}:${row.revision}`));
+            const next = candidates.find(row => !attempted.has(row.attemptKey));
             if (next) {
               selected = next.address;
-              attempted.add(`${next.address}:${next.revision}`);
+              attempted.add(next.attemptKey);
               state.message = `Planning ${next.address} · ${next.title}`;
             } else state.message = `Criteria: ${candidates.length} unstarted · no unattempted criteria · next check in ${interval}s`;
           }
