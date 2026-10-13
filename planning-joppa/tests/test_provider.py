@@ -108,6 +108,23 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(any(link["target"] == "work:dependency" for link in links))
         self.assertTrue(any(link["target"] == "record:note" for link in links))
 
+    def test_retirement_preserves_finished_dependents(self):
+        for field, setting in (("done", "Evidence"), ("retired", {"reason": "Old"})):
+            with self.subTest(field=field):
+                data, value = assignment(), plan()
+                data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+                value["tasks"][0].update(action="retire", target="work:old", revision=3)
+                consumer = deepcopy(data["joppa"]["tasks"][0])
+                consumer["address"] = "work:consumer"
+                consumer["process"][field] = setting
+                consumer["document"]["links"].append(
+                    {"target": "work:old", "relation": "depends_on", "blocking": True, "revision": 3})
+                data["joppa"]["tasks"].append(consumer)
+                original = deepcopy(data)
+                commands = publication.operations(value, data)
+                self.assertEqual([item["command"]["op"] for item in commands], ["retire_task", "finish_planning"])
+                self.assertEqual(data, original)
+
     def test_retirement_refuses_unsafe_targets_and_dependency_use(self):
         data, value = assignment(), plan()
         task = value["tasks"][0]
