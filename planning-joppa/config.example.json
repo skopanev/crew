@@ -2,6 +2,7 @@
   "workspace": "product",
   "url": "https://joppa.example.com/mcp",
   "token_file": "/path/to/private/planner.token",
+  "reader_token_file": "/path/to/private/planner-reader.token",
   "runs_folder": "/path/to/private/planning-runs",
   "cbm_store": "/path/to/shared/cbm-store",
   "cbm_root": "/path/to/source-root",
