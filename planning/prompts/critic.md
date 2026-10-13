@@ -27,8 +27,8 @@ Return ONLY one JSON object as your final response; no signal tags:
 Use "reject" if and only if at least one finding is blocking. A missing
 mandatory fact or invalid premise is blocking. Preference alone is not.
 Consider a simpler, more efficient solution with concrete benefits and costs;
-do not demand abstractions for hypothetical requirements. Do not block on
-file layout, function names, test placement or missing build details.
+do not demand abstractions for hypothetical requirements.
+Do not block a plan for omitted implementation details unless the AC requires them.
 Check the mechanism, reuse, safety, scope, dependencies and observable AC coverage.
 Do not silently
 reverse confirmed product decisions. A necessary owner question is an explicit
