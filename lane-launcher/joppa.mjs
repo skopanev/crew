@@ -133,7 +133,8 @@ export async function claimTask(run, persist) {
   run.claim = {claimed: true, id: run.executionId, workspace: run.workspace, status: 'in_progress', source: 'joppa',
     address: run.task, actor: run.joppaWorker.actor, revision: object.current_revision, digest: contractDigest(object)};
   persist();
-  require(object.work_ready === true && object.review_required === false, 'Claimed Task needs dependency or contract review before execution');
+  require(object.work_ready === true && object.review_required === false && object.process?.review_required !== true,
+    'Claimed Task needs dependency or contract review before execution');
   const input = taskInput(run.config, object);
   if (object.document.parent) {
     const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
@@ -158,6 +159,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
   require(object.address === run.task, 'Joppa returned a different Task for completion');
   require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress', 'Task holder changed; outcome not written');
   if (result.code === 0) {
+    require(object.review_required === false && object.process?.review_required !== true,
+      'TASK_REVIEW_REQUIRED: Task context needs review; landed work remains held');
     require(contractDigest(object) === run.claim.digest, 'Task contract changed during execution; completion refused');
     const report = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(file => fs.existsSync(file));
     require(report, 'Checked publication evidence is missing; Task remains held');
@@ -194,17 +197,18 @@ export async function finishTask(run, stateFile, result, artifacts) {
   } else {
     const startup = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8').split('\n')
       .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
+    const preexisting = result.code === 73 && startup?.includes('WORKTREE PREEXISTED:');
     const failureFile = artifacts && path.join(artifacts, 'failure.txt');
-    if (!failureFile || !fs.existsSync(failureFile)) {
+    if (!preexisting && (!failureFile || !fs.existsSync(failureFile))) {
       await noteHeldTask(run, stateFile, startup || result.error || 'Lane startup failed');
       result.held = true;
       return;
     }
     result.blocked = true;
-    const failure = fs.readFileSync(failureFile, 'utf8');
+    const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
     run.blockRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
       op: 'block_task', id: run.task, revision: object.current_revision,
-      reason: reasonCode(completionEvent(run, result, artifacts)),
+      reason: preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts)),
       evidence: `${failure || 'Lane failed'}\nRun: ${path.basename(path.dirname(stateFile))}`}};
     persist();
     await api(run.config, run.joppaWorker, 'joppa_command', run.blockRequest);
