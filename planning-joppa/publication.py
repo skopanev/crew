@@ -133,11 +133,11 @@ def validate(plan, assignment):
 
 
 def contract(task, plan):
-    lines = [task["outcome"], "", "Approach: " + plan["approach"],
-             f"Repository: {task['repository']}", f"Module: {task['module']}", "", "Steps:"]
+    lines = ["Goal: " + task["outcome"], "",
+             f"Repository: {task['repository']}", f"Module: {task['module']}", "", "How:"]
     lines.extend(f"{number}. " + re.sub(r"^\s*\d+\.\s+", "", step)
                  for number, step in enumerate(task["steps"], 1))
-    lines += ["", "Reuse:", *(task["reuse"] or ["No existing mechanism applies."]), "", "Checks:"]
+    lines += ["", "Checks:"]
     for check in task["checks"]:
         method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
         lines.append(method + " => " + check["expected"])

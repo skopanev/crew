@@ -52,20 +52,41 @@ def source(object):
                                            "files", "references", "review_required", "work_ready")} | {"process": process}
 
 
-def snapshot_source(object, types):
+def snapshot_source(object, types, selected_ac=None):
     current = source(object)
-    if types[object["kind"]].get("role") == "task":
-        # Worker claims and releases append revisions without changing the work contract.
+    for key in ("verification", "pending_run", "summary", "status"):
+        current["process"].pop(key, None)
+    role = types[object["kind"]].get("role")
+    if role == "task" or (role == "ac" and selected_ac and object["address"] != selected_ac):
+        # Sibling execution state does not change the authored planning context.
         current.pop("current_revision")
         current.pop("process")
         current.pop("work_ready")
         current.pop("review_required")
         current["document"] = {key: value for key, value in current["document"].items()
                                if key in ("data", "parent", "links", "present", "schema_revision")}
+    if role == "task":
+        annotations = dict(current.get("annotations") or {})
+        comments = annotations.get("comments")
+        if isinstance(comments, dict):
+            annotations["comments"] = {key: comment for key, comment in comments.items()
+                                       if comment.get("actor_type") != "agent"}
+        if not annotations.get("comments"):
+            annotations.pop("comments", None)
+        current["annotations"] = annotations
     return current
 
 
 def load(api, config, ac_id):
+    for attempt in range(3):
+        try:
+            return load_once(api, config, ac_id)
+        except ValueError as error:
+            if not str(error).startswith("workspace changed during ") or attempt == 2:
+                raise
+
+
+def load_once(api, config, ac_id):
     workspace = config["workspace"]
     tree = api.call("joppa_tree", {"workspace": workspace})
     types = tree["schema"]["types"]
@@ -128,6 +149,34 @@ def load(api, config, ac_id):
     # Current verification decisions belong to the Requirement, not the AC document revision.
     meaning = {key: value for key, value in revision.items() if key not in ("tasks", "runs")}
     meaning["comments"] = req_detail.get("comments")
+    siblings = []
+    for criterion in revision.get("acs", []):
+        address = criterion["id"]
+        if address == ac_id:
+            continue
+        sibling = get(address)
+        require(types[sibling["kind"]].get("role") == "ac", "Requirement contains a non-criterion child")
+        siblings.append(sibling)
+        for kind, definition in types.items():
+            if definition.get("role") != "task" or sibling["kind"] not in definition.get("parents", []):
+                continue
+            cursor = None
+            while True:
+                args = {"workspace": workspace, "parent": address, "kind": kind, "limit": 100}
+                if cursor:
+                    args["cursor"] = cursor
+                page = api.call("joppa_objects", args)
+                require(page["position"] == tree["position"], "workspace changed during sibling context read")
+                siblings.extend(get(item["address"]) for item in page["items"])
+                cursor = page.get("next_cursor")
+                if not cursor:
+                    break
+    for item in siblings:
+        for link in item["document"].get("links", []):
+            get(link["target"])
+        for reference in item.get("references", []):
+            if isinstance(reference, dict) and reference.get("target"):
+                get(reference["target"])
     require(all(item["position"] == tree["position"] for item in objects.values()), "workspace changed during object read")
     require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
             "workspace changed during context read")
@@ -141,10 +190,11 @@ def load(api, config, ac_id):
                   "decisions": [json.dumps(meaning, ensure_ascii=False)],
                   "repositories": config["repositories"],
                   "joppa": {"parents": [source(item) for item in parents], "tasks": [source(item) for item in tasks],
+                            "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
                             "task_schema": types[task_kind]},
                   "knowledge_query": ac["document"]["data"].get("description") or ac["document"]["data"]["title"]}
-    snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types) for key, item in objects.items()},
+    snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
                 "requirement": meaning}
     validate_input(assignment)
     return assignment, snapshot, ac
@@ -167,7 +217,7 @@ def capture_object(target, workspace, object):
         address = text(object.get("address"), "object.address")
         types = snapshot["schema"]["types"]
         require(object.get("kind") in types, "object schema changed during planning")
-        current = snapshot_source(object, types)
+        current = snapshot_source(object, types, assignment["ac"]["id"])
         if address in snapshot["objects"]:
             unchanged(snapshot["objects"][address], current)
             return
@@ -187,7 +237,7 @@ def refresh_reads(api, config, assignment, snapshot, original):
         if address not in snapshot["objects"]:
             object = object_read(api, config["workspace"], address)
             assignment["joppa"]["objects"][address] = source(object)
-            snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"])
+            snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"], assignment["ac"]["id"])
     unchanged(original, snapshot)
 
 
@@ -198,6 +248,6 @@ def read_assignment(api, config, target):
     for address, expected in snapshot["objects"].items():
         if address not in assignment["joppa"]["objects"]:
             object = object_read(api, config["workspace"], address)
-            unchanged(expected, snapshot_source(object, snapshot["schema"]["types"]))
+            unchanged(expected, snapshot_source(object, snapshot["schema"]["types"], assignment["ac"]["id"]))
             assignment["joppa"]["objects"][address] = source(object)
     return assignment

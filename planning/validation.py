@@ -154,12 +154,14 @@ def plan(result, assignment):
         require(repo is not None, "Task repository not in input scope")
         module = next((m for m in repo["modules"] if m["name"] == task.get("module")), None)
         require(module is not None, "Task module not in input registry")
-        root = inside(repo["path"], module["path"])
+        roots = [inside(repo["path"], path) for path in module.get("paths", [module["path"]])]
         for path in strings(task.get("write_paths", []), "task.write_paths", empty=True):
-            require(inside(repo["path"], path).is_relative_to(root), f"Task path outside module: {path}")
+            require(any(inside(repo["path"], path).is_relative_to(root) for root in roots),
+                    f"Task path outside module: {path}")
         for field in ("title", "outcome"):
             text(task.get(field), "task." + field)
         strings(task.get("steps"), "task.steps")
+        require(len(task["steps"]) <= 5, "Task mechanism supports at most five steps")
         strings(task.get("reuse"), "task.reuse", empty=True)
         dependencies = strings(task.get("depends_on"), "task.depends_on", empty=True)
         require(set(dependencies).issubset(seen), "Tasks must be topologically ordered; unknown/cyclic prerequisite")

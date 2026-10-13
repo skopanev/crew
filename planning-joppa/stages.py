@@ -96,17 +96,19 @@ def prompt_assignment(assignment):
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
+        "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "revision": task["current_revision"],
                    "data": task["document"]["data"], "links": task["document"]["links"],
                    "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                   for task in tasks],
         "objects": {address: {"revision": item["current_revision"], "data": item["document"]["data"],
-                              "links": item["document"]["links"], "annotations": item["annotations"]}
+                              "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
+                              "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
     # The Requirement document already supplies its authored body and AC text.
     decisions = json.loads(assignment["decisions"][0])
     result["decisions"] = [json.dumps({key: decisions.get(key) for key in
-        ("confirmed", "comments", "sources", "issues", "verification_scope", "acceptance", "coverage_review")}, ensure_ascii=False)]
+        ("confirmed", "comments", "sources", "issues")}, ensure_ascii=False)]
     result["knowledge_query"] = assignment["knowledge_query"]
     return result
 

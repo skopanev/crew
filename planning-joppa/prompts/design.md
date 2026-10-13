@@ -7,7 +7,8 @@ Use action retire only for an unclaimed blocked Task under this AC whose work is
 Supply its target and current revision. Use outcome for the retirement reason. Keep depends_on empty.
 Keep the usual Task fields and observable retirement checks. Never depend on a Task retired by this plan.
 Update each remaining dependent Task to remove its dependency before you retire the target.
-Give complete mechanism steps and observable checks. Lane chooses files, functions and test placement.
+Give at most five mechanism steps and observable AC and module checks for each Task.
+Lane chooses files, functions and test placement. Keep research citations outside Task outcomes, steps and checks.
 Do not implement code or call mutations. Never claim that checks passed without evidence.
 Use disposition implement, verify_existing or blocked. A blocked plan needs concrete blockers.
 An implement plan needs Tasks. A verify_existing plan needs scoped verification Tasks.

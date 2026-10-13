@@ -88,6 +88,8 @@ def validate_input(data):
             require(name not in names, f"duplicate module: {name}")
             names.add(name)
             inside(root, module.get("path"))
+            for path in strings(module.get("paths", [module["path"]]), "module.paths"):
+                inside(root, path)
     return data
 
 
