@@ -56,10 +56,9 @@ The deployed server must support `claim_planning`, `finish_planning` and `releas
 The planner refuses before claiming if those commands are absent.
 Refresh the canonical source and its shared CBM index before launch.
 Verify indexed paths in the inspected source. Do not index an isolated checkout.
-Dependent Tasks need a server revision rule before unrestricted dispatch.
-Task claim and completion change document revisions and invalidate dependency pins.
-The confirmed initial scope permits independent verification Tasks.
-Keep required dependencies explicit. Do not remove them to bypass this prerequisite.
+The deployed server keeps Task dependency pins current through claim and completion events.
+Contract changes and retirement still invalidate those pins.
+Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.
 The planning engine handles one AC per run. The dashboard selects the next AC after each run.
 
