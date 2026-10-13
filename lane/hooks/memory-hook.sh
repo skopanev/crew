@@ -23,6 +23,14 @@ event="$("$jq_bin" -r '.hook_event_name // empty' <<<"$input" 2>/dev/null || tru
 printf '%s\t%s\n' "${event:-НЕТ_ИМЕНИ}" "${EQUILL_ROLE:-?}" \
   >> "${MEDULLA_RUN_DIR:-/tmp}/hook-events.log" 2>/dev/null || true
 
+if [[ "$event" == PreToolUse ]]; then
+  if "$jq_bin" -e '.tool_name == "Bash" and .tool_input.run_in_background == true' <<<"$input" >/dev/null 2>&1; then
+    "$jq_bin" -cn '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
+      permissionDecisionReason:"Run commands in the foreground. Wait for their results before the final signal."}}'
+  fi
+  exit 0
+fi
+
 # ── НАПОМИНАНИЕ О СИГНАЛЕ ───────────────────────────────────────────────────
 # Контракт приезжает ОДИН раз, на старте. Дальше идут часы работы: у кодера
 # замерено 12 минут, 70 вызовов инструментов и 134 события хука - и к моменту,
@@ -45,16 +53,23 @@ printf '%s\t%s\n' "${event:-НЕТ_ИМЕНИ}" "${EQUILL_ROLE:-?}" \
 if [[ "$event" == Stop ]]; then
   active="$("$jq_bin" -r '.stop_hook_active // false' <<<"$input" 2>/dev/null || echo false)"
 
-  # ТЕГ ПРОВЕРЯЕТСЯ, А НЕ ПРЕДПОЛАГАЕТСЯ. Раньше первый Stop блокировался
-  # БЕЗУСЛОВНО: узел, честно напечатавший тег, всё равно платил лишний круг -
-  # лишний вызов модели на каждом узле каждого прогона. Нашёл квен на ревью.
-  # Расшифровка приходит в payload как transcript_path; смотрим хвост, где
-  # лежит последнее сказанное. Не прочли - ведём себя как раньше: лучше лишний
-  # круг, чем выпустить узел без сигнала.
+  # Check only the latest assistant message. Contracts and older turns are not results.
   tagged=""
   tp="$("$jq_bin" -r '.transcript_path // empty' <<<"$input" 2>/dev/null || true)"
   if [[ -n "$tp" && -r "$tp" ]]; then
-    tail -c 200000 "$tp" 2>/dev/null | grep -q '<signal:[A-Z_]\+>' && tagged=1
+    "$jq_bin" -ne '
+      def assistant:
+        if .type == "assistant" then .message
+        elif .type == "response_item" and .payload.type == "message" and .payload.role == "assistant" then .payload
+        elif .message.role == "assistant" then .message else null end;
+      reduce inputs as $row ("";
+        ($row | assistant) as $message |
+        if $message == null then . else
+          if ($message.content | type) == "string" then $message.content else
+            [$message.content[]? | select(.type == "text" or .type == "output_text") | .text] | join("\n")
+          end
+        end) | test("<signal:([A-Z_]+)>[\\s\\S]*</signal:\\1>")
+    ' "$tp" >/dev/null 2>&1 && tagged=1
   fi
   # Выход прямой, а не через quiet: она объявлена ниже по файлу и на этой
   # строке ещё не существует - проверено трассировкой, "quiet: command not

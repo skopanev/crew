@@ -16,6 +16,8 @@
       "Bash(*bash -n *)"
     ],
     "deny": [
+      "ScheduleWakeup",
+      "Monitor",
       "Bash(*git push*)",
       "Bash(*git push --force*)",
       "Bash(*git push -f *)",
@@ -123,6 +125,11 @@
       {
         "matcher": "Bash",
         "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "rtk hook claude",
