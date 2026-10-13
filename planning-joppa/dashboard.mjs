@@ -99,9 +99,18 @@ export function titleCell(row, width) {
   return `${clip(row.requirementTitle, requirementWidth)} : ${clip(row.acTitle, budget - requirementWidth)}`;
 }
 
+function criterionIds(config) {
+  const ids = config.ac_ids;
+  if (ids === undefined) return null;
+  if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !id.includes(':')) ||
+      new Set(ids).size !== ids.length) throw new Error('ac_ids must contain distinct full criterion addresses');
+  return ids;
+}
+
 export async function readyCriteria(config, tokenFile, signal) {
+  const ids = criterionIds(config);
   const rows = [];
-  let cursor;
+  let cursor, blocked;
   do {
     const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
@@ -110,15 +119,30 @@ export async function readyCriteria(config, tokenFile, signal) {
     const pending = [];
     for (const row of page.items) {
       const work = row.work_summary;
-      if (row.work_ready === true && !row.review_required && !row.process?.planning_claim &&
-          work?.active === 0 && work.done === 0) pending.push(row);
+      if ((!ids || ids.includes(row.address)) && row.work_ready === true && !row.review_required &&
+          !row.process?.planning_claim && work?.active === 0) pending.push(row);
     }
-    if (pending.length) {
+    if (pending.some(row => row.work_summary.done > 0) && !blocked) {
+      blocked = new Set();
+      let waitingCursor;
+      do {
+        const waiting = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
+          workspace: config.workspace, view: 'waiting', limit: 100,
+          ...(waitingCursor ? {cursor: waitingCursor} : {}),
+        }, {signal});
+        for (const task of waiting.tasks) {
+          if (task.waiting_reason === 'Task is blocked for planning') blocked.add(task.ac);
+        }
+        waitingCursor = waiting.next_cursor;
+      } while (waitingCursor);
+    }
+    const candidates = pending.filter(row => row.work_summary.done === 0 || blocked?.has(row.address));
+    if (candidates.length) {
       const checks = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
-        workspace: config.workspace, ac: pending.map(row => row.address).join(','),
+        workspace: config.workspace, ac: candidates.map(row => row.address).join(','),
       }, {signal});
       const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
-      for (const row of pending) {
+      for (const row of candidates) {
         if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
         const status = statuses.get(row.address);
         if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
@@ -127,7 +151,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     }
     cursor = page.next_cursor;
   } while (cursor);
-  return rows;
+  return ids ? rows.sort((a, b) => ids.indexOf(a.address) - ids.indexOf(b.address)) : rows;
 }
 
 export async function main(argv) {
@@ -151,6 +175,8 @@ export async function main(argv) {
   if (dryRun && !ac) throw new Error('--dry-run needs --ac-id');
   const configFile = path.resolve(file);
   const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  const ids = criterionIds(config);
+  if (ac && ids && !ids.includes(ac)) throw new Error('Selected AC is outside config.ac_ids');
   if (typeof config.workspace !== 'string' || typeof config.runs_folder !== 'string') throw new Error('Config needs workspace and runs_folder');
   const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
   const configuredRoot = path.resolve(path.dirname(configFile), expand(config.runs_folder));

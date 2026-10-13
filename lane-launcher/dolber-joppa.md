@@ -14,7 +14,7 @@ Use one authenticated actor and one private token file per lane slot. Keep crede
 
 ## Execution
 
-Dolber and the planner queue use the same Node.js MCP client. Joppa calls do not start a Python process.
+Dolber and the planner queue use the same Node.js MCP client. Their queue calls do not start a Python process.
 Dolber selects an available implementation Task from the configured Joppa project.
 It opens a Herdr tab in the current workspace. Its worker claims that exact Task before preflight or Docker.
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
