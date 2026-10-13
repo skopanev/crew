@@ -76,6 +76,38 @@ class ProviderTests(unittest.TestCase):
                                                   "reason": value["tasks"][0]["outcome"]})
         self.assertEqual(data, original)
 
+    def test_retirement_accepts_a_blocked_verification_task(self):
+        data, value = assignment(), plan()
+        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        data["joppa"]["tasks"][0]["document"]["data"]["purpose"] = "verification"
+        value["tasks"][0].update(action="retire", target="work:old", revision=3)
+        self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "retire_task")
+
+    def test_retirement_requires_existing_dependents_to_remove_the_link(self):
+        data, value = assignment(), plan()
+        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        value["tasks"][0].update(action="retire", target="work:old", revision=3)
+        consumer = deepcopy(data["joppa"]["tasks"][0])
+        consumer["address"] = "work:consumer"
+        consumer["document"]["links"].append(
+            {"target": "work:old", "relation": "depends_on", "blocking": True, "revision": 3})
+        consumer["document"]["links"].append(
+            {"target": "work:dependency", "relation": "depends_on", "blocking": True, "revision": 3})
+        data["joppa"]["tasks"].append(consumer)
+        data["joppa"]["objects"][consumer["address"]] = consumer
+        with self.assertRaisesRegex(ValueError, "removes the dependency from work:consumer"):
+            publication.operations(value, data)
+        changed = deepcopy(plan()["tasks"][0])
+        changed.update(id="consumer", action="update", target="work:consumer", revision=3, depends_on=[])
+        value["tasks"].append(changed)
+        commands = publication.operations(value, data)
+        self.assertEqual([item["command"]["op"] for item in commands],
+                         ["retire_task", "save_object", "finish_planning"])
+        links = commands[1]["command"]["links"]
+        self.assertFalse(any(link["target"] == "work:old" for link in links))
+        self.assertTrue(any(link["target"] == "work:dependency" for link in links))
+        self.assertTrue(any(link["target"] == "record:note" for link in links))
+
     def test_retirement_refuses_unsafe_targets_and_dependency_use(self):
         data, value = assignment(), plan()
         task = value["tasks"][0]

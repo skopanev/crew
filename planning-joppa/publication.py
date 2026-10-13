@@ -9,18 +9,22 @@ from mcp import Rejected
 import validation
 
 
-def editable(task):
+def unclaimed(task):
     process = task["process"]
     require(not process.get("done") and not process.get("retired"),
             "completed or retired Tasks cannot be rewritten")
     require(not process.get("assignee") and not process.get("claim")
             and process.get("status") != "in_progress", "claimed Tasks cannot be rewritten by Crew planning")
+
+
+def editable(task):
+    unclaimed(task)
     require(task["document"]["data"].get("purpose") == "implementation",
             "only implementation Tasks can be rewritten by Crew planning")
 
 
 def retirable(task):
-    editable(task)
+    unclaimed(task)
     require(isinstance(task["process"].get("blocked"), dict),
             "only blocked Tasks can be retired by Crew planning")
 
@@ -112,6 +116,14 @@ def validate(plan, assignment):
                 require(dep != task.get("target"), "Task cannot depend on itself")
         aliases = {item.get("target"): item["id"] for item in normalized["tasks"] if item.get("target")}
         task["depends_on"] = [aliases.get(dep, dep) for dep in dependencies if ":" not in dep or dep in aliases]
+    updates = {task["target"] for task in normalized["tasks"] if task["action"] == "update"}
+    for address, existing in inventory.items():
+        if address in retired:
+            continue
+        dependencies = {link["target"] for link in existing["document"].get("links", [])
+                        if link.get("blocking") and link.get("relation") == "depends_on"}
+        require(not dependencies.intersection(retired) or address in updates,
+                f"retirement requires an update that removes the dependency from {address}")
     validation.plan(normalized, assignment)
     require(len(plan.get("tasks", [])) <= 99, "one publication supports at most 99 Task saves")
     schema = assignment["joppa"]["task_schema"]
@@ -139,6 +151,7 @@ def operations(plan, assignment):
     objects = assignment["joppa"]["objects"]
     schema = assignment["joppa"]["task_schema"]
     result, refs = [], {}
+    retired = {task["target"] for task in plan["tasks"] if task["action"] == "retire"}
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
     ac = assignment["ac"]["id"]
     owner = objects[ac]["document"]["data"].get("owner")
@@ -161,6 +174,8 @@ def operations(plan, assignment):
                 projects.append(project_id)
         data["projects"] = projects
         links = deepcopy(existing["document"].get("links", [])) if existing else []
+        links = [link for link in links if not (link.get("blocking") and link.get("relation") == "depends_on"
+                                                and link.get("target") in retired)]
         for dependency in task["depends_on"]:
             canonical = aliases.get(dependency, dependency)
             if dependency in refs:
