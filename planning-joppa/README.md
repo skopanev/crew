@@ -1,6 +1,7 @@
 # Joppa planning
 
-Status: planning published Tasks in a live run. Lane confirmed completion of both Tasks.
+Status: live publication and lane completion passed before native context reads were added.
+Native reads pass on four providers. Full native planning publication remains unverified.
 Task completion does not confirm criterion acceptance.
 
 Run from the Crew repository:
@@ -40,6 +41,9 @@ It skips failed AC revisions for the rest of the process. Restart to try an unch
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
 The input is one AC. The planner reads its Requirement, parents, decisions and existing Tasks.
+One AC is the smallest native planning unit. The planner publishes complete Tasks under that AC.
+The owner prepares smaller ACs when the criterion needs separate planning runs.
+NTK supports shallow ticket splitting before design in its separate workflow.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
 All planning agents can query Joppa for relevant context across the configured workspace.
 The reader exposes eight read tools. It rejects writes and reads of other workspaces.
