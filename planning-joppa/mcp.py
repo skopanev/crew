@@ -1,5 +1,6 @@
 """Authenticated MCP calls for the separate Joppa planner."""
 import json
+import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -101,3 +102,111 @@ class Joppa:
         if not isinstance(structured, dict):
             raise MCPError(f"Joppa {name} returned no object")
         return structured
+
+
+READ_TOOLS = frozenset(("joppa_search", "joppa_read", "joppa_tests", "joppa_tree",
+                        "joppa_objects", "joppa_tasks", "joppa_model_docs", "joppa_help"))
+
+
+class Reader:
+    """Expose workspace reads to agents. Keep publication in the workflow."""
+    def __init__(self, api, workspace, target):
+        self.api, self.workspace, self.target = api, workspace, target
+
+    def tools(self):
+        tools = []
+        for tool in self.api.tools():
+            if tool["name"] not in READ_TOOLS:
+                continue
+            tool = dict(tool)
+            tool["annotations"] = {**tool.get("annotations", {}), "readOnlyHint": True, "destructiveHint": False}
+            schema = tool["inputSchema"]
+            if "workspace" in schema.get("properties", {}):
+                tool["inputSchema"] = {**schema, "properties": {**schema["properties"],
+                    "workspace": {"type": "string", "enum": [self.workspace], "default": self.workspace}}}
+            tools.append(tool)
+        return tools
+
+    def call(self, name, arguments):
+        if name not in READ_TOOLS:
+            raise MCPError("The planning reader does not permit this tool")
+        if not isinstance(arguments, dict):
+            raise MCPError("Tool arguments must be an object")
+        args = dict(arguments)
+        if args.get("item_id"):
+            raise MCPError("Use workspace and a full object address instead of item_id")
+        if name != "joppa_model_docs":
+            if args.get("workspace", self.workspace) != self.workspace:
+                raise MCPError("The planning reader permits only its configured workspace")
+            args["workspace"] = self.workspace
+        address = args.get("address") if name == "joppa_objects" else (
+            args.get("target") or args.get("req")) if name == "joppa_read" else None
+        if address and ":" not in address:
+            raise MCPError("Use a full kind:id object address")
+        result = self.api.call(name, args)
+        if address and not args.get("revision") and not args.get("history"):
+            import context
+            obj = result if name == "joppa_objects" else context.object_read(self.api, self.workspace, address)
+            context.capture_object(self.target, self.workspace, obj)
+        return result
+
+
+def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
+    """Serve the MCP stdio protocol without forwarding mutation methods."""
+    for line in input_stream:
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            output_stream.write(json.dumps({"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32700, "message": "Invalid JSON"}}) + "\n")
+            output_stream.flush()
+            continue
+        if not isinstance(request, dict):
+            output_stream.write(json.dumps({"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "Request must be an object"}}) + "\n")
+            output_stream.flush()
+            continue
+        if "id" not in request:
+            continue
+        response = {"jsonrpc": "2.0", "id": request["id"]}
+        method, params = request.get("method"), request.get("params", {})
+        try:
+            if not isinstance(params, dict):
+                raise MCPError("Request params must be an object")
+            if method == "initialize":
+                result = {"protocolVersion": params.get("protocolVersion", "2025-03-26"),
+                          "capabilities": {"tools": {}}, "serverInfo": {"name": "crew-joppa-reader", "version": "1"}}
+            elif method == "ping":
+                result = {}
+            elif method == "tools/list":
+                result = {"tools": reader.tools()}
+            elif method == "tools/call":
+                value = reader.call(params["name"], params.get("arguments", {}))
+                result = {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}],
+                          "structuredContent": value}
+            else:
+                raise MCPError("The planning reader does not support this method")
+            response["result"] = result
+        except (MCPError, ValueError, KeyError, OSError) as error:
+            if method == "tools/call":
+                response["result"] = {"isError": True, "content": [{"type": "text", "text": str(error)}]}
+            else:
+                response["error"] = {"code": -32601, "message": str(error)}
+        output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
+        output_stream.flush()
+
+
+if __name__ == "__main__":
+    import argparse
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
+    parser = argparse.ArgumentParser(description="Read the configured Joppa workspace through MCP stdio.")
+    parser.add_argument("--url", required=True)
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--token-file", required=True)
+    parser.add_argument("--artifacts", required=True)
+    args = parser.parse_args()
+    try:
+        serve(Reader(Joppa(args.url, args.token_file), args.workspace, Path(args.artifacts)))
+    except (MCPError, ValueError, OSError) as error:
+        print("Joppa reader: " + str(error), file=sys.stderr)
+        sys.exit(1)
