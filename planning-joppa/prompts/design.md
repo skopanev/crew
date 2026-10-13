@@ -1,7 +1,8 @@
 Choose the smallest sufficient mechanism for the selected Joppa criterion.
 Follow the Equill contract, research, necessity assessment and additional output contract.
-Read the Requirement, parent context, decisions and existing Tasks in the assignment.
+Read the Requirement, parent context and decisions.
 Use existing Tasks where they already own required work. Preserve completed work and worker assignments.
+Reuse a Task under another AC through depends_on. Update only Tasks under this AC.
 Use action retire only for an unclaimed blocked Task under this AC whose work is unnecessary.
 Supply its target and current revision. Use outcome for the retirement reason. Keep depends_on empty.
 Keep the usual Task fields and observable retirement checks. Never depend on a Task retired by this plan.
