@@ -204,10 +204,16 @@ export async function finishTask(run, stateFile, result, artifacts) {
     require(confirmed.process?.status === 'done', 'Joppa did not confirm Task completion');
     result.completed = true;
   } else {
-    result.blocked = true;
     const startup = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8').split('\n')
       .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
-    const failure = artifacts && fs.existsSync(path.join(artifacts, 'failure.txt')) ? fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8') : startup || result.error;
+    const failureFile = artifacts && path.join(artifacts, 'failure.txt');
+    if (!failureFile || !fs.existsSync(failureFile)) {
+      await noteHeldTask(run, stateFile, startup || result.error || 'Lane startup failed');
+      result.held = true;
+      return;
+    }
+    result.blocked = true;
+    const failure = fs.readFileSync(failureFile, 'utf8');
     run.blockRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
       op: 'block_task', id: run.task, revision: object.current_revision,
       reason: reasonCode(completionEvent(run, result, artifacts)),
