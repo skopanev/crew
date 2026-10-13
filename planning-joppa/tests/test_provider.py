@@ -64,6 +64,47 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_retirement_uses_the_existing_atomic_publication(self):
+        data, value = assignment(), plan()
+        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        value["tasks"][0].update(action="retire", target="work:old", revision=3,
+                                 outcome="The approved outcome needs no further work.")
+        original = deepcopy(data)
+        commands = publication.operations(value, data)
+        self.assertEqual([item["command"]["op"] for item in commands], ["retire_task", "finish_planning"])
+        self.assertEqual(commands[0]["command"], {"op": "retire_task", "id": "old", "revision": 3,
+                                                  "reason": value["tasks"][0]["outcome"]})
+        self.assertEqual(data, original)
+
+    def test_retirement_refuses_unsafe_targets_and_dependency_use(self):
+        data, value = assignment(), plan()
+        task = value["tasks"][0]
+        task.update(action="retire", target="work:old", revision=3)
+        blocked = data["joppa"]["tasks"][0]
+        blocked["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        for field, setting in (("blocked", None), ("assignee", "worker"),
+                               ("claim", {"actor": "worker"}), ("status", "in_progress"),
+                               ("done", "Evidence"), ("retired", {"reason": "Old"})):
+            with self.subTest(field=field):
+                changed = deepcopy(data)
+                changed["joppa"]["tasks"][0]["process"][field] = setting
+                with self.assertRaises(ValueError):
+                    publication.operations(value, changed)
+        stale = deepcopy(value)
+        stale["tasks"][0]["revision"] = 2
+        with self.assertRaisesRegex(ValueError, "source revision"):
+            publication.operations(stale, data)
+        for dependency in ("first", "work:old"):
+            consumer = deepcopy(plan()["tasks"][0])
+            consumer.update(id="consumer", depends_on=[dependency])
+            mixed = deepcopy(value)
+            mixed["tasks"].append(consumer)
+            with self.assertRaisesRegex(ValueError, "retired by this plan"):
+                publication.operations(mixed, data)
+        task["depends_on"] = ["work:dependency"]
+        with self.assertRaisesRegex(ValueError, "retirement cannot add dependencies"):
+            publication.operations(value, data)
+
     def test_context_reads_actual_revision_shape_and_custom_roles(self):
         ac = item("criterion:a", "rule:r")
         req = item("rule:r", "area:capability")

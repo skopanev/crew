@@ -105,10 +105,10 @@ def finish():
     # Update only the exact Task document reviewed by this plan.
     current_tasks = {item["address"]: item for item in fresh["joppa"]["tasks"]}
     for task in plan["tasks"]:
-        if task["action"] == "update":
+        if task["action"] in ("update", "retire"):
             actual = current_tasks.get(task["target"])
             require(actual and actual["current_revision"] == task["revision"], "target Task revision changed during planning")
-            publication.editable(actual)
+            (publication.retirable if task["action"] == "retire" else publication.editable)(actual)
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])

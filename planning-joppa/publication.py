@@ -19,6 +19,12 @@ def editable(task):
             "only implementation Tasks can be rewritten by Crew planning")
 
 
+def retirable(task):
+    editable(task)
+    require(isinstance(task["process"].get("blocked"), dict),
+            "only blocked Tasks can be retired by Crew planning")
+
+
 def ensure_recovered(root, current, server, workspace, ac):
     """Refuse another claim while an earlier run needs receipt recovery."""
     for claim_file in Path(root).glob("*/artifacts/claim.json"):
@@ -76,24 +82,30 @@ def validate(plan, assignment):
     normalized["tasks"] = ordered_tasks(normalized.get("tasks", []))
     if normalized.get("disposition") == "verify_existing":
         require(bool(normalized.get("tasks")), "existing behavior requires a scoped verification Task")
+        require(any(task.get("action") != "retire" for task in normalized["tasks"]),
+                "existing behavior requires a scoped verification Task")
         normalized["disposition"] = "implement"
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     known = assignment["joppa"]["objects"]
     targets = set()
+    retired = {value for task in normalized["tasks"] if task.get("action") == "retire"
+               for value in (task["id"], task.get("target"))}
     for task in normalized.get("tasks", []):
-        require(task.get("action") in ("create", "update"), "Task action must be create or update")
-        if task["action"] == "update":
+        require(task.get("action") in ("create", "update", "retire"), "Task action must be create, update or retire")
+        if task["action"] in ("update", "retire"):
             address = text(task.get("target"), "Task target")
             require(address in inventory and address not in targets, "update must target one existing Task under this AC")
             existing = inventory[address]
-            editable(existing)
+            (retirable if task["action"] == "retire" else editable)(existing)
             require(task.get("revision") == existing["current_revision"], "Task source revision differs from the input")
             targets.add(address)
         else:
             require("target" not in task and "revision" not in task, "new Task cannot replace an existing Task")
-        if plan.get("disposition") == "verify_existing":
+        if plan.get("disposition") == "verify_existing" and task["action"] != "retire":
             require(task.get("purpose") == "verification", "existing behavior needs verification work only")
         dependencies = strings(task.get("depends_on"), "task.depends_on", empty=True)
+        require(not set(dependencies).intersection(retired), "Task cannot depend on a Task retired by this plan")
+        require(task["action"] != "retire" or not dependencies, "retirement cannot add dependencies")
         for dep in dependencies:
             if ":" in dep:
                 require(dep in known, f"dependency was not read in the criterion context: {dep}")
@@ -133,6 +145,10 @@ def operations(plan, assignment):
     require(owner, "criterion owner is required for new Task documents")
     for number, task in enumerate(ordered_tasks(plan["tasks"]), 1):
         existing = inventory.get(task.get("target"))
+        if task["action"] == "retire":
+            result.append({"command": {"op": "retire_task", "id": existing["address"].split(":", 1)[1],
+                "revision": existing["current_revision"], "reason": task["outcome"]}})
+            continue
         data = deepcopy(existing["document"]["data"]) if existing else {"owner": owner, "purpose": "implementation"}
         # Joppa execution uses implementation Tasks for both code and scoped verification.
         # Verification evidence remains a separate operation.
