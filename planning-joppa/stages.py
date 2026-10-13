@@ -91,6 +91,8 @@ def prompt_assignment(assignment):
                 "data": obj["document"]["data"], "links": obj["document"]["links"],
                 "annotations": obj["annotations"], "files": obj["files"]}, ensure_ascii=False)}
             visible.add(item["id"])
+        if level == "ac":
+            result[level]["verification"] = assignment["joppa"]["objects"][item["id"]]["process"].get("verification")
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],

@@ -110,58 +110,69 @@ function criterionIds(config) {
 export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
-  let cursor, blocked;
+  const blocked = new Map(), active = new Set(), pending = new Map();
+  let cursor;
+  do {
+    const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
+      workspace: config.workspace, view: 'all', limit: 100, ...(cursor ? {cursor} : {}),
+    }, {signal});
+    for (const task of page.tasks) {
+      if (['done', 'retired'].includes(task.status) || ids && !ids.includes(task.ac)) continue;
+      if (typeof task.ac !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
+        throw new Error('Unfinished Task is missing its criterion, address or revision');
+      }
+      if (task.assignee || task.claim || task.claimable === true) active.add(task.ac);
+      if (task.waiting_reason !== 'Task is blocked for planning' || task.assignee || task.claim) continue;
+      const tasks = blocked.get(task.ac) || [];
+      tasks.push(`${task.address}:${task.revision}`);
+      blocked.set(task.ac, tasks);
+    }
+    cursor = page.next_cursor;
+  } while (cursor);
   do {
     const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
       ...(cursor ? {cursor} : {}),
     }, {signal});
-    const pending = [];
     for (const row of page.items) {
       const work = row.work_summary;
       if ((!ids || ids.includes(row.address)) && row.work_ready === true && !row.review_required &&
-          !row.process?.planning_claim && work?.active === 0) pending.push(row);
-    }
-    if (pending.length && !blocked) {
-      blocked = new Map();
-      let waitingCursor;
-      do {
-        const waiting = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
-          workspace: config.workspace, view: 'waiting', limit: 100,
-          ...(waitingCursor ? {cursor: waitingCursor} : {}),
-        }, {signal});
-        for (const task of waiting.tasks) {
-          if (task.waiting_reason !== 'Task is blocked for planning') continue;
-          if (typeof task.ac !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
-            throw new Error('Blocked Task is missing its criterion, address or revision');
-          }
-          const tasks = blocked.get(task.ac) || [];
-          tasks.push(`${task.address}:${task.revision}`);
-          blocked.set(task.ac, tasks);
-        }
-        waitingCursor = waiting.next_cursor;
-      } while (waitingCursor);
-    }
-    const candidates = pending.filter(row => row.work_summary.done === 0 || blocked?.has(row.address));
-    if (candidates.length) {
-      const checks = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
-        workspace: config.workspace, ac: candidates.map(row => row.address).join(','),
-      }, {signal});
-      const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
-      for (const row of candidates) {
-        if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
-        const status = statuses.get(row.address);
-        if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
-        if (status !== 'green') {
-          const failures = (blocked?.get(row.address) || []).sort();
-          rows.push({...row, failedTaskCount: failures.length,
-            attemptKey: JSON.stringify([row.address, row.revision, failures])});
-        }
-      }
+          !row.process?.planning_claim && (work?.active === 0 || blocked.has(row.address)) && !active.has(row.address) &&
+          (work?.done === 0 || blocked.has(row.address))) pending.set(row.address, row);
     }
     cursor = page.next_cursor;
   } while (cursor);
+  for (const ac of blocked.keys()) {
+    if (pending.has(ac) || active.has(ac)) continue;
+    const object = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
+      workspace: config.workspace, address: ac,
+    }, {signal});
+    if (object.document?.present === true && object.historical === false &&
+        object.work_ready === true && !object.review_required && !object.process?.planning_claim &&
+        object.process?.assessment?.state === 'ready' && !object.process?.readiness_blocker) {
+      pending.set(ac, {...object, revision: object.current_revision, title: object.document.data.title});
+    }
+  }
+  const candidates = [...pending.values()];
+  for (let offset = 0; offset < candidates.length; offset += 100) {
+    const batch = candidates.slice(offset, offset + 100);
+    const checks = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
+      workspace: config.workspace, ac: batch.map(row => row.address).join(','),
+    }, {signal});
+    const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
+    for (const row of batch) {
+      if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
+      const status = statuses.get(row.address);
+      if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
+      const failures = (blocked.get(row.address) || []).sort();
+      if (status !== 'green') {
+        rows.push({...row, testStatus: status, failedTaskCount: failures.length,
+          attemptKey: JSON.stringify([row.address, row.revision, failures])});
+      }
+    }
+  }
   return rows.sort((a, b) => Number(b.failedTaskCount > 0) - Number(a.failedTaskCount > 0) ||
+    Number(b.testStatus === 'red') - Number(a.testStatus === 'red') ||
     (ids ? ids.indexOf(a.address) - ids.indexOf(b.address) : 0));
 }
 

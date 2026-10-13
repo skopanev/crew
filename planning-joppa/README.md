@@ -38,7 +38,9 @@ The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in 
 It selects criteria in the configured workspace. Repository mappings bound Task publication.
 It excludes criteria with active Tasks and criteria whose Tasks are all completed.
 It includes a criterion with blocked Tasks even when a sibling Task is completed.
+Passing AC tests exclude the criterion from automatic planning.
 It plans criteria with blocked Tasks before new work.
+Within each group, it selects failing AC tests before unverified AC tests.
 An unchanged failed plan stays skipped. A new Task failure permits another planning attempt.
 Set `ac_ids` to an ordered list of full AC addresses to limit automatic planning.
 If `ac_ids` is absent, the loop selects eligible criteria across the workspace.
