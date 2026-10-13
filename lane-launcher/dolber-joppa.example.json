@@ -30,7 +30,7 @@
       "path": "/absolute/source-workspace/application",
       "targetBranch": "develop",
       "cbmProject": "application",
-      "modules": [{"name": "core", "path": "src"}, {"name": "tests", "path": "tests"}],
+      "modules": [{"name": "core", "path": ".", "paths": ["src", "tests", "migrations"]}],
       "preflight": null,
       "gateCommands": ["bun run typecheck", "bun run test"],
       "testCommand": ["bun", "run", "test"]

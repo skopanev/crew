@@ -16,10 +16,11 @@ Use the standard plan shape. Each Task also needs action: create or update.
 For update, include target (an existing Task under the supplied AC) and revision (its current document revision).
 Preserve its owner, worker assignment, parent and other document fields.
 Reuse existing suitable Tasks instead of duplicating their work. Omit unchanged, done and retired Tasks.
-An implement plan needs complete mechanism steps, reuse choices and observable checks for every Task.
+An implement plan needs at most five mechanism steps, reuse choices and observable AC and module checks for every Task.
 Do not emit shallow implementation Tasks. Lane decides files, functions and test placement.
 Use Joppa MCP to inspect relevant Tasks, ACs, Requirements, capabilities and domains in the configured workspace.
 Search before creating Tasks. Read the full current object before reuse or a dependency.
+The input includes sibling ACs and Tasks under the same Requirement. Reuse their required outputs through dependencies.
 Use earlier local Task IDs or full object addresses read through Joppa MCP for depends_on.
 Add dependencies only when one output is required for another Task.
 Unlike the default plan shape, verify_existing requires at least one scoped verification Task.

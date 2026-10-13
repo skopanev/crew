@@ -34,7 +34,8 @@ def final_response(events, harness):
         message = "".join(p.get("text", "") for p in parts if p.get("messageID") == key) if key else parts[-1].get("text", "")
     else:
         raise ValueError(f"unsupported planning harness: {harness}")
-    require(isinstance(message, str) and message.strip(), "empty assistant delivery")
+    require(isinstance(message, str) and message.strip(),
+            "empty assistant delivery; emit final JSON after tool reads")
     message = message.strip()
     if message.startswith("```json\n") and message.endswith("```"):
         message = message[8:-3].strip()

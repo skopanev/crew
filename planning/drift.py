@@ -77,13 +77,13 @@ def cited(assignment, plan, target):
     repos = {r["id"]: r for r in assignment["repositories"]}
     paths = {key: set() for key in repos}
     # Module names are unique only within a repository.
-    modules = {(r["id"], m["name"]): m["path"] for r in repos.values() for m in r["modules"]}
+    modules = {(r["id"], m["name"]): m.get("paths", [m["path"]]) for r in repos.values() for m in r["modules"]}
     named = [(t.get("repository"), t.get("module")) for t in plan.get("tasks", [])]
     ticket = assignment.get("ticket", {}).get("module")
     named += [(key, ticket) for key in repos if ticket]
     for key in named:
         if key in modules:
-            paths[key[0]].add(modules[key])
+            paths[key[0]].update(modules[key])
     # A check directory is not a dependency on every file below it; it only has to survive.
     cwds = {key: set() for key in repos}
     checks = [(c, c.get("repository")) for c in plan.get("acceptance_checks", [])]

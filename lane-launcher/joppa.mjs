@@ -52,11 +52,17 @@ export function validateJoppa(config) {
     require(text(repo.cbmProject), 'Repository needs cbmProject');
     require(Array.isArray(repo.modules) && repo.modules.length, 'Repository needs modules: [{name, path}]');
     const modules = new Set();
-    for (const {name, path: modulePath} of repo.modules) {
+    for (const {name, path: modulePath, paths: modulePaths = [modulePath]} of repo.modules) {
       require(!modules.has(name), 'Module names must be distinct within their repository');
       require(text(name) && text(modulePath) && !path.isAbsolute(modulePath) && inside(path.resolve(folder, modulePath), folder),
         'Module paths must stay inside their repository');
       require(inside(fs.realpathSync(path.resolve(folder, modulePath)), folder), 'Module symlinks must stay inside their repository');
+      require(Array.isArray(modulePaths) && modulePaths.length, 'Module paths must be a nonempty list');
+      for (const scope of modulePaths) {
+        require(text(scope) && !path.isAbsolute(scope) && !scope.split(/[\\/]/).includes('..') &&
+          inside(path.resolve(folder, scope), folder), 'Module paths must stay inside their repository');
+        require(inside(fs.realpathSync(path.resolve(folder, scope)), folder), 'Module symlinks must stay inside their repository');
+      }
       modules.add(name);
     }
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
@@ -113,10 +119,12 @@ export function taskInput(config, object) {
   const repo = config.repositories.find(repo => repo.id === field('Repository'));
   require(repo, 'Task repository is not configured');
   const module = field('Module');
-  const modulePath = repo.modules.find(item => item.name === module)?.path;
+  const configuredModule = repo.modules.find(item => item.name === module);
+  const modulePath = configuredModule?.path;
   require(modulePath, 'Task module is not configured');
   return {repo, ticket: {id: executionId(object.address), address: object.address, title: data.title,
-    body: data.contract, module: modulePath, moduleId: module, repository: repo.id, revision: object.current_revision, source: 'joppa',
+    body: data.contract, module: modulePath, moduleId: module, modulePaths: configuredModule.paths || [modulePath],
+    repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: data.contract}};
 }
 

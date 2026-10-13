@@ -48,7 +48,8 @@ It skips an attempted AC revision while its blocked Task revisions remain unchan
 Restart to try the same unchanged input again.
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
-The input is one AC. The planner reads its Requirement, parents, decisions and existing Tasks.
+The input is one AC. The planner reads its Requirement, parents, decisions and sibling ACs and Tasks.
+It reuses sibling Tasks through dependencies. It edits only Tasks under the selected AC.
 One AC is the smallest native planning unit. The planner publishes complete Tasks under that AC.
 The owner prepares smaller ACs when the criterion needs separate planning runs.
 NTK supports shallow ticket splitting before design in its separate workflow.
@@ -61,8 +62,12 @@ Runtime MCP configs contain the credential file path, never its value.
 Publication remains a separate workflow stage.
 Research checks reuse. Necessity checks the minimum scope. Design supplies mechanisms.
 Two independent critics review the plan. Publication saves Tasks and finishes the claim in one transaction.
-The plan enters each Task contract. A verification Task checks existing behavior.
+Each Task contract contains Goal, Repository, Module, How and Checks. How has at most five mechanism steps.
+Research citations stay outside Task contracts. A verification Task checks existing behavior.
 Publication does not confirm acceptance or mark the AC as passing.
+
+A module can define `paths` for its writable roots, such as production code, required tests and migrations.
+Its `path` remains the working directory. Without `paths`, the module uses `path` as its sole writable root.
 
 The deployed server must support `claim_planning`, `finish_planning` and `release_planning`.
 The planner refuses before claiming if those commands are absent.
