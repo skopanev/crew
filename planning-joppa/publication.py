@@ -118,7 +118,7 @@ def validate(plan, assignment):
         task["depends_on"] = [aliases.get(dep, dep) for dep in dependencies if ":" not in dep or dep in aliases]
     updates = {task["target"] for task in normalized["tasks"] if task["action"] == "update"}
     for address, existing in inventory.items():
-        if address in retired:
+        if address in retired or existing["process"].get("done") or existing["process"].get("retired"):
             continue
         dependencies = {link["target"] for link in existing["document"].get("links", [])
                         if link.get("blocking") and link.get("relation") == "depends_on"}
