@@ -1,5 +1,6 @@
 """Focused provider checks. No network, credentials, or live mutations."""
 from copy import deepcopy
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -367,6 +368,57 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(api.calls[-1][1]["command"]["op"], "release_planning")
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
+
+    def test_unchanged_blocked_task_keeps_the_planning_claim(self):
+        spec = importlib.util.spec_from_file_location("joppa_stage_control", ROOT / "planning-joppa/stages.py")
+        stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stage)
+        refusal = "blocked Task needs a new contract or retirement"
+        for blocked in (False, True):
+            with self.subTest(blocked=blocked), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory)
+                data, value = assignment(), plan()
+                task = value["tasks"][0]
+                task.update(action="update", target="work:old", revision=3)
+                existing = data["joppa"]["tasks"][0]
+                existing["document"]["data"].update(title=task["title"], contract=publication.contract(task, value),
+                                                     projects=["other", "p"])
+                if blocked:
+                    existing["process"]["blocked"] = {"reason": "Failed", "position": 19}
+                for name, body in {"input": data, "plan": value, "joppa-snapshot": {},
+                    "claim": {"status": "confirmed", "actor": "planner", "result": {"position": 22}}}.items():
+                    (target / f"{name}.json").write_text(json.dumps(body))
+                class Server(Fake):
+                    def call(self, name, args):
+                        self.calls.append((name, deepcopy(args)))
+                        if name == "joppa_objects":
+                            return {"process": {"planning_claim": {"actor": "planner", "position": 22}}}
+                        if name == "joppa_batch":
+                            raise Rejected(refusal)
+                        return {"position": 23}
+                api = Server()
+                with patch.object(stage, "settings", return_value={"workspace": "example"}), \
+                     patch.object(stage.shared, "artifacts", return_value=target), \
+                     patch.object(stage.shared, "verify_context", return_value=({}, {}, {})), \
+                     patch.object(stage.context, "client", return_value=api), \
+                     patch.object(stage.context, "read_assignment", return_value=data), \
+                     patch.object(stage.context, "load", return_value=(data, {}, None)), \
+                     patch.object(stage.context, "refresh_reads"), patch.object(stage, "signal"):
+                    if blocked:
+                        with self.assertRaisesRegex(Rejected, refusal):
+                            stage.finish()
+                        stage.fail(refusal)
+                    else:
+                        stage.finish()
+                result = read(target / "result.json")
+                self.assertEqual(result["claim_released"], not blocked)
+                self.assertEqual(result["status"], "blocked" if blocked else "unchanged")
+                self.assertEqual((target / "release.json").exists(), not blocked)
+                if blocked:
+                    self.assertTrue(result["needs_recovery"])
+                    mutations = [(name, args) for name, args in api.calls if name != "joppa_objects"]
+                    self.assertEqual([name for name, args in mutations], ["joppa_batch"])
+                    self.assertEqual(mutations[0][1]["operations"][0]["command"]["op"], "finish_planning")
 
     def test_server_rejection_retains_exact_reason(self):
         transport = object.__new__(__import__("mcp").Joppa)

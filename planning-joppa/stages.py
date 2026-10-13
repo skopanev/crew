@@ -148,7 +148,8 @@ def finish():
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])
     operations = publication.operations(plan, fresh)
-    if len(operations) == 1:
+    if len(operations) == 1 and not any(isinstance(task["process"].get("blocked"), dict)
+                                        for task in fresh["joppa"]["tasks"]):
         released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
                                        "Reviewed Task contracts are unchanged.")
         require(released, "unchanged Tasks require confirmed claim release")
@@ -188,11 +189,14 @@ def fail(reason=None):
                     for path in (target / "claim.json", target / "publication.json", target / "release.json"))
     publication_path = target / "publication.json"
     incomplete = publication_path.exists() and read(publication_path)["status"] == "confirmed"
+    claim_path = target / "claim.json"
+    retained = claim_path.exists() and read(claim_path)["status"] == "confirmed" and not released
+    needs_recovery = uncertain or incomplete or bool(release_error) or retained
     write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason,
           "claim_released": released, "release_error": release_error,
-          "needs_recovery": uncertain or incomplete or bool(release_error),
+          "needs_recovery": needs_recovery,
           "acceptance_verified": False})
-    signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if uncertain or incomplete or release_error else ""))
+    signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if needs_recovery else ""))
 
 
 def needs_human():

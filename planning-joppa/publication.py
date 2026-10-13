@@ -242,8 +242,10 @@ def release(api, target, workspace, ac, reason):
     if receipt["status"] != "confirmed":
         return False
     publication = target / "publication.json"
-    if publication.exists() and read(publication)["status"] != "rejected":
-        return False
+    if publication.exists():
+        result = read(publication)
+        if result["status"] != "rejected" or result.get("error") == "blocked Task needs a new contract or retirement":
+            return False
     prior = target / "release.json"
     if prior.exists():
         return read(prior)["status"] == "confirmed"

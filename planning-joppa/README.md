@@ -62,11 +62,16 @@ Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.
 The planning engine handles one AC per run. The dashboard selects the next AC after each run.
 
-Crew planning updates only unclaimed implementation Tasks. It preserves Tasks with another purpose.
+Crew planning updates only unclaimed implementation Tasks.
+It can retire a blocked, unclaimed Task under the held AC.
+The same publication removes blocking links to that Task from remaining Tasks.
+It preserves completed and retired Tasks.
 It skips unchanged documents and pins dependencies from the fresh context.
 Before each claim, it checks previous receipts for this endpoint, workspace and AC.
 Unresolved receipts block a new run. They require explicit recovery.
 Confirmed failures release this run's planning claim. Uncertain mutations retain their request receipts.
+An unchanged blocked Task must pass the server's `finish_planning` check.
+The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
 Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
 Never start another mutation blindly. Planning claims do not expire.
