@@ -377,11 +377,10 @@ nodes:
       model: gpt-6.1-sol
       effort: high
       slug: architecture
-    - harness: opencode
-      model: zai-coding-plan/glm-5.3
+    - harness: agy
+      model: gemini-4-argon-high
       effort: high
       slug: codereview
-      flag: --pure
     - harness: claude-code
       model: claude-sonnet-5-5
       effort: high
