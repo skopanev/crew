@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {execFile} from 'node:child_process';
+import {callJoppa} from './joppa-api.mjs';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 
-const bridge = fileURLToPath(new URL('./joppa-api.py', import.meta.url));
+const here = path.dirname(fileURLToPath(import.meta.url));
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 const inside = (file, root) => file === root || file.startsWith(root + path.sep);
@@ -30,7 +30,7 @@ export function validateJoppa(config) {
     const token = fs.realpathSync(worker.tokenFile);
     require(fs.statSync(token).isFile() && !tokens.has(token), 'Joppa worker token files must be distinct files');
     require((fs.statSync(token).mode & 0o077) === 0, 'Joppa token files must not grant group or other access');
-    const mounted = [config.sourceRoot, path.resolve(path.dirname(bridge), '..'), config.stateDir,
+    const mounted = [config.sourceRoot, path.resolve(here, '..'), config.stateDir,
       config.sshDir, ...(config.readOnlyRepos || []), ...(config.readWriteDirs || [])].filter(Boolean);
     require(!mounted.some(root => inside(token, fs.existsSync(root) ? fs.realpathSync(root) : root)),
       'Joppa token files must stay outside source, Crew, run, key and extra mount directories');
@@ -75,20 +75,7 @@ export function validateJoppa(config) {
 }
 
 export function api(config, worker, tool, arguments_, {signal} = {}) {
-  return new Promise((resolve, reject) => {
-    const child = execFile(config.python || 'python3', [bridge], {encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024, signal},
-      (error, stdout) => {
-        let reply;
-        try { reply = JSON.parse(stdout); } catch { return reject(new Error('Joppa client failed without a response')); }
-        if (reply.error || error) {
-          const failure = new Error(reply.error || 'Joppa client failed');
-          failure.rejected = reply.rejected === true;
-          return reject(failure);
-        }
-        resolve(reply.result);
-      });
-    child.stdin.end(JSON.stringify({url: config.joppa.url, tokenFile: worker.tokenFile, tool, arguments: arguments_}));
-  });
+  return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal});
 }
 
 export async function nextTask(config) {
