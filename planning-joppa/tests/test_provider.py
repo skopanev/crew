@@ -373,9 +373,11 @@ class ProviderTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("joppa_stage_control", ROOT / "planning-joppa/stages.py")
         stage = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(stage)
-        refusal = "blocked Task needs a new contract or retirement"
-        for blocked in (False, True):
-            with self.subTest(blocked=blocked), tempfile.TemporaryDirectory() as directory:
+        blocked_refusal = "blocked Task needs a new contract or retirement"
+        for blocked, terminal, refusal in ((False, None, blocked_refusal), (True, None, blocked_refusal),
+                (True, None, "planning produced no Task changes"),
+                (True, "done", blocked_refusal), (True, "retired", blocked_refusal)):
+            with self.subTest(blocked=blocked, terminal=terminal, refusal=refusal), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory)
                 data, value = assignment(), plan()
                 task = value["tasks"][0]
@@ -385,6 +387,13 @@ class ProviderTests(unittest.TestCase):
                                                      projects=["other", "p"])
                 if blocked:
                     existing["process"]["blocked"] = {"reason": "Failed", "position": 19}
+                if terminal:
+                    finished = deepcopy(existing)
+                    finished["address"] = "work:finished"
+                    finished["process"][terminal] = {"reason": "Earlier work"}
+                    data["joppa"]["tasks"].append(finished)
+                    existing["process"].pop("blocked")
+                active_blocked = blocked and terminal is None
                 for name, body in {"input": data, "plan": value, "joppa-snapshot": {},
                     "claim": {"status": "confirmed", "actor": "planner", "result": {"position": 22}}}.items():
                     (target / f"{name}.json").write_text(json.dumps(body))
@@ -404,18 +413,19 @@ class ProviderTests(unittest.TestCase):
                      patch.object(stage.context, "read_assignment", return_value=data), \
                      patch.object(stage.context, "load", return_value=(data, {}, None)), \
                      patch.object(stage.context, "refresh_reads"), patch.object(stage, "signal"):
-                    if blocked:
+                    if active_blocked:
                         with self.assertRaisesRegex(Rejected, refusal):
                             stage.finish()
                         stage.fail(refusal)
                     else:
                         stage.finish()
                 result = read(target / "result.json")
-                self.assertEqual(result["claim_released"], not blocked)
-                self.assertEqual(result["status"], "blocked" if blocked else "unchanged")
-                self.assertEqual((target / "release.json").exists(), not blocked)
-                if blocked:
+                self.assertEqual(result["claim_released"], not active_blocked)
+                self.assertEqual(result["status"], "blocked" if active_blocked else "unchanged")
+                self.assertEqual((target / "release.json").exists(), not active_blocked)
+                if active_blocked:
                     self.assertTrue(result["needs_recovery"])
+                    self.assertTrue(read(target / "publication.json")["retain_claim"])
                     mutations = [(name, args) for name, args in api.calls if name != "joppa_objects"]
                     self.assertEqual([name for name, args in mutations], ["joppa_batch"])
                     self.assertEqual(mutations[0][1]["operations"][0]["command"]["op"], "finish_planning")
