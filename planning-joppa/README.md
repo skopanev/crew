@@ -36,7 +36,10 @@ New runs save their output in `output.log` inside the Medulla run folder.
 Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
 The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in the config to change this interval.
 It selects criteria in the configured workspace. Repository mappings bound Task publication.
-It excludes criteria with active or completed Tasks to avoid repeating existing work.
+It excludes criteria with active Tasks and criteria whose Tasks are all completed.
+It includes a criterion with blocked Tasks even when a sibling Task is completed.
+Set `ac_ids` to an ordered list of full AC addresses to limit automatic planning.
+If `ac_ids` is absent, the loop selects eligible criteria across the workspace.
 It skips failed AC revisions for the rest of the process. Restart to try an unchanged revision again.
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
