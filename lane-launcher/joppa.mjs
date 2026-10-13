@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
