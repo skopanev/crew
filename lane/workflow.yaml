@@ -243,6 +243,7 @@ nodes:
   implement_code:
     timeout: 7200   # writing the code
     env:
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       EQUILL_ROLE: crew-lane-coder
       EQUILL_RULES: none
       EQUILL_PROMPT_PROFILE: agent.memory.hybrid
