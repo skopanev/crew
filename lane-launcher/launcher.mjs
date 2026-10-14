@@ -190,6 +190,7 @@ export async function tick(config, display = null) {
   const run = {ticket: candidate.id, workspace: config.workspace, config,
     runFolder, args: selected ? null : laneArgs(config, candidate.id), createdAt: new Date().toISOString(),
     ...(selected ? {task: candidate.id, taskRevision: candidate.revision, tasks: candidate.tasks, requirement: candidate.requirement,
+      repositoryId: candidate.repository,
       executionId: executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
       deliveryBranch: `ticket-${executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id)}-${path.basename(dir)}`,
       joppaWorker: selected.worker} : {})};

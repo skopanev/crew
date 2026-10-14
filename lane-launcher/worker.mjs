@@ -178,7 +178,8 @@ try {
       if (result.blockConfirmed) announce(`[lane] BLOCKED ${tasks} · Joppa confirmed; claims released`);
       if (result.held) announce(`[lane] HELD ${tasks} · claims retained with failure evidence`);
     } catch (error) {
-      result = {...result, status: 'failed', code: 2, blocked: Boolean(run.claim), error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
+      result = {...result, status: 'failed', code: 2, held: true, blocked: false,
+        error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
       announce(`[lane] ${result.error}`);
       if (run.claim && !run.failureRequest) {
         try {
