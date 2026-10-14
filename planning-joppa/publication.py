@@ -106,6 +106,13 @@ def validate(plan, assignment):
             "Task must belong to a selected Requirement criterion")
     require(all(check.get("ac") in selected for check in plan.get("acceptance_checks", [])),
             "every acceptance check needs its selected criterion address")
+    included = {task.get("target") for task in plan.get("tasks", []) if task.get("action") in ("update", "retire")}
+    for existing in assignment["joppa"]["tasks"]:
+        if existing["document"].get("parent") not in selected or existing["process"].get("done") or existing["process"].get("retired"):
+            continue
+        unclaimed(existing)
+        require(existing["address"] in included,
+                f"Requirement plan must explicitly update or retire unfinished Task {existing['address']}")
     ordered = ordered_tasks(plan.get("tasks", []))
     local = {task["id"]: task for task in ordered}
     aliases = {task["target"]: task["id"] for task in ordered if task.get("target")}
@@ -425,10 +432,16 @@ def release(api, target, workspace, ac, reason):
             return False
     prior = target / "release.json"
     if prior.exists():
-        return read(prior)["status"] == "confirmed"
+        release = read(prior)
+        return release["status"] == "confirmed" and not any(item.get("unknown") for item in release.get("skipped_claims", []))
     holders, skipped = {}, []
     for address, position, actor in claim_entries(receipt):
-        object = api.call("joppa_objects", {"workspace": workspace, "address": address})
+        try:
+            object = api.call("joppa_objects", {"workspace": workspace, "address": address})
+            require(isinstance(object, dict) and isinstance(object.get("process"), dict), "claim read is incomplete")
+        except Exception:
+            skipped.append({"ac": address, "reason": "planning claim could not be read", "unknown": True})
+            continue
         claim = object.get("process", {}).get("planning_claim")
         if not isinstance(claim, dict) or claim.get("position") != position or actor is not None and claim.get("actor") != actor:
             skipped.append({"ac": address, "reason": "planning claim is missing or replaced"})
@@ -440,7 +453,7 @@ def release(api, target, workspace, ac, reason):
                   for address in holders]
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped})
-        return True
+        return not any(item.get("unknown") for item in skipped)
     tool = "joppa_batch" if "operations" in receipt["arguments"] else "joppa_command"
     arguments = {"workspace": workspace, "operations": operations} if tool == "joppa_batch" else {
         "workspace": workspace, "command": operations[0]["command"]}
@@ -451,4 +464,4 @@ def release(api, target, workspace, ac, reason):
             release = read(prior)
             write(prior, {**release, "released": list(holders) if release["status"] == "confirmed" else [],
                           "requested_releases": list(holders), "skipped_claims": skipped})
-    return True
+    return not any(item.get("unknown") for item in skipped)
