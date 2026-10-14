@@ -49,6 +49,9 @@ Restart to try the same unchanged input again.
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
 The input is one AC. The planner reads its Requirement, parents, decisions and sibling ACs and Tasks.
+It also lists unfinished Tasks across Requirements in the configured repository projects, with their module and mechanism.
+This list locates possible overlap. A full current object read still verifies reuse and dependencies.
+Shared modules do not require dependencies unless one Task needs another Task's output.
 It reuses sibling Tasks through dependencies. It edits only Tasks under the selected AC.
 One AC is the smallest native planning unit. The planner publishes complete Tasks under that AC.
 The owner prepares smaller ACs when the criterion needs separate planning runs.

@@ -63,6 +63,7 @@ def prepare():
     require(all(name in advertised for name in ("claim_planning", "finish_planning", "release_planning")),
             "Joppa planning commands are not deployed; no claim was attempted")
     assignment, snapshot, ac = context.load(api, config, os.environ["PLANNING_JOPPA_AC"])
+    assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
     publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], ac["address"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", snapshot)
@@ -96,6 +97,7 @@ def prompt_assignment(assignment):
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
+        "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "revision": task["current_revision"],
                    "data": task["document"]["data"], "links": task["document"]["links"],

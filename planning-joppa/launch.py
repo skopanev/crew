@@ -21,6 +21,8 @@ Do not emit shallow implementation Tasks. Lane decides files, functions and test
 Use Joppa MCP to inspect relevant Tasks, ACs, Requirements, capabilities and domains in the configured workspace.
 Search before creating Tasks. Read the full current object before reuse or a dependency.
 The input includes sibling ACs and Tasks under the same Requirement. Reuse their required outputs through dependencies.
+Unfinished work lists Tasks across Requirements in the configured repository projects. Check overlapping mechanisms before design.
+Read the full current Task before reuse or a dependency. A shared module alone does not require a dependency.
 Use earlier local Task IDs or full object addresses read through Joppa MCP for depends_on.
 Add dependencies only when one output is required for another Task.
 Unlike the default plan shape, verify_existing requires at least one scoped verification Task.
