@@ -105,8 +105,9 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
   }
   if (tableWidth() > width) {
     const ticket = columns.find(column => column.key === 'ticket');
-    ticket.width = Math.max(1, ticket.width - (tableWidth() - width));
-    if (tableWidth() > width) columns = columns.filter(column => column.key !== 'time');
+    const available = ticket.width - (tableWidth() - width);
+    if (available >= Math.min(ticketWidth, 8)) ticket.width = available;
+    else columns = columns.filter(column => column.key !== 'time');
   }
   if (tableWidth() > width) {
     if (width <= statusWidth + 2) columns = columns.filter(column => column.key === 'status');
