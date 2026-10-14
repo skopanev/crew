@@ -189,8 +189,10 @@ export async function tick(config, display = null) {
   fs.mkdirSync(runFolder);
   const run = {ticket: candidate.id, workspace: config.workspace, config,
     runFolder, args: selected ? null : laneArgs(config, candidate.id), createdAt: new Date().toISOString(),
-    ...(selected ? {task: candidate.id, taskRevision: candidate.revision, executionId: executionId(candidate.id),
-      deliveryBranch: `ticket-${executionId(candidate.id)}-${path.basename(dir)}`, joppaWorker: selected.worker} : {})};
+    ...(selected ? {task: candidate.id, taskRevision: candidate.revision, tasks: candidate.tasks, requirement: candidate.requirement,
+      executionId: executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
+      deliveryBranch: `ticket-${executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id)}-${path.basename(dir)}`,
+      joppaWorker: selected.worker} : {})};
   const stateFile = path.join(dir, 'launch.json');
   save(stateFile, run);
   // Reserve capacity before opening the tab; its worker claims before startup.

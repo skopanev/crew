@@ -117,6 +117,26 @@ Use `--dry-run` for one preview iteration: check configuration and Docker, then 
 
 Capacity includes only Docker lane containers and pending reservations belonging to the selected dispatcher ID. Container membership uses the existing `medulla.workflow=lane` and `medulla.runs_under` labels: the run path contains `crew-dispatchers/<id>/`. Other IDs, other workflows and legacy containers without a dispatcher identity are excluded. Stop or finish old unscoped lanes before switching their dispatcher to this version; their historical files are retained. Docker/Herdr inspection errors prevent launches. Use the same `stateDir` for all dispatcher invocations: locks are under `crew-dispatchers/<id>/dispatcher.lock`, so the same ID cannot run twice while different IDs can run concurrently. Manual `lane/run.sh` launches require `--dispatcher-id <id>` and become visible to that dispatcher through their container label. Manual launches must respect the same limit; a separate manual start can race the dispatcher. After a hard crash, inspect `dispatcher.lock/owner.json` and remove the lock only once that PID has stopped. An uncertain tab creation keeps its reservation until inspected; it does not silently free capacity.
 
+## Joppa execution
+
+For Joppa, start the dispatcher with `--source joppa --config <file>`.
+The dispatcher selects all executable Tasks for one Requirement and repository.
+Task title prefixes such as `[01]` and `[02]` define their execution order.
+External dependencies still control eligibility, including dependencies between repositories.
+One lane uses one coder session, checkout, gate cycle, expert review, and landing for those Tasks.
+
+The worker claims all selected Tasks in one `joppa_batch` request before Docker starts.
+Packages above the server limit of 100 operations fail without a partial claim.
+Each Task keeps its contract, writable roots, revision, and acceptance context in `claim.tasks` and `ticket.tasks`.
+The aggregate `modulePaths` lists the union of those roots. It does not expand an individual Task scope.
+Completion checks every Task and acceptance context before one atomic completion request.
+Each completion receives the same checked landing evidence and its own Task address.
+
+`launch.json` stores the ordered `tasks`, the Requirement address, and the saved atomic requests.
+The result maps each Task address to its confirmed status and revision in `result.tasks`.
+A confirmed workflow failure blocks all held Tasks atomically.
+An uncertain claim, worker state, or outcome retains the Tasks for inspection.
+
 ## Status-only CLI
 
 ```bash

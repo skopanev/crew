@@ -124,6 +124,8 @@ nodes:
       Test command: {{var:ticket_test_command}}
       Read the ticket:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
+      If the ticket has tasks, inspect every Task contract and its writable roots.
+      Select DUPLICATE only when every Task already satisfies its contract.
 
   create_worktree:
     env:
@@ -282,6 +284,8 @@ nodes:
       Ticket {{var:ticket_id}} in workspace {{var:project_name}}:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       Read {{var:RUN_ARTIFACTS}}/scout.txt.
+      If the ticket has tasks, execute them in executionOrder in this coder session.
+      Keep each Task within its contract and writable roots. Record each Task result in coder-report.txt.
       Artifacts: {{var:RUN_ARTIFACTS}}.
 
   prepare_review:
@@ -430,6 +434,7 @@ nodes:
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
       {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
       {{var:RUN_ARTIFACTS}}/diff.patch.
+      Read {{var:RUN_ARTIFACTS}}/ticket.json. If it has tasks, review every Task contract and its writable roots.
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
       - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>

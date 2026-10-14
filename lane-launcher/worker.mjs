@@ -173,9 +173,10 @@ try {
         .map(name => path.join(run.runFolder, name, 'artifacts'))
         .find(folder => fs.existsSync(path.join(folder, 'landing.txt')) || fs.existsSync(path.join(folder, 'verification.txt'))) : null;
       await finishTask(run, stateFile, result, artifacts);
-      if (result.completed) announce(`[lane] DONE ${run.task} · Joppa confirmed`);
-      if (result.blockConfirmed) announce(`[lane] BLOCKED ${run.task} · Joppa confirmed; claim released`);
-      if (result.held) announce(`[lane] HELD ${run.task} · claim retained with failure evidence`);
+      const tasks = (run.tasks || [{address: run.task}]).map(task => task.address).join(', ');
+      if (result.completed) announce(`[lane] DONE ${tasks} · Joppa confirmed`);
+      if (result.blockConfirmed) announce(`[lane] BLOCKED ${tasks} · Joppa confirmed; claims released`);
+      if (result.held) announce(`[lane] HELD ${tasks} · claims retained with failure evidence`);
     } catch (error) {
       result = {...result, status: 'failed', code: 2, blocked: Boolean(run.claim), error: `JOPPA_OUTCOME_UNCONFIRMED: ${error.message}`};
       announce(`[lane] ${result.error}`);
