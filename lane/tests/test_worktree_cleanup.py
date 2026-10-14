@@ -12,6 +12,22 @@ CLEANUP = TEXT[TEXT.index('cleanup() {'):TEXT.index('trap cleanup EXIT')]
 
 
 class WorktreeCleanupTests(unittest.TestCase):
+    def test_only_successful_creation_owns_an_empty_checkout(self):
+        ownership = TEXT[TEXT.index('worktree_created=false'):TEXT.index('mounts+=(--mount-rw "$worktree")')]
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as directory:
+                worktree = Path(directory) / 'ticket'
+                if existing:
+                    worktree.mkdir()
+                script = ('say() { printf "%s\\n" "$*"; }\n' + CLEANUP +
+                          '\ntrap cleanup EXIT\n' + ownership + '\nexit 2\n')
+                result = subprocess.run(['bash', '-c', script], env=dict(os.environ, worktree=str(worktree)),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 73 if existing else 2, result.stderr)
+                self.assertEqual(worktree.exists(), existing)
+                if existing:
+                    self.assertIn('WORKTREE PREEXISTED', result.stdout)
+
     def test_failure_cleanup_preserves_work_and_existing_trees(self):
         cases = ('empty', 'unchanged', 'changed', 'untracked', 'ignored',
                  'committed', 'existing', 'no-baseline', 'success', 'symlink')

@@ -380,12 +380,9 @@ mkdir -p "$(dirname "$worktree")" "$TOOLING_ROOT/$ticket"
 worktree_created=false
 if mkdir "$worktree" 2>/dev/null; then
   worktree_created=true
-elif [[ ! -d "$worktree" || -L "$worktree" || -n "$(ls -A "$worktree")" ]]; then
+else
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"
   exit 73
-else
-  # This run owns the accepted empty directory.
-  worktree_created=true
 fi
 mounts+=(--mount-rw "$worktree")
 cd "$TOOLING_ROOT"
