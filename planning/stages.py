@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from common import digest, fingerprint, read, require, run, signal, validate_input, write
+from common import digest, fingerprint, inside, read, require, run, signal, validate_input, write
 from contracts import ROLES, load_contract
 import drift
 import validation
@@ -344,15 +344,43 @@ def finish():
     save_result(assignment, plan, reviews, old, contracts, chain)
 
 
-def verify_context(assignment, plan, review=True):
+def verify_context(assignment, plan, review=True, *, mechanisms_only=False):
     target = artifacts()
     require_necessity(plan)
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
     for key, critic_review in reviews.items():
         validation.critique(critic_review, digest(plan))
         require(critic_review["verdict"] == "clear", f"{key} critic rejected: {critic_review['summary']}")
-    old, contracts = verify_freshness(assignment, review)
+    old, contracts = verify_mechanism_context(assignment, plan) if mechanisms_only else verify_freshness(assignment, review)
     return reviews, old, contracts
+
+
+def verify_mechanism_context(assignment, plan):
+    """Recheck roles and current source without binding mechanism Tasks to a Git commit."""
+    contracts = read(artifacts() / "contracts.json")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        loaded = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
+    require(all(loaded[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
+            "mandatory Equill contract changed during planning; re-plan")
+    prepared = read(artifacts() / "snapshots.json")
+    current = {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}
+    repositories = {repo["id"]: repo for repo in assignment["repositories"]}
+    for key, repo in repositories.items():
+        require(drift.clean(prepared[key]) and drift.clean(current[key]),
+                "uncommitted source changes prevent planning publication")
+        ancestor = subprocess.run(["git", "-C", repo["path"], "merge-base", "--is-ancestor",
+                                   prepared[key]["head"], current[key]["head"]], capture_output=True, timeout=45)
+        require(ancestor.returncode == 0, f"{key}: source no longer descends from the prepared base")
+    directories = [(check["repository"], check["cwd"]) for check in plan["acceptance_checks"] if "cwd" in check]
+    for task in plan["tasks"]:
+        repo = repositories[task["repository"]]
+        module = next(module for module in repo["modules"] if module["name"] == task["module"])
+        directories.append((repo["id"], module["path"]))
+        directories.extend((repo["id"], check["cwd"]) for check in task["checks"] if "cwd" in check)
+    for key, directory in directories:
+        require(inside(repositories[key]["path"], directory).is_dir(),
+                f"{key}: planned working directory is absent: {directory}")
+    return current, contracts
 
 
 # The exact failure when the source moved while planning ran. planning-ntk marks

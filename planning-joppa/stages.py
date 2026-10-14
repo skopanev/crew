@@ -138,9 +138,10 @@ def finish():
     assignment = context.read_assignment(api, config, target)
     plan = read(target / "plan.json")
     publication.validate(plan, assignment)
-    reviews, snapshots, contracts = shared.verify_context(assignment, plan)
+    reviews, snapshots, contracts = shared.verify_context(assignment, plan, mechanisms_only=True)
     fresh, current, _ = context.load(api, config, assignment["ac"]["id"])
     context.refresh_reads(api, config, fresh, current, read(target / "joppa-snapshot.json"))
+    publication.validate(plan, fresh)
     # Update only the exact Task document reviewed by this plan.
     current_tasks = {item["address"]: item for item in fresh["joppa"]["tasks"]}
     for task in plan["tasks"]:
@@ -174,7 +175,8 @@ def finish():
             "publication response is incomplete; inspect publication.json before another run")
     write(target / "result.json", {"status": "published", "scope": "planned_tasks", "ac": assignment["ac"]["id"],
           "acceptance_verified": False, "task_count": len(operations) - 1, "plan_digest": digest(plan),
-          "snapshots": snapshots, "contracts": {key: value["bundle_digest"] for key, value in contracts.items()},
+          "snapshots": snapshots, "prepared_snapshots": read(target / "snapshots.json"),
+          "contracts": {key: value["bundle_digest"] for key, value in contracts.items()},
           "reviews": reviews, "publication": result})
     signal("READY", "Reviewed Tasks published. The criterion still requires implementation and verification.")
 

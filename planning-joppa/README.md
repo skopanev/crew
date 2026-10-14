@@ -65,6 +65,11 @@ Two independent critics review the plan. Publication saves Tasks and finishes th
 Each Task contract contains Goal, Repository, Module, How and Checks. How has at most five mechanism steps.
 Research citations stay outside Task contracts. A verification Task checks existing behavior.
 Publication does not confirm acceptance or mark the AC as passing.
+Clean code changes do not invalidate a mechanism plan. Publication rechecks current source and Equill roles.
+It revalidates the plan against live Joppa context. Changes to the AC, its context or reviewed Tasks still prevent publication.
+Uncommitted source changes still prevent publication. Lane checks the current code before implementation.
+The current source must descend from the prepared base. Planned module and check directories must still exist.
+The result records both prepared and current source snapshots.
 
 A module can define `paths` for its writable roots, such as production code, required tests and migrations.
 Its `path` remains the working directory. Without `paths`, the module uses `path` as its sole writable root.
