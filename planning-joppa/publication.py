@@ -390,19 +390,24 @@ def held(api, workspace, address, position, actor=None):
     return claim
 
 
-def held_claims(api, workspace, receipt):
+def claim_entries(receipt):
     require(receipt["status"] == "confirmed", "planning claim was not confirmed")
     results = receipt["result"].get("results", [receipt["result"]])
     args = receipt["arguments"]
     commands = [args["command"]] if "command" in args else [item["command"] for item in args["operations"]]
     require(len(results) == len(commands), "planning claim response is incomplete; inspect claim.json")
-    holders = {}
+    entries = []
     for command, result in zip(commands, results):
         address = command["ac"]
         require(type(result.get("position")) is int, "planning claim response has no event position; inspect claim.json")
         actor = receipt.get("holders", {}).get(address, receipt.get("actor"))
-        holders[address] = held(api, workspace, address, result["position"], actor)["actor"]
-    return holders
+        entries.append((address, result["position"], actor))
+    return entries
+
+
+def held_claims(api, workspace, receipt):
+    return {address: held(api, workspace, address, position, actor)["actor"]
+            for address, position, actor in claim_entries(receipt)}
 
 
 def release(api, target, workspace, ac, reason):
@@ -421,11 +426,29 @@ def release(api, target, workspace, ac, reason):
     prior = target / "release.json"
     if prior.exists():
         return read(prior)["status"] == "confirmed"
-    holders = held_claims(api, workspace, receipt)
+    holders, skipped = {}, []
+    for address, position, actor in claim_entries(receipt):
+        object = api.call("joppa_objects", {"workspace": workspace, "address": address})
+        claim = object.get("process", {}).get("planning_claim")
+        if not isinstance(claim, dict) or claim.get("position") != position or actor is not None and claim.get("actor") != actor:
+            skipped.append({"ac": address, "reason": "planning claim is missing or replaced"})
+            continue
+        holders[address] = claim["actor"]
+    if holders:
+        write(claim_file, {**receipt, "holders": {**receipt.get("holders", {}), **holders}})
     operations = [{"command": {"op": "release_planning", "ac": address, "reason": reason[:2000]}}
                   for address in holders]
+    if not operations:
+        write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped})
+        return True
     tool = "joppa_batch" if "operations" in receipt["arguments"] else "joppa_command"
     arguments = {"workspace": workspace, "operations": operations} if tool == "joppa_batch" else {
         "workspace": workspace, "command": operations[0]["command"]}
-    mutate(api, prior, tool, arguments)
+    try:
+        mutate(api, prior, tool, arguments)
+    finally:
+        if prior.exists():
+            release = read(prior)
+            write(prior, {**release, "released": list(holders) if release["status"] == "confirmed" else [],
+                          "requested_releases": list(holders), "skipped_claims": skipped})
     return True

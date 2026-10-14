@@ -122,6 +122,83 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual([entry["command"]["ac"] for entry in arguments["operations"]],
                              ["criterion:a", "criterion:b"])
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
+            (target / "release.json").unlink()
+            class Replaced(Server):
+                def call(self, name, args):
+                    result = super().call(name, args)
+                    if name == "joppa_objects" and args["address"] == "criterion:b":
+                        result["process"]["planning_claim"] = {"actor": "another-planner", "position": 26}
+                    return result
+            api = Replaced()
+            self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
+            self.assertEqual([entry["command"]["ac"] for entry in api.calls[-1][1]["operations"]], ["criterion:a"])
+            release = read(target / "release.json")
+            self.assertEqual(release["released"], ["criterion:a"])
+            self.assertEqual(release["skipped_claims"][0]["ac"], "criterion:b")
+            with self.assertRaisesRegex(ValueError, "does not hold"):
+                publication.held_claims(api, "example", receipt)
+            (target / "release.json").unlink()
+            class Uncertain(Server):
+                def call(self, name, args):
+                    if name == "joppa_batch":
+                        raise MCPError("release response lost")
+                    return super().call(name, args)
+            with self.assertRaisesRegex(MCPError, "response lost"):
+                publication.release(Uncertain(), target, "example", "criterion:a", "Failure")
+            uncertain = read(target / "release.json")
+            self.assertEqual(uncertain["status"], "uncertain")
+            self.assertEqual(uncertain["released"], [])
+            self.assertEqual(uncertain["requested_releases"], ["criterion:a", "criterion:b"])
+
+    def test_requirement_uses_each_criteria_test_list_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data, value = assignment(), plan()
+            data["repositories"][0]["path"] = directory
+            (Path(directory) / "checks.rs").write_text("assert!(required_behavior());\n")
+            (Path(directory) / "implementation.rs").write_text("required_behavior\n")
+            data["joppa"].update(scope="requirement", criteria=[], criterion_schemas={})
+            value.update(disposition="verify_existing", tasks=[], criteria=[], acceptance_checks=[])
+            for address, revision in (("criterion:a", 4), ("criterion:b", 9)):
+                data["joppa"]["criteria"].append({"id": address})
+                data["joppa"]["objects"][address] = context.source(item(address, "rule:r"))
+                detail = {key: deepcopy(data["joppa"][key]) for key in ("task_type", "task_schema", "test_status")}
+                detail["test_status"].update(address=address, tests_revision=revision)
+                data["joppa"]["criterion_schemas"][address] = detail
+                value["criteria"].append({"ac": address, "disposition": "verify_existing"})
+                value["acceptance_checks"].append({"ac": address, "repository": "service", "scenario": "Existing behavior",
+                    "expected": "Required result", "test": "checks.rs > required_behavior",
+                    "evidence": "service:checks.rs:1; service:implementation.rs:1"})
+            bindings = [operation["command"] for operation in publication.operations(value, data)
+                        if operation["command"]["op"] == "set_ac_tests"]
+            self.assertEqual([(command["target"], command["revision"]) for command in bindings],
+                             [("criterion:a", 4), ("criterion:b", 9)])
+
+    def test_capture_rejects_an_oversized_publication_before_critics(self):
+        spec = importlib.util.spec_from_file_location("joppa_stage_size", ROOT / "planning-joppa/stages.py")
+        stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stage)
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
+            criterion_schemas={address: {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+        data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
+        value["criteria"] = [{"ac": address, "disposition": "implement"} for address in ("criterion:a", "criterion:b")]
+        value["acceptance_checks"] = [{**deepcopy(value["acceptance_checks"][0]), "ac": address}
+                                      for address in ("criterion:a", "criterion:b")]
+        first = value["tasks"][0]
+        value["tasks"] = [{**deepcopy(first), "id": f"task{number}", "ac": "criterion:a" if number < 50 else "criterion:b"}
+                          for number in range(100)]
+        api = Fake()
+        with tempfile.TemporaryDirectory() as directory, patch.object(stage, "settings", return_value={"workspace": "example"}), \
+             patch.object(stage.context, "client", return_value=api), patch.object(stage.context, "read_assignment", return_value=data), \
+             patch.object(stage.shared, "artifacts", return_value=Path(directory)), \
+             patch.object(stage.shared, "body_result", return_value=(value, [])), \
+             patch.object(stage.shared, "bind_necessity") as necessity:
+            with self.assertRaisesRegex(ValueError, "100 operations"):
+                stage.capture("plan")
+            necessity.assert_not_called()
+            self.assertFalse((Path(directory) / "plan.json").exists())
+        self.assertEqual(api.calls, [])
 
     def test_requirement_mixes_implementation_and_existing_test_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -178,6 +255,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
         self.assertEqual(snapshot["criteria"], ["criterion:a", "criterion:c"])
         objects["criterion:a"]["process"]["planning_claim"] = {"actor": "planner", "position": 21}
+        with self.assertRaisesRegex(ValueError, "no ready criteria"):
+            context.load_requirement(Server(), config, "r")
         resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a", "criterion:c"])
         self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
 
@@ -544,9 +623,10 @@ class ProviderTests(unittest.TestCase):
             target = Path(directory)
             (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner", "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}))
             api = Fake(result={"process": {"planning_claim": {"actor": "other", "position": 22}}})
-            with self.assertRaisesRegex(ValueError, "does not hold"):
-                publication.release(api, target, "example", "criterion:a", "Failure")
+            self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(len(api.calls), 1)
+            self.assertEqual(read(target / "release.json")["skipped_claims"][0]["ac"], "criterion:a")
+            (target / "release.json").unlink()
             api = Fake(result={"process": {"planning_claim": {"actor": "planner", "position": 22}}})
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(api.calls[-1][1]["command"]["op"], "release_planning")
