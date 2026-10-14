@@ -10,16 +10,17 @@ import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read, laneArgs} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId} from '../joppa.mjs';
+import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
 
 async function packageFixture(t, mode = 'success') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const tokenFile = path.join(root, 'token');
   fs.writeFileSync(tokenFile, 'fixture-token');
-  const objects = new Map(), calls = [];
+  const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
     work_ready: true, review_required: false, document: {present: true, parent, data, links: []},
     process: {status: 'open', assignee: null}});
@@ -46,9 +47,13 @@ async function packageFixture(t, mode = 'success') {
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
     else if (name === 'joppa_objects') value = objects.get(args.address);
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
-      tasks: ['task:t2', 'task:t1'].map(address => ({address, revision: 3, title: objects.get(address).document.data.title}))};
+      tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
+        status: objects.get(address).process.status, assignee: objects.get(address).process.assignee}))
+        .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
     else if (name === 'joppa_batch') {
-      if (mode === 'reject') { rejected = true; value = {error: 'operation 2 revision changed'}; }
+      if (mode === 'reject' || mode === 'outcome-reject' && args.operations[0].command.op !== 'claim_task') {
+        rejected = true; value = {error: 'operation 2 revision changed'};
+      }
       else {
         value = {results: args.operations.map(({command}, index) => {
           const object = objects.get(command.id);
@@ -74,15 +79,133 @@ async function packageFixture(t, mode = 'success') {
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
   const stateFile = path.join(root, 'launch.json');
   fs.writeFileSync(path.join(root, 'output.log'), '');
-  return {root, run, stateFile, calls, objects, persist: () => save(stateFile, run)};
+  return {root, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
 }
 
 test('Joppa package selects all executable repository Tasks in plan order', async t => {
   const f = await packageFixture(t);
+  f.queue.push('task:t1');
   const selected = await nextTask(f.run.config);
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1', 'task:t2']);
   assert.equal(selected.candidate.requirement, 'req:r');
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+for (const state of ['live', 'held', 'uncertain']) test(`Joppa package excludes a ${state} local repository reservation`, async t => {
+  const f = await packageFixture(t);
+  const folder = path.join(f.root, 'runs/11111111-1111-4111-8111-111111111111');
+  fs.mkdirSync(folder, {recursive: true});
+  const run = {...f.run, repositoryId: 'app', joppaWorker: {actor: 'another-worker'}};
+  if (state === 'held') run.result = {code: 2, held: true, finishedAt: new Date().toISOString()};
+  if (state === 'uncertain') {
+    run.claimRequest = {operations: [{command: {op: 'claim_task', id: 'task:t1'}}]};
+    run.result = {code: 2, finishedAt: new Date().toISOString()};
+  }
+  save(path.join(folder, 'launch.json'), run);
+  assert.equal((await nextTask(f.run.config)).candidate, null);
+});
+
+for (const sameRepository of [false, true]) test(`Joppa package detects remote holders; same repository=${sameRepository}`, async t => {
+  const f = await packageFixture(t);
+  const held = f.objects.get('task:t2');
+  held.process = {status: 'in_progress', assignee: 'manual-worker'};
+  if (!sameRepository) {
+    held.document.data.contract = held.document.data.contract.replace('Repository: app', 'Repository: other');
+    f.run.config.repositories.push({...f.run.config.repositories[0], id: 'other'});
+  }
+  const selected = await nextTask(f.run.config);
+  if (sameRepository) assert.equal(selected.candidate, null);
+  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+});
+
+test('Joppa package unconfirmed worker outcome remains held', async t => {
+  const f = await packageFixture(t, 'outcome-reject');
+  Object.assign(f.run.config, {readOnlyRepos: [], gateCommands: ['true'], sshDir: f.root});
+  const bins = path.join(f.root, 'bins'), artifacts = path.join(f.run.runFolder, 'fixture/artifacts');
+  fs.mkdirSync(bins);
+  fs.mkdirSync(artifacts, {recursive: true});
+  fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Gate failed');
+  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\nexit 1\n', {mode: 0o755});
+  f.persist();
+  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`});
+  assert.equal(result.code, 2, result.stderr);
+  const saved = read(f.stateFile);
+  assert.equal(saved.result.held, true);
+  assert.equal(saved.result.blocked, false);
+  assert.equal(saved.result.blockConfirmed, undefined);
+  assert.match(saved.result.error, /JOPPA_OUTCOME_UNCONFIRMED/);
+});
+
+function blockedPackage(f) {
+  const root = path.join(f.root, 'worktrees'), runs = path.join(f.root, 'receipts');
+  fs.mkdirSync(root);
+  const runId = '11111111-1111-4111-8111-111111111111';
+  fs.mkdirSync(path.join(runs, runId), {recursive: true});
+  const run = {...f.run, repositoryId: 'app', config: {...f.run.config, worktreeRoot: root},
+    claim: {tasks: f.run.tasks}, result: {code: 1, blockConfirmed: true, finishedAt: new Date().toISOString()}};
+  const folder = path.join(root, run.executionId);
+  fs.mkdirSync(folder);
+  fs.writeFileSync(path.join(folder, 'retained.txt'), 'Retained package work');
+  save(path.join(runs, runId, 'launch.json'), run);
+  const tasks = f.run.tasks.map(({address}) => ({address, kind: 'task', process: {
+    status: 'open', assignee: null, blocked: {reason: 'GATE_FAIL', evidence: `Run: ${runId}`}}}));
+  const operations = tasks.map(task => ({command: {op: 'retire_task', id: task.address.split(':')[1]}}));
+  return {root, runs, run, folder, runId, input: {tasks, operations, config: {workspace: 'fixture',
+    url: f.run.config.joppa.url, worktree_root: root, lane_runs_folder: runs, repositories: [{path: f.root}]}}};
+}
+
+test('Joppa package cleanup removes its recorded shared checkout once', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  const prepared = cleanupBlockedTasks(blocked.input);
+  assert.equal(prepared.length, 1);
+  assert.equal(prepared[0].folder, blocked.folder);
+  assert.equal(fs.existsSync(blocked.folder), false);
+});
+
+test('Joppa package cleanup refuses an incomplete AC scope before deleting any checkout', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  blocked.input.tasks = [blocked.input.tasks[1]];
+  blocked.input.operations = [blocked.input.operations[1]];
+  assert.throws(() => cleanupBlockedTasks(blocked.input), /every blocked Task.*whole Requirement/);
+  assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+});
+
+test('Joppa package cleanup requires an operation for every retained Task', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  blocked.input.operations.pop();
+  assert.throws(() => cleanupBlockedTasks(blocked.input), /Every blocked Task needs/);
+  assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+});
+
+test('Joppa package cleanup preserves legacy single-Task receipts', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  const run = {...blocked.run, executionId: executionId('task:t1')};
+  delete run.tasks;
+  run.claim = {claimed: true};
+  const folder = path.join(blocked.root, run.executionId);
+  fs.renameSync(blocked.folder, folder);
+  blocked.input.tasks.pop();
+  blocked.input.operations.pop();
+  save(path.join(blocked.runs, blocked.runId, 'launch.json'), run);
+  assert.equal(cleanupBlockedTasks(blocked.input)[0].folder, folder);
+  assert.equal(fs.existsSync(folder), false);
+});
+
+for (const state of ['live', 'held', 'uncertain']) test(`Joppa package cleanup refuses a ${state} sibling run`, async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  const folder = path.join(blocked.runs, '22222222-2222-4222-8222-222222222222');
+  fs.mkdirSync(folder);
+  const active = {...blocked.run, task: 'task:t2', tasks: [{address: 'task:t2'}]};
+  if (state === 'live') delete active.result;
+  if (state === 'held') active.result = {code: 2, held: true, finishedAt: new Date().toISOString()};
+  if (state === 'uncertain') {
+    delete active.claim;
+    active.claimRequest = {operations: [{command: {op: 'claim_task', id: 'task:t2'}}]};
+    active.result = {code: 2, finishedAt: new Date().toISOString()};
+  }
+  save(path.join(folder, 'launch.json'), active);
+  assert.throws(() => cleanupBlockedTasks(blocked.input), /Active, held or unconfirmed/);
+  assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
 });
 
 test('Joppa package claims atomically and preserves each Task contract and scope', async t => {

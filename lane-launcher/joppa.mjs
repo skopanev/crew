@@ -86,11 +86,19 @@ export function api(config, worker, tool, arguments_, {signal} = {}) {
   return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal});
 }
 
+export function runHoldsTasks(run) {
+  if (!run.result || run.result.held || run.claimRequest && !run.claim && !run.claimRejected) return true;
+  if (run.claim && !run.result.completed && !run.result.blockConfirmed) return true;
+  return Boolean(run.completionRequest && !run.result.completed || run.blockRequest && !run.result.blockConfirmed ||
+    run.result.blocked && !run.result.blockConfirmed || /JOPPA_OUTCOME_UNCONFIRMED/.test(run.result.error || ''));
+}
+
 export async function nextTask(config) {
-  const busy = new Set(runDirectories(config.stateDir).flatMap(dir => {
-    try { const run = readRun(path.join(dir, 'launch.json')); return !run.result || run.claimRequest && !run.claim && !run.claimRejected ? [run.joppaWorker?.actor] : []; }
+  const reservations = runDirectories(config.stateDir).flatMap(dir => {
+    try { const run = readRun(path.join(dir, 'launch.json')); return runHoldsTasks(run) ? [run] : []; }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  }));
+  });
+  const busy = new Set(reservations.map(run => run.joppaWorker?.actor));
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     if (busy.has(worker.actor)) continue;
@@ -103,6 +111,39 @@ export async function nextTask(config) {
       if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
       return objects.get(address);
     };
+    const group = async address => {
+      const current = await object(address), input = taskInput(config, current), seen = new Set();
+      let parent = current.document.parent;
+      while (parent) {
+        require(!seen.has(parent), 'Task parent context contains a cycle');
+        seen.add(parent);
+        const context = await object(parent);
+        require(context.address === parent && context.document?.present === true && context.historical === false,
+          'Task parent context is absent or historical');
+        if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository: input.repo.id};
+        parent = context.document.parent;
+      }
+      throw new Error('Task needs a requirement ancestor');
+    };
+    const occupied = new Set();
+    for (const run of reservations) {
+      if (!run.joppaWorker) continue;
+      const repository = run.repositoryId || run.repository?.id || run.claim?.ticket?.repository;
+      const context = run.requirement && repository ? {requirement: run.requirement, repository} : await group(run.task);
+      occupied.add(`${context.requirement}\n${context.repository}`);
+    }
+    let heldCursor;
+    do {
+      const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
+        view: 'all', limit: 100, ...(heldCursor ? {cursor: heldCursor} : {})});
+      for (const task of page.tasks) {
+        if (task.status !== 'in_progress' && !task.assignee) continue;
+        if (task.status === 'done' || task.status === 'retired') continue;
+        const context = await group(task.address);
+        occupied.add(`${context.requirement}\n${context.repository}`);
+      }
+      heldCursor = page.next_cursor;
+    } while (heldCursor);
     let cursor;
     do {
       const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
@@ -112,26 +153,16 @@ export async function nextTask(config) {
         require(text(task.address) && Number.isSafeInteger(task.revision), 'Joppa returned an invalid Task');
         const current = await object(task.address);
         require(current.address === task.address && current.current_revision === task.revision, 'Task changed during queue selection');
-        const input = taskInput(config, current), seen = new Set();
-        let parent = current.document.parent, requirement;
-        while (parent) {
-          require(!seen.has(parent), 'Task parent context contains a cycle');
-          seen.add(parent);
-          const context = await object(parent);
-          require(context.address === parent && context.document?.present === true && context.historical === false,
-            'Task parent context is absent or historical');
-          if (schema.schema.types[context.kind]?.role === 'requirement') { requirement = context.address; break; }
-          parent = context.document.parent;
-        }
-        require(requirement, 'Task needs a requirement ancestor');
-        eligible.push({...task, repository: input.repo.id, requirement});
+        const context = await group(task.address);
+        if (!occupied.has(`${context.requirement}\n${context.repository}`)) eligible.push({...task, ...context});
       }
       cursor = page.next_cursor;
     } while (cursor);
     available = Math.max(available, eligible.length);
     if (eligible.length) {
       const task = eligible[0];
-      const tasks = eligible.filter(item => item.requirement === task.requirement && item.repository === task.repository)
+      const tasks = [...new Map(eligible.filter(item => item.requirement === task.requirement && item.repository === task.repository)
+        .map(item => [item.address, item])).values()]
         .sort((a, b) => taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))
         .map(item => ({address: item.address, revision: item.revision, title: item.title}));
       require(tasks.length <= 100, 'Repository package exceeds the Joppa 100-operation atomic batch limit; no Tasks claimed');
