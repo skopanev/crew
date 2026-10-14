@@ -40,6 +40,10 @@ It excludes criteria with active Tasks and criteria whose Tasks are all complete
 It includes a criterion with blocked Tasks even when a sibling Task is completed.
 Passing AC tests exclude the criterion from automatic planning.
 It plans criteria with blocked Tasks before new work.
+Before selection, it checks blocking dependencies on the criterion and its ancestors.
+Task targets require completion. AC targets require green tests. Other targets require at least one live AC and all live ACs green.
+Archived targets and descendant branches do not block work. A structural parent alone does not block work.
+Current dependency pins must remain valid. Priority applies after these checks.
 Within each group, it selects failing AC tests before unverified AC tests.
 An unchanged failed plan stays skipped. A new Task failure permits another planning attempt.
 Set `ac_ids` to an ordered list of full AC addresses to limit automatic planning.

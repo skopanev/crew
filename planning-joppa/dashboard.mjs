@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {tail} from '../planning-ntk/dashboard.mjs';
 import {api} from '../lane-launcher/joppa.mjs';
+import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {lock as dispatcherLock} from '../planning-ntk/dispatch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -111,6 +112,8 @@ export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
   const blocked = new Map(), active = new Set(), pending = new Map();
+  const dependencies = dependencyCheck((tool, args) => api({joppa: {url: config.url}}, {tokenFile}, tool,
+    {workspace: config.workspace, ...args}, {signal}));
   let cursor;
   do {
     const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
@@ -165,7 +168,7 @@ export async function readyCriteria(config, tokenFile, signal) {
       const status = statuses.get(row.address);
       if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
       const failures = (blocked.get(row.address) || []).sort();
-      if (status !== 'green') {
+      if (status !== 'green' && (await dependencies(row.address)).ready) {
         rows.push({...row, testStatus: status, failedTaskCount: failures.length,
           attemptKey: JSON.stringify([row.address, row.revision, failures])});
       }

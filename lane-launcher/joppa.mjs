@@ -3,6 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
+import {dependencyCheck} from './dependencies.mjs';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
@@ -95,11 +96,19 @@ export async function nextTask(config) {
     if (busy.has(worker.actor)) continue;
     const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
     if (mine.total) { held++; continue; }
-    const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
-      purpose: 'implementation', view: 'available', limit: 1, ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
-    available = Math.max(available, page.total);
-    if (page.tasks?.length) {
-      const task = page.tasks[0];
+    const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
+    const eligible = [];
+    let cursor;
+    do {
+      const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
+        purpose: 'implementation', view: 'available', limit: 100, ...(cursor ? {cursor} : {}),
+        ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
+      for (const task of page.tasks) if ((await dependencies(task.address)).ready) eligible.push(task);
+      cursor = page.next_cursor;
+    } while (cursor);
+    available = Math.max(available, eligible.length);
+    if (eligible.length) {
+      const task = eligible[0];
       require(text(task.address) && Number.isSafeInteger(task.revision), 'Joppa returned an invalid Task');
       return {candidate: {id: task.address, title: task.title, revision: task.revision}, worker, available, held};
     }
@@ -129,6 +138,11 @@ export function taskInput(config, object) {
 }
 
 export async function claimTask(run, persist) {
+  if (!run.claimRequest) {
+    const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
+    const dependency = await check(run.task);
+    require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
+  }
   run.claimRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
     op: 'claim_task', id: run.task, revision: run.taskRevision}};
   persist();
