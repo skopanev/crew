@@ -6,7 +6,7 @@ import re
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
-from common import digest, read, require, run, signal, write
+from common import digest, fingerprint, read, require, run, signal, write
 import stages as shared
 import context
 import publication
@@ -155,6 +155,7 @@ def prompt_assignment(assignment):
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
+        "test_status": assignment["joppa"]["test_status"],
         "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "revision": task["current_revision"],
@@ -185,7 +186,12 @@ def capture(kind):
         signal("NEEDS_HUMAN" if result["owner_gaps"] else "ASSESSED", "Necessity assessment validated")
     else:
         config = settings()
-        publication.validate(result, context.read_assignment(context.client(config), config, target))
+        api = context.client(config)
+        assignment = context.read_assignment(api, config, target)
+        publication.validate(result, assignment)
+        if result["disposition"] == "verify_existing":
+            publication.verify_bindings(api, config, result, assignment,
+                {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}, read(target / "snapshots.json"))
         shared.bind_necessity(result)
         write(target / "plan.json", result)
         signal("PLANNED", "Task mechanisms validated for the selected criterion")
@@ -212,6 +218,8 @@ def finish():
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])
+    if plan["disposition"] == "verify_existing":
+        publication.verify_bindings(api, config, plan, fresh, snapshots, read(target / "snapshots.json"))
     operations = publication.operations(plan, fresh)
     blocked = any(isinstance(task["process"].get("blocked"), dict)
                   and not task["process"].get("done") and not task["process"].get("retired")
@@ -234,11 +242,13 @@ def finish():
             and results[-1].get("command", {}).get("op") == "finish_planning",
             "publication response is incomplete; inspect publication.json before another run")
     write(target / "result.json", {"status": "published", "scope": "planned_tasks", "ac": assignment["ac"]["id"],
-          "acceptance_verified": False, "task_count": len(operations) - 1, "plan_digest": digest(plan),
+          "acceptance_verified": False,
+          "task_count": sum(op["command"]["op"] in ("save_object", "retire_task") for op in operations),
+          "plan_digest": digest(plan),
           "snapshots": snapshots, "prepared_snapshots": read(target / "snapshots.json"),
           "contracts": {key: value["bundle_digest"] for key, value in contracts.items()},
           "reviews": reviews, "publication": result})
-    signal("READY", "Reviewed Tasks published. The criterion still requires implementation and verification.")
+    signal("READY", "Reviewed plan published. Criterion acceptance remains a separate result.")
 
 
 def fail(reason=None):
