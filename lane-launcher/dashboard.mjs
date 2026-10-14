@@ -77,30 +77,47 @@ function reasonFor(run) {
   return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
-export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth} = {}) {
-  const width = Math.max(30, process.stdout.columns || 80);
+export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE'} = {}) {
+  const width = Math.max(1, process.stdout.columns || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
   const statusWidth = Math.min(8, Math.max(6, ...recent.map(row => row.status.length)));
-  const ticketWidth = identityWidth || Math.max(6, ...recent.map(row => Array.from(plain(row.ticket)).length));
-  const stageWidth = 24;
-  const runWidth = Math.max(36, ...recent.map(row => row.runId.length));
-  const rowHeight = Math.ceil((statusWidth + ticketWidth + stageWidth + runWidth + 37) / width);
-  const visible = recent.slice(0, Math.max(0,
-    Math.floor(((process.stdout.rows || 24) - reserved - rowHeight) / rowHeight)));
-  const output = [`${'STARTED'.padEnd(19)}  ${identityLabel.padEnd(ticketWidth)}  ${'STATUS'.padEnd(statusWidth)}  ${'STAGE / REASON CODE'.padEnd(stageWidth)}  ${'RUN ID'.padEnd(runWidth)}  TIME`];
-  for (const row of visible) {
+  const length = value => Array.from(plain(value || '')).length;
+  const ticketWidth = identityWidth || Math.max(length(identityLabel), ...recent.map(row => length(row.ticket)));
+  const started = row => {
     const date = new Date(row.start);
-    const started = Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
-    const identity = `${started.padEnd(19)}  ${clip(row.ticket, ticketWidth).padEnd(ticketWidth)}`;
-    const label = clip(row.status, statusWidth).padEnd(statusWidth);
-    const details = `${clip(row.stage || '', stageWidth).padEnd(stageWidth)}  ${row.runId.padEnd(runWidth)}  ${duration(row.start, row.end || Date.now())}`;
+    return Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
+  };
+  let columns = [
+    {key: 'started', label: 'STARTED', width: 19, value: started},
+    {key: 'ticket', label: identityLabel, width: ticketWidth, value: row => row.ticket},
+    ...(recent.some(row => row.title) ? [{key: 'title', label: titleLabel,
+      width: Math.min(60, Math.max(length(titleLabel), ...recent.map(row => length(row.title)))), value: row => row.title || ''}] : []),
+    {key: 'status', label: 'STATUS', width: statusWidth, value: row => row.status},
+    {key: 'stage', label: 'STAGE / REASON CODE', width: 24, value: row => row.stage || ''},
+    {key: 'run', label: 'RUN ID', width: Math.max(6, ...recent.map(row => length(row.runId))), value: row => row.runId},
+    {key: 'time', label: 'TIME', width: 8, value: row => duration(row.start, row.end || Date.now())},
+  ];
+  const tableWidth = () => columns.reduce((total, column) => total + column.width, 2 * (columns.length - 1));
+  for (const key of ['title', 'started', 'run', 'time', 'stage']) {
+    if (tableWidth() <= width) break;
+    columns = columns.filter(column => column.key !== key);
+  }
+  if (tableWidth() > width) {
+    if (width <= statusWidth + 2) columns = columns.filter(column => column.key === 'status');
+    for (const column of columns) column.width = column.key === 'status' ? Math.min(statusWidth, width) : width - statusWidth - 2;
+  }
+  const visible = recent.slice(0, Math.max(0, (process.stdout.rows || 24) - reserved - 1));
+  const cell = (value, column) => clip(value, column.width).padEnd(column.width);
+  const output = [columns.map(column => cell(column.label, column)).join('  ')];
+  for (const row of visible) {
     const success = ['READY', 'DECOMPOSED'].includes(row.status);
     const tone = row.active ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED', 'HELD'].includes(row.status) ? 'yellow' : 'red';
-    output.push(success ? paint('ready', `${identity}  ${label}  ${details}`) :
-      `${row.active ? identity : paint('finished', identity)}  ${paint(tone, label)}  ${row.active ? details : paint('finished', details)}`);
+    const cells = columns.map(column => cell(column.value(row), column));
+    output.push(success ? paint('ready', cells.join('  ')) : cells.map((value, index) =>
+      columns[index].key === 'status' ? paint(tone, value) : row.active ? value : paint('finished', value)).join('  '));
   }
-  if (!rows.length) output.push('No runs yet');
+  if (!rows.length) output.push(clip('No runs yet', width));
   return output;
 }
 

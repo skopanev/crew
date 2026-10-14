@@ -218,9 +218,8 @@ export async function main(argv) {
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
-    const identityWidth = Math.max(20, Math.min(Math.floor(width * 0.55), width - 106));
-    const table = renderRunTable(rows.map(row => ({...row, ticket: titleCell(row, identityWidth)})),
-      paint, 6, {identityLabel: 'REQ : AC', identityWidth});
+    const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
+      paint, 6, {identityLabel: 'AC', titleLabel: 'REQ : AC'});
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
