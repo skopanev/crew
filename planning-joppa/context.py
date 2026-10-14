@@ -108,6 +108,11 @@ def source(object):
                                            "files", "references", "review_required", "work_ready")} | {"process": process}
 
 
+def test_list(status):
+    return {"tests": [item["address"] for item in status["tests"]],
+            "tests_revision": status.get("tests_revision"), "tests_draft": status["tests_draft"]}
+
+
 def snapshot_source(object, types, selected_ac=None):
     current = source(object)
     for key in ("verification", "pending_run", "summary", "status"):
@@ -235,6 +240,9 @@ def load_once(api, config, ac_id):
             if isinstance(reference, dict) and reference.get("target"):
                 get(reference["target"])
     require(all(item["position"] == tree["position"] for item in objects.values()), "workspace changed during object read")
+    tests = api.call("joppa_tests", {"workspace": workspace, "ac": ac_id})
+    require(tests.get("address") == ac_id and isinstance(tests.get("tests"), list),
+            "criterion test status is incomplete")
     require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
             "workspace changed during context read")
     groups = [item for item in parents if types[item["kind"]].get("role") == "group"]
@@ -247,12 +255,13 @@ def load_once(api, config, ac_id):
                   "decisions": [json.dumps(meaning, ensure_ascii=False)],
                   "repositories": config["repositories"],
                   "joppa": {"parents": [source(item) for item in parents], "tasks": [source(item) for item in tasks],
+                            "test_status": tests,
                             "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
                             "task_schema": types[task_kind]},
                   "knowledge_query": ac["document"]["data"].get("description") or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
-                "requirement": meaning}
+                "requirement": meaning, "tests": test_list(tests)}
     validate_input(assignment)
     return assignment, snapshot, ac
 

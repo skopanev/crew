@@ -70,7 +70,17 @@ Publication remains a separate workflow stage.
 Research checks reuse. Necessity checks the minimum scope. Design supplies mechanisms.
 Two independent critics review the plan. Publication saves Tasks and finishes the claim in one transaction.
 Each Task contract contains Goal, Repository, Module, How and Checks. How has at most five mechanism steps.
-Research citations stay outside Task contracts. A verification Task checks existing behavior.
+Research citations stay outside Task contracts. Missing tests or behavior require implementation Tasks.
+When existing passing tests cover every Then and Evidence item, critics inspect their actual assertions.
+The planner binds these tests without creating a verification Task. Each acceptance check supplies
+`test` (`file > test name`), `evidence` (`repository:path:line` for assertions and implementation),
+and optional `source_ac` when another fully read AC supplies the passing result.
+Publication rechecks the recorded pass and its commit ancestry. Cited test and implementation files must remain unchanged.
+An unbound test needs a recorded pass under another AC before this shortcut can use it.
+The binding preserves existing test addresses by union. A changed or draft list uses one atomic bind-and-finish batch.
+This path requires server support for `set_ac_tests.revision` and test-only `finish_planning`.
+An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
+The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
 Clean code changes do not invalidate a mechanism plan. Publication rechecks current source and Equill roles.
 It revalidates the plan against live Joppa context. Changes to the AC, its context or reviewed Tasks still prevent publication.

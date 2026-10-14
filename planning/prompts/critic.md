@@ -30,6 +30,8 @@ Consider a simpler, more efficient solution with concrete benefits and costs;
 do not demand abstractions for hypothetical requirements.
 Do not block a plan for omitted implementation details unless the AC requires them.
 Check the mechanism, reuse, safety, scope, dependencies and observable AC coverage.
+For verify_existing, inspect the cited test assertions against every Then and Evidence item.
+Reject missing coverage or a claimed pass without execution evidence. Binding tests does not confirm acceptance.
 Do not silently
 reverse confirmed product decisions. A necessary owner question is an explicit
 finding. A patch to one consumer when the defect lives in a shared source is a
