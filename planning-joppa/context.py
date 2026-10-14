@@ -318,7 +318,9 @@ def load_requirement(api, config, req_id, selected=None):
              and item["document"].get("parent") in addresses]
     candidates = []
     for address in addresses:
-        ac = get(address)
+        # Admission needs live ownership. Authored snapshots exclude planning claims.
+        ac = object_read(api, workspace, address)
+        objects[address] = source(ac)
         work = [item for item in tasks if item["document"]["parent"] == address
                 and not item["process"].get("done") and not item["process"].get("retired")]
         if (ac.get("work_ready") is True and ac.get("review_required") is False

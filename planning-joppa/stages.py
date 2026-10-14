@@ -210,7 +210,7 @@ def capture(kind):
         config = settings()
         api = context.client(config)
         assignment = context.read_assignment(api, config, target)
-        publication.validate(result, assignment)
+        publication.operations(result, assignment)
         verify_bindings(api, config, result, assignment,
             {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}, read(target / "snapshots.json"))
         shared.bind_necessity(result)
@@ -309,6 +309,7 @@ def fail(reason=None):
     needs_recovery = uncertain or incomplete or bool(release_error) or retained
     write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason,
           "claim_released": released, "release_error": release_error,
+          "skipped_claims": read(target / "release.json").get("skipped_claims", []) if (target / "release.json").exists() else [],
           "needs_recovery": needs_recovery,
           "acceptance_verified": False})
     signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if needs_recovery else ""))
