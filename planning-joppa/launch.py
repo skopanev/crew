@@ -25,8 +25,12 @@ Unfinished work lists Tasks across Requirements in the configured repository pro
 Read the full current Task before reuse or a dependency. A shared module alone does not require a dependency.
 Use earlier local Task IDs or full object addresses read through Joppa MCP for depends_on.
 Add dependencies only when one output is required for another Task.
-Unlike the default plan shape, verify_existing requires at least one scoped verification Task.
-Set purpose: verification on each such Task. Give observable checks. Do not claim that acceptance passed.
+For verify_existing, create no Task. Each acceptance_check needs test (file > test name),
+evidence (repository:path:line), and optional source_ac for an existing passing result under another fully read AC.
+Include citations for the test assertions and affected implementation. Confirm a recorded passing result through Joppa.
+Critics must confirm that the actual assertions cover every Then and Evidence item.
+Missing tests or behavior require implementation Tasks. Test binding alone is publication work.
+Never claim that acceptance passed. A later full report supplies acceptance results.
 The server publishes all Tasks and finishes the planning claim atomically.
 Agents do not call Joppa mutations. Do not create a planning placeholder Task.
 Title length must obey joppa.task_schema.title_preview_length.

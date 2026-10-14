@@ -38,7 +38,9 @@ def assignment():
             "repositories": [{"id": "service", "project": "project:p", "path": "/tmp/example-source",
                               "cbm_project": "service", "modules": [{"name": "core", "path": "src"}]}],
             "joppa": {"task_type": "work", "task_schema": {"question": "What work?", "title_preview_length": 64},
-                      "tasks": [task], "objects": {"criterion:a": ac, "work:old": task, "work:dependency": dependency}}}
+                      "tasks": [task], "objects": {"criterion:a": ac, "work:old": task, "work:dependency": dependency},
+                      "test_status": {"address": "criterion:a", "tests": [], "tests_draft": False,
+                                      "tests_revision": None}}}
 
 
 def plan():
@@ -178,6 +180,8 @@ class ProviderTests(unittest.TestCase):
                     return deepcopy(tree)
                 if tool == "joppa_read":
                     return deepcopy(detail)
+                if tool == "joppa_tests":
+                    return deepcopy(assignment()["joppa"]["test_status"])
                 if "address" in args:
                     return deepcopy(objects[args["address"]])
                 return {"position": 20, "items": [{"address": "work:one"}], "next_cursor": None}
@@ -190,7 +194,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(snapshot["requirement"]["comments"], {"decision": "Approved"})
         self.assertNotIn("tasks", snapshot["requirement"])
         self.assertEqual(len(value["joppa"]["tasks"]), 1)
-        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects"}))
+        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects", "joppa_tests"}))
         detail["requirement"]["current_revision"] = 8
         with self.assertRaisesRegex(ValueError, "another revision"):
             context.load(Reader(), config, "a")
@@ -314,17 +318,72 @@ class ProviderTests(unittest.TestCase):
             (old / "release.json").write_text(json.dumps({"status": "confirmed"}))
             check()
 
-    def test_verification_creates_scoped_work_not_acceptance(self):
+    def test_existing_coverage_does_not_create_verification_work(self):
         value = plan()
         value["disposition"] = "verify_existing"
-        with self.assertRaisesRegex(ValueError, "verification work only"):
+        with self.assertRaisesRegex(ValueError, "must not create verification work"):
             publication.operations(value, assignment())
-        value["tasks"][0]["purpose"] = "verification"
-        ops = publication.operations(value, assignment())
-        self.assertEqual(ops[0]["command"]["data"]["purpose"], "implementation")
-        self.assertIn("Checks:", ops[0]["command"]["data"]["contract"])
-        self.assertEqual(ops[-1]["command"]["op"], "finish_planning")
-        self.assertFalse(any(op["command"]["op"] in ("result", "accept", "complete_task") for op in ops))
+        value["tasks"] = []
+        with self.assertRaisesRegex(ValueError, "acceptance_check.test"):
+            publication.operations(value, assignment())
+
+    def test_binding_preserves_the_list_and_skips_an_unchanged_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data, value = assignment(), plan()
+            data["repositories"][0]["path"] = directory
+            test = Path(directory) / "checks.rs"
+            test.write_text("assert!(required_behavior());\n")
+            (Path(directory) / "implementation.rs").write_text("required_behavior\n")
+            value.update(disposition="verify_existing", tasks=[])
+            value["acceptance_checks"][0].update(test="checks.rs > required_behavior",
+                evidence="service:checks.rs:1; service:implementation.rs:1")
+            status = data["joppa"]["test_status"]
+            status.update(tests=[{"address": "checks.rs > other"}], tests_revision=4)
+            ops = publication.operations(value, data)
+            self.assertEqual([op["command"]["op"] for op in ops], ["set_ac_tests", "finish_planning"])
+            self.assertEqual(ops[0]["command"]["tests"], ["checks.rs > other", "checks.rs > required_behavior"])
+            self.assertEqual(ops[0]["command"]["revision"], 4)
+            status["tests"].append({"address": "checks.rs > required_behavior"})
+            self.assertEqual(len(publication.operations(value, data)), 1)
+            status["tests_draft"] = True
+            self.assertEqual(len(publication.operations(value, data)), 2)
+
+    def test_binding_requires_execution_evidence_and_unchanged_cited_source(self):
+        from common import fingerprint
+        with tempfile.TemporaryDirectory() as directory:
+            data, value = assignment(), plan()
+            data["repositories"][0]["path"] = directory
+            git = lambda *args: subprocess.check_output(["git", "-C", directory, *args], text=True).strip()
+            git("init", "-q")
+            test = Path(directory) / "checks.rs"
+            test.write_text("assert!(required_behavior());\n")
+            (Path(directory) / "implementation.rs").write_text("required_behavior\n")
+            git("add", ".")
+            git("-c", "user.name=proof", "-c", "user.email=proof@local", "commit", "-qm", "fixture")
+            commit = git("rev-parse", "HEAD")
+            value.update(disposition="verify_existing", tasks=[])
+            value["acceptance_checks"][0].update(test="checks.rs > required_behavior",
+                evidence="service:checks.rs:1; service:implementation.rs:1")
+            row = {"address": "checks.rs > required_behavior", "status": "pass", "commit": commit}
+            data["joppa"]["test_status"]["tests"] = [row]
+            snap = {"service": fingerprint(data["repositories"][0])}
+            api = Fake(result=data["joppa"]["test_status"])
+            publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            row["status"] = "not_run"
+            with self.assertRaisesRegex(ValueError, "passing result missing"):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            row["status"] = "pass"
+            (Path(directory) / "unrelated.txt").write_text("unrelated\n")
+            git("add", ".")
+            git("-c", "user.name=proof", "-c", "user.email=proof@local", "commit", "-qm", "unrelated")
+            snap = {"service": fingerprint(data["repositories"][0])}
+            publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            test.write_text("assert!(false);\n")
+            git("add", ".")
+            git("-c", "user.name=proof", "-c", "user.email=proof@local", "commit", "-qm", "changed assertion")
+            snap = {"service": fingerprint(data["repositories"][0])}
+            with self.assertRaises(ValueError):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
 
     def test_rejects_stale_and_completed_updates_and_unknown_dependencies(self):
         value = plan()

@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 import re
 
-from common import digest, read, require, strings, text, write
+from common import digest, fingerprint, inside, read, require, run, strings, text, write
 from mcp import Rejected
 import validation
 
@@ -85,10 +85,10 @@ def validate(plan, assignment):
     normalized = deepcopy(plan)
     normalized["tasks"] = ordered_tasks(normalized.get("tasks", []))
     if normalized.get("disposition") == "verify_existing":
-        require(bool(normalized.get("tasks")), "existing behavior requires a scoped verification Task")
-        require(any(task.get("action") != "retire" for task in normalized["tasks"]),
-                "existing behavior requires a scoped verification Task")
-        normalized["disposition"] = "implement"
+        require(all(task.get("action") == "retire" for task in normalized["tasks"]),
+                "existing covered behavior must not create verification work")
+        normalized["disposition"] = "implement" if normalized["tasks"] else "verify_existing"
+        binding_checks(plan, assignment)
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     known = assignment["joppa"]["objects"]
     targets = set()
@@ -105,8 +105,6 @@ def validate(plan, assignment):
             targets.add(address)
         else:
             require("target" not in task and "revision" not in task, "new Task cannot replace an existing Task")
-        if plan.get("disposition") == "verify_existing" and task["action"] != "retire":
-            require(task.get("purpose") == "verification", "existing behavior needs verification work only")
         dependencies = strings(task.get("depends_on"), "task.depends_on", empty=True)
         require(not set(dependencies).intersection(retired), "Task cannot depend on a Task retired by this plan")
         require(task["action"] != "retire" or not dependencies, "retirement cannot add dependencies")
@@ -130,6 +128,63 @@ def validate(plan, assignment):
     limit = schema.get("title_preview_length", 64)
     for task in plan.get("tasks", []):
         require(len(task["title"]) <= limit, f"Task title exceeds the configured {limit}-character limit")
+
+
+def binding_checks(plan, assignment):
+    repositories = {repo["id"]: repo for repo in assignment["repositories"]}
+    checks = plan.get("acceptance_checks")
+    require(isinstance(checks, list) and checks, "existing coverage requires test assertions")
+    result = []
+    for check in checks:
+        repo = repositories.get(check.get("repository"))
+        require(repo is not None, "test repository is not configured")
+        address = text(check.get("test"), "acceptance_check.test")
+        parts = address.split(" > ")
+        require(len(parts) >= 2 and all(part.strip() for part in parts)
+                and len(address) <= 400 and not re.search(r"[\x00-\x1f\x7f-\x9f]", address),
+                "test address requires file > test name")
+        test = inside(repo["path"], parts[0])
+        require(test.is_file() and test.suffix, "bound test file does not exist")
+        evidence = text(check.get("evidence"), "acceptance_check.evidence")
+        citations = re.findall(re.escape(repo["id"]) + r":([^\s:;]+):(\d+)\b", evidence)
+        require(citations, "assertion evidence requires repository:path:line")
+        paths = {parts[0]}
+        for relative, line in citations:
+            file = inside(repo["path"], relative)
+            require(file.is_file() and 0 < int(line) <= len(file.read_text().splitlines()),
+                    "assertion evidence file or line is absent")
+            paths.add(relative)
+        require(parts[0] in {relative for relative, _ in citations}, "cite an assertion in the bound test file")
+        require(paths - {parts[0]}, "cite a covered implementation file")
+        source = check.get("source_ac", assignment["ac"]["id"])
+        require(source in assignment["joppa"]["objects"], "test source AC must be read in the current context")
+        result.append((repo, address, source, sorted(paths)))
+    return result
+
+
+def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
+    """Read execution evidence and verify its cited source before a binding write."""
+    statuses = {}
+    for repo, address, source, paths in binding_checks(plan, assignment):
+        if source not in statuses:
+            statuses[source] = api.call("joppa_tests", {"workspace": config["workspace"], "ac": source})
+        status = statuses[source]
+        require(status.get("address") == source, "test evidence belongs to another criterion")
+        row = next((item for item in status.get("tests", []) if item["address"] == address), None)
+        require(row is not None and row.get("status") == "pass", f"recorded passing result missing for {address}")
+        commit = row.get("commit")
+        require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit),
+                "test execution evidence needs a commit")
+        head = snapshots[repo["id"]]["head"]
+        run(["git", "-C", repo["path"], "merge-base", "--is-ancestor", commit, head])
+        run(["git", "-C", repo["path"], "diff", "--quiet", commit, head, "--", *paths])
+        if prepared:
+            run(["git", "-C", repo["path"], "diff", "--quiet", prepared[repo["id"]]["head"], head, "--", *paths])
+    require(not any(item.get("status") in ("fail", "missing")
+                    for item in assignment["joppa"]["test_status"]["tests"]),
+            "existing criterion tests contain a failure or missing result")
+    require(all(fingerprint(repo) == snapshots[repo["id"]] for repo in assignment["repositories"]),
+            "source changed while checking existing test evidence")
 
 
 def contract(task, plan):
@@ -202,8 +257,19 @@ def operations(plan, assignment):
         refs[task["id"]] = ref
         if existing:
             refs[existing["address"]] = ref
+    if plan["disposition"] == "verify_existing":
+        status = assignment["joppa"]["test_status"]
+        tests = list(dict.fromkeys([*[item["address"] for item in status["tests"]],
+                                   *[check["test"] for check in plan["acceptance_checks"]]]))
+        require(len(tests) <= 200, "criterion supports at most 200 tests")
+        if tests != [item["address"] for item in status["tests"]] or status["tests_draft"]:
+            result.append({"command": {"op": "set_ac_tests", "target": ac, "tests": tests,
+                "revision": status.get("tests_revision") or 0,
+                "reason": "Bind existing tests after review of every criterion assertion."}})
     result.append({"command": {"op": "finish_planning", "ac": ac,
-                               "reason": "Publish reviewed Tasks. The criterion still requires verification."}})
+        "reason": "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
+                  else "Publish reviewed Tasks. The criterion still requires verification."}})
+    require(len(result) <= 100, "one publication supports at most 100 operations")
     return result
 
 
