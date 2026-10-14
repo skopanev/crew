@@ -96,12 +96,17 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     {key: 'status', label: 'STATUS', width: statusWidth, value: row => row.status},
     {key: 'stage', label: 'STAGE / REASON CODE', width: 24, value: row => row.stage || ''},
     {key: 'run', label: 'RUN ID', width: Math.max(6, ...recent.map(row => length(row.runId))), value: row => row.runId},
-    {key: 'time', label: 'TIME', width: 8, value: row => duration(row.start, row.end || Date.now())},
+    {key: 'time', label: 'ELAPSED', width: 8, value: row => duration(row.start, row.end || Date.now())},
   ];
   const tableWidth = () => columns.reduce((total, column) => total + column.width, 2 * (columns.length - 1));
-  for (const key of ['title', 'started', 'run', 'time', 'stage']) {
+  for (const key of ['title', 'started', 'run', 'stage']) {
     if (tableWidth() <= width) break;
     columns = columns.filter(column => column.key !== key);
+  }
+  if (tableWidth() > width) {
+    const ticket = columns.find(column => column.key === 'ticket');
+    ticket.width = Math.max(1, ticket.width - (tableWidth() - width));
+    if (tableWidth() > width) columns = columns.filter(column => column.key !== 'time');
   }
   if (tableWidth() > width) {
     if (width <= statusWidth + 2) columns = columns.filter(column => column.key === 'status');
