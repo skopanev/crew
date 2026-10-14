@@ -15,6 +15,7 @@ vars:
   DELIVERY: target
   DELIVERY_BRANCH: ''
   VERIFY_ONLY: 'false'
+  LANE_SHARED_LOCK_DIR: ''
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
   CBM_PROJECT: ''
@@ -285,6 +286,8 @@ nodes:
   prepare_review:
     env:
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
+      DELIVERY: '{{var:DELIVERY}}'
+      GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       VERIFY_ONLY: '{{var:VERIFY_ONLY}}'
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
@@ -300,7 +303,8 @@ nodes:
     timeout: 3600
     on_signal:
       SNAPSHOT: expert_review
-      CHECKED: git_landing
+      CONFLICT: git_fix
+      LAND_FAILED: notify_failure
       GATE_FAIL: reject_gate
       NOTHING_DONE: notify_failure
       __failed__: notify_failure
@@ -335,6 +339,15 @@ nodes:
           exit 0
         fi
       fi
+      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" != branch ]; then
+        rc=0
+        bash "${TOOLING_ROOT}/lane/bin/rebase.sh" "$target" || rc=$?
+        case "$rc" in
+          0) ;;
+          3) echo '<signal:CONFLICT>Target rebase conflicts; see artifacts/rebase-log.txt.</signal:CONFLICT>'; exit 0 ;;
+          *) echo '<signal:LAND_FAILED>Target refresh or rebase failed; see artifacts/fetch.txt and rebase-log.txt.</signal:LAND_FAILED>'; exit 0 ;;
+        esac
+      fi
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
       git diff --binary "origin/${target}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
@@ -344,10 +357,6 @@ nodes:
       fi
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
-      if [ "${MEDULLA_LAST_NODE:-}" = "git_landing" ] && [ "${MEDULLA_LAST_SIGNAL:-}" = "REBASED" ]; then
-        echo "<signal:CHECKED>Clean rebase checks passed; land the checked candidate.</signal:CHECKED>"
-        exit 0
-      fi
       # Share one Equill contract across all review harnesses and rounds.
       qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
       # Extract content and publish atomically after a successful read.
@@ -497,18 +506,21 @@ nodes:
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
+      gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
+      LANE_SHARED_LOCK_DIR: '{{var:LANE_SHARED_LOCK_DIR}}'
       module_name: '{{var:module_name}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
       project_name: '{{var:project_name}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 600
+    # Bounded target-lock wait (3600s), gate (3600s) and Git operations.
+    timeout: 8100
     on_signal:
       VERIFIED: cleanup
       LAND_FAILED: notify_failure
       CONFLICT: git_fix
-      REBASED: prepare_review
+      GATE_FAIL: reject_gate
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: cleanup
@@ -561,35 +573,21 @@ nodes:
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
       fi
-      land
-      if [ "$rc" -eq 3 ]; then
-        # Ветка ушла вперёд, пока шло ревью: при параллельных полосах это норма.
-        echo "${target} moved while this was in review; rebasing" >&2
-        git fetch origin
-        if git rebase "origin/${target}" > "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt" 2>&1; then
-          cat "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt"
-          echo "<signal:REBASED>Clean rebase completed; rerun checks before landing.</signal:REBASED>"
-          exit 0
-        else
-          cat "$MEDULLA_RUN_DIR/artifacts/rebase-log.txt" >&2
-          git status --short > "$MEDULLA_RUN_DIR/artifacts/rebase-status.txt"
-          conflicts="$(git diff --name-only --diff-filter=U)"
-          git rebase --abort || true
-          if [ -z "$conflicts" ]; then
-            echo "<signal:LAND_FAILED>rebase failed without file conflicts; see artifacts/rebase-log.txt</signal:LAND_FAILED>"
-            exit 0
-          fi
-          tried="$(jq -r 'select(.node=="git_fix")|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
-          if [ "${tried:-0}" -ge 1 ]; then
-            echo "<signal:LAND_FAILED>rebase onto ${target} still conflicts after a fix attempt; a person has to resolve it</signal:LAND_FAILED>"
-          else
-            echo "<signal:CONFLICT>rebase onto ${target} conflicts; full logs: ${MEDULLA_RUN_DIR}/artifacts/rebase-log.txt and rebase-status.txt</signal:CONFLICT>"
-          fi
-          exit 0
-        fi
+      if [ -z "$LANE_SHARED_LOCK_DIR" ] || [ ! -d "$LANE_SHARED_LOCK_DIR" ]; then
+        echo '<signal:LAND_FAILED>Target landing requires a configured sharedLockDir.</signal:LAND_FAILED>'
+        exit 0
       fi
-
-      [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>land.sh exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
+      key="$(printf '%s\n%s\n' "$(git remote get-url origin)" "$target" | sha256sum | cut -d ' ' -f 1)"
+      echo 'landing: waiting for the shared target lock' >&2
+      rc=0
+      flock --exclusive --wait 3600 --conflict-exit-code 75 --close \
+        "$LANE_SHARED_LOCK_DIR/landing-$key.lock" \
+        bash "$TOOLING_ROOT/lane/bin/integrate.sh" "$target" || rc=$?
+      if [ "$rc" -eq 75 ]; then
+        echo '<signal:LAND_FAILED>Target lock wait exceeded 3600 seconds.</signal:LAND_FAILED>'
+      elif [ "$rc" -ne 0 ]; then
+        echo "<signal:LAND_FAILED>Target integration exited $rc.</signal:LAND_FAILED>"
+      fi
   cleanup:
     env:
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
@@ -790,16 +788,16 @@ nodes:
       # Share the repair limit across failed checks and review rounds.
       since="$(jq -r 'select(.node=="git_fix")|.step' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
       since="${since:-0}"
-      done_rounds="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
+      done_rounds="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or ((.node=="prepare_review" or .node=="git_landing") and .signal=="GATE_FAIL")) and (.step // 0) > $s)|1' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | grep -c 1 || true)"
       done_rounds="${done_rounds:-0}"
-      finding="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
+      finding="$(jq -r --argjson s "$since" 'select((.signal=="REJECT" or ((.node=="prepare_review" or .node=="git_landing") and .signal=="GATE_FAIL")) and (.step // 0) > $s)|.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
 
       # Preserve the full repair history for the coder.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       {
         printf 'Round %s of %s\n\nLatest blocker:\n%s\n\nRepair history:\n' \
           "$done_rounds" "$limit" "$finding"
-        jq -r --argjson s "$since" 'select((.signal=="REJECT" or (.node=="prepare_review" and .signal=="GATE_FAIL")) and (.step // 0) > $s)|"- "+.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true
+        jq -r --argjson s "$since" 'select((.signal=="REJECT" or ((.node=="prepare_review" or .node=="git_landing") and .signal=="GATE_FAIL")) and (.step // 0) > $s)|"- "+.message' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true
       } > "$MEDULLA_RUN_DIR/artifacts/rejects.txt" 2>/dev/null || true
 
       # Check the limit before emitting a repair signal.

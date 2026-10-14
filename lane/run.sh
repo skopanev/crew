@@ -91,6 +91,8 @@ fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
+[[ "${LANE_DELIVERY:-target}" = branch || -n "${shared_lock_dir:-}" ]] || {
+  say 'run.sh: target delivery requires --shared-lock-dir'; exit 2; }
 [[ "$ticket" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { say "run.sh: invalid ticket id"; exit 2; }
 [[ -x "$cbm_command" ]] || { say "run.sh: --cbm-mcp-command must name an executable host CBM server"; exit 2; }
 [[ -n "$cbm_cache" && -d "$cbm_cache" ]] || { say "run.sh: --cbm-cache-dir must name the existing shared CBM store"; exit 2; }
@@ -412,6 +414,7 @@ medulla \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
   --var "gate_timeout_seconds=$gate_timeout" \
+  --var "LANE_SHARED_LOCK_DIR=${shared_lock_dir:+/workspace/$(basename "$shared_lock_dir")}" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   ${equill_vars[@]+"${equill_vars[@]}"} \

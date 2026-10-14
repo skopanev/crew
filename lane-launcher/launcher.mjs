@@ -129,6 +129,9 @@ function snapshots(config) {
 }
 
 function preflight(config) {
+  if (config.launchLanes && config.delivery !== 'branch' && !config.sharedLockDir) {
+    throw new Error('Target delivery requires sharedLockDir; no ticket was claimed');
+  }
   if (config.source !== 'joppa') credentials();
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);

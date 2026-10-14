@@ -71,7 +71,11 @@ Verification-only failures stop without implementation.
 Implementation is committed with native hooks before the configured checks and
 review. Checks can therefore produce receipts for the exact commit to be pushed.
 Landing verifies the checked commit and tree, and runs the native push hook.
-A clean rebase runs checks and returns to landing without another expert review.
+Target delivery refreshes and rebases the candidate before the first configured checks.
+Set `sharedLockDir` in the dispatcher config, or pass `--shared-lock-dir` to `run.sh`.
+The final fetch, rebase, checks and push hold one shared lock per origin and target branch.
+A clean rebase runs checks inside that lock without another expert review or workflow loop.
+The lock wait is bounded to 3600 seconds. A writer outside this lock can still make the push fail safely.
 Conflict resolution or a coder repair requires checks and expert review again.
 Force push is unavailable.
 

@@ -36,7 +36,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `cbmCacheDir` | Absolute path to the existing shared CBM store, matching the active CBM daemon. No store is created or copied |
 | `readOnlyRepos` | Additional repositories mounted read-only |
 | `readWriteDirs` | Existing absolute directories mounted writable at `/workspace/<directory-name>`; defaults to `[]` |
-| `sharedLockDir` | One shared lock directory directly under `sourceRoot`, mounted writable at `/workspace/<directory-name>`; defaults to `null` |
+| `sharedLockDir` | Required for target delivery: one existing shared directory directly under `sourceRoot`, mounted writable at `/workspace/<directory-name>` |
 | `gateCommands` | Required check commands run against the lane's candidate |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
