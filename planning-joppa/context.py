@@ -118,7 +118,8 @@ def snapshot_source(object, types, selected_ac=None):
     for key in ("verification", "pending_run", "summary", "status"):
         current["process"].pop(key, None)
     role = types[object["kind"]].get("role")
-    if role == "task" or (role == "ac" and selected_ac and object["address"] != selected_ac):
+    selected = {selected_ac} if isinstance(selected_ac, str) else set(selected_ac or [])
+    if role == "task" or (role == "ac" and selected and object["address"] not in selected):
         # Sibling execution state does not change the authored planning context.
         current.pop("current_revision")
         current.pop("process")
@@ -266,6 +267,154 @@ def load_once(api, config, ac_id):
     return assignment, snapshot, ac
 
 
+def selected_criteria(assignment):
+    return assignment["joppa"].get("criteria", [assignment["ac"]])
+
+
+def criterion_assignment(assignment, address):
+    """Keep the existing one-AC validator without changing the shared planner."""
+    from copy import deepcopy
+    result = deepcopy(assignment)
+    result["ac"] = next(item for item in selected_criteria(assignment) if item["id"] == address)
+    result["joppa"]["tasks"] = [item for item in assignment["joppa"]["tasks"]
+                                 if item["document"]["parent"] == address]
+    detail = assignment["joppa"].get("criterion_schemas", {}).get(address)
+    if detail:
+        result["joppa"].update(detail)
+    return result
+
+
+def load_requirement(api, config, req_id, selected=None):
+    """Plan one Requirement. Keep unfinished external prerequisites outside this run."""
+    workspace = config["workspace"]
+    tree = api.call("joppa_tree", {"workspace": workspace})
+    types = tree["schema"]["types"]
+    if ":" not in req_id:
+        kinds = [kind for kind, definition in types.items() if definition.get("role") == "requirement"]
+        require(len(kinds) == 1, "use a full Requirement address when its schema type is ambiguous")
+        req_id = kinds[0] + ":" + req_id
+    req = object_read(api, workspace, req_id)
+    require(types[req["kind"]].get("role") == "requirement", "input must be a Requirement")
+    detail = api.call("joppa_read", {"workspace": workspace, "req": req_id})["requirement"]
+    revision = detail["revisions"][0]
+    require(revision["number"] == detail["current_revision"], "Requirement read returned another revision")
+    addresses = [item["id"] for item in revision.get("acs", [])]
+    require(addresses, "Requirement has no current criteria")
+    assignment, snapshot, _ = load(api, config, addresses[0])
+    require(assignment["requirement"]["id"] == req_id, "criterion belongs to another Requirement")
+    objects = assignment["joppa"]["objects"]
+    def get(address):
+        if address not in objects:
+            objects[address] = source(object_read(api, workspace, address))
+        return objects[address]
+    tests = {}
+    for offset in range(0, len(addresses), 100):
+        response = api.call("joppa_tests", {"workspace": workspace, "ac": ",".join(addresses[offset:offset + 100])})
+        tests.update({item["address"]: item for item in response.get("items", [response])})
+    require(all(address in tests for address in addresses), "Requirement test status is incomplete")
+    require(all(tests[address].get("status") in ("green", "red", "grey") for address in addresses),
+            "Requirement test status is invalid")
+    tasks = [item for item in objects.values() if types[item["kind"]].get("role") == "task"
+             and item["document"].get("parent") in addresses]
+    candidates = []
+    for address in addresses:
+        ac = get(address)
+        work = [item for item in tasks if item["document"]["parent"] == address
+                and not item["process"].get("done") and not item["process"].get("retired")]
+        if (ac.get("work_ready") is True and ac.get("review_required") is False
+                and (selected is not None or not ac["process"].get("planning_claim")) and tests[address].get("status") != "green"
+                and all(not item["process"].get("assignee") and not item["process"].get("claim")
+                        and isinstance(item["process"].get("blocked"), dict) for item in work)):
+            candidates.append(address)
+    def internal(object, allowed):
+        seen = set()
+        while object:
+            if object["address"] in seen:
+                raise ValueError("parent cycle in Requirement dependencies")
+            seen.add(object["address"])
+            if types[object["kind"]].get("role") == "ac":
+                return object["address"] in allowed
+            parent = object["document"].get("parent")
+            object = get(parent) if parent else None
+        return False
+    def satisfied(object, seen=None):
+        seen = set(seen or [])
+        require(object["address"] not in seen, "dependency cycle in Requirement context")
+        seen.add(object["address"])
+        process = object["process"]
+        role = types[object["kind"]].get("role")
+        if role == "task":
+            return bool(process.get("done")) and not process.get("retired") and not object.get("review_required")
+        if role == "ac":
+            response = tests.get(object["address"]) or api.call("joppa_tests", {"workspace": workspace, "ac": object["address"]})
+            return response.get("status") == "green"
+        children, cursor = [], None
+        while True:
+            response = api.call("joppa_objects", {"workspace": workspace, "parent": object["address"], "limit": 100,
+                                                **({"cursor": cursor} if cursor else {})})
+            children.extend(get(item["address"]) for item in response["items"] if item.get("present", True))
+            cursor = response.get("next_cursor")
+            if not cursor:
+                break
+        return bool(children) and all(satisfied(item, seen) for item in children)
+    def ready(address, allowed, trail=None):
+        trail = set(trail or [])
+        require(address not in trail, "dependency cycle in Requirement context")
+        trail.add(address)
+        object, seen = get(address), set()
+        while object:
+            require(object["address"] not in seen, "parent cycle in Requirement context")
+            seen.add(object["address"])
+            for link in object["document"].get("links", []):
+                if link.get("relation") != "depends_on" or link.get("blocking") is not True:
+                    continue
+                dependency = get(link["target"])
+                if internal(dependency, allowed):
+                    continue
+                revision = link.get("revision")
+                origin = dependency["process"].get("origin_revision")
+                pin = (isinstance(revision, int) and isinstance(origin, int)
+                       and origin <= revision <= dependency["current_revision"]) if types[dependency["kind"]].get("role") == "task" else revision == dependency["current_revision"]
+                if not pin or not satisfied(dependency) or not ready(dependency["address"], allowed, trail):
+                    return False
+            parent = object["document"].get("parent")
+            object = get(parent) if parent else None
+        return True
+    while True:
+        allowed = set(candidates)
+        eligible = [address for address in candidates if ready(address, allowed)]
+        if eligible == candidates:
+            break
+        candidates = eligible
+    if selected is not None:
+        require(set(selected).issubset(candidates), "selected criterion is no longer ready for Requirement planning")
+        candidates = list(selected)
+    require(candidates, "Requirement has no ready criteria without unmet external dependencies")
+    criteria = [{"id": address, "revision": get(address)["current_revision"],
+                 "text": json.dumps(get(address), ensure_ascii=False)} for address in candidates]
+    schemas = {}
+    for address in candidates:
+        task_types = [kind for kind, definition in types.items()
+                      if definition.get("role") == "task" and get(address)["kind"] in definition.get("parents", [])]
+        require(len(task_types) == 1, "criterion needs exactly one direct Task type")
+        kind = task_types[0]
+        require(types[kind].get("question"), "Task type needs a configured question")
+        reference = types[kind].get("references", {}).get("projects")
+        require(reference and reference.get("multiple") is True, "Task type needs a projects reference list")
+        require(all(get(repo["project"])["kind"] == reference["target"] for repo in config["repositories"]),
+                "repository project type differs from Task schema")
+        schemas[address] = {"task_type": kind, "task_schema": types[kind], "test_status": tests[address]}
+    assignment["ac"] = criteria[0]
+    assignment["joppa"].update(scope="requirement", criteria=criteria, criterion_schemas=schemas,
+        tasks=[item for item in tasks if item["document"]["parent"] in candidates])
+    snapshot["objects"] = {address: snapshot_source(item, types, candidates) for address, item in objects.items()}
+    snapshot["tests"] = {address: test_list(tests[address]) for address in candidates}
+    snapshot["criteria"] = candidates
+    require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
+            "workspace changed during Requirement context read")
+    return assignment, snapshot, req
+
+
 def unchanged(old, new):
     require(digest(old) == digest(new), "Joppa context changed during planning; read the criterion again")
 
@@ -283,7 +432,7 @@ def capture_object(target, workspace, object):
         address = text(object.get("address"), "object.address")
         types = snapshot["schema"]["types"]
         require(object.get("kind") in types, "object schema changed during planning")
-        current = snapshot_source(object, types, assignment["ac"]["id"])
+        current = snapshot_source(object, types, [item["id"] for item in selected_criteria(assignment)])
         if address in snapshot["objects"]:
             unchanged(snapshot["objects"][address], current)
             return
@@ -303,7 +452,8 @@ def refresh_reads(api, config, assignment, snapshot, original):
         if address not in snapshot["objects"]:
             object = object_read(api, config["workspace"], address)
             assignment["joppa"]["objects"][address] = source(object)
-            snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"], assignment["ac"]["id"])
+            snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"],
+                                                          [item["id"] for item in selected_criteria(assignment)])
     unchanged(original, snapshot)
 
 
@@ -314,6 +464,7 @@ def read_assignment(api, config, target):
     for address, expected in snapshot["objects"].items():
         if address not in assignment["joppa"]["objects"]:
             object = object_read(api, config["workspace"], address)
-            unchanged(expected, snapshot_source(object, snapshot["schema"]["types"], assignment["ac"]["id"]))
+            unchanged(expected, snapshot_source(object, snapshot["schema"]["types"],
+                                                [item["id"] for item in selected_criteria(assignment)]))
             assignment["joppa"]["objects"][address] = source(object)
     return assignment
