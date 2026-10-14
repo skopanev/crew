@@ -341,6 +341,7 @@ export async function guardTaskClaims(run, persist) {
   require(run.releaseConfirmed !== true, 'PACKAGE_CLAIMS_RELEASED: This run no longer holds its Tasks');
   require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Inspect the saved release request before retrying');
   const reader = await occupancyReader(run.config, run.joppaWorker), claims = claimTasks(run), objects = [];
+  const ownAddresses = new Set(claims.map(claim => claim.address));
   const context = await reader.group(claims[0].address);
   require(context, 'Claimed Task repository is not configured');
   for (const claim of claims) {
@@ -354,7 +355,7 @@ export async function guardTaskClaims(run, persist) {
     const other = await reader.group(task.address);
     if (!other || other.requirement !== context.requirement || other.repository !== context.repository) return;
     const object = await reader.object(task.address), actor = object.process?.assignee;
-    if (actor && actor !== run.joppaWorker.actor && object.process.status === 'in_progress') {
+    if (actor && (actor !== run.joppaWorker.actor || !ownAddresses.has(object.address)) && object.process.status === 'in_progress') {
       conflict ||= {address: object.address, actor, ...other};
     }
   });
