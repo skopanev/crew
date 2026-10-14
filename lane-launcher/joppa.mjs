@@ -229,16 +229,26 @@ export async function finishTask(run, stateFile, result, artifacts) {
       .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
     const preexisting = result.code === 73 && startup?.includes('WORKTREE PREEXISTED:');
     const failureFile = artifacts && path.join(artifacts, 'failure.txt');
-    if (!preexisting && (!failureFile || !fs.existsSync(failureFile))) {
+    const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
+    const container = /^\[medulla\] (medulla-sess-[\w.-]+) never became ready\b/m.exec(output)?.[1];
+    const checkout = run.config.worktreeRoot && run.executionId && path.join(run.config.worktreeRoot, run.executionId);
+    const nativeEmpty = !fs.existsSync(run.runFolder) || fs.readdirSync(run.runFolder).length === 0;
+    const startupFailed = result.status === 'failed' && container && checkout && nativeEmpty && !fs.existsSync(checkout) &&
+      contractDigest(object) === run.claim.digest &&
+      output.includes(`run.sh: removed unused worktree: ${checkout}`) &&
+      !command('docker', ['ps', '-a', '--filter', `name=${container}`, '--format', '{{.Names}}']);
+    if (!preexisting && !startupFailed && (!failureFile || !fs.existsSync(failureFile))) {
       await noteHeldTask(run, stateFile, startup || result.error || 'Lane startup failed');
       result.held = true;
       return;
     }
     result.blocked = true;
-    const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
+    const failure = preexisting ? startup : startupFailed ?
+      'Session container never became ready. Container and unused checkout are absent. No native workflow ran.' :
+      fs.readFileSync(failureFile, 'utf8');
     run.blockRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
       op: 'block_task', id: run.task, revision: object.current_revision,
-      reason: preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts)),
+      reason: preexisting ? 'WORKTREE_PREEXISTED' : startupFailed ? 'STARTUP_FAILED' : reasonCode(completionEvent(run, result, artifacts)),
       evidence: `${failure || 'Lane failed'}\nRun: ${path.basename(path.dirname(stateFile))}`}};
     persist();
     await api(run.config, run.joppaWorker, 'joppa_command', run.blockRequest);
