@@ -100,6 +100,12 @@ Set `worktree_root` to the Dolber worktree root and `lane_runs_folder` to its di
 Cleanup requires a block Run ID and finished failed lane receipts for that Task.
 Active, held and unconfirmed successful runs prevent cleanup. The planner never archives the checkout.
 It deletes no checkout unless the publication updates or retires its blocked Task.
+For `WORKTREE_PREEXISTED` alone, prepare can retry the existing Tasks without agents.
+The AC and all live unfinished Tasks must have current owner-reviewed contracts and valid repository scopes.
+Each block must identify a finished lane with exit code 73. Active, held and successful lanes prevent deletion.
+This path requires deployed `unblock_task`. It preserves Task contracts, IDs and dependencies.
+Cleanup precedes one atomic batch that unblocks the Tasks and finishes planning.
+An uncertain publication retains its receipt and claim for recovery. Other failures use the normal planning graph.
 It skips unchanged documents and pins dependencies from the fresh context.
 Before each claim, it checks previous receipts for this endpoint, workspace and AC.
 Unresolved receipts block a new run. They require explicit recovery.

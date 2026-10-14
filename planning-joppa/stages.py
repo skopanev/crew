@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
@@ -63,7 +64,6 @@ def prepare():
     require(all(name in advertised for name in ("claim_planning", "finish_planning", "release_planning")),
             "Joppa planning commands are not deployed; no claim was attempted")
     assignment, snapshot, ac = context.load(api, config, os.environ["PLANNING_JOPPA_AC"])
-    assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
     publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], ac["address"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", snapshot)
@@ -73,9 +73,67 @@ def prepare():
     claim = publication.held(api, config["workspace"], ac["address"], receipt["position"])
     write(target / "claim.json", {**read(target / "claim.json"), "actor": claim["actor"]})
     # Claiming does not change authored context. Check that no other writer changed it.
-    _, current, _ = context.load(api, config, ac["address"])
+    fresh, current, current_ac = context.load(api, config, ac["address"])
     context.unchanged(snapshot, current)
+    if retry_startup(api, config, target, fresh, current_ac, advertised):
+        return
+    assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
+    write(target / "input.json", assignment)
     shared.prepare_context(prompt_assignment(assignment), mcp_servers=prepare_reader())
+
+
+def retry_startup(api, config, target, assignment, ac, advertised):
+    tasks = [task for task in assignment["joppa"]["tasks"]
+             if not task["document"]["data"].get("archived")
+             and not task["process"].get("done") and not task["process"].get("retired")]
+    if not tasks or not all(isinstance(task["process"].get("blocked"), dict)
+                           and task["process"]["blocked"].get("reason") == "WORKTREE_PREEXISTED" for task in tasks):
+        return False
+    require("unblock_task" in advertised, "Startup retry requires deployed unblock_task; no research was started")
+    require(len(tasks) <= 99, "Startup retry supports at most 99 Tasks in one atomic batch")
+    for item in [ac, *tasks]:
+        require(item.get("work_ready") is True and item.get("review_required") is False
+                and item["process"].get("review_required") is not True,
+                "Startup retry requires current owner-reviewed AC and Task contracts")
+        require(item["document"].get("present") is True and not item["document"]["data"].get("archived"),
+                "Startup retry requires live objects")
+    operations = []
+    for task in tasks:
+        publication.editable(task)
+        data = task["document"]["data"]
+        contract = data.get("contract", "")
+        require(isinstance(contract, str) and contract.strip(), "Startup retry requires an implementation contract")
+        def field(name):
+            values = re.findall(r"^" + name + r":[ \t]*(\S[^\r\n]*)$", contract, re.M)
+            require(len(values) == 1, f"Task contract needs exactly one {name}: line")
+            return values[0].strip()
+        repo = next((repo for repo in config["repositories"] if repo["id"] == field("Repository")), None)
+        require(repo is not None, "Task repository is not configured")
+        module = next((module for module in repo["modules"] if module["name"] == field("Module")), None)
+        require(module is not None, "Task module is not configured")
+        require(any(project in data.get("projects", [])
+                    for project in (repo["project"], repo["project"].split(":", 1)[1])),
+                "Task projects do not include its configured repository")
+        require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
+        operations.append({"command": {"op": "unblock_task", "id": task["address"].split(":", 1)[1],
+            "revision": task["current_revision"], "reason": "Retry startup after removing the retained worktree.",
+            "evidence": task["process"]["blocked"].get("evidence", "")}})
+    operations.append({"command": {"op": "finish_planning", "ac": ac["address"],
+        "reason": "Retry startup with the same owner-reviewed Task contracts."}})
+    claim = read(target / "claim.json")
+    publication.held(api, config["workspace"], ac["address"], claim["result"]["position"], claim["actor"])
+    print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
+        "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")
+    result = publication.mutate(api, target / "publication.json", "joppa_batch", {
+        "workspace": config["workspace"], "operations": operations}, retain_claim=True)
+    results = result.get("results")
+    require(isinstance(results, list) and len(results) == len(operations)
+            and results[-1].get("command", {}).get("op") == "finish_planning",
+            "startup publication response is incomplete; inspect publication.json")
+    write(target / "result.json", {"status": "published", "scope": "startup_retry", "ac": ac["address"],
+        "acceptance_verified": False, "task_count": len(tasks), "publication": result})
+    signal("READY", "Retained worktrees removed. Existing Task contracts reopened without research.")
+    return True
 
 
 def prompt_assignment(assignment):
