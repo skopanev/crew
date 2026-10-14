@@ -4,14 +4,214 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read, laneArgs} from '../runtime.mjs';
+import {claimTask, finishTask, nextTask, executionId} from '../joppa.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+
+async function packageFixture(t, mode = 'success') {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const tokenFile = path.join(root, 'token');
+  fs.writeFileSync(tokenFile, 'fixture-token');
+  const objects = new Map(), calls = [];
+  const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
+    work_ready: true, review_required: false, document: {present: true, parent, data, links: []},
+    process: {status: 'open', assignee: null}});
+  objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
+  for (let index = 1; index <= 2; index++) {
+    objects.set(`ac:a${index}`, make(`ac:a${index}`, 'ac', 'req:r', {title: `AC ${index}`}));
+    objects.set(`task:t${index}`, make(`task:t${index}`, 'task', `ac:a${index}`, {
+      title: `[0${index}] Task ${index}`, purpose: 'implementation',
+      contract: `Goal: scoped change ${index}\nRepository: app\nModule: m${index}\nChecks: exact check ${index}`}));
+  }
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'DELETE') { res.writeHead(204).end(); return; }
+    let body = '';
+    for await (const part of req) body += part;
+    const message = JSON.parse(body);
+    res.setHeader('Content-Type', 'application/json');
+    if (message.method === 'notifications/initialized') { res.writeHead(204).end(); return; }
+    if (message.method === 'initialize') {
+      res.end(JSON.stringify({jsonrpc: '2.0', id: message.id, result: {protocolVersion: '2025-03-26'}})); return;
+    }
+    const {name, arguments: args} = message.params;
+    calls.push({name, args});
+    let value, rejected = false;
+    if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
+    else if (name === 'joppa_objects') value = objects.get(args.address);
+    else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
+      tasks: ['task:t2', 'task:t1'].map(address => ({address, revision: 3, title: objects.get(address).document.data.title}))};
+    else if (name === 'joppa_batch') {
+      if (mode === 'reject') { rejected = true; value = {error: 'operation 2 revision changed'}; }
+      else {
+        value = {results: args.operations.map(({command}, index) => {
+          const object = objects.get(command.id);
+          if (command.op === 'claim_task') object.process = {status: 'in_progress', assignee: 'lane-1'};
+          if (command.op === 'complete_task') object.process = {status: 'done', assignee: null, done: true};
+          if (command.op === 'block_task') object.process = {status: 'open', assignee: null,
+            blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};
+          return {command: {...command, id: command.id.split(':')[1]}, object: null, position: index + 1};
+        })};
+        if (mode === 'incomplete') value.results.pop();
+      }
+    }
+    res.end(JSON.stringify({jsonrpc: '2.0', id: message.id,
+      result: {structuredContent: value, ...(rejected ? {isError: true} : {})}}));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const config = {source: 'joppa', workspace: 'fixture', stateDir: root, joppa: {url: `http://127.0.0.1:${server.address().port}`,
+    project: 'project:app', workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
+    modules: [{name: 'm1', path: 'src/a', paths: ['src/a', 'tests/a']}, {name: 'm2', path: 'src/b', paths: ['src/b', 'tests/b']}]}]};
+  const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',
+    task: 'task:t1', taskRevision: 3, tasks: [1, 2].map(index => ({address: `task:t${index}`, revision: 3})),
+    executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
+  const stateFile = path.join(root, 'launch.json');
+  fs.writeFileSync(path.join(root, 'output.log'), '');
+  return {root, run, stateFile, calls, objects, persist: () => save(stateFile, run)};
+}
+
+test('Joppa package selects all executable repository Tasks in plan order', async t => {
+  const f = await packageFixture(t);
+  const selected = await nextTask(f.run.config);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1', 'task:t2']);
+  assert.equal(selected.candidate.requirement, 'req:r');
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('Joppa package claims atomically and preserves each Task contract and scope', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const mutations = f.calls.filter(call => call.name === 'joppa_batch');
+  assert.equal(mutations.length, 1);
+  assert.deepEqual(mutations[0].args.operations.map(item => item.command.id), ['task:t1', 'task:t2']);
+  assert.deepEqual(f.run.claim.ticket.modulePaths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
+  assert.deepEqual(f.run.claim.ticket.tasks[0].modulePaths, ['src/a', 'tests/a']);
+  assert.deepEqual(f.run.claim.ticket.tasks[1].modulePaths, ['src/b', 'tests/b']);
+  assert.match(f.run.claim.ticket.body, /Task 1: task:t1/);
+  assert.equal(f.run.claim.ticket.tasks[0].parentContext.address, 'ac:a1');
+  assert.equal(f.run.claim.ticket.tasks[1].parentContext.address, 'ac:a2');
+  assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
+});
+
+for (const mode of ['reject', 'incomplete']) test(`Joppa package ${mode} claim cannot start a lane`, async t => {
+  const f = await packageFixture(t, mode);
+  await assert.rejects(claimTask(f.run, f.persist), mode === 'reject' ? /operation 2/ : /incomplete/);
+  assert.equal(f.run.claim, undefined);
+  assert.equal(Boolean(f.run.claimRejected), mode === 'reject');
+  assert.equal(read(f.stateFile).claimRequest.operations.length, 2);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+  assert.equal(f.calls.some(call => call.name === 'joppa_command'), false);
+});
+
+for (const mode of ['reject', 'incomplete']) test(`Joppa package worker stops before startup after ${mode} claim`, async t => {
+  const f = await packageFixture(t, mode);
+  const bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
+  fs.mkdirSync(bins);
+  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
+  f.persist();
+  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
+  assert.equal(result.code, 2, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const saved = read(f.stateFile);
+  assert.equal(saved.claim, undefined);
+  assert.match(saved.result.error, mode === 'reject' ? /CLAIM_REFUSED/ : /CLAIM_UNCERTAIN/);
+  assert.equal(saved.claimRequest.operations.length, 2);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+});
+
+test('Joppa package blocks all held Tasks with one atomic outcome', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed');
+  const result = {code: 1, status: 'failed'};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.blockConfirmed, true);
+  assert.deepEqual(result.tasks.map(task => [task.address, task.status]), [['task:t1', 'blocked'], ['task:t2', 'blocked']]);
+  const batch = f.calls.filter(call => call.name === 'joppa_batch').at(-1);
+  assert.deepEqual(batch.args.operations.map(item => item.command.op), ['block_task', 'block_task']);
+});
+
+test('Joppa package refuses more than 100 Tasks before API calls', async t => {
+  const f = await packageFixture(t);
+  f.run.tasks = Array.from({length: 101}, (_, index) => ({address: `task:t${index}`, revision: 3}));
+  await assert.rejects(claimTask(f.run, f.persist), /100-operation/);
+  assert.equal(f.calls.length, 0);
+});
+
+function packageLanding(f) {
+  const remote = path.join(f.root, 'remote.git');
+  const git = (args, input) => {
+    const result = spawnSync('git', args, {encoding: 'utf8', input, env: {...process.env,
+      GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com',
+      GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com'}});
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git(['init', '--bare', remote]);
+  const tree = git(['-C', remote, 'mktree'], '');
+  const sha = git(['-C', remote, 'commit-tree', tree, '-m', 'Checked fixture']);
+  git(['-C', remote, 'update-ref', 'refs/heads/checked-package', sha]);
+  git(['-C', remote, 'config', 'remote.origin.url', remote]);
+  f.run.repository.path = remote;
+  f.run.repository.targetBranch = 'main';
+  f.run.deliveryBranch = 'checked-package';
+  f.run.config.delivery = 'branch';
+  f.run.config.sshDir = f.root;
+  const artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(artifacts, 'landing.txt'), `Landed SHA: ${sha}\nTarget: checked-package\n`);
+  return artifacts;
+}
+
+test('Joppa package completes every Task atomically with the same checked landing', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.completed, true);
+  assert.deepEqual(result.tasks.map(task => [task.address, task.status]), [['task:t1', 'done'], ['task:t2', 'done']]);
+  const operations = f.run.completionRequest.operations;
+  const landing = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8').trim();
+  assert.equal(operations.length, 2);
+  operations.forEach(({command}, index) => {
+    assert.equal(command.id, `task:t${index + 1}`);
+    assert.match(command.evidence, new RegExp(`Task: task:t${index + 1}`));
+    assert.equal(command.evidence.startsWith(landing), true);
+  });
+});
+
+for (const address of ['ac:a2', 'req:r']) test(`Joppa package refuses completion after ${address} context changes`, async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f);
+  f.objects.get(address).document.data.title += ' changed';
+  await assert.rejects(finishTask(f.run, f.stateFile, {code: 0, status: 'exited'}, artifacts), /context changed/);
+  assert.equal(f.run.completionRequest, undefined);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+  for (const task of f.run.tasks) assert.equal(f.objects.get(task.address).process.status, 'in_progress');
+});
+
+test('Joppa package preserves a single Task ticket and execution identifier', async t => {
+  const f = await packageFixture(t);
+  f.run.tasks = [f.run.tasks[0]];
+  f.run.executionId = executionId(f.run.task);
+  await claimTask(f.run, f.persist);
+  assert.equal(f.run.claim.id, executionId('task:t1'));
+  assert.equal(f.run.claim.ticket.id, executionId('task:t1'));
+  assert.equal(f.run.claim.ticket.body, f.objects.get('task:t1').document.data.contract);
+  assert.deepEqual(f.run.claim.ticket.modulePaths, ['src/a', 'tests/a']);
+  assert.equal(f.run.claim.digest, f.run.claim.tasks[0].digest);
+});
+
 test('runtime settings come from the selected config, without a broker profile', async t => {
   const f = await setup(t);
   save(f.configFile, {...f.config, image: 'crew-fixture:tests', dockerEngine: true});
