@@ -181,7 +181,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
   require(object.address === run.task, 'Joppa returned a different Task for completion');
   require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress', 'Task holder changed; outcome not written');
   if (result.code === 0) {
-    require(object.review_required === false && object.process?.review_required !== true,
+    require(object.work_ready === true && object.review_required === false && object.process?.review_required !== true,
       'TASK_REVIEW_REQUIRED: Task context needs review; landed work remains held');
     require(contractDigest(object) === run.claim.digest, 'Task contract changed during execution; completion refused');
     const report = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(file => fs.existsSync(file));
@@ -206,10 +206,18 @@ export async function finishTask(run, stateFile, result, artifacts) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
         {workspace: run.workspace, address: run.claim.parent.address});
       require(parent.address === run.claim.parent.address && parent.document?.present === true && parent.historical === false &&
-        contractDigest(parent) === run.claim.parent.digest, 'Task parent context changed during execution; completion refused');
+        Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 && parent.work_ready === true &&
+        parent.review_required === false && parent.process?.review_required !== true,
+        'Task parent context needs review; completion refused');
     }
+    const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: run.task});
+    require(current.address === run.task && current.process?.assignee === run.joppaWorker.actor && current.process.status === 'in_progress',
+      'Task holder changed before completion; outcome not written');
+    require(current.work_ready === true && current.review_required === false && current.process?.review_required !== true,
+      'TASK_REVIEW_REQUIRED: Task context needs review; landed work remains held');
+    require(contractDigest(current) === run.claim.digest, 'Task contract changed before completion; completion refused');
     run.completionRequest ||= {workspace: run.workspace, request_id: randomUUID(), command: {
-      op: 'complete_task', id: run.task, revision: object.current_revision,
+      op: 'complete_task', id: run.task, revision: current.current_revision,
       evidence: `${evidence.trim()}\nRequired gates and independent review passed. Run: ${path.basename(path.dirname(stateFile))}${findings ? '\nNonblocking findings:\n' + findings : ''}`}};
     persist();
     await api(run.config, run.joppaWorker, 'joppa_command', run.completionRequest);
