@@ -35,6 +35,11 @@ def configuration(path):
         repo["path"] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
     require(len({r["id"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate repository ID")
     require(len({r["project"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate project mapping")
+    if "ac_ids" in config:
+        require(isinstance(config["ac_ids"], list) and bool(config["ac_ids"])
+                and all(isinstance(address, str) and ":" in address for address in config["ac_ids"])
+                and len(set(config["ac_ids"])) == len(config["ac_ids"]),
+                "ac_ids must contain distinct full criterion addresses")
     if config.get("worktree_root"):
         require(all(not Path(repo["path"]).is_relative_to(Path(config["worktree_root"]))
                     for repo in config["repositories"]), "worktree_root cannot contain a canonical repository")
@@ -323,22 +328,14 @@ def load_requirement(api, config, req_id, selected=None):
         objects[address] = source(ac)
         work = [item for item in tasks if item["document"]["parent"] == address
                 and not item["process"].get("done") and not item["process"].get("retired")]
-        if (ac.get("work_ready") is True and ac.get("review_required") is False
+        if ((not config.get("ac_ids") or address in config["ac_ids"])
+                and ac.get("work_ready") is True and ac.get("review_required") is False
+                and ac["process"].get("assessment", {}).get("state") == "ready"
+                and not ac["process"].get("readiness_blocker")
                 and (selected is not None or not ac["process"].get("planning_claim")) and tests[address].get("status") != "green"
                 and all(not item["process"].get("assignee") and not item["process"].get("claim")
                         and isinstance(item["process"].get("blocked"), dict) for item in work)):
             candidates.append(address)
-    def internal(object, allowed):
-        seen = set()
-        while object:
-            if object["address"] in seen:
-                raise ValueError("parent cycle in Requirement dependencies")
-            seen.add(object["address"])
-            if types[object["kind"]].get("role") == "ac":
-                return object["address"] in allowed
-            parent = object["document"].get("parent")
-            object = get(parent) if parent else None
-        return False
     def satisfied(object, seen=None):
         seen = set(seen or [])
         require(object["address"] not in seen, "dependency cycle in Requirement context")
@@ -359,7 +356,7 @@ def load_requirement(api, config, req_id, selected=None):
             if not cursor:
                 break
         return bool(children) and all(satisfied(item, seen) for item in children)
-    def ready(address, allowed, trail=None):
+    def ready(address, trail=None):
         trail = set(trail or [])
         require(address not in trail, "dependency cycle in Requirement context")
         trail.add(address)
@@ -371,23 +368,16 @@ def load_requirement(api, config, req_id, selected=None):
                 if link.get("relation") != "depends_on" or link.get("blocking") is not True:
                     continue
                 dependency = get(link["target"])
-                if internal(dependency, allowed):
-                    continue
                 revision = link.get("revision")
                 origin = dependency["process"].get("origin_revision")
                 pin = (isinstance(revision, int) and isinstance(origin, int)
                        and origin <= revision <= dependency["current_revision"]) if types[dependency["kind"]].get("role") == "task" else revision == dependency["current_revision"]
-                if not pin or not satisfied(dependency) or not ready(dependency["address"], allowed, trail):
+                if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")
             object = get(parent) if parent else None
         return True
-    while True:
-        allowed = set(candidates)
-        eligible = [address for address in candidates if ready(address, allowed)]
-        if eligible == candidates:
-            break
-        candidates = eligible
+    candidates = [address for address in candidates if ready(address)]
     if selected is not None:
         require(set(selected).issubset(candidates), "selected criterion is no longer ready for Requirement planning")
         candidates = list(selected)
@@ -415,6 +405,22 @@ def load_requirement(api, config, req_id, selected=None):
     require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
             "workspace changed during Requirement context read")
     return assignment, snapshot, req
+
+
+def planning_idle(api, config, assignment, expected=None):
+    """Do not split one Requirement between concurrent planning runs."""
+    expected = expected or {}
+    revision = json.loads(assignment["decisions"][0])
+    addresses = {item["id"] for item in revision.get("acs", [])} | {assignment["ac"]["id"]}
+    require(set(expected).issubset(addresses), "planning receipt contains another Requirement criterion")
+    for address in addresses:
+        object = object_read(api, config["workspace"], address)
+        claim = object.get("process", {}).get("planning_claim")
+        if address in expected:
+            require(isinstance(claim, dict) and all(claim.get(key) == expected[address].get(key) for key in ("actor", "position")),
+                    f"this run no longer holds planning claim {address}")
+        else:
+            require(not claim, f"Requirement already has an active planning run on {address}")
 
 
 def unchanged(old, new):

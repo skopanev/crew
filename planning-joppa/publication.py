@@ -2,6 +2,7 @@
 from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
+import json
 import re
 
 from common import digest, fingerprint, inside, read, require, run, strings, text, write
@@ -100,6 +101,36 @@ def criterion_plan(plan, assignment, address):
     return result
 
 
+def package_counters(plan, assignment):
+    """Keep approved sibling Tasks. New indices follow their retained prefixes."""
+    if assignment["joppa"].get("scope") != "requirement":
+        return {}
+    criteria = {item["id"] for item in context.selected_criteria(assignment)}
+    for value in assignment.get("decisions", []):
+        criteria.update(item["id"] for item in json.loads(value).get("acs", []))
+    targets = {task["target"]: task for task in plan["tasks"] if task.get("target")}
+    counters = {}
+    for existing in assignment["joppa"]["objects"].values():
+        if (existing["address"] in targets or existing["document"].get("parent") not in criteria
+                or existing["process"].get("done") or existing["process"].get("retired")):
+            continue
+        data = existing["document"]["data"]
+        if data.get("purpose") != "implementation":
+            continue
+        repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", data.get("contract", ""), re.M)
+        if len(repository) != 1:
+            continue
+        repository = repository[0]
+        match = re.match(r"^\[(\d+)\]\s", data.get("title", ""))
+        counters[repository] = max(counters.get(repository, 0), int(match[1]) if match else 0)
+        for link in existing["document"].get("links", []):
+            target = targets.get(link.get("target"))
+            require(not (link.get("relation") == "depends_on" and link.get("blocking") is True
+                         and target and target["repository"] == repository),
+                    f"retained Task {existing['address']} requires planned Task {link.get('target')}; their approved order cannot be preserved")
+    return counters
+
+
 def validate(plan, assignment):
     if assignment["joppa"].get("scope") != "requirement":
         return validate_one(plan, assignment)
@@ -109,6 +140,18 @@ def validate(plan, assignment):
     require(all(check.get("ac") in selected for check in plan.get("acceptance_checks", [])),
             "every acceptance check needs its selected criterion address")
     included = {task.get("target") for task in plan.get("tasks", []) if task.get("action") in ("update", "retire")}
+    retired = {value for task in plan.get("tasks", []) if task.get("action") == "retire"
+               for value in (task["id"], task.get("target"))}
+    updates = {task.get("target") for task in plan.get("tasks", []) if task.get("action") == "update"}
+    for task in plan.get("tasks", []):
+        require(not set(task.get("depends_on", [])).intersection(retired), "Task cannot depend on a Task retired by this plan")
+    for existing in assignment["joppa"]["objects"].values():
+        if existing["address"] in retired | updates or existing["process"].get("done") or existing["process"].get("retired"):
+            continue
+        dependencies = {link["target"] for link in existing["document"].get("links", [])
+                        if link.get("relation") == "depends_on" and link.get("blocking") is True}
+        require(not dependencies.intersection(retired),
+                f"retirement requires an update that removes the dependency from {existing['address']}")
     for existing in assignment["joppa"]["tasks"]:
         if existing["document"].get("parent") not in selected or existing["process"].get("done") or existing["process"].get("retired"):
             continue
@@ -118,7 +161,7 @@ def validate(plan, assignment):
     ordered = ordered_tasks(plan.get("tasks", []))
     local = {task["id"]: task for task in ordered}
     aliases = {task["target"]: task["id"] for task in ordered if task.get("target")}
-    counters = {}
+    counters = package_counters(plan, assignment)
     for task in ordered:
         if task.get("action") != "retire":
             repository = task.get("repository")
@@ -268,7 +311,7 @@ def operations(plan, assignment):
     result, refs = [], {}
     retired = {task["target"] for task in plan["tasks"] if task["action"] == "retire"}
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
-    changed, counters = set(), {}
+    changed, counters = set(), package_counters(plan, assignment)
     local = {task["id"]: task for task in plan["tasks"]}
     def same_package(task, dependency):
         if not grouped:
@@ -278,11 +321,7 @@ def operations(plan, assignment):
             other = next((value for value in local.values() if value.get("target") == dependency), None)
         if other:
             return other["repository"] == task["repository"]
-        existing = objects.get(dependency)
-        if not existing or existing["document"].get("parent") not in {item["id"] for item in context.selected_criteria(assignment)}:
-            return False
-        repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", existing["document"]["data"].get("contract", ""), re.M)
-        return repository == [task["repository"]]
+        return False
     for number, task in enumerate(ordered_tasks(plan["tasks"]), 1):
         ac = task["ac"]
         scope = context.criterion_assignment(assignment, ac)

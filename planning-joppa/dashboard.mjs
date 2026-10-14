@@ -61,6 +61,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const publication = json(path.join(artifacts, 'publication.json'));
       const recovery = result?.needs_recovery || !result && (
         [claim, publication, released].some(receipt => ['pending', 'uncertain'].includes(receipt?.status)) ||
+        released?.skipped_claims?.some(item => item.unknown === true) ||
         claim?.status === 'confirmed' && released?.status !== 'confirmed');
       const status = active ? 'RUNNING' : ['published', 'unchanged'].includes(result?.status) ? 'READY' :
         recovery ? 'HELD' : result?.reason?.startsWith('Required owner decision:') ? 'HUMAN' :

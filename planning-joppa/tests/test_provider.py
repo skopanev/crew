@@ -67,6 +67,92 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_direct_ac_filter_refuses_before_claim(self):
+        spec = importlib.util.spec_from_file_location("joppa_stage_filter", ROOT / "planning-joppa/stages.py")
+        stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stage)
+        data = assignment()
+        api = Fake(result={"commands": ["claim_planning", "finish_planning", "release_planning"]})
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"PLANNING_JOPPA_AC": "criterion:a"}, clear=False), \
+             patch.object(stage, "settings", return_value={"workspace": "example", "ac_ids": ["criterion:b"]}), \
+             patch.object(stage, "reader_servers"), patch.object(stage.context, "client", return_value=api), \
+             patch.object(stage.context, "load", return_value=(data, {}, data["joppa"]["objects"]["criterion:a"])), \
+             patch.object(stage.shared, "artifacts", return_value=Path(directory)):
+            with self.assertRaisesRegex(ValueError, "outside config.ac_ids"):
+                stage.prepare()
+        self.assertEqual([name for name, _ in api.calls], ["joppa_help"])
+
+    def test_requirement_claim_guard_checks_siblings_and_exact_own_receipt(self):
+        data = assignment()
+        data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
+        own = {"actor": "planner", "position": 22}
+        objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b")}
+        objects["criterion:a"]["process"]["planning_claim"] = {**own, "future_metadata": "allowed"}
+        objects["criterion:b"]["process"]["planning_claim"] = {"actor": "other", "position": 23}
+        class Server:
+            def call(self, name, args):
+                return deepcopy(objects[args["address"]])
+        with self.assertRaisesRegex(ValueError, "active planning run"):
+            context.planning_idle(Server(), {"workspace": "example"}, data)
+        with self.assertRaisesRegex(ValueError, "active planning run on criterion:b"):
+            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+        objects["criterion:b"]["process"].pop("planning_claim")
+        context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+        with self.assertRaisesRegex(ValueError, "no longer holds"):
+            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": {**own, "position": 24}})
+
+    def test_retained_sibling_order_and_dependencies_remain_approved(self):
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}],
+            criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_status")}})
+        data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
+        retained = context.source(item("work:retained", "criterion:b", {"title": "[07] Approved work", "owner": "owner",
+            "purpose": "implementation", "contract": "Repository: service\nModule: core"}, {"status": "open"}))
+        data["joppa"]["objects"][retained["address"]] = retained
+        value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
+        value["acceptance_checks"][0]["ac"] = "criterion:a"
+        value["tasks"][0]["depends_on"] = ["work:retained"]
+        original = deepcopy(retained)
+        command = publication.operations(value, data)[0]["command"]
+        self.assertTrue(command["data"]["title"].startswith("[08] "))
+        self.assertEqual(command["links"][0]["target"], "work:retained")
+        self.assertEqual(retained, original)
+        retained["document"]["data"]["title"] = "Legacy approved work"
+        self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
+        old = data["joppa"]["objects"]["work:old"]
+        old["process"]["blocked"] = {"reason": "Failed"}
+        data["joppa"]["tasks"] = [old]
+        value["tasks"][0].update(action="update", target="work:old", revision=3, depends_on=[])
+        retained["document"]["links"] = [{"target": "work:old", "revision": 3, "relation": "depends_on", "blocking": True}]
+        with self.assertRaisesRegex(ValueError, "retained Task work:retained requires planned Task work:old"):
+            publication.operations(value, data)
+
+    def test_cross_criterion_retirement_cannot_become_a_dependency(self):
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
+            criterion_schemas={address: {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+        data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
+        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed"}
+        consumer = deepcopy(data["joppa"]["tasks"][0])
+        consumer.update(address="work:consumer")
+        consumer["document"]["parent"] = "criterion:b"
+        data["joppa"]["tasks"].append(consumer)
+        data["joppa"]["objects"][consumer["address"]] = consumer
+        data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
+        value["criteria"] = [{"ac": address, "disposition": "implement"} for address in ("criterion:a", "criterion:b")]
+        value["acceptance_checks"] = [{**deepcopy(value["acceptance_checks"][0]), "ac": address}
+                                      for address in ("criterion:a", "criterion:b")]
+        value["tasks"][0].update(action="retire", target="work:old", revision=3)
+        update = deepcopy(value["tasks"][0])
+        update.update(id="consumer", action="update", ac="criterion:b", target="work:consumer", repository="client")
+        value["tasks"].append(update)
+        for dependency in ("first", "work:old"):
+            update["depends_on"] = [dependency]
+            with self.assertRaisesRegex(ValueError, "retired by this plan"):
+                publication.operations(value, data)
+
     def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -304,6 +390,8 @@ class ProviderTests(unittest.TestCase):
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
+        for object in objects.values():
+            object["process"]["assessment"] = {"state": "ready"}
         objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
                         "criterion:outside": item("criterion:outside", "rule:outside"),
                         "rule:outside": item("rule:outside")})
@@ -329,13 +417,22 @@ class ProviderTests(unittest.TestCase):
         config = {"workspace": "example", "repositories": assignment()["repositories"]}
         data, snapshot, requirement = context.load_requirement(Server(), config, "r")
         self.assertEqual(requirement["address"], "rule:r")
-        self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
-        self.assertEqual(snapshot["criteria"], ["criterion:a", "criterion:c"])
+        self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a"])
+        self.assertEqual(snapshot["criteria"], ["criterion:a"])
+        config["ac_ids"] = ["criterion:c"]
+        with self.assertRaisesRegex(ValueError, "no ready criteria"):
+            context.load_requirement(Server(), config, "r")
+        original_links = objects["criterion:c"]["document"]["links"]
+        objects["criterion:c"]["document"]["links"] = []
+        filtered, _, _ = context.load_requirement(Server(), config, "r")
+        self.assertEqual([entry["id"] for entry in filtered["joppa"]["criteria"]], ["criterion:c"])
+        config.pop("ac_ids")
+        objects["criterion:c"]["document"]["links"] = original_links
         objects["criterion:a"]["process"]["planning_claim"] = {"actor": "planner", "position": 21}
         with self.assertRaisesRegex(ValueError, "no ready criteria"):
             context.load_requirement(Server(), config, "r")
-        resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a", "criterion:c"])
-        self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
+        resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a"])
+        self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a"])
 
     def test_retirement_uses_the_existing_atomic_publication(self):
         data, value = assignment(), plan()
@@ -752,6 +849,7 @@ class ProviderTests(unittest.TestCase):
                      patch.object(stage.context, "client", return_value=api), \
                      patch.object(stage.context, "read_assignment", return_value=data), \
                      patch.object(stage.context, "load", return_value=(data, {}, None)), \
+                     patch.object(stage.context, "planning_idle"), \
                      patch.object(stage.context, "refresh_reads"), patch.object(stage, "signal"):
                     if active_blocked:
                         with self.assertRaisesRegex(Rejected, refusal):
