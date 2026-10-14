@@ -244,6 +244,7 @@ nodes:
     timeout: 7200   # writing the code
     env:
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
+      BASH_MAX_TIMEOUT_MS: '900000'
       EQUILL_ROLE: crew-lane-coder
       EQUILL_RULES: none
       EQUILL_PROMPT_PROFILE: agent.memory.hybrid
