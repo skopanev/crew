@@ -27,7 +27,7 @@ sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json --ac-id ac:crit
 
 The first command selects ready ACs and plans one at a time. The second starts one AC.
 Use `--monitor` to show existing runs without starting work.
-The table shows the start time, Requirement and AC titles, status, stage or reason code, run ID and duration.
+The table shows the start time, AC address and text, status, stage or reason code, run ID and elapsed time.
 Active runs appear first. The screen updates every five seconds.
 Use `--once` to select at most one AC and exit after it finishes.
 Use `--monitor --once` for one display snapshot.

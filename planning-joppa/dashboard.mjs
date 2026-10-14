@@ -46,7 +46,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         if (data?.title) return data.title;
         try { return JSON.parse(item.text).data?.title || item.id; } catch { return item.id; }
       };
-      const label = input ? `${title(input.requirement)} : ${title(input.ac)}` : ac;
+      const label = input ? title(input.ac) : ac;
       try { pid = Number(fs.readFileSync(path.join(folder, '.lock'), 'utf8').trim()); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const journal = tail(path.join(folder, 'journal.jsonl')).split('\n').flatMap(line => {
         try { return [JSON.parse(line)]; } catch { return []; }
@@ -82,8 +82,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const end = active ? undefined : current?.folder === folder && current.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, requirementTitle: input ? title(input.requirement) : '',
-        acTitle: input ? title(input.ac) : '', ac,
+      return [{ticket: label, acTitle: input ? title(input.ac) : '', ac,
         runId: match?.[5] || entry.name, start, end, active, status, stage}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
@@ -93,11 +92,7 @@ export function titleCell(row, width) {
     const chars = Array.from(text.replace(/[\x00-\x1f\x7f]/g, ' '));
     return chars.length > size ? chars.slice(0, size - 1).join('') + '…' : chars.join('');
   };
-  if (!row.requirementTitle || !row.acTitle) return clip(row.ticket, width);
-  const budget = width - 3;
-  const requirementWidth = Math.min(Array.from(row.requirementTitle).length,
-    Math.max(Math.floor(budget / 2), budget - Array.from(row.acTitle).length));
-  return `${clip(row.requirementTitle, requirementWidth)} : ${clip(row.acTitle, budget - requirementWidth)}`;
+  return clip(row.acTitle || row.ticket, width);
 }
 
 function criterionIds(config) {
@@ -222,7 +217,7 @@ export async function main(argv) {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
     const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
-      paint, 6, {identityLabel: 'AC', titleLabel: 'REQ : AC'});
+      paint, 6, {identityLabel: 'AC', titleLabel: 'AC TEXT'});
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
