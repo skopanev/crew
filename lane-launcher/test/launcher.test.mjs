@@ -162,6 +162,31 @@ test('Joppa package cleanup removes its recorded shared checkout once', async t 
   assert.equal(fs.existsSync(blocked.folder), false);
 });
 
+for (const state of ['confirmed', 'overlapping', 'unconfirmed', 'newer']) {
+  test(`Joppa package cleanup handles ${state} success before another failed package`, async t => {
+    const f = await packageFixture(t), blocked = blockedPackage(f);
+    blocked.run.createdAt = '2026-10-14T12:00:00.000Z';
+    save(path.join(blocked.runs, blocked.runId, 'launch.json'), blocked.run);
+    const folder = path.join(blocked.runs, '33333333-3333-4333-8333-333333333333');
+    fs.mkdirSync(folder);
+    const tasks = state === 'overlapping' ? blocked.run.tasks : [{address: 'task:old1'}, {address: 'task:old2'}];
+    const earlier = {...blocked.run, task: tasks[0].address, tasks, claim: {tasks},
+      createdAt: '2026-10-14T10:00:00.000Z', result: {code: 0, completed: state !== 'unconfirmed',
+        finishedAt: state === 'newer' ? '2026-10-14T13:00:00.000Z' : '2026-10-14T11:00:00.000Z'}};
+    save(path.join(folder, 'launch.json'), earlier);
+    if (state === 'confirmed') {
+      const prepared = cleanupBlockedTasks(blocked.input, {dryRun: true});
+      assert.equal(prepared.length, 1);
+      assert.equal(prepared[0].folder, blocked.folder);
+    } else {
+      const error = state === 'overlapping' ? /successful receipt overlaps/ :
+        state === 'newer' ? /not historical/ : /unconfirmed successful/;
+      assert.throws(() => cleanupBlockedTasks(blocked.input, {dryRun: true}), error);
+    }
+    assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+  });
+}
+
 test('Joppa package cleanup refuses an incomplete AC scope before deleting any checkout', async t => {
   const f = await packageFixture(t), blocked = blockedPackage(f);
   blocked.input.tasks = [blocked.input.tasks[1]];

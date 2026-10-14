@@ -79,14 +79,23 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     const matches = [];
     for (const [name, run] of receipts) {
       const samePackage = packageKey(receipt) && packageKey(run) === packageKey(receipt);
-      if (run.executionId !== execution && !samePackage && !members(run).some(address => group.includes(address))) continue;
-      require((samePackage || members(run).some(address => group.includes(address))) && run.workspace === config.workspace &&
+      const overlaps = members(run).some(address => group.includes(address));
+      if (run.executionId !== execution && !samePackage && !overlaps) continue;
+      require((samePackage || overlaps) && run.workspace === config.workspace &&
         run.config?.joppa?.url === config.url && typeof run.config.worktreeRoot === 'string' &&
         path.resolve(run.config.worktreeRoot) === root,
       'Lane receipt belongs to another package or configuration');
-      require(run.result && Number.isInteger(run.result.code) && run.result.finishedAt &&
-        !runHoldsTasks(run) && !run.result.completed && run.result.code !== 0,
+      require(run.result && Number.isInteger(run.result.code) && run.result.finishedAt && !runHoldsTasks(run),
       'Active, held or unconfirmed successful lane prevents worktree cleanup');
+      if (run.result.completed || run.result.code === 0) {
+        require(run.result.completed === true && run.result.code === 0,
+          'Unconfirmed successful lane prevents worktree cleanup');
+        require(!overlaps, 'A successful receipt overlaps the blocked Tasks; inspect Task history before cleanup');
+        const finished = Date.parse(run.result.finishedAt), started = Date.parse(receipt.createdAt);
+        require(Number.isFinite(finished) && Number.isFinite(started) && finished <= started,
+          'Successful package ownership is not historical; inspect lane receipts before cleanup');
+        continue;
+      }
       matches.push(name);
       if (name === runId && retry) require(run.result.code === 73, 'Startup retry requires the worktree failure exit code');
     }
