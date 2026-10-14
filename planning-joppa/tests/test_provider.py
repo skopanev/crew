@@ -69,7 +69,7 @@ class Fake:
 class ProviderTests(unittest.TestCase):
     def test_requirement_packages_keep_order_without_internal_dependency_links(self):
         data, value = assignment(), plan()
-        data["joppa"].update(scope="requirement", criteria=[], criterion_schemas={})
+        data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})
         data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
         value["criteria"], value["tasks"], value["acceptance_checks"] = [], [], []
         for index, address in enumerate(("criterion:a", "criterion:b", "criterion:c")):
@@ -149,6 +149,61 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(uncertain["status"], "uncertain")
             self.assertEqual(uncertain["released"], [])
             self.assertEqual(uncertain["requested_releases"], ["criterion:a", "criterion:b"])
+            (target / "release.json").unlink()
+            class Unreadable(Server):
+                def call(self, name, args):
+                    if name == "joppa_objects" and args["address"] == "criterion:a":
+                        raise MCPError("claim read failed")
+                    return super().call(name, args)
+            api = Unreadable()
+            self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
+            self.assertEqual(read(target / "release.json")["released"], ["criterion:b"])
+            self.assertTrue(read(target / "release.json")["skipped_claims"][0]["unknown"])
+            self.assertEqual([entry["command"]["ac"] for entry in api.calls[-1][1]["operations"]], ["criterion:b"])
+            previous_calls = len(api.calls)
+            self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
+            self.assertEqual(len(api.calls), previous_calls)
+
+    def test_requirement_explicitly_orders_every_unfinished_selected_task(self):
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],
+            criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_status")}})
+        value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
+        value["acceptance_checks"][0]["ac"] = "criterion:a"
+        old = data["joppa"]["tasks"][0]
+        old["process"]["blocked"] = {"reason": "Failed"}
+        with self.assertRaisesRegex(ValueError, "explicitly update or retire unfinished Task work:old"):
+            publication.operations(value, data)
+        provider = deepcopy(old)
+        provider["address"] = "work:provider"
+        provider["document"]["data"]["contract"] = "Repository: service\nModule: core"
+        data["joppa"]["tasks"].append(provider)
+        data["joppa"]["objects"][provider["address"]] = provider
+        old["document"]["links"].append({"target": "work:provider", "revision": 3,
+                                           "relation": "depends_on", "blocking": True})
+        consumer = deepcopy(value["tasks"][0])
+        consumer.update(action="update", target="work:old", revision=3, depends_on=["work:provider", "work:dependency"])
+        value["tasks"] = [consumer]
+        with self.assertRaisesRegex(ValueError, "explicitly update or retire unfinished Task work:provider"):
+            publication.operations(value, data)
+        prerequisite = deepcopy(consumer)
+        prerequisite.update(id="provider", target="work:provider", depends_on=[])
+        value["tasks"].append(prerequisite)
+        done = deepcopy(old)
+        done["address"] = "work:done"
+        done["process"]["done"] = {"evidence": "Already landed"}
+        data["joppa"]["tasks"].append(done)
+        operations = publication.operations(value, data)
+        saves = [entry["command"] for entry in operations if entry["command"]["op"] == "save_object"]
+        self.assertEqual([entry["id"] for entry in saves], ["provider", "old"])
+        self.assertEqual([entry["data"]["title"][:4] for entry in saves], ["[01]", "[02]"])
+        self.assertFalse(any(link["relation"] == "depends_on" and link["target"] == "work:provider"
+                             for entry in saves for link in entry["links"]))
+        self.assertTrue(any(link["target"] == "work:dependency" for link in saves[-1]["links"]))
+        provider["process"]["assignee"] = "worker"
+        with self.assertRaisesRegex(ValueError, "claimed Tasks"):
+            publication.operations(value, data)
 
     def test_requirement_uses_each_criteria_test_list_revision(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -156,7 +211,7 @@ class ProviderTests(unittest.TestCase):
             data["repositories"][0]["path"] = directory
             (Path(directory) / "checks.rs").write_text("assert!(required_behavior());\n")
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
-            data["joppa"].update(scope="requirement", criteria=[], criterion_schemas={})
+            data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})
             value.update(disposition="verify_existing", tasks=[], criteria=[], acceptance_checks=[])
             for address, revision in (("criterion:a", 4), ("criterion:b", 9)):
                 data["joppa"]["criteria"].append({"id": address})
@@ -178,7 +233,7 @@ class ProviderTests(unittest.TestCase):
         stage = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(stage)
         data, value = assignment(), plan()
-        data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
+        data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
             criterion_schemas={address: {key: deepcopy(data["joppa"][key])
                 for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
         data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
@@ -206,7 +261,7 @@ class ProviderTests(unittest.TestCase):
             data["repositories"][0]["path"] = directory
             (Path(directory) / "checks.rs").write_text("assert!(required_behavior());\n")
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
-            data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
+            data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
                 criterion_schemas={address: {key: deepcopy(data["joppa"][key])
                     for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
             data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))

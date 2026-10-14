@@ -21,6 +21,7 @@ Inspect the actual assertions. Cover every Then and Evidence item. Missing tests
 When critic findings are supplied, resolve each blocking finding or refute it with source evidence.
 Keep one Task in one repository and module. Add dependencies only when outputs require them.
 For Requirement scope, group Tasks by repository and declare the required execution order.
+Explicitly update or retire every unfinished Task under the selected ACs. Do not omit it from the package order.
 The package coder executes that order. Crew omits same-package dependency links and preserves external dependency links.
 For Requirement scope, add criteria: [{ac, disposition}] for every selected AC.
 Each Task and acceptance check must name its selected ac. Follow each AC's implementation or existing-test-binding disposition.
