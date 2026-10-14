@@ -7,6 +7,7 @@ import re
 from common import digest, fingerprint, inside, read, require, run, strings, text, write
 from mcp import Rejected
 import validation
+import context
 
 
 def unclaimed(task):
@@ -37,7 +38,8 @@ def ensure_recovered(root, current, server, workspace, ac):
             continue
         claim = read(claim_file)
         args = claim.get("arguments", {})
-        if args.get("workspace") != workspace or args.get("command", {}).get("ac") != ac:
+        commands = [args["command"]] if "command" in args else [item["command"] for item in args.get("operations", [])]
+        if args.get("workspace") != workspace or ac not in {item.get("ac") for item in commands}:
             continue
         if claim.get("server") and claim["server"] != server:
             continue
@@ -81,7 +83,53 @@ def ordered_tasks(tasks):
     return result
 
 
+def criterion_plan(plan, assignment, address):
+    if assignment["joppa"].get("scope") != "requirement":
+        return deepcopy(plan)
+    entries = plan.get("criteria")
+    require(isinstance(entries, list), "Requirement plan needs a disposition for every selected AC")
+    expected = {item["id"] for item in context.selected_criteria(assignment)}
+    require(len(entries) == len(expected) and {item.get("ac") for item in entries} == expected,
+            "Requirement plan dispositions must match all selected criteria")
+    result = deepcopy(plan)
+    result["disposition"] = next(item["disposition"] for item in entries if item["ac"] == address)
+    result["tasks"] = [item for item in result["tasks"] if item.get("ac") == address]
+    result["acceptance_checks"] = [item for item in result["acceptance_checks"] if item.get("ac") == address]
+    return result
+
+
 def validate(plan, assignment):
+    if assignment["joppa"].get("scope") != "requirement":
+        return validate_one(plan, assignment)
+    selected = {item["id"] for item in context.selected_criteria(assignment)}
+    require(all(task.get("ac") in selected for task in plan.get("tasks", [])),
+            "Task must belong to a selected Requirement criterion")
+    require(all(check.get("ac") in selected for check in plan.get("acceptance_checks", [])),
+            "every acceptance check needs its selected criterion address")
+    ordered = ordered_tasks(plan.get("tasks", []))
+    local = {task["id"]: task for task in ordered}
+    aliases = {task["target"]: task["id"] for task in ordered if task.get("target")}
+    counters = {}
+    for task in ordered:
+        if task.get("action") != "retire":
+            repository = task.get("repository")
+            counters[repository] = counters.get(repository, 0) + 1
+            title = f"[{counters[repository]:02d}] " + re.sub(r"^\[\d+\]\s*", "", text(task.get("title"), "task.title"))
+            schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
+            require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
+        for dependency in task.get("depends_on", []):
+            require(dependency in local or dependency in assignment["joppa"]["objects"],
+                    f"dependency was not read in the Requirement context: {dependency}")
+    for address in selected:
+        value = criterion_plan(plan, assignment, address)
+        own = {task["id"] for task in value["tasks"]}
+        for task in value["tasks"]:
+            task["depends_on"] = [dependency for dependency in task.get("depends_on", [])
+                                  if aliases.get(dependency, dependency) in own or dependency not in local and dependency not in aliases]
+        validate_one(value, context.criterion_assignment(assignment, address))
+
+
+def validate_one(plan, assignment):
     normalized = deepcopy(plan)
     normalized["tasks"] = ordered_tasks(normalized.get("tasks", []))
     if normalized.get("disposition") == "verify_existing":
@@ -123,7 +171,6 @@ def validate(plan, assignment):
         require(not dependencies.intersection(retired) or address in updates,
                 f"retirement requires an update that removes the dependency from {address}")
     validation.plan(normalized, assignment)
-    require(len(plan.get("tasks", [])) <= 99, "one publication supports at most 99 Task saves")
     schema = assignment["joppa"]["task_schema"]
     limit = schema.get("title_preview_length", 64)
     for task in plan.get("tasks", []):
@@ -208,23 +255,46 @@ def operations(plan, assignment):
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     repositories = {item["id"]: item for item in assignment["repositories"]}
     objects = assignment["joppa"]["objects"]
-    schema = assignment["joppa"]["task_schema"]
+    grouped = assignment["joppa"].get("scope") == "requirement"
     result, refs = [], {}
     retired = {task["target"] for task in plan["tasks"] if task["action"] == "retire"}
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
-    ac = assignment["ac"]["id"]
-    owner = objects[ac]["document"]["data"].get("owner")
-    require(owner, "criterion owner is required for new Task documents")
+    changed, counters = set(), {}
+    local = {task["id"]: task for task in plan["tasks"]}
+    def same_package(task, dependency):
+        if not grouped:
+            return False
+        other = local.get(dependency)
+        if not other:
+            other = next((value for value in local.values() if value.get("target") == dependency), None)
+        if other:
+            return other["repository"] == task["repository"]
+        existing = objects.get(dependency)
+        if not existing or existing["document"].get("parent") not in {item["id"] for item in context.selected_criteria(assignment)}:
+            return False
+        repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", existing["document"]["data"].get("contract", ""), re.M)
+        return repository == [task["repository"]]
     for number, task in enumerate(ordered_tasks(plan["tasks"]), 1):
+        ac = task["ac"]
+        scope = context.criterion_assignment(assignment, ac)
+        schema = scope["joppa"]["task_schema"]
+        owner = objects[ac]["document"]["data"].get("owner")
+        require(owner, "criterion owner is required for new Task documents")
         existing = inventory.get(task.get("target"))
         if task["action"] == "retire":
             result.append({"command": {"op": "retire_task", "id": existing["address"].split(":", 1)[1],
                 "revision": existing["current_revision"], "reason": task["outcome"]}})
+            changed.add(ac)
             continue
         data = deepcopy(existing["document"]["data"]) if existing else {"owner": owner, "purpose": "implementation"}
         # Joppa execution uses implementation Tasks for both code and scoped verification.
         # Verification evidence remains a separate operation.
-        data.update(title=task["title"], contract=contract(task, plan))
+        title = task["title"]
+        if grouped:
+            counters[task["repository"]] = counters.get(task["repository"], 0) + 1
+            title = f"[{counters[task['repository']]:02d}] " + re.sub(r"^\[\d+\]\s*", "", title)
+            require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
+        data.update(title=title, contract=contract(task, plan))
         project = repositories[task["repository"]]["project"]
         project_id = project.split(":", 1)[1]
         projects = list(data.get("projects") or [])
@@ -234,8 +304,10 @@ def operations(plan, assignment):
         data["projects"] = projects
         links = deepcopy(existing["document"].get("links", [])) if existing else []
         links = [link for link in links if not (link.get("blocking") and link.get("relation") == "depends_on"
-                                                and link.get("target") in retired)]
+                                                and (link.get("target") in retired or same_package(task, link.get("target"))))]
         for dependency in task["depends_on"]:
+            if same_package(task, dependency):
+                continue
             canonical = aliases.get(dependency, dependency)
             if dependency in refs:
                 target, revision = {"$ref": refs[dependency] + "/address"}, {"$ref": refs[dependency] + "/saved_revision"}
@@ -247,7 +319,7 @@ def operations(plan, assignment):
             links = [link for link in links if not (link.get("relation") == "depends_on"
                                                    and link.get("target") in (canonical, target))]
             links.append(candidate)
-        command = {"op": "save_object", "kind": assignment["joppa"]["task_type"],
+        command = {"op": "save_object", "kind": scope["joppa"]["task_type"],
                    "revision": existing["current_revision"] if existing else 0,
                    "parent": ac, "data": data, "links": links,
                    "reason": "Publish the reviewed mechanism for this criterion.", "question_checked": schema["question"]}
@@ -258,21 +330,33 @@ def operations(plan, assignment):
                 continue
         ref = "task" + str(number)
         result.append({"ref": ref, "command": command})
+        changed.add(ac)
         refs[task["id"]] = ref
         if existing:
             refs[existing["address"]] = ref
-    if plan["disposition"] == "verify_existing":
-        status = assignment["joppa"]["test_status"]
+    for criterion in context.selected_criteria(assignment):
+        ac = criterion["id"]
+        scope = context.criterion_assignment(assignment, ac)
+        value = criterion_plan(plan, assignment, ac)
+        if value["disposition"] != "verify_existing":
+            continue
+        status = scope["joppa"]["test_status"]
         tests = list(dict.fromkeys([*[item["address"] for item in status["tests"]],
-                                   *[check["test"] for check in plan["acceptance_checks"]]]))
+                                   *[check["test"] for check in value["acceptance_checks"]]]))
         require(len(tests) <= 200, "criterion supports at most 200 tests")
         if tests != [item["address"] for item in status["tests"]] or status["tests_draft"]:
             result.append({"command": {"op": "set_ac_tests", "target": ac, "tests": tests,
                 "revision": status.get("tests_revision") or 0,
                 "reason": "Bind existing tests after review of every criterion assertion."}})
-    result.append({"command": {"op": "finish_planning", "ac": ac,
-        "reason": "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
-                  else "Publish reviewed Tasks. The criterion still requires verification."}})
+            changed.add(ac)
+    for criterion in context.selected_criteria(assignment):
+        ac = criterion["id"]
+        blocked = any(task["document"]["parent"] == ac and isinstance(task["process"].get("blocked"), dict)
+                      and not task["process"].get("done") and not task["process"].get("retired") for task in inventory.values())
+        result.append({"command": {"op": "finish_planning" if not grouped or ac in changed or blocked else "release_planning", "ac": ac,
+            "reason": "Publish the reviewed Requirement plan." if grouped
+                      else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
+                      else "Publish reviewed Tasks. The criterion still requires verification."}})
     require(len(result) <= 100, "one publication supports at most 100 operations")
     return result
 
@@ -306,6 +390,21 @@ def held(api, workspace, address, position, actor=None):
     return claim
 
 
+def held_claims(api, workspace, receipt):
+    require(receipt["status"] == "confirmed", "planning claim was not confirmed")
+    results = receipt["result"].get("results", [receipt["result"]])
+    args = receipt["arguments"]
+    commands = [args["command"]] if "command" in args else [item["command"] for item in args["operations"]]
+    require(len(results) == len(commands), "planning claim response is incomplete; inspect claim.json")
+    holders = {}
+    for command, result in zip(commands, results):
+        address = command["ac"]
+        require(type(result.get("position")) is int, "planning claim response has no event position; inspect claim.json")
+        actor = receipt.get("holders", {}).get(address, receipt.get("actor"))
+        holders[address] = held(api, workspace, address, result["position"], actor)["actor"]
+    return holders
+
+
 def release(api, target, workspace, ac, reason):
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -322,7 +421,11 @@ def release(api, target, workspace, ac, reason):
     prior = target / "release.json"
     if prior.exists():
         return read(prior)["status"] == "confirmed"
-    held(api, workspace, ac, receipt["result"]["position"], receipt.get("actor"))
-    mutate(api, prior, "joppa_command", {"workspace": workspace, "command": {
-        "op": "release_planning", "ac": ac, "reason": reason[:2000]}})
+    holders = held_claims(api, workspace, receipt)
+    operations = [{"command": {"op": "release_planning", "ac": address, "reason": reason[:2000]}}
+                  for address in holders]
+    tool = "joppa_batch" if "operations" in receipt["arguments"] else "joppa_command"
+    arguments = {"workspace": workspace, "operations": operations} if tool == "joppa_batch" else {
+        "workspace": workspace, "command": operations[0]["command"]}
+    mutate(api, prior, tool, arguments)
     return True

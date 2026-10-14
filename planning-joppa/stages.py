@@ -63,19 +63,29 @@ def prepare():
     advertised = json.dumps(help)
     require(all(name in advertised for name in ("claim_planning", "finish_planning", "release_planning")),
             "Joppa planning commands are not deployed; no claim was attempted")
-    assignment, snapshot, ac = context.load(api, config, os.environ["PLANNING_JOPPA_AC"])
-    publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], ac["address"])
+    requirement = os.environ.get("PLANNING_JOPPA_REQ")
+    assignment, snapshot, ac = (context.load_requirement(api, config, requirement) if requirement
+                                else context.load(api, config, os.environ["PLANNING_JOPPA_AC"]))
+    criteria = context.selected_criteria(assignment)
+    for criterion in criteria:
+        publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], criterion["id"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", snapshot)
-    receipt = publication.mutate(api, target / "claim.json", "joppa_command", {"workspace": config["workspace"],
-        "command": {"op": "claim_planning", "ac": ac["address"], "revision": ac["current_revision"]}})
-    require(type(receipt.get("position")) is int, "planning claim response has no event position; inspect claim.json")
-    claim = publication.held(api, config["workspace"], ac["address"], receipt["position"])
-    write(target / "claim.json", {**read(target / "claim.json"), "actor": claim["actor"]})
+    operations = [{"command": {"op": "claim_planning", "ac": item["id"], "revision": item["revision"]}} for item in criteria]
+    require(len(operations) <= 100, "Requirement claims exceed the Joppa batch limit of 100 operations")
+    tool = "joppa_batch" if requirement else "joppa_command"
+    arguments = {"workspace": config["workspace"], "operations": operations} if requirement else {
+        "workspace": config["workspace"], "command": operations[0]["command"]}
+    publication.mutate(api, target / "claim.json", tool, arguments)
+    claim = read(target / "claim.json")
+    holders = publication.held_claims(api, config["workspace"], claim)
+    write(target / "claim.json", {**claim, "holders": holders,
+          **({"actor": next(iter(holders.values()))} if not requirement else {})})
     # Claiming does not change authored context. Check that no other writer changed it.
-    fresh, current, current_ac = context.load(api, config, ac["address"])
+    fresh, current, current_ac = (context.load_requirement(api, config, requirement, [item["id"] for item in criteria])
+                                  if requirement else context.load(api, config, ac["address"]))
     context.unchanged(snapshot, current)
-    if retry_startup(api, config, target, fresh, current_ac, advertised):
+    if not requirement and retry_startup(api, config, target, fresh, current_ac, advertised):
         return
     assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
     write(target / "input.json", assignment)
@@ -166,6 +176,18 @@ def prompt_assignment(assignment):
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
                               "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
+    if assignment["joppa"].get("scope") == "requirement":
+        criteria = context.selected_criteria(assignment)
+        ids = {item["id"] for item in criteria}
+        result["ac"] = {**result["ac"], "text": "Selected Requirement criteria appear below."}
+        result["joppa"]["objects"] = {key: item for key, item in result["joppa"]["objects"].items() if key not in ids}
+        result["joppa"].update(scope="requirement", criteria=[{
+            "id": item["id"], "revision": item["revision"],
+            "annotations": assignment["joppa"]["objects"][item["id"]]["annotations"],
+            "files": assignment["joppa"]["objects"][item["id"]]["files"],
+            **{key: assignment["joppa"]["objects"][item["id"]]["document"].get(key) for key in ("data", "links")}}
+            for item in criteria],
+                              criterion_schemas=assignment["joppa"]["criterion_schemas"])
     # The Requirement document already supplies its authored body and AC text.
     decisions = json.loads(assignment["decisions"][0])
     result["decisions"] = [json.dumps({key: decisions.get(key) for key in
@@ -189,12 +211,20 @@ def capture(kind):
         api = context.client(config)
         assignment = context.read_assignment(api, config, target)
         publication.validate(result, assignment)
-        if result["disposition"] == "verify_existing":
-            publication.verify_bindings(api, config, result, assignment,
-                {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}, read(target / "snapshots.json"))
+        verify_bindings(api, config, result, assignment,
+            {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}, read(target / "snapshots.json"))
         shared.bind_necessity(result)
         write(target / "plan.json", result)
         signal("PLANNED", "Task mechanisms validated for the selected criterion")
+
+
+def verify_bindings(api, config, plan, assignment, snapshots, prepared):
+    for criterion in context.selected_criteria(assignment):
+        address = criterion["id"]
+        value = publication.criterion_plan(plan, assignment, address)
+        if value["disposition"] == "verify_existing":
+            publication.verify_bindings(api, config, value, context.criterion_assignment(assignment, address), snapshots,
+                                        prepared if prepared is not None else read(shared.artifacts() / "snapshots.json"))
 
 
 def finish():
@@ -205,7 +235,10 @@ def finish():
     plan = read(target / "plan.json")
     publication.validate(plan, assignment)
     reviews, snapshots, contracts = shared.verify_context(assignment, plan, mechanisms_only=True)
-    fresh, current, _ = context.load(api, config, assignment["ac"]["id"])
+    grouped = assignment["joppa"].get("scope") == "requirement"
+    fresh, current, _ = (context.load_requirement(api, config, assignment["requirement"]["id"],
+                         [item["id"] for item in context.selected_criteria(assignment)]) if grouped
+                         else context.load(api, config, assignment["ac"]["id"]))
     context.refresh_reads(api, config, fresh, current, read(target / "joppa-snapshot.json"))
     publication.validate(plan, fresh)
     # Update only the exact Task document reviewed by this plan.
@@ -217,14 +250,13 @@ def finish():
             (publication.retirable if task["action"] == "retire" else publication.editable)(actual)
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
-    publication.held(api, config["workspace"], assignment["ac"]["id"], claim["result"]["position"], claim["actor"])
-    if plan["disposition"] == "verify_existing":
-        publication.verify_bindings(api, config, plan, fresh, snapshots, read(target / "snapshots.json"))
+    publication.held_claims(api, config["workspace"], claim)
+    verify_bindings(api, config, plan, fresh, snapshots, None)
     operations = publication.operations(plan, fresh)
     blocked = any(isinstance(task["process"].get("blocked"), dict)
                   and not task["process"].get("done") and not task["process"].get("retired")
                   for task in fresh["joppa"]["tasks"])
-    if len(operations) == 1 and not blocked:
+    if not grouped and len(operations) == 1 and not blocked:
         released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
                                        "Reviewed Task contracts are unchanged.")
         require(released, "unchanged Tasks require confirmed claim release")
@@ -239,9 +271,11 @@ def finish():
         "workspace": config["workspace"], "operations": operations}, retain_claim=blocked)
     results = result.get("results")
     require(isinstance(results, list) and len(results) == len(operations)
-            and results[-1].get("command", {}).get("op") == "finish_planning",
+            and results[-1].get("command", {}).get("op") in ("finish_planning", "release_planning"),
             "publication response is incomplete; inspect publication.json before another run")
     write(target / "result.json", {"status": "published", "scope": "planned_tasks", "ac": assignment["ac"]["id"],
+          **({"requirement": assignment["requirement"]["id"], "criteria": [item["id"] for item in context.selected_criteria(assignment)]}
+             if grouped else {}),
           "acceptance_verified": False,
           "task_count": sum(op["command"]["op"] in ("save_object", "retire_task") for op in operations),
           "plan_digest": digest(plan),

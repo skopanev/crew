@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
 from common import digest, require
 import context
 
-OUTPUT_CONTRACT = """This is Joppa planning. Plan exactly the supplied AC.
+OUTPUT_CONTRACT = """This is Joppa planning. Plan the supplied scope.
 Use the standard plan shape. Each Task also needs action: create or update.
 For update, include target (an existing Task under the supplied AC) and revision (its current document revision).
 Preserve its owner, worker assignment, parent and other document fields.
@@ -36,21 +36,34 @@ Agents do not call Joppa mutations. Do not create a planning placeholder Task.
 Title length must obey joppa.task_schema.title_preview_length.
 """
 
+REQUIREMENT_CONTRACT = """Plan all selected criteria in this Requirement as one coherent increment.
+The input joppa.criteria lists the selected ACs. Each Task needs its exact ac address.
+Include criteria: [{ac: full-address, disposition: implement or verify_existing}] for every selected AC.
+Every acceptance_check also needs its exact ac address. Keep complete mechanisms and observable checks.
+Group implementation work by repository. Declare required local prerequisites in depends_on to establish plan order.
+Crew persists that order as [01], [02] Task title prefixes within each repository package.
+Do not add same-package Joppa depends_on links. The package coder executes Tasks in order.
+Preserve external prerequisites, including other repository packages. Do not create a package object.
+Reuse existing Tasks and proven test bindings. Do not create verification Tasks for behavior that existing tests prove.
+"""
+
 
 def main():
     parser = argparse.ArgumentParser(description="Plan one Joppa criterion in a separate Medulla workflow.")
     parser.add_argument("--config", required=True)
-    parser.add_argument("--ac-id", required=True, help="criterion address or ID when its schema type is unique")
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--ac-id", help="criterion address or ID when its schema type is unique")
+    scope.add_argument("--req-id", help="Requirement address or ID when its schema type is unique")
     parser.add_argument("--dry-run", action="store_true", help="validate the config and show the command without MCP, agents or writes")
     args = parser.parse_args()
     path = Path(args.config).expanduser().resolve()
     config = context.configuration(path)
     workflow = Path(__file__).resolve().parent
     variables = {"PLANNING_JOPPA_CONFIG": str(path), "PLANNING_JOPPA_CONFIG_DIGEST": digest(config),
-                 "PLANNING_JOPPA_AC": args.ac_id, "PLANNING_PYTHON": sys.executable,
+                 "PLANNING_JOPPA_AC": args.ac_id or "", "PLANNING_JOPPA_REQ": args.req_id or "", "PLANNING_PYTHON": sys.executable,
                  "RESEARCH_MODEL": "gpt-6.1-sol", "DESIGN_MODEL": "claude-opus-5-5",
-                 "OUTPUT_CONTRACT": OUTPUT_CONTRACT,
-                 "NECESSITY_OUTPUT_CONTRACT": "Assess the selected AC. Existing owner decisions remain authoritative. "
+                 "OUTPUT_CONTRACT": (REQUIREMENT_CONTRACT + OUTPUT_CONTRACT) if args.req_id else OUTPUT_CONTRACT,
+                 "NECESSITY_OUTPUT_CONTRACT": ("Assess all selected criteria in this Requirement. " if args.req_id else "Assess the selected AC. ") + "Existing owner decisions remain authoritative. "
                     "Do not produce shallow Tasks or wait for implementation dependencies to land. "
                     "Use Joppa MCP to inspect related work and its context as needed. Describe the minimum mechanism scope. The designer then prepares complete Tasks.",
                  "CBM_CACHE_DIR": config["cbm_store"], "CBM_ALLOWED_ROOT": config["cbm_root"],
@@ -61,7 +74,7 @@ def main():
     executable = os.environ.get("MEDULLA_BIN", "medulla")
     command = [executable, "-w", str(workflow), "--runs-folder", config["runs_folder"], "--print-run-dir"]
     if args.dry_run:
-        print("AC: " + args.ac_id)
+        print(("Requirement: " + args.req_id) if args.req_id else ("AC: " + args.ac_id))
         print("Graph: prepare → research → necessity → design → critics → finish")
         print("Publication: Task saves + finish_planning, one transaction")
         print("Command: " + " ".join(command))

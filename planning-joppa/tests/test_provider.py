@@ -67,6 +67,120 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_requirement_packages_keep_order_without_internal_dependency_links(self):
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", criteria=[], criterion_schemas={})
+        data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
+        value["criteria"], value["tasks"], value["acceptance_checks"] = [], [], []
+        for index, address in enumerate(("criterion:a", "criterion:b", "criterion:c")):
+            data["joppa"]["criteria"].append({"id": address, "revision": 3})
+            data["joppa"]["objects"][address] = context.source(item(address, "rule:r"))
+            data["joppa"]["criterion_schemas"][address] = {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_status")}
+            task = deepcopy(plan()["tasks"][0])
+            task.update(id=f"step{index}", ac=address, repository="client" if index == 2 else "service",
+                        depends_on=[f"step{index - 1}"] if index else ["work:dependency"])
+            value["tasks"].append(task)
+            value["criteria"].append({"ac": address, "disposition": "implement"})
+            value["acceptance_checks"].append({**deepcopy(plan()["acceptance_checks"][0]),
+                "ac": address, "repository": task["repository"]})
+        # Input order must not change the prerequisite order.
+        value["tasks"].reverse()
+        commands = publication.operations(value, data)
+        saves = [operation["command"] for operation in commands if operation["command"]["op"] == "save_object"]
+        self.assertEqual([command["parent"] for command in saves], ["criterion:a", "criterion:b", "criterion:c"])
+        self.assertEqual([command["data"]["title"][:4] for command in saves], ["[01]", "[02]", "[01]"])
+        self.assertEqual(saves[0]["links"][0]["target"], "work:dependency")
+        self.assertEqual(saves[1]["links"], [])
+        self.assertEqual(saves[2]["links"][0]["target"], {"$ref": "task2/address"})
+        self.assertEqual([operation["command"]["ac"] for operation in commands[-3:]],
+                         ["criterion:a", "criterion:b", "criterion:c"])
+        value["tasks"][0]["ac"] = "criterion:outside"
+        with self.assertRaisesRegex(ValueError, "selected Requirement criterion"):
+            publication.operations(value, data)
+
+    def test_requirement_claim_release_is_atomic_and_checks_every_holder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            receipt = {"status": "confirmed", "holders": {"criterion:a": "planner", "criterion:b": "planner"},
+                "arguments": {"workspace": "example", "operations": [
+                    {"command": {"op": "claim_planning", "ac": address, "revision": 3}}
+                    for address in ("criterion:a", "criterion:b")]},
+                "result": {"results": [{"position": 22}, {"position": 23}]}}
+            (target / "claim.json").write_text(json.dumps(receipt))
+            class Server(Fake):
+                def call(self, name, args):
+                    self.calls.append((name, deepcopy(args)))
+                    if name == "joppa_objects":
+                        return {"process": {"planning_claim": {"actor": "planner", "position":
+                            22 if args["address"] == "criterion:a" else 23}}}
+                    return {"results": [{"position": 24}, {"position": 25}]}
+            api = Server()
+            self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
+            name, arguments = api.calls[-1]
+            self.assertEqual(name, "joppa_batch")
+            self.assertEqual([entry["command"]["ac"] for entry in arguments["operations"]],
+                             ["criterion:a", "criterion:b"])
+            self.assertEqual(read(target / "release.json")["status"], "confirmed")
+
+    def test_requirement_mixes_implementation_and_existing_test_bindings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data, value = assignment(), plan()
+            data["repositories"][0]["path"] = directory
+            (Path(directory) / "checks.rs").write_text("assert!(required_behavior());\n")
+            (Path(directory) / "implementation.rs").write_text("required_behavior\n")
+            data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
+                criterion_schemas={address: {key: deepcopy(data["joppa"][key])
+                    for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+            data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
+            value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"},
+                                 {"ac": "criterion:b", "disposition": "verify_existing"}]
+            value["acceptance_checks"][0]["ac"] = "criterion:a"
+            value["acceptance_checks"].append({"ac": "criterion:b", "repository": "service", "scenario": "Existing behavior",
+                "expected": "Required result", "test": "checks.rs > required_behavior",
+                "evidence": "service:checks.rs:1; service:implementation.rs:1"})
+            ops = publication.operations(value, data)
+            self.assertEqual([op["command"]["op"] for op in ops],
+                             ["save_object", "set_ac_tests", "finish_planning", "finish_planning"])
+            self.assertEqual(ops[1]["command"]["target"], "criterion:b")
+            self.assertEqual(ops[0]["command"]["parent"], "criterion:a")
+
+    def test_requirement_selection_excludes_unmet_external_dependencies(self):
+        types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
+                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+                          "references": {"projects": {"multiple": True, "target": "project"}}}}
+        objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
+        objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
+                        "criterion:outside": item("criterion:outside", "rule:outside"),
+                        "rule:outside": item("rule:outside")})
+        objects["criterion:b"]["document"]["links"] = [
+            {"target": "criterion:outside", "revision": 3, "relation": "depends_on", "blocking": True}]
+        objects["criterion:c"]["document"]["links"] = [
+            {"target": "criterion:a", "revision": 3, "relation": "depends_on", "blocking": True}]
+        detail = {"position": 20, "requirement": {"current_revision": 3, "revisions": [{"number": 3,
+            "acs": [{"id": address} for address in ("criterion:a", "criterion:b", "criterion:c")]}]}}
+        class Server:
+            def call(self, name, args):
+                if name == "joppa_tree":
+                    return {"position": 20, "schema": {"types": deepcopy(types)}}
+                if name == "joppa_read":
+                    return deepcopy(detail)
+                if name == "joppa_tests":
+                    rows = [{"address": address, "status": "grey", "tests": [], "tests_draft": False,
+                             "tests_revision": None} for address in args["ac"].split(",")]
+                    return rows[0] if len(rows) == 1 else {"items": rows}
+                if "address" in args:
+                    return deepcopy(objects[args["address"]])
+                return {"position": 20, "items": [], "next_cursor": None}
+        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        data, snapshot, requirement = context.load_requirement(Server(), config, "r")
+        self.assertEqual(requirement["address"], "rule:r")
+        self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
+        self.assertEqual(snapshot["criteria"], ["criterion:a", "criterion:c"])
+        objects["criterion:a"]["process"]["planning_claim"] = {"actor": "planner", "position": 21}
+        resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a", "criterion:c"])
+        self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a", "criterion:c"])
+
     def test_retirement_uses_the_existing_atomic_publication(self):
         data, value = assignment(), plan()
         data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
@@ -413,7 +527,7 @@ class ProviderTests(unittest.TestCase):
     def test_uncertain_publication_keeps_claim_and_never_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner"}))
+            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner", "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}))
             api = Fake(error=MCPError("transport failed"))
             with self.assertRaises(MCPError):
                 publication.mutate(api, target / "publication.json", "joppa_batch", {"workspace": "example", "operations": []})
@@ -428,7 +542,7 @@ class ProviderTests(unittest.TestCase):
     def test_confirmed_failure_releases_only_the_same_claim(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner"}))
+            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner", "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}))
             api = Fake(result={"process": {"planning_claim": {"actor": "other", "position": 22}}})
             with self.assertRaisesRegex(ValueError, "does not hold"):
                 publication.release(api, target, "example", "criterion:a", "Failure")
@@ -464,7 +578,7 @@ class ProviderTests(unittest.TestCase):
                     existing["process"].pop("blocked")
                 active_blocked = blocked and terminal is None
                 for name, body in {"input": data, "plan": value, "joppa-snapshot": {},
-                    "claim": {"status": "confirmed", "actor": "planner", "result": {"position": 22}}}.items():
+                    "claim": {"status": "confirmed", "actor": "planner", "result": {"position": 22}, "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}}.items():
                     (target / f"{name}.json").write_text(json.dumps(body))
                 class Server(Fake):
                     def call(self, name, args):
