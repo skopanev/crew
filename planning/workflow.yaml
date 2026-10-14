@@ -26,6 +26,7 @@ nodes:
     shell: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" prepare'
     on_signal:
       PREPARED: research
+      READY: __exit_ok__
       BLOCKED: __exit_fail__
       __failed__: failed
       __default__: failed

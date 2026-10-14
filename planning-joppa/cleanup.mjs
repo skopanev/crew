@@ -28,13 +28,15 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
   for (const task of blocked) {
     require(!task.process.assignee && !task.process.claim && task.process.status !== 'in_progress', 'Blocked Task has a holder');
     const id = task.address.slice(task.address.indexOf(':') + 1);
-    require(operations.some(({command: cmd}) => cmd.id === id &&
-      (cmd.op === 'retire_task' || cmd.op === 'save_object' && cmd.kind === task.kind)),
-    'Every blocked Task needs a contract update or retirement before cleanup');
+    const operation = operations.find(({command: cmd}) => cmd.id === id &&
+      (cmd.op === 'unblock_task' || cmd.op === 'retire_task' || cmd.op === 'save_object' && cmd.kind === task.kind));
+    require(operation, 'Every blocked Task needs an unblock, contract update or retirement before cleanup');
+    const retry = operation.command.op === 'unblock_task';
+    require(!retry || task.process.blocked.reason === 'WORKTREE_PREEXISTED', 'Only worktree startup failures can use unblock cleanup');
     const execution = executionId(task.address), folder = path.join(root, execution), entry = stat(folder);
-    if (!entry) continue;
+    if (!entry && !retry) continue;
     require(runs !== folder && !runs.startsWith(folder + path.sep), 'Cleanup cannot contain lane receipts');
-    require(entry.isDirectory() && !entry.isSymbolicLink() && fs.realpathSync(folder) === folder,
+    require(!entry || entry.isDirectory() && !entry.isSymbolicLink() && fs.realpathSync(folder) === folder,
       'Blocked worktree must be a real directory without symlinks');
     const runId = /^Run:\s*([^\s]+)\s*$/m.exec(task.process.blocked.evidence || '')?.[1];
     require(runId && uuid.test(runId), 'Blocked worktree has no terminal lane Run ID');
@@ -57,9 +59,10 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
         !run.result.held && !run.result.completed && run.result.code !== 0,
       'Active, held or unconfirmed successful lane prevents worktree cleanup');
       matches.push(name);
+      if (name === runId && retry) require(run.result.code === 73, 'Startup retry requires the worktree failure exit code');
     }
     require(matches.includes(runId), 'Block receipt does not confirm a finished lane for this Task');
-    prepared.push({task: task.address, folder});
+    if (entry) prepared.push({task: task.address, folder});
   }
   // Validate every target before deleting any checkout. Publication follows cleanup.
   for (const item of prepared) {
