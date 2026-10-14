@@ -48,7 +48,9 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_objects') value = objects.get(args.address);
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
+        purpose: objects.get(address).document.data.purpose,
         status: objects.get(address).process.status, assignee: objects.get(address).process.assignee}))
+        .filter(task => !args.purpose || task.purpose === args.purpose)
         .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
     else if (name === 'joppa_batch') {
       if (mode === 'reject' || mode === 'outcome-reject' && args.operations[0].command.op !== 'claim_task') {
@@ -116,6 +118,43 @@ for (const sameRepository of [false, true]) test(`Joppa package detects remote h
   const selected = await nextTask(f.run.config);
   if (sameRepository) assert.equal(selected.candidate, null);
   else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+});
+
+test('Joppa package ignores held Tasks for another purpose without an implementation contract', async t => {
+  const f = await packageFixture(t), other = f.objects.get('task:t2');
+  other.document.data = {title: 'Research task', purpose: 'research'};
+  other.process = {status: 'in_progress', assignee: 'research-worker'};
+  const selected = await nextTask(f.run.config);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  assert.equal(f.calls.find(call => call.name === 'joppa_tasks' && call.args.view === 'all').args.purpose, 'implementation');
+  assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), false);
+});
+
+for (const state of ['retained', 'removed', 'other-repository']) test(`Joppa package handles a ${state} blocked sibling checkout`, async t => {
+  const f = await packageFixture(t);
+  f.queue.splice(0, 1);
+  const root = path.join(f.root, 'worktrees'), folder = path.join(f.root, 'runs/11111111-1111-4111-8111-111111111111');
+  fs.mkdirSync(root);
+  fs.mkdirSync(folder, {recursive: true});
+  f.run.config.worktreeRoot = root;
+  const repositoryId = state === 'other-repository' ? 'other' : 'app';
+  const run = {...f.run, task: 'task:t2', tasks: [{address: 'task:t2'}, {address: 'task:old3'}], repositoryId,
+    executionId: executionId(`req:r\n${repositoryId}`),
+    result: {code: 1, blockConfirmed: true, finishedAt: new Date().toISOString()}};
+  if (state !== 'removed') fs.mkdirSync(path.join(root, run.executionId));
+  save(path.join(folder, 'launch.json'), run);
+  const selected = await nextTask(f.run.config);
+  if (state === 'retained') assert.equal(selected.candidate, null);
+  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('Joppa package keeps manual existing checkout handling in lane startup', async t => {
+  const f = await packageFixture(t);
+  f.queue.splice(0, 1);
+  f.run.config.worktreeRoot = path.join(f.root, 'worktrees');
+  fs.mkdirSync(path.join(f.run.config.worktreeRoot, executionId('task:t1')), {recursive: true});
+  assert.deepEqual((await nextTask(f.run.config)).candidate.tasks.map(task => task.address), ['task:t1']);
 });
 
 test('Joppa package unconfirmed worker outcome remains held', async t => {

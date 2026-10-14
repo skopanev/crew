@@ -94,9 +94,17 @@ export function runHoldsTasks(run) {
 }
 
 export async function nextTask(config) {
-  const reservations = runDirectories(config.stateDir).flatMap(dir => {
-    try { const run = readRun(path.join(dir, 'launch.json')); return runHoldsTasks(run) ? [run] : []; }
+  const runs = runDirectories(config.stateDir).flatMap(dir => {
+    try { return [readRun(path.join(dir, 'launch.json'))]; }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  });
+  const reservations = runs.filter(runHoldsTasks);
+  const retained = runs.filter(run => {
+    if (run.result?.blockConfirmed !== true || !/^joppa-[0-9a-f]{32}$/.test(run.executionId || '') ||
+        typeof run.config?.worktreeRoot !== 'string' || typeof config.worktreeRoot !== 'string' ||
+        path.resolve(run.config.worktreeRoot) !== path.resolve(config.worktreeRoot)) return false;
+    try { fs.lstatSync(path.join(config.worktreeRoot, run.executionId)); return true; }
+    catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   });
   const busy = new Set(reservations.map(run => run.joppaWorker?.actor));
   let available = 0, held = 0;
@@ -126,8 +134,8 @@ export async function nextTask(config) {
       throw new Error('Task needs a requirement ancestor');
     };
     const occupied = new Set();
-    for (const run of reservations) {
-      if (!run.joppaWorker) continue;
+    for (const run of [...reservations, ...retained]) {
+      if (!run.joppaWorker && !run.config?.joppa) continue;
       const repository = run.repositoryId || run.repository?.id || run.claim?.ticket?.repository;
       const context = run.requirement && repository ? {requirement: run.requirement, repository} : await group(run.task);
       occupied.add(`${context.requirement}\n${context.repository}`);
@@ -135,7 +143,7 @@ export async function nextTask(config) {
     let heldCursor;
     do {
       const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
-        view: 'all', limit: 100, ...(heldCursor ? {cursor: heldCursor} : {})});
+        purpose: 'implementation', view: 'all', limit: 100, ...(heldCursor ? {cursor: heldCursor} : {})});
       for (const task of page.tasks) {
         if (task.status !== 'in_progress' && !task.assignee) continue;
         if (task.status === 'done' || task.status === 'retired') continue;
