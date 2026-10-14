@@ -71,12 +71,12 @@ async function packageFixture(t, mode = 'success') {
             blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};
           return {command: {...command, id: command.id.split(':')[1]}, object: null, position: index + 1};
         })};
-        if (['postclaim-race', 'release-unknown'].includes(mode) && args.operations[0].command.op === 'claim_task') {
+        if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && args.operations[0].command.op === 'claim_task') {
           const foreign = structuredClone(objects.get('task:t1'));
           foreign.address = 'task:foreign';
           foreign.document.data.projects = ['project:other'];
           foreign.document.data.contract = 'Repository: app\nModule: unconfigured';
-          foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+          foreign.process = {status: 'in_progress', assignee: mode === 'sameactor-race' ? 'lane-1' : 'foreign-worker'};
           objects.set(foreign.address, foreign);
           queue.push(foreign.address);
         }
@@ -148,7 +148,7 @@ for (const configured of [false, true]) test(`Joppa package scans cross-project 
   assert.equal(scans.find(call => call.args.view === 'available').args.project, 'project:app');
 });
 
-for (const mode of ['postclaim-race', 'release-unknown']) test(`Joppa package ${mode} stops its worker before shell startup`, async t => {
+for (const mode of ['postclaim-race', 'sameactor-race', 'release-unknown']) test(`Joppa package ${mode} stops its worker before shell startup`, async t => {
   const f = await packageFixture(t, mode), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
   fs.mkdirSync(bins);
   fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
@@ -156,14 +156,14 @@ for (const mode of ['postclaim-race', 'release-unknown']) test(`Joppa package ${
   const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
   assert.equal(result.code, 2, result.stderr);
   assert.equal(fs.existsSync(marker), false);
-  const saved = read(f.stateFile), confirmed = mode === 'postclaim-race';
+  const saved = read(f.stateFile), confirmed = mode !== 'release-unknown';
   assert.deepEqual(saved.releaseRequest.operations.map(item => item.command.id), ['task:t1', 'task:t2']);
   assert.equal(saved.releaseConfirmed === true, confirmed);
   assert.equal(saved.result.released, confirmed);
   assert.equal(saved.result.held, !confirmed);
   assert.equal(saved.result.blocked, false);
   assert.equal(runHoldsTasks(saved), !confirmed);
-  assert.equal(f.objects.get('task:foreign').process.assignee, 'foreign-worker');
+  assert.equal(f.objects.get('task:foreign').process.assignee, mode === 'sameactor-race' ? 'lane-1' : 'foreign-worker');
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 2);
   assert.equal(saved.completionRequest, undefined);
   assert.equal(saved.blockRequest, undefined);
