@@ -2,10 +2,11 @@
 import json
 import fcntl
 import os
+import re
 from pathlib import Path
 
 from common import digest, read, require, text, validate_input
-from mcp import Joppa
+from mcp import Joppa, Rejected
 
 
 def configuration(path):
@@ -47,6 +48,50 @@ def configuration(path):
 
 def client(config):
     return Joppa(config["url"], config["token_file"])
+
+
+def pending_work(api, config, assignment):
+    for attempt in range(3):
+        try:
+            return pending_work_page(api, config, assignment)
+        except Rejected as error:
+            if "task queue changed; start again without cursor" not in str(error) or attempt == 2:
+                raise
+
+
+def pending_work_page(api, config, assignment):
+    """Locate unfinished work across Requirements. Full reads still bind reuse and dependencies."""
+    visible = set(assignment["joppa"]["objects"])
+    projects = {name for repo in config["repositories"] for name in (repo["project"], repo["project"].split(":", 1)[1])}
+    result, cursor = [], None
+    while True:
+        args = {"workspace": config["workspace"], "view": "all", "limit": 100}
+        if cursor:
+            args["cursor"] = cursor
+        page = api.call("joppa_tasks", args)
+        for task in page["tasks"]:
+            address = task.get("address") or f"task:{task['req']}/{task['id']}"
+            if task["status"] in ("done", "retired") or address in visible:
+                continue
+            if not projects.intersection(task.get("projects", [])):
+                continue
+            contract = task.get("contract", "")
+            def field(name):
+                match = re.search(r"^" + name + r":[ \t]*([^\r\n]+)$", contract, re.M)
+                return match[1].strip() if match else None
+            how = re.search(r"^How:\s*\n(.*?)(?:\nChecks:|\Z)", contract, re.M | re.S)
+            ac = task.get("parent") or task.get("ac")
+            req = task.get("req")
+            legacy_ac = task.get("ac")
+            if not req and isinstance(legacy_ac, str) and "/" in legacy_ac:
+                req = legacy_ac.removeprefix("ac:").split("/", 1)[0]
+            result.append({"address": address, "revision": task["revision"], "title": task["title"],
+                "ac": ac, "requirement": req, "status": task["status"],
+                "repository": field("Repository"), "module": field("Module"),
+                "how": " ".join(how[1].split()) if how else None})
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return result
 
 
 def object_read(api, workspace, address):
