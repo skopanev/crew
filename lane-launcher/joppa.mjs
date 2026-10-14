@@ -87,10 +87,53 @@ export function api(config, worker, tool, arguments_, {signal} = {}) {
 }
 
 export function runHoldsTasks(run) {
+  if (run.releaseConfirmed === true) return false;
   if (!run.result || run.result.held || run.claimRequest && !run.claim && !run.claimRejected) return true;
   if (run.claim && !run.result.completed && !run.result.blockConfirmed) return true;
   return Boolean(run.completionRequest && !run.result.completed || run.blockRequest && !run.result.blockConfirmed ||
     run.result.blocked && !run.result.blockConfirmed || /JOPPA_OUTCOME_UNCONFIRMED/.test(run.result.error || ''));
+}
+
+async function occupancyReader(config, worker) {
+  const schema = await api(config, worker, 'joppa_tree', {workspace: config.workspace}), objects = new Map();
+  const object = async address => {
+    if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
+    const current = await objects.get(address);
+    require(current?.address === address && current.document?.present === true && current.historical === false,
+      'Task ownership context is absent or historical');
+    return current;
+  };
+  const group = async address => {
+    const current = await object(address), contract = current.document.data?.contract;
+    const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
+    const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
+    if (!configured.length) return null;
+    require(declarations.length === 1, 'Held Task repository declaration is ambiguous');
+    const repository = configured[0][1].trim(), seen = new Set();
+    let parent = current.document.parent;
+    while (parent) {
+      require(!seen.has(parent), 'Task parent context contains a cycle');
+      seen.add(parent);
+      const context = await object(parent);
+      if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
+      parent = context.document.parent;
+    }
+    throw new Error('Task needs a requirement ancestor');
+  };
+  return {object, group};
+}
+
+async function heldTasks(config, worker, visit) {
+  let cursor;
+  do {
+    const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace,
+      purpose: 'implementation', view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
+    for (const task of page.tasks) {
+      if (task.status === 'done' || task.status === 'retired' || task.status !== 'in_progress' && !task.assignee) continue;
+      await visit(task);
+    }
+    cursor = page.next_cursor;
+  } while (cursor);
 }
 
 export async function nextTask(config) {
@@ -113,45 +156,18 @@ export async function nextTask(config) {
     const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
     if (mine.total) { held++; continue; }
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
-    const eligible = [], objects = new Map();
-    const schema = await api(config, worker, 'joppa_tree', {workspace: config.workspace});
-    const object = async address => {
-      if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
-      return objects.get(address);
-    };
-    const group = async address => {
-      const current = await object(address), input = taskInput(config, current), seen = new Set();
-      let parent = current.document.parent;
-      while (parent) {
-        require(!seen.has(parent), 'Task parent context contains a cycle');
-        seen.add(parent);
-        const context = await object(parent);
-        require(context.address === parent && context.document?.present === true && context.historical === false,
-          'Task parent context is absent or historical');
-        if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository: input.repo.id};
-        parent = context.document.parent;
-      }
-      throw new Error('Task needs a requirement ancestor');
-    };
+    const eligible = [], {object, group} = await occupancyReader(config, worker);
     const occupied = new Set();
     for (const run of [...reservations, ...retained]) {
       if (!run.joppaWorker && !run.config?.joppa) continue;
       const repository = run.repositoryId || run.repository?.id || run.claim?.ticket?.repository;
       const context = run.requirement && repository ? {requirement: run.requirement, repository} : await group(run.task);
-      occupied.add(`${context.requirement}\n${context.repository}`);
+      if (context) occupied.add(`${context.requirement}\n${context.repository}`);
     }
-    let heldCursor;
-    do {
-      const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
-        purpose: 'implementation', view: 'all', limit: 100, ...(heldCursor ? {cursor: heldCursor} : {})});
-      for (const task of page.tasks) {
-        if (task.status !== 'in_progress' && !task.assignee) continue;
-        if (task.status === 'done' || task.status === 'retired') continue;
-        const context = await group(task.address);
-        occupied.add(`${context.requirement}\n${context.repository}`);
-      }
-      heldCursor = page.next_cursor;
-    } while (heldCursor);
+    await heldTasks(config, worker, async task => {
+      const context = await group(task.address);
+      if (context) occupied.add(`${context.requirement}\n${context.repository}`);
+    });
     let cursor;
     do {
       const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
@@ -161,6 +177,7 @@ export async function nextTask(config) {
         require(text(task.address) && Number.isSafeInteger(task.revision), 'Joppa returned an invalid Task');
         const current = await object(task.address);
         require(current.address === task.address && current.current_revision === task.revision, 'Task changed during queue selection');
+        taskInput(config, current);
         const context = await group(task.address);
         if (!occupied.has(`${context.requirement}\n${context.repository}`)) eligible.push({...task, ...context});
       }
@@ -316,10 +333,55 @@ export async function claimTask(run, persist) {
   // Keep the original receipt fields for readers of single-Task runs.
   if (objects.length === 1) Object.assign(run.claim, run.claim.tasks[0]);
   persist();
+  await guardTaskClaims(run, persist);
   return run.claim;
 }
 
+export async function guardTaskClaims(run, persist) {
+  require(run.releaseConfirmed !== true, 'PACKAGE_CLAIMS_RELEASED: This run no longer holds its Tasks');
+  require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Inspect the saved release request before retrying');
+  const reader = await occupancyReader(run.config, run.joppaWorker), claims = claimTasks(run), objects = [];
+  const context = await reader.group(claims[0].address);
+  require(context, 'Claimed Task repository is not configured');
+  for (const claim of claims) {
+    const object = await reader.object(claim.address);
+    require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress',
+      'Task holder changed before lane startup; claims remain held for inspection');
+    objects.push(object);
+  }
+  let conflict;
+  await heldTasks(run.config, run.joppaWorker, async task => {
+    const other = await reader.group(task.address);
+    if (!other || other.requirement !== context.requirement || other.repository !== context.repository) return;
+    const object = await reader.object(task.address), actor = object.process?.assignee;
+    if (actor && actor !== run.joppaWorker.actor && object.process.status === 'in_progress') {
+      conflict ||= {address: object.address, actor, ...other};
+    }
+  });
+  if (!conflict) return;
+  run.claimConflict = conflict;
+  run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
+    revision: object.current_revision, reason: `Another actor holds ${conflict.address} in this Requirement and repository. Lane did not start.`})));
+  persist();
+  try { await mutateTasks(run, run.releaseRequest); }
+  catch (error) { throw new Error(`PACKAGE_RELEASE_UNCONFIRMED: ${error.message}`); }
+  run.releaseResults = [];
+  for (const claim of claims) {
+    const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
+    require(current.address === claim.address && current.historical === false && current.document?.present === true &&
+      Number.isSafeInteger(current.current_revision) && current.process?.status === 'open' &&
+      current.process.assignee === null && !current.process.claim && !current.process.done && !current.process.retired,
+      'PACKAGE_RELEASE_UNCONFIRMED: Joppa did not confirm every Task as current and unclaimed');
+    run.releaseResults.push({address: claim.address, revision: current.current_revision, status: 'open'});
+  }
+  run.releaseConfirmed = true;
+  persist();
+  throw new Error(`PACKAGE_ALREADY_HELD: ${conflict.address} belongs to ${conflict.actor}; this run released its own Tasks before startup`);
+}
+
 export async function finishTask(run, stateFile, result, artifacts) {
+  if (run.releaseConfirmed === true) return;
+  require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Tasks remain held for inspection');
   if (!run.claim) return;
   const persist = () => save(stateFile, run);
   const claims = claimTasks(run);
