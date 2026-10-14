@@ -156,6 +156,7 @@ def binding_checks(plan, assignment):
             paths.add(relative)
         require(parts[0] in {relative for relative, _ in citations}, "cite an assertion in the bound test file")
         require(paths - {parts[0]}, "cite a covered implementation file")
+        paths.add(str(Path(parts[0]).parent))
         source = check.get("source_ac", assignment["ac"]["id"])
         require(source in assignment["joppa"]["objects"], "test source AC must be read in the current context")
         result.append((repo, address, source, sorted(paths)))
@@ -166,6 +167,9 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
     """Read execution evidence and verify its cited source before a binding write."""
     statuses = {}
     for repo, address, source, paths in binding_checks(plan, assignment):
+        snapshot = snapshots.get(repo["id"], {})
+        baseline = (prepared or snapshots).get(repo["id"], {})
+        require(snapshot.get("head") and baseline.get("head"), "test evidence repository snapshot is missing")
         if source not in statuses:
             statuses[source] = api.call("joppa_tests", {"workspace": config["workspace"], "ac": source})
         status = statuses[source]
@@ -175,15 +179,15 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
         commit = row.get("commit")
         require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit),
                 "test execution evidence needs a commit")
-        head = snapshots[repo["id"]]["head"]
+        head = snapshot["head"]
         run(["git", "-C", repo["path"], "merge-base", "--is-ancestor", commit, head])
         run(["git", "-C", repo["path"], "diff", "--quiet", commit, head, "--", *paths])
         if prepared:
-            run(["git", "-C", repo["path"], "diff", "--quiet", prepared[repo["id"]]["head"], head, "--", *paths])
+            run(["git", "-C", repo["path"], "diff", "--quiet", baseline["head"], head, "--", *paths])
     require(not any(item.get("status") in ("fail", "missing")
                     for item in assignment["joppa"]["test_status"]["tests"]),
             "existing criterion tests contain a failure or missing result")
-    require(all(fingerprint(repo) == snapshots[repo["id"]] for repo in assignment["repositories"]),
+    require(all(fingerprint(repo) == snapshots.get(repo["id"]) for repo in assignment["repositories"]),
             "source changed while checking existing test evidence")
 
 

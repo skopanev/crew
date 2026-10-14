@@ -331,22 +331,29 @@ class ProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             data, value = assignment(), plan()
             data["repositories"][0]["path"] = directory
-            test = Path(directory) / "checks.rs"
+            (Path(directory) / "checks").mkdir()
+            test = Path(directory) / "checks/checks.rs"
             test.write_text("assert!(required_behavior());\n")
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
             value.update(disposition="verify_existing", tasks=[])
-            value["acceptance_checks"][0].update(test="checks.rs > required_behavior",
-                evidence="service:checks.rs:1; service:implementation.rs:1")
+            value["acceptance_checks"][0].update(test="checks/checks.rs > required_behavior",
+                evidence="service:checks/checks.rs:1; service:implementation.rs:1")
             status = data["joppa"]["test_status"]
-            status.update(tests=[{"address": "checks.rs > other"}], tests_revision=4)
+            status.update(tests=[{"address": "checks/checks.rs > other"}], tests_revision=4)
             ops = publication.operations(value, data)
             self.assertEqual([op["command"]["op"] for op in ops], ["set_ac_tests", "finish_planning"])
-            self.assertEqual(ops[0]["command"]["tests"], ["checks.rs > other", "checks.rs > required_behavior"])
+            self.assertEqual(ops[0]["command"]["tests"], ["checks/checks.rs > other", "checks/checks.rs > required_behavior"])
             self.assertEqual(ops[0]["command"]["revision"], 4)
-            status["tests"].append({"address": "checks.rs > required_behavior"})
+            status["tests"].append({"address": "checks/checks.rs > required_behavior"})
             self.assertEqual(len(publication.operations(value, data)), 1)
             status["tests_draft"] = True
             self.assertEqual(len(publication.operations(value, data)), 2)
+            retire = deepcopy(plan()["tasks"][0])
+            retire.update(action="retire", target="work:old", revision=3)
+            data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+            value["tasks"] = [retire]
+            self.assertEqual([op["command"]["op"] for op in publication.operations(value, data)],
+                             ["retire_task", "set_ac_tests", "finish_planning"])
 
     def test_binding_requires_execution_evidence_and_unchanged_cited_source(self):
         from common import fingerprint
@@ -355,20 +362,23 @@ class ProviderTests(unittest.TestCase):
             data["repositories"][0]["path"] = directory
             git = lambda *args: subprocess.check_output(["git", "-C", directory, *args], text=True).strip()
             git("init", "-q")
-            test = Path(directory) / "checks.rs"
+            (Path(directory) / "checks").mkdir()
+            test = Path(directory) / "checks/checks.rs"
             test.write_text("assert!(required_behavior());\n")
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
             git("add", ".")
             git("-c", "user.name=proof", "-c", "user.email=proof@local", "commit", "-qm", "fixture")
             commit = git("rev-parse", "HEAD")
             value.update(disposition="verify_existing", tasks=[])
-            value["acceptance_checks"][0].update(test="checks.rs > required_behavior",
-                evidence="service:checks.rs:1; service:implementation.rs:1")
-            row = {"address": "checks.rs > required_behavior", "status": "pass", "commit": commit}
+            value["acceptance_checks"][0].update(test="checks/checks.rs > required_behavior",
+                evidence="service:checks/checks.rs:1; service:implementation.rs:1")
+            row = {"address": "checks/checks.rs > required_behavior", "status": "pass", "commit": commit}
             data["joppa"]["test_status"]["tests"] = [row]
             snap = {"service": fingerprint(data["repositories"][0])}
             api = Fake(result=data["joppa"]["test_status"])
             publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            with self.assertRaisesRegex(ValueError, "snapshot is missing"):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, {})
             row["status"] = "not_run"
             with self.assertRaisesRegex(ValueError, "passing result missing"):
                 publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
