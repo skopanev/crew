@@ -67,6 +67,28 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old, current = root / "older/artifacts", root / "current/artifacts"
+            old.mkdir(parents=True)
+            current.mkdir(parents=True)
+            (old / "claim.json").write_text(json.dumps({"status": "confirmed", "server": "https://example.invalid/mcp",
+                "arguments": {"workspace": "example", "operations": [
+                    {"command": {"op": "claim_planning", "ac": address}} for address in ("criterion:a", "criterion:b")]}}))
+            release = {"status": "confirmed", "released": ["criterion:b"],
+                       "skipped_claims": [{"ac": "criterion:a", "unknown": True, "reason": "planning claim could not be read"}]}
+            (old / "release.json").write_text(json.dumps(release))
+            def check(address):
+                publication.ensure_recovered(root, current, "https://example.invalid/mcp", "example", address)
+            with self.assertRaisesRegex(ValueError, "claim or publication needs recovery"):
+                check("criterion:a")
+            check("criterion:b")
+            release["skipped_claims"][0].pop("unknown")
+            release["skipped_claims"][0]["reason"] = "planning claim is missing or replaced"
+            (old / "release.json").write_text(json.dumps(release))
+            check("criterion:a")
+
     def test_requirement_packages_keep_order_without_internal_dependency_links(self):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})

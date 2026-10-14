@@ -48,7 +48,9 @@ def ensure_recovered(root, current, server, workspace, ac):
         require(not any(item.get("status") in ("pending", "uncertain") for item in receipts),
                 f"earlier run needs receipt recovery: {target}")
         if claim.get("status") == "confirmed":
-            released = (target / "release.json").exists() and read(target / "release.json").get("status") == "confirmed"
+            release = read(target / "release.json") if (target / "release.json").exists() else {}
+            released = release.get("status") == "confirmed" and not any(
+                item.get("ac") == ac and item.get("unknown") for item in release.get("skipped_claims", []))
             finished = (target / "result.json").exists() and read(target / "result.json").get("status") == "published"
             require(released or finished, f"earlier claim or publication needs recovery: {target}")
 
