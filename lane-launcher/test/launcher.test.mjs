@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read, laneArgs} from '../runtime.mjs';
-import {claimTask, finishTask, nextTask, executionId} from '../joppa.mjs';
+import {claimTask, finishTask, nextTask, executionId, runHoldsTasks} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
@@ -49,10 +49,15 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
         purpose: objects.get(address).document.data.purpose,
+        projects: objects.get(address).document.data.projects || ['project:app'],
         status: objects.get(address).process.status, assignee: objects.get(address).process.assignee}))
         .filter(task => !args.purpose || task.purpose === args.purpose)
+        .filter(task => !args.project || task.projects.includes(args.project))
         .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
     else if (name === 'joppa_batch') {
+      if (mode === 'release-unknown' && args.operations[0].command.op === 'release_task') {
+        res.destroy(); return;
+      }
       if (mode === 'reject' || mode === 'outcome-reject' && args.operations[0].command.op !== 'claim_task') {
         rejected = true; value = {error: 'operation 2 revision changed'};
       }
@@ -61,10 +66,20 @@ async function packageFixture(t, mode = 'success') {
           const object = objects.get(command.id);
           if (command.op === 'claim_task') object.process = {status: 'in_progress', assignee: 'lane-1'};
           if (command.op === 'complete_task') object.process = {status: 'done', assignee: null, done: true};
+          if (command.op === 'release_task') object.process = {status: 'open', assignee: null, claim: null};
           if (command.op === 'block_task') object.process = {status: 'open', assignee: null,
             blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};
           return {command: {...command, id: command.id.split(':')[1]}, object: null, position: index + 1};
         })};
+        if (['postclaim-race', 'release-unknown'].includes(mode) && args.operations[0].command.op === 'claim_task') {
+          const foreign = structuredClone(objects.get('task:t1'));
+          foreign.address = 'task:foreign';
+          foreign.document.data.projects = ['project:other'];
+          foreign.document.data.contract = 'Repository: app\nModule: unconfigured';
+          foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+          objects.set(foreign.address, foreign);
+          queue.push(foreign.address);
+        }
         if (mode === 'incomplete') value.results.pop();
       }
     }
@@ -118,6 +133,65 @@ for (const sameRepository of [false, true]) test(`Joppa package detects remote h
   const selected = await nextTask(f.run.config);
   if (sameRepository) assert.equal(selected.candidate, null);
   else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+});
+
+for (const configured of [false, true]) test(`Joppa package scans cross-project holders; configured repository=${configured}`, async t => {
+  const f = await packageFixture(t), foreign = f.objects.get('task:t2');
+  foreign.document.data.projects = ['project:other'];
+  foreign.document.data.contract = `Repository: ${configured ? 'app' : 'unconfigured'}\nModule: absent`;
+  foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+  const selected = await nextTask(f.run.config);
+  if (configured) assert.equal(selected.candidate, null);
+  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  const scans = f.calls.filter(call => call.name === 'joppa_tasks');
+  assert.equal(scans.find(call => call.args.view === 'all').args.project, undefined);
+  assert.equal(scans.find(call => call.args.view === 'available').args.project, 'project:app');
+});
+
+for (const mode of ['postclaim-race', 'release-unknown']) test(`Joppa package ${mode} stops its worker before shell startup`, async t => {
+  const f = await packageFixture(t, mode), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
+  fs.mkdirSync(bins);
+  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
+  f.persist();
+  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
+  assert.equal(result.code, 2, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const saved = read(f.stateFile), confirmed = mode === 'postclaim-race';
+  assert.deepEqual(saved.releaseRequest.operations.map(item => item.command.id), ['task:t1', 'task:t2']);
+  assert.equal(saved.releaseConfirmed === true, confirmed);
+  assert.equal(saved.result.released, confirmed);
+  assert.equal(saved.result.held, !confirmed);
+  assert.equal(saved.result.blocked, false);
+  assert.equal(runHoldsTasks(saved), !confirmed);
+  assert.equal(f.objects.get('task:foreign').process.assignee, 'foreign-worker');
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 2);
+  assert.equal(saved.completionRequest, undefined);
+  assert.equal(saved.blockRequest, undefined);
+  assert.equal(saved.failureRequest, undefined);
+});
+
+test('Joppa package legacy adopted claim runs the ownership guard before startup', async t => {
+  const f = await packageFixture(t);
+  f.run.tasks = [f.run.tasks[0]];
+  f.run.executionId = executionId(f.run.task);
+  await claimTask(f.run, f.persist);
+  delete f.run.claimRequest;
+  delete f.run.claim.tasks;
+  delete f.run.requirement;
+  const foreign = f.objects.get('task:t2');
+  foreign.document.data.projects = ['project:other'];
+  foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+  const bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
+  fs.mkdirSync(bins);
+  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
+  f.persist();
+  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
+  assert.equal(result.code, 2, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const saved = read(f.stateFile);
+  assert.equal(saved.releaseConfirmed, true);
+  assert.deepEqual(saved.releaseResults.map(task => task.address), ['task:t1']);
+  assert.equal(foreign.process.assignee, 'foreign-worker');
 });
 
 test('Joppa package ignores held Tasks for another purpose without an implementation contract', async t => {

@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
-import {claimTask, finishTask, noteHeldTask} from './joppa.mjs';
+import {claimTask, guardTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -57,6 +57,7 @@ try {
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   announce(`[lane] CLAIM ${run.ticket}`);
+  const adoptedJoppaClaim = joppa && Boolean(run.claim);
   const claimed = run.claim || await (joppa ? claimTask(run, () => save(stateFile, run)) : claimTicket(run.ticket, run.workspace));
   if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
       String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
@@ -66,6 +67,7 @@ try {
   }
   run.claim = {...claimed, workspace: run.workspace};
   save(stateFile, run);
+  if (adoptedJoppaClaim) await guardTaskClaims(run, () => save(stateFile, run));
   announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (joppa) {
     run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
@@ -167,7 +169,12 @@ try {
       }
     } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }
   }
-  if (joppa) {
+  if (joppa && run.releaseRequest) {
+    result.released = run.releaseConfirmed === true;
+    result.held = !result.released;
+    result.blocked = false;
+    announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · package ownership conflict; lane did not start`);
+  } else if (joppa) {
     try {
       artifacts ||= fs.existsSync(run.runFolder) ? fs.readdirSync(run.runFolder).sort().reverse()
         .map(name => path.join(run.runFolder, name, 'artifacts'))
