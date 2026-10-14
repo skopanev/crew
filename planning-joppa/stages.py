@@ -67,6 +67,9 @@ def prepare():
     assignment, snapshot, ac = (context.load_requirement(api, config, requirement) if requirement
                                 else context.load(api, config, os.environ["PLANNING_JOPPA_AC"]))
     criteria = context.selected_criteria(assignment)
+    require(not config.get("ac_ids") or {item["id"] for item in criteria}.issubset(config["ac_ids"]),
+            "selected criteria are outside config.ac_ids")
+    context.planning_idle(api, config, assignment)
     for criterion in criteria:
         publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], criterion["id"])
     write(target / "input.json", assignment)
@@ -85,6 +88,9 @@ def prepare():
     fresh, current, current_ac = (context.load_requirement(api, config, requirement, [item["id"] for item in criteria])
                                   if requirement else context.load(api, config, ac["address"]))
     context.unchanged(snapshot, current)
+    context.planning_idle(api, config, fresh, {
+        address: {"actor": holders[address], "position": position}
+        for address, position, _ in publication.claim_entries(claim)})
     if not requirement and retry_startup(api, config, target, fresh, current_ac, advertised):
         return
     assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
@@ -251,6 +257,9 @@ def finish():
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     publication.held_claims(api, config["workspace"], claim)
+    context.planning_idle(api, config, fresh, {
+        address: {"actor": actor, "position": position}
+        for address, position, actor in publication.claim_entries(claim)})
     verify_bindings(api, config, plan, fresh, snapshots, None)
     operations = publication.operations(plan, fresh)
     blocked = any(isinstance(task["process"].get("blocked"), dict)

@@ -57,10 +57,13 @@ Restart to try the same unchanged input again.
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
 Requirement planning selects all current ready ACs under one schema Requirement.
-It excludes green ACs, active worker claims and unmet external dependencies.
+It obeys `ac_ids` and excludes green ACs, active worker claims and all unmet blocking dependencies.
+This includes dependencies on sibling ACs. A later package plans them after their prerequisites finish.
 It reads the Requirement, selected ACs, parents, decisions and existing related Tasks in one native run.
 Each planned Task keeps its AC parent. Publication groups execution by repository without creating package objects.
-Task titles preserve execution order as `[01]`, `[02]` within each repository package.
+Task titles preserve execution order with numeric prefixes within each repository package.
+New indices follow retained unfinished Tasks' numeric prefixes. Nonselected legacy Tasks keep their deterministic fallback order.
+Dependencies on retained Tasks stay external prerequisites. A plan cannot reverse their approved order.
 The package coder executes that order. Same-package Tasks do not receive blocking `depends_on` links.
 External dependencies, including other repository packages, remain explicit.
 Every selected AC has its own implementation or existing-test-binding disposition and observable acceptance checks.
