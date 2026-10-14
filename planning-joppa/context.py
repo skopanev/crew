@@ -19,6 +19,14 @@ def configuration(path):
             continue
         value = Path(config[key]).expanduser()
         config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
+    require(bool(config.get("worktree_root")) == bool(config.get("lane_runs_folder")),
+            "worktree_root and lane_runs_folder must be configured together")
+    for key in ("worktree_root", "lane_runs_folder"):
+        if key not in config:
+            continue
+        value = Path(text(config[key], "config." + key)).expanduser()
+        require(".." not in value.parts, "cleanup path cannot contain parent traversal")
+        config[key] = str(value if value.is_absolute() else root / value)
     for repo in config["repositories"]:
         text(repo.get("project"), "repository.project address")
         require(":" in repo["project"], "repository.project must be a full object address")
@@ -26,6 +34,9 @@ def configuration(path):
         repo["path"] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
     require(len({r["id"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate repository ID")
     require(len({r["project"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate project mapping")
+    if config.get("worktree_root"):
+        require(all(not Path(repo["path"]).is_relative_to(Path(config["worktree_root"]))
+                    for repo in config["repositories"]), "worktree_root cannot contain a canonical repository")
     require(all(not Path(config["runs_folder"]).is_relative_to(Path(r["path"])) for r in config["repositories"]),
             "runs_folder must be outside inspected repositories")
     placeholder = {"id": "config-check", "text": "Validate configuration.", "revision": 1}

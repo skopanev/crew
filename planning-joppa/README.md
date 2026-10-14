@@ -83,6 +83,11 @@ Crew planning updates only unclaimed implementation Tasks.
 It can retire a blocked, unclaimed Task under the held AC.
 The same publication removes blocking links to that Task from remaining Tasks.
 It preserves completed and retired Tasks.
+Before publication reopens a blocked Task, the planner discards its retained checkout.
+Set `worktree_root` to the Dolber worktree root and `lane_runs_folder` to its dispatcher runs directory.
+Cleanup requires a block Run ID and finished failed lane receipts for that Task.
+Active, held and unconfirmed successful runs prevent cleanup. The planner never archives the checkout.
+It deletes no checkout unless the publication updates or retires its blocked Task.
 It skips unchanged documents and pins dependencies from the fresh context.
 Before each claim, it checks previous receipts for this endpoint, workspace and AC.
 Unresolved receipts block a new run. They require explicit recovery.

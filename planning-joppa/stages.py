@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
-from common import digest, read, require, signal, write
+from common import digest, read, require, run, signal, write
 import stages as shared
 import context
 import publication
@@ -163,6 +163,9 @@ def finish():
               "acceptance_verified": False, "claim_released": True, "task_count": 0})
         signal("READY", "Existing Task contracts match the reviewed plan. Planning claim released.")
         return
+    if blocked and len(operations) > 1:
+        print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))],
+            input=json.dumps({"config": config, "tasks": fresh["joppa"]["tasks"], "operations": operations}), timeout=120), end="")
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
         "workspace": config["workspace"], "operations": operations}, retain_claim=blocked)
     results = result.get("results")
