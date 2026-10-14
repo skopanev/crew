@@ -2,6 +2,8 @@
 
 Status: live publication and lane completion passed before native context reads were added.
 Native reads pass on four providers. Full native planning publication remains unverified.
+Whole-Requirement planning requires deployed multi-AC planning claims and test-only publication support.
+Its provider checks pass. A live grouped run has not passed yet.
 Task completion does not confirm criterion acceptance.
 
 Run from the Crew repository:
@@ -9,6 +11,7 @@ Run from the Crew repository:
 ```sh
 sh ./planning-joppa/run.sh --config /path/to/private/config.json --ac-id ac:criterion-id --dry-run
 sh ./planning-joppa/run.sh --config /path/to/private/config.json --ac-id ac:criterion-id
+sh ./planning-joppa/run.sh --config /path/to/private/config.json --req-id requirement:requirement-id
 ```
 
 Use `config.example.json` as the shape of the private configuration.
@@ -25,11 +28,12 @@ sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json
 sh ./lane-launcher/planner-joppa.sh /path/to/private/config.json --ac-id ac:criterion-id
 ```
 
-The first command selects ready ACs and plans one at a time. The second starts one AC.
+The first command groups ready ACs by their schema Requirement and starts one Requirement at a time.
+The second command preserves explicit one-AC planning. Use `--req-id` to start an explicit Requirement.
 Use `--monitor` to show existing runs without starting work.
 The table shows the start time, AC address and text, status, stage or reason code, run ID and elapsed time.
 Active runs appear first. The screen updates every five seconds.
-Use `--once` to select at most one AC and exit after it finishes.
+Use `--once` to select at most one Requirement and exit after it finishes.
 Use `--monitor --once` for one display snapshot.
 The table reads existing Medulla journals and results. It creates no history database.
 New runs save their output in `output.log` inside the Medulla run folder.
@@ -48,17 +52,26 @@ Within each group, it selects failing AC tests before unverified AC tests.
 An unchanged failed plan stays skipped. A new Task failure permits another planning attempt.
 Set `ac_ids` to an ordered list of full AC addresses to limit automatic planning.
 If `ac_ids` is absent, the loop selects eligible criteria across the workspace.
-It skips an attempted AC revision while its blocked Task revisions remain unchanged.
+It skips an attempted Requirement revision while its candidate AC and blocked Task revisions remain unchanged.
 Restart to try the same unchanged input again.
 Unresolved planning receipts prevent another automatic claim. Recover these receipts first.
 
-The input is one AC. The planner reads its Requirement, parents, decisions and sibling ACs and Tasks.
+Requirement planning selects all current ready ACs under one schema Requirement.
+It excludes green ACs, active worker claims and unmet external dependencies.
+It reads the Requirement, selected ACs, parents, decisions and existing related Tasks in one native run.
+Each planned Task keeps its AC parent. Publication groups execution by repository without creating package objects.
+Task titles preserve execution order as `[01]`, `[02]` within each repository package.
+The package coder executes that order. Same-package Tasks do not receive blocking `depends_on` links.
+External dependencies, including other repository packages, remain explicit.
+Every selected AC has its own implementation or existing-test-binding disposition and observable acceptance checks.
+Claims use one atomic batch. Publication saves Tasks, binds proven tests and finishes changed ACs in one atomic batch.
+Unchanged AC contracts release their claims. The Joppa batch limit remains 100 operations.
+The explicit `--ac-id` input preserves the one-AC path.
 It also lists unfinished Tasks across Requirements in the configured repository projects, with their module and mechanism.
 This list locates possible overlap. A full current object read still verifies reuse and dependencies.
 Shared modules do not require dependencies unless one Task needs another Task's output.
-It reuses sibling Tasks through dependencies. It edits only Tasks under the selected AC.
-One AC is the smallest native planning unit. The planner publishes complete Tasks under that AC.
-The owner prepares smaller ACs when the criterion needs separate planning runs.
+It reuses related Tasks through dependencies. It edits only Tasks under the selected ACs.
+The planner publishes complete implementation mechanisms under their original criteria.
 NTK supports shallow ticket splitting before design in its separate workflow.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
 All planning agents can query Joppa for relevant context across the configured workspace.
@@ -99,7 +112,7 @@ The deployed server keeps Task dependency pins current through claim and complet
 Contract changes and retirement still invalidate those pins.
 Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.
-The planning engine handles one AC per run. The dashboard selects the next AC after each run.
+The dashboard starts the next Requirement after each run. NTK uses its separate, unchanged planner.
 
 Crew planning updates only unclaimed implementation Tasks.
 It can retire a blocked, unclaimed Task under the held AC.

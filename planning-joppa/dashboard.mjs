@@ -38,7 +38,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const result = json(path.join(artifacts, 'result.json'));
       let vars = '', pid;
       try { vars = fs.readFileSync(path.join(folder, 'vars.yaml'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      const ac = input?.ac?.id || /^PLANNING_JOPPA_AC:\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
+      const subject = input?.joppa?.scope === 'requirement' ? input.requirement : input?.ac;
+      const ac = subject?.id || /^PLANNING_JOPPA_(?:REQ|AC):\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
       if (!ac) return [];
       const title = item => {
         if (!item) return '';
@@ -46,7 +47,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         if (data?.title) return data.title;
         try { return JSON.parse(item.text).data?.title || item.id; } catch { return item.id; }
       };
-      const label = input ? title(input.ac) : ac;
+      const label = input ? title(subject) : ac;
       try { pid = Number(fs.readFileSync(path.join(folder, '.lock'), 'utf8').trim()); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const journal = tail(path.join(folder, 'journal.jsonl')).split('\n').flatMap(line => {
         try { return [JSON.parse(line)]; } catch { return []; }
@@ -82,7 +83,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const end = active ? undefined : current?.folder === folder && current.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, acTitle: input ? title(input.ac) : '', ac,
+      return [{ticket: label, acTitle: input ? title(subject) : '', ac,
         runId: match?.[5] || entry.name, start, end, active, status, stage}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
@@ -174,6 +175,41 @@ export async function readyCriteria(config, tokenFile, signal) {
     (ids ? ids.indexOf(a.address) - ids.indexOf(b.address) : 0));
 }
 
+export async function groupRequirements(candidates, read) {
+  const schema = (await read('joppa_tree', {})).schema.types;
+  const objects = new Map(), groups = new Map();
+  const object = async address => {
+    if (!objects.has(address)) objects.set(address, read('joppa_objects', {address}));
+    const result = await objects.get(address);
+    if (result.address !== address || result.document?.present !== true || result.historical !== false ||
+        !Number.isSafeInteger(result.current_revision)) throw new Error('Requirement selection needs current full object reads');
+    return result;
+  };
+  for (const candidate of candidates) {
+    let current = await object(candidate.address);
+    const seen = new Set();
+    while (schema[current.kind]?.role !== 'requirement') {
+      if (seen.has(current.address)) throw new Error('Requirement parent chain contains a cycle');
+      seen.add(current.address);
+      if (!current.document.parent) throw new Error('Criterion has no schema Requirement ancestor');
+      current = await object(current.document.parent);
+    }
+    const group = groups.get(current.address) || {address: current.address, revision: current.current_revision,
+      title: current.document.data.title || current.address, members: []};
+    group.members.push(candidate.attemptKey);
+    groups.set(current.address, group);
+  }
+  return [...groups.values()].map(({members, ...item}) => ({...item,
+    attemptKey: JSON.stringify([item.address, item.revision, members.sort()])}));
+}
+
+export async function readyRequirements(config, tokenFile, signal) {
+  const candidates = await readyCriteria(config, tokenFile, signal);
+  if (!candidates.length) return [];
+  return groupRequirements(candidates, (tool, args) => api({joppa: {url: config.url}}, {tokenFile}, tool,
+    {workspace: config.workspace, ...args}, {signal}));
+}
+
 export async function main(argv) {
   const positional = argv[0] && !argv[0].startsWith('--') ? argv.shift() : null;
   const option = name => {
@@ -186,13 +222,15 @@ export async function main(argv) {
   };
   const file = option('--config') || positional;
   const ac = option('--ac-id');
+  const requirement = option('--req-id');
   const once = argv.includes('--once');
   const monitor = argv.includes('--monitor');
   const dryRun = argv.includes('--dry-run');
-  if (!file || argv.some(value => !['--once', '--dry-run', '--monitor'].includes(value)) || monitor && ac) {
-    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--ac-id AC | --monitor] [--once] [--dry-run]');
+  if (!file || argv.some(value => !['--once', '--dry-run', '--monitor'].includes(value)) ||
+      Number(Boolean(ac)) + Number(Boolean(requirement)) + Number(monitor) > 1) {
+    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--req-id REQ | --ac-id AC | --monitor] [--once] [--dry-run]');
   }
-  if (dryRun && !ac) throw new Error('--dry-run needs --ac-id');
+  if (dryRun && !ac && !requirement) throw new Error('--dry-run needs --req-id or --ac-id');
   const configFile = path.resolve(file);
   const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
   const ids = criterionIds(config);
@@ -204,20 +242,22 @@ export async function main(argv) {
   const interval = config.interval_seconds ?? 60;
   if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
   const tokenFile = config.token_file ? path.resolve(path.dirname(configFile), expand(config.token_file)) : null;
-  if (!ac && !monitor && !tokenFile) throw new Error('Config needs token_file for automatic selection');
-  const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []), ...(dryRun ? ['--dry-run'] : [])];
+  if (!ac && !requirement && !monitor && !tokenFile) throw new Error('Config needs token_file for automatic selection');
+  const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
+    ...(requirement ? ['--req-id', requirement] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {
     const child = spawn('sh', args, {stdio: 'inherit'});
     process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
     return;
   }
-  const state = {message: ac ? `Planning ${ac}` : monitor ? 'Monitoring existing runs' : 'Checking ready criteria', error: null};
+  const state = {message: ac || requirement ? `Planning ${ac || requirement}` :
+    monitor ? 'Monitoring existing runs' : 'Checking ready Requirements', error: null};
   let current = null, screen, child, stopped = false, wake, termination, selection;
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
     const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
-      paint, 6, {identityLabel: 'AC', titleLabel: 'AC TEXT'});
+      paint, 6, {identityLabel: 'REQ / AC', titleLabel: 'TEXT'});
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
@@ -256,15 +296,15 @@ export async function main(argv) {
     if (stopped) wake();
   });
   try {
-    if (!ac && !monitor) {
+    if (!ac && !requirement && !monitor) {
       lock = dispatcherLock(root);
     }
     if (process.stdout.isTTY) screen = createScreen(state, paint, render);
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = ac;
-      if (!ac && !monitor) {
+      let selected = requirement;
+      if (!ac && !requirement && !monitor) {
         current = null;
         state.error = null;
         try {
@@ -272,22 +312,22 @@ export async function main(argv) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
           } else {
             selection = new AbortController();
-            const candidates = await readyCriteria(config, tokenFile, selection.signal);
+            const candidates = await readyRequirements(config, tokenFile, selection.signal);
             selection = null;
             const next = candidates.find(row => !attempted.has(row.attemptKey));
             if (next) {
               selected = next.address;
               attempted.add(next.attemptKey);
               state.message = `Planning ${next.address} · ${next.title}`;
-            } else state.message = `Criteria: ${candidates.length} unstarted · no unattempted criteria · next check in ${interval}s`;
+            } else state.message = `Requirements: ${candidates.length} ready · no unattempted Requirements · next check in ${interval}s`;
           }
         } catch (error) { state.error = `Selection failed: ${error.message}`; }
         if (state.error && once && !stopped) process.exitCode = 2;
         draw();
       }
       if (stopped) break;
-      if (selected) {
-        const runArgs = ac ? args : [...args, '--ac-id', selected];
+      if (ac || selected) {
+        const runArgs = ac || requirement ? args : [...args, '--req-id', selected];
         child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true});
         let pending = '', buffered = '';
         const output = data => {
@@ -318,13 +358,13 @@ export async function main(argv) {
         await termination;
         if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
         if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
-        if (!stopped && (once || ac)) process.exitCode = code ?? 2;
+        if (!stopped && (once || ac || requirement)) process.exitCode = code ?? 2;
         draw();
       }
-      if (once || stopped || ac || monitor) break;
+      if (once || stopped || ac || requirement || monitor) break;
       await pause();
     } while (!stopped);
-    if (!once && !stopped && (ac || monitor)) await new Promise(resolve => { wake = resolve; });
+    if (!once && !stopped && (ac || requirement || monitor)) await new Promise(resolve => { wake = resolve; });
   } finally {
     clearInterval(ticker);
     process.off('SIGINT', interrupt);
