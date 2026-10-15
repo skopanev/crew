@@ -486,6 +486,19 @@ function isImplementTimeout(artifacts) {
   }
 }
 
+function isPrepareFailure(artifacts) {
+  if (!artifacts) return false;
+  try {
+    const origin = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8'));
+    const journal = fs.readFileSync(path.join(path.dirname(artifacts), 'journal.jsonl'), 'utf8')
+      .trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    const preparation = journal.filter(row => row.node === 'prepare');
+    return origin.node === 'prepare' && ['__failed__', '__timeout__', '__default__'].includes(origin.signal) &&
+      journal.every(row => ['prepare', 'notify_failure'].includes(row.node)) && preparation.length === 1 &&
+      journal[0].node === 'prepare' && preparation[0].signal === origin.signal;
+  } catch { return false; }
+}
+
 export async function finishTask(run, stateFile, result, artifacts) {
   if (run.releaseConfirmed === true) return;
   require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Tasks remain held for inspection');
@@ -580,9 +593,14 @@ export async function finishTask(run, stateFile, result, artifacts) {
       objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) &&
       !command('docker', ['ps', '-a', '--filter', `name=${container}`, '--format', '{{.Names}}']);
-    if (startupFailed) {
+    const prepareFailed = result.status === 'failed' && checkout && !fs.existsSync(checkout) &&
+      objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
+      output.includes(`run.sh: removed unused worktree: ${checkout}`) && isPrepareFailure(artifacts);
+    if (startupFailed || prepareFailed) {
       run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
-        revision: object.current_revision, reason: 'Session container never became ready. No native workflow ran; unused checkout removed.'})));
+        revision: object.current_revision, reason: prepareFailed
+          ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
+          : 'Session container never became ready. No native workflow ran; unused checkout removed.'})));
       persist();
       await mutateTasks(run, run.releaseRequest);
       run.releaseResults = [];
