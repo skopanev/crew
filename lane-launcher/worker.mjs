@@ -4,12 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {laneRunFolder} from './scope.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {api, claimTask, guardTaskClaims, releaseTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
-import {requirementPlan} from './requirement-delivery.mjs';
+import {requirementPlan, parsePublication} from './requirement-delivery.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
@@ -57,38 +58,54 @@ process.on('SIGHUP', () => stop('SIGTERM'));
 let result, claimRefused = false;
 let artifacts = null;
 let readerDir;
+let finalizationTicket;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
-  announce(`[lane] CLAIM ${run.ticket}`);
-  const adoptedJoppaClaim = joppa && Boolean(run.claim);
-  const claimed = run.claim || await (joppa ? claimTask(run, () => save(stateFile, run)) : claimTicket(run.ticket, run.workspace));
-  if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
-      String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
-    delete run.claim;
-    claimRefused = true;
-    throw new Error(`${joppa ? 'Joppa' : 'NTK'} did not confirm claim for ${run.ticket}`);
+  if (joppa && run.finalizeOnly) {
+    if (run.config.delivery !== 'requirement') throw new Error('Finalization requires requirement delivery');
+    run.repository = run.config.repositories.find(repo => repo.id === run.repositoryId);
+    if (!run.repository) throw new Error('Finalization repository is not configured');
+    finalizationTicket = {id: run.executionId, source: 'joppa', address: run.requirement,
+      repository: run.repository.id, module: '.', title: `Finalize ${run.requirement}`};
+    announce(`[lane] FINALIZE ${run.requirement} · no Task claim`);
+  } else {
+    announce(`[lane] CLAIM ${run.ticket}`);
+    const adoptedJoppaClaim = joppa && Boolean(run.claim);
+    const claimed = run.claim || await (joppa ? claimTask(run, () => save(stateFile, run)) : claimTicket(run.ticket, run.workspace));
+    if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
+        String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
+      delete run.claim;
+      claimRefused = true;
+      throw new Error(`${joppa ? 'Joppa' : 'NTK'} did not confirm claim for ${run.ticket}`);
+    }
+    run.claim = {...claimed, workspace: run.workspace};
+    save(stateFile, run);
+    if (adoptedJoppaClaim) await guardTaskClaims(run, () => save(stateFile, run));
+    announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   }
-  run.claim = {...claimed, workspace: run.workspace};
-  save(stateFile, run);
-  if (adoptedJoppaClaim) await guardTaskClaims(run, () => save(stateFile, run));
-  announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (joppa) {
     const readJoppa = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
     if (run.config.delivery === 'requirement') {
       run.requirementDelivery = await requirementPlan(run, readJoppa);
       if (run.requirementDelivery.planningHeld) {
-        await releaseTaskClaims(run, () => save(stateFile, run), 'Requirement planning is active; lane did not start.');
+        if (!run.finalizeOnly) await releaseTaskClaims(run, () => save(stateFile, run), 'Requirement planning is active; lane did not start.');
         throw new Error('REQUIREMENT_PLANNING_ACTIVE: wait for the planner to release the Requirement');
       }
+      if (run.finalizeOnly && !run.requirementDelivery.final) throw new Error('REQUIREMENT_CHANGED: unfinished work remains');
       run.deliveryBranch = run.requirementDelivery.branch;
       run.requirementDelivery.head = (await repositoryGit(run.config, run.repository,
         ['ls-remote', 'origin', `refs/heads/${run.deliveryBranch}`])).split(/\s/)[0] || '';
+      if (run.finalizeOnly) {
+        if (!run.requirementDelivery.head) throw new Error('REQUIREMENT_CHANGED: requirement branch is absent');
+        run.requirementDelivery.targetHead = (await repositoryGit(run.config, run.repository,
+          ['ls-remote', 'origin', `refs/heads/${run.repository.targetBranch}`])).split(/\s/)[0];
+      }
       save(stateFile, run);
     }
     try {
-      await publicationReader(run.config, readJoppa)(run);
+      if (!run.finalizeOnly) await publicationReader(run.config, readJoppa)(run);
     } catch (error) {
       if (error.code === 'DEPENDENCY_NOT_LANDED') {
         await releaseTaskClaims(run, () => save(stateFile, run), error.message + '; lane did not start.');
@@ -107,10 +124,12 @@ try {
   fs.mkdirSync(run.runFolder, {recursive: true});
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
   const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
-    input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks,
+    input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,
       task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})),
         joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
-  fs.writeFileSync(claimFile, JSON.stringify({...run.claim, ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
+  const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
+    source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;
+  fs.writeFileSync(claimFile, JSON.stringify({...claim, ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
   if (delivery) {
     readerDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-joppa-reader-')));
     fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(readerDir, 'token'));
@@ -126,6 +145,7 @@ try {
         LANE_REQUIREMENT_HEAD: run.requirementDelivery?.head || '',
         LANE_REQUIREMENT_FINAL: String(run.requirementDelivery?.final ?? false),
         LANE_REQUIREMENT_READER_DIR: readerDir || '',
+        LANE_FINALIZE_ONLY: String(run.finalizeOnly === true),
         EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
@@ -149,7 +169,7 @@ try {
   if (postLand) result.postLandWarning = postLand[1];
   if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
-  const message = run.claim || signal ? error.message :
+  const message = run.claim || signal || run.finalizeOnly ? error.message :
     claimRefused || error.rejected || /^NTK HTTP 4\d\d/.test(error.message) ? `CLAIM_REFUSED: ${error.message}` :
       `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in ${joppa ? 'Joppa' : 'NTK'} before retrying`;
   result = {status: 'failed', code: 2,
@@ -218,7 +238,42 @@ try {
       }
     } catch (error) { announce(`[lane] Cannot read failure details: ${error.message}`); }
   }
-  if (joppa && run.releaseRequest) {
+  if (joppa && run.finalizeOnly) {
+    result.held = false;
+    result.blocked = false;
+    if (result.code === 0) {
+      try {
+        artifacts ||= fs.readdirSync(run.runFolder).map(name => path.join(run.runFolder, name, 'artifacts'))
+          .find(folder => fs.existsSync(path.join(folder, 'landing.txt')) || fs.existsSync(path.join(folder, 'verification.txt')));
+        const receipt = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(fs.existsSync);
+        if (!receipt) throw new Error('Finalization publication evidence is missing');
+        const {sha, target} = parsePublication(fs.readFileSync(receipt, 'utf8'));
+        if (target !== run.repository.targetBranch) throw new Error('Finalization target differs from configuration');
+        const git = args => repositoryGit(run.config, run.repository, args);
+        const head = (await git(['ls-remote', 'origin', `refs/heads/${target}`])).split(/\s/)[0];
+        if (!head) throw new Error('Finalization target is absent');
+        await git(['fetch', '--no-write-fetch-head', 'origin', head]);
+        await git(['merge-base', '--is-ancestor', sha, head]);
+        result.completed = true;
+        announce(`[lane] FINALIZED ${run.requirement} · ${sha} on ${target}`);
+      } catch (error) {
+        result.status = 'failed'; result.code = 2;
+        result.error = `REQUIREMENT_FINALIZE_UNCONFIRMED: ${error.message}`;
+      }
+    }
+    if (!result.completed && run.requirementDelivery) {
+      const {head, targetHead, fingerprint} = run.requirementDelivery;
+      result.finalizeFailed = {head, targetHead, fingerprint};
+      const failure = artifacts && path.join(artifacts, 'failure.txt');
+      const details = failure && fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : result.error || 'Finalization failed';
+      run.finalizationFailureRequest = {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note',
+        target: run.requirement, id: randomUUID(), reply_to: null,
+        text: `Requirement finalization failed.\nBranch: ${run.deliveryBranch}\nHead: ${head}\nTarget head: ${targetHead}\nRun: ${path.basename(dir)}\n${details.slice(0, 1500)}`}};
+      save(stateFile, run);
+      try { await api(run.config, run.joppaWorker, 'joppa_command', run.finalizationFailureRequest); }
+      catch (error) { result.noteError = error.message; }
+    }
+  } else if (joppa && run.releaseRequest) {
     result.released = run.releaseConfirmed === true;
     result.held = !result.released;
     result.blocked = false;

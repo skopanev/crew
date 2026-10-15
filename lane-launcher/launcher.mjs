@@ -165,7 +165,8 @@ export async function tick(config, display = null) {
     strict: config.strict, has_module: true, dry_run: true};
   const selected = config.source === 'joppa' ? await nextTask(config) : null;
   const candidate = selected ? selected.candidate : await nextTicket(query);
-  if (selected && candidate && (candidate.tasks?.length !== 1 || candidate.tasks[0].address !== candidate.id)) {
+  if (selected && candidate && !candidate.finalizeOnly &&
+      (candidate.tasks?.length !== 1 || candidate.tasks[0].address !== candidate.id)) {
     throw new Error('A new Joppa lane must contain exactly its selected Task');
   }
   try {
@@ -201,7 +202,9 @@ export async function tick(config, display = null) {
     runFolder, args: selected ? null : laneArgs(config, candidate.id), createdAt: new Date().toISOString(),
     ...(selected ? {task: candidate.id, taskRevision: candidate.revision, tasks: candidate.tasks, requirement: candidate.requirement,
       repositoryId: candidate.repository,
-      executionId: executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
+      executionId: executionId(candidate.finalizeOnly ? `${candidate.requirement}\n${candidate.repository}\n${path.basename(dir)}` :
+        candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
+      ...(candidate.finalizeOnly ? {finalizeOnly: true} : {}),
       deliveryBranch: `ticket-${executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id)}-${path.basename(dir)}`,
       joppaWorker: selected.worker} : {})};
   const stateFile = path.join(dir, 'launch.json');

@@ -1,5 +1,6 @@
 // Read live dependency state for one queue check. Store no persistent state.
 export function dependencyCheck(read) {
+  const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
   const objects = new Map(), satisfied = new Map(), checked = new Map();
   let schema, branches;
   const types = async () => (schema ||= read('joppa_tree', {})).then(result => result.schema.types);
@@ -7,14 +8,14 @@ export function dependencyCheck(read) {
     if (!objects.has(address)) objects.set(address, read('joppa_objects', {address}));
     const value = await objects.get(address);
     if (!value?.address || !value.document || value.historical !== false || !Number.isSafeInteger(value.current_revision)) {
-      throw new Error('Dependency read did not return a current object');
+      throw invalid('Dependency read did not return a current object');
     }
     return value;
   };
   const present = value => value.document.present === true && value.document.data?.archived !== true;
   const role = async value => {
     const configured = (await types())[value.kind];
-    if (!configured) throw new Error('Dependency object type is absent from the schema');
+    if (!configured) throw invalid('Dependency object type is absent from the schema');
     return configured.role;
   };
   async function criterionBranches() {

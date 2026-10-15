@@ -65,7 +65,7 @@ async function packageFixture(t, mode = 'success') {
         value = {results: args.operations.map(({command}, index) => {
           const object = objects.get(command.id);
           if (command.op === 'claim_task') object.process = {status: 'in_progress', assignee: 'lane-1'};
-          if (command.op === 'complete_task') object.process = {status: 'done', assignee: null, done: true};
+          if (command.op === 'complete_task') object.process = {status: 'done', assignee: null, done: command.evidence};
           if (command.op === 'release_task') object.process = {status: 'open', assignee: null, claim: null};
           if (command.op === 'block_task') object.process = {status: 'open', assignee: null,
             blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};

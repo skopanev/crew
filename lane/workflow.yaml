@@ -19,6 +19,9 @@ vars:
   REQUIREMENT_HEAD: ''
   REQUIREMENT_FINAL: 'false'
   REQUIREMENT_READER_FILE: ''
+  FINALIZE_ONLY: 'false'
+  EQUILL_ACTOR: lane
+  EQUILL_STORE: ''
   SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
   LANE_SHARED_LOCK_DIR: ''
@@ -52,6 +55,15 @@ nodes:
       set -euo pipefail
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       printf '<signal:var key=RUN_ARTIFACTS>%s/artifacts</signal:var>\n' "$MEDULLA_RUN_DIR"
+      if [ "$FINALIZE_ONLY" = true ]; then
+        jq -e -s --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
+          select(length == 1) | .[0] | select(.source == "joppa-finalization" and
+            .id == $id and .workspace == $ws and .delivery.input.finalizeOnly == true and .delivery.plan.final == true) |
+          . + {run_dir: $run}' "$LAUNCH_CLAIM_FILE" > "$MEDULLA_RUN_DIR/artifacts/claim.json"
+        jq '.ticket' "$MEDULLA_RUN_DIR/artifacts/claim.json" > "$MEDULLA_RUN_DIR/artifacts/ticket.json"
+        echo '<signal:REQUIREMENT_READY>Finalize completed Requirement work without a Task claim.</signal:REQUIREMENT_READY>'
+        exit 0
+      fi
       rm -f "$MEDULLA_RUN_DIR/artifacts/claim.json"
       # Adopt the host worker's confirmed claim. Never claim from the container.
       claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
@@ -162,6 +174,7 @@ nodes:
       READY: implement_code
       VERIFY_EXISTING: prepare_review
       REQUIREMENT_SCOUT: cbm_discovery
+      FINALIZE_READY: git_landing
       NO_GIT_KEY: notify_failure
       FETCH_FAILED: notify_failure
       NO_TARGET_BRANCH: notify_failure
@@ -346,6 +359,11 @@ nodes:
         fi
       fi
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+        if [ "$FINALIZE_ONLY" = true ]; then
+          printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
+          echo '<signal:FINALIZE_READY>Run full gates and deliver completed Requirement work.</signal:FINALIZE_READY>'
+          exit 0
+        fi
         echo '<signal:REQUIREMENT_SCOUT>Inspect this requirement checkout before implementation.</signal:REQUIREMENT_SCOUT>'
         exit 0
       fi
@@ -662,6 +680,7 @@ nodes:
     timeout: 8100
     on_signal:
       VERIFIED: cleanup
+      ALREADY_LANDED: cleanup
       LAND_FAILED: notify_failure
       CONFLICT: git_fix
       MERGE_CONFLICT: notify_failure
@@ -690,8 +709,10 @@ nodes:
         echo "<signal:LAND_FAILED>untracked files appeared after review: ${new_files}</signal:LAND_FAILED>"; exit 0; }
       have_tree="$(git write-tree)"
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
-      gate_commands="${review_commands:-$gate_commands}" python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
-        echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
+      if [ "$FINALIZE_ONLY" != true ]; then
+        gate_commands="${review_commands:-$gate_commands}" python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
+          echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
+      fi
 
       if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         git diff --cached --quiet HEAD || {
@@ -717,17 +738,18 @@ nodes:
       if [ "$DELIVERY" = requirement ]; then
         [ -n "${REQUIREMENT_BRANCH:-}" ] || {
           echo '<signal:LAND_FAILED>Requirement branch is missing.</signal:LAND_FAILED>'; exit 0; }
-        # Publish reviewed Task work before the full gate. A failure keeps this branch.
-        task_base="$(cat .git/lane-base)"
-        rc=0
-        gate_commands="${review_commands:-$gate_commands}" \
-          bash "$TOOLING_ROOT/lane/bin/land.sh" "$REQUIREMENT_BRANCH" \
-          > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
-        printf '%s\n' "$task_base" > .git/lane-base
-        cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
-        [ "$rc" -eq 0 ] || {
-          echo "<signal:LAND_FAILED>Requirement publication exited $rc.</signal:LAND_FAILED>"; exit 0; }
-        [ "${REQUIREMENT_FINAL:-false}" = true ] || exit 0
+        if [ "${REQUIREMENT_FINAL:-false}" != true ]; then
+          task_base="$(cat .git/lane-base)"
+          rc=0
+          gate_commands="${review_commands:-$gate_commands}" \
+            bash "$TOOLING_ROOT/lane/bin/land.sh" "$REQUIREMENT_BRANCH" \
+            > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
+          printf '%s\n' "$task_base" > .git/lane-base
+          cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
+          [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Requirement publication exited $rc.</signal:LAND_FAILED>"
+          exit 0
+        fi
+        # A failed final Task stays private. Retirement must not publish its code.
         # Existing-code verification still needs full gates before requirement delivery.
         export VERIFY_ONLY=false
         echo '<signal:var key=VERIFY_ONLY>false</signal:var>'
@@ -790,6 +812,17 @@ nodes:
         target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
       fi
       cd "${project_dir}"
+      if [ "$FINALIZE_ONLY" = true ]; then
+        if [ -f "$LANE_WORKTREE/.git/lane-verified" ]; then
+          printf 'Requirement: %s\nVerified existing SHA: %s\nTarget: %s\nRequirement head was already on target; no checks or push repeated.\n' \
+            "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/verification.txt"
+          echo '<signal:VERIFIED>Requirement work was already delivered.</signal:VERIFIED>'
+        else
+          printf 'Requirement: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
+          echo '<signal:LANDED>Requirement work delivered.</signal:LANDED>'
+        fi
+        exit 0
+      fi
       if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         touch "${LANE_WORKTREE}/.git/lane-verified"
         printf 'Ticket: %s\nVerified existing SHA: %s\nTarget: %s\nChecks and review passed; no commit or push.\n' \
@@ -827,6 +860,11 @@ nodes:
       jq -n --arg node "${MEDULLA_LAST_NODE:-?}" --arg signal "${MEDULLA_LAST_SIGNAL:-none}" \
         --arg message "${MEDULLA_LAST_MESSAGE:-}" '{node: $node, signal: $signal, message: $message}' \
         > "$MEDULLA_RUN_DIR/artifacts/origin.json"
+      if [ "$FINALIZE_ONLY" = true ]; then
+        printf '%s\nNo Task claim or Task outcome was changed.\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+        cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
+        exit 1
+      fi
       # Before a confirmed claim, never write the ticket or touch its worktree.
       if [ "${MEDULLA_LAST_SIGNAL:-}" = "CLAIM_REFUSED" ] || ! jq -e \
         --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" \

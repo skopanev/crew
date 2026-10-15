@@ -128,13 +128,15 @@ if [[ -n "$coder_timeout" ]]; then
   coder_args=(--node-timeout "implement_code=$coder_timeout")
 fi
 
-# The host worker owns NTK claims; no Docker or preflight without its receipt.
+# The host worker supplies a confirmed Task claim or an explicit finalization manifest.
 claim_file="${LANE_CLAIM_FILE:-}"
 [[ -f "$claim_file" ]] || {
   say "run.sh: confirmed host claim file required; start through the lane worker"; exit 2; }
-jq -e -s --arg id "$ticket" --arg ws "$project" '
-  length == 1 and (.[0] | .claimed == true and .status == "in_progress" and
-    .workspace == $ws and (.id | ascii_downcase) == ($id | ascii_downcase))
+jq -e -s --arg id "$ticket" --arg ws "$project" --arg finalize "${LANE_FINALIZE_ONLY:-false}" '
+  length == 1 and (.[0] | .workspace == $ws and (.id | ascii_downcase) == ($id | ascii_downcase) and
+    (if $finalize == "true" then .source == "joppa-finalization" and
+      .delivery.input.finalizeOnly == true and .delivery.plan.final == true
+     else .claimed == true and .status == "in_progress" end))
 ' "$claim_file" >/dev/null 2>&1 || {
   say "run.sh: confirmed host claim required; start through the lane worker"; exit 2; }
 
@@ -325,6 +327,11 @@ cleanup() {
       else
         say "run.sh: retained worktree: clean landed state not confirmed at $worktree" >&2
       fi
+    elif [[ "${LANE_FINALIZE_ONLY:-false}" == true && -d "$worktree/.git" ]] \
+      && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
+      && [[ -z "$changes" ]]; then
+      # No agent writes in a finalizer. Its clean source comes from published inputs.
+      rm -rf -- "$worktree"
     elif [[ -d "$worktree/.git" && -f "$worktree/.git/lane-base" ]]; then
       if base="$(cat "$worktree/.git/lane-base" 2>/dev/null)" \
         && head="$(git --no-optional-locks -C "$worktree" rev-parse HEAD 2>/dev/null)" \
@@ -355,6 +362,9 @@ if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
 fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
+cbm_connector="" cbm_project=""
+equill_vars=()
+if [[ "${LANE_FINALIZE_ONLY:-false}" != true ]]; then
 
 # Broker supplies a current bridge, scoped to this source root, as for --box.
 # Only its small per-run connector enters the container; the database stays shared.
@@ -420,13 +430,13 @@ equill_vars=(
     --var "EQUILL_RULES=${EQUILL_RULES:-none}"
     --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
     --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
-    --var "LANE_WORKTREE=$LANE_WORKTREE"
     --var "EQUILL_PROJECT=$project"
     --var "EQUILL_TICKET=$ticket"
     --var "EQUILL_MODULE=$module"
     --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
 )
 say "run.sh: memory on (equill bridge pid $bridge_pid)"
+fi
 
 # Code and Git writes use this ticket directory. Clone happens after claim.
 check_mountpoint "$worktree"
@@ -464,6 +474,8 @@ medulla \
   --var "REQUIREMENT_HEAD=${LANE_REQUIREMENT_HEAD:-}" \
   --var "REQUIREMENT_FINAL=${LANE_REQUIREMENT_FINAL:-false}" \
   --var "REQUIREMENT_READER_FILE=$requirement_reader" \
+  --var "FINALIZE_ONLY=${LANE_FINALIZE_ONLY:-false}" \
+  --var "LANE_WORKTREE=$LANE_WORKTREE" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \

@@ -14,6 +14,15 @@ for attempt in 1 2; do
   rc=0
   if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
     timeout 120 git fetch origin > "$artifacts/fetch.txt" 2>&1 || fail LAND_FAILED 'Target fetch failed before requirement integration.'
+    if [ "${FINALIZE_ONLY:-false}" = true ]; then
+      [ "$(git rev-parse "origin/${REQUIREMENT_BRANCH}")" = "$REQUIREMENT_HEAD" ] ||
+        fail REQUIREMENT_CHANGED 'Requirement branch moved before finalization.'
+      if git merge-base --is-ancestor "$REQUIREMENT_HEAD" "origin/$target"; then
+        git checkout --detach "origin/$target" || fail LAND_FAILED 'Cannot inspect the delivered target.'
+        touch .git/lane-verified
+        fail ALREADY_LANDED 'Requirement work is already on target; no checks or push repeated.'
+      fi
+    fi
     if ! git merge --no-edit "origin/$target" > "$artifacts/rebase-log.txt" 2>&1; then
       git status --short > "$artifacts/rebase-status.txt"
       git merge --abort || fail LAND_FAILED 'Cannot restore the candidate after a target merge conflict.'
@@ -31,7 +40,7 @@ for attempt in 1 2; do
      || ! python3 "$TOOLING_ROOT/lane/bin/gates.py" verify >/dev/null 2>&1; then
     if ! python3 "$TOOLING_ROOT/lane/bin/gates.py" run; then
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
-        fail REQUIREMENT_GATE_FAIL 'Requirement checks failed; candidate retained on the requirement branch. See artifacts/gates.'
+        fail REQUIREMENT_GATE_FAIL 'Requirement checks failed; final Task checkout retained. See artifacts/gates.'
       fi
       fail GATE_FAIL 'Post-rebase checks failed; see artifacts/gates for logs and receipts.'
     fi
@@ -39,8 +48,8 @@ for attempt in 1 2; do
   python3 "$TOOLING_ROOT/lane/bin/gates.py" verify || fail LAND_FAILED 'Post-rebase gate receipt is invalid.'
   printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$snapshot"
   if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
-    node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" ||
-      fail REQUIREMENT_CHANGED 'Requirement context changed or could not be read; candidate retained on the requirement branch.'
+    timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" ||
+      fail REQUIREMENT_CHANGED 'Requirement context changed or could not be read within 60 seconds; final Task checkout retained.'
   fi
   rc=0
   bash "$TOOLING_ROOT/lane/bin/land.sh" "$target" > "$artifacts/landing-log.txt" 2>&1 || rc=$?
