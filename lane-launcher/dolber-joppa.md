@@ -65,6 +65,7 @@ NTK Dolber keeps its existing config and commands.
 `coderTimeoutSeconds` requires Medulla support for `--node-timeout` in the host runtime and the selected image.
 An older engine rejects the flag before coding. The cap cannot extend the workflow's coder timeout.
 It does not limit expert review or landing. A resumed run keeps its saved cap.
+Config changes apply only to new claims. Existing runs keep their captured arguments.
 
 Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.
