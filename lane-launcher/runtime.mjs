@@ -52,6 +52,7 @@ export function laneArgs(config, ticket) {
     ...(config.sharedLockDir ? ['--shared-lock-dir', config.sharedLockDir] : []),
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),
     ...(config.readWriteDirs || []).flatMap(dir => ['--mount-rw', dir]),
+    ...(config.reviewCommands || []).flatMap(check => ['--review-command', check]),
     ...config.gateCommands.flatMap(check => ['--gate-command', check])];
 }
 export function validateWritableDirs(config, ticket) {

@@ -67,6 +67,8 @@ export function validateJoppa(config) {
       modules.add(name);
     }
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
+    require(repo.reviewCommands == null || Array.isArray(repo.reviewCommands) && repo.reviewCommands.length && repo.reviewCommands.every(text),
+      'Repository reviewCommands must be a nonempty array of check commands');
     require(repo.gateTimeoutSeconds == null || (Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0),
       'Repository gateTimeoutSeconds must be a positive integer');
     require(Array.isArray(repo.testCommand) && repo.testCommand.length && repo.testCommand.every(text), 'Repository needs testCommand');

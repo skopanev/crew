@@ -11,7 +11,6 @@ before=$(git rev-parse HEAD)
   [ "$(git write-tree)" = "$(sed -n 1p "$snapshot")" ] &&
   [ -z "$(git status --porcelain)" ] || fail LAND_FAILED 'Candidate changed while waiting for the target lock.'
 for attempt in 1 2; do
-  before=$(git rev-parse HEAD)
   rc=0
   bash "$TOOLING_ROOT/lane/bin/rebase.sh" "$target" || rc=$?
   case "$rc" in
@@ -19,13 +18,13 @@ for attempt in 1 2; do
     3) fail CONFLICT 'Target rebase conflicts; see artifacts/rebase-log.txt and rebase-status.txt.' ;;
     *) fail LAND_FAILED 'Target refresh or rebase failed; see artifacts/fetch.txt and rebase-log.txt.' ;;
   esac
-  if [ "$(git rev-parse HEAD)" != "$before" ]; then
+  if ! python3 "$TOOLING_ROOT/lane/bin/gates.py" verify >/dev/null 2>&1; then
     if ! python3 "$TOOLING_ROOT/lane/bin/gates.py" run; then
       fail GATE_FAIL 'Post-rebase checks failed; see artifacts/gates for logs and receipts.'
     fi
-    python3 "$TOOLING_ROOT/lane/bin/gates.py" verify || fail LAND_FAILED 'Post-rebase gate receipt is invalid.'
-    printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$snapshot"
   fi
+  python3 "$TOOLING_ROOT/lane/bin/gates.py" verify || fail LAND_FAILED 'Post-rebase gate receipt is invalid.'
+  printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$snapshot"
   rc=0
   bash "$TOOLING_ROOT/lane/bin/land.sh" "$target" > "$artifacts/landing-log.txt" 2>&1 || rc=$?
   cat "$artifacts/landing-log.txt"

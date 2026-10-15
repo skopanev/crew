@@ -72,6 +72,7 @@ try {
   announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (joppa) {
     run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
+      reviewCommands: run.repository.reviewCommands ?? run.config.reviewCommands,
       gateTimeoutSeconds: run.repository.gateTimeoutSeconds ?? run.config.gateTimeoutSeconds}, run.executionId);
     save(stateFile, run);
   }
