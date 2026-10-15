@@ -196,7 +196,7 @@ try {
       if (result.released) {
         announce(result.checkpointed
           ? `[lane] RELEASED ${tasks} · checkpoint ${run.recovery.sha.slice(0, 12)} saved on ${run.recovery.ref}; Joppa confirmed`
-          : `[lane] RELEASED ${tasks} · startup failed; Joppa confirmed; no workflow ran`);
+          : `[lane] RELEASED ${tasks} · startup failed; Joppa confirmed; no agent work`);
         if (run.recovery?.cleanupError) announce(`[lane] Cleanup failed: ${run.recovery.cleanupError}`);
       }
       if (result.blockConfirmed) announce(`[lane] BLOCKED ${tasks} · Joppa confirmed; claims released`);
