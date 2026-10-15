@@ -8,7 +8,7 @@ vars:
   ticket_title: ''
   gate_commands: '[]'
   gate_timeout_seconds: '900'
-  LAUNCH_CLAIM: ''
+  LAUNCH_CLAIM_FILE: ''
   TICKET_SOURCE: ntk
   TARGET_BRANCH: ''
   REPOSITORY_PREFLIGHT: __ntkrc__
@@ -34,7 +34,7 @@ nodes:
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
       ticket_id: '{{var:ticket_id}}'
-      LAUNCH_CLAIM: '{{var:LAUNCH_CLAIM}}'
+      LAUNCH_CLAIM_FILE: '{{var:LAUNCH_CLAIM_FILE}}'
     timeout: 120
     on_signal:
       READY: cbm_discovery
@@ -48,14 +48,13 @@ nodes:
       rm -f "$MEDULLA_RUN_DIR/artifacts/claim.json"
       # Adopt the host worker's confirmed claim. Never claim from the container.
       claim="$MEDULLA_RUN_DIR/artifacts/claim.json"
-      printf '%s\n' "$LAUNCH_CLAIM" > "$claim.raw"
       jq -e -s --arg id "$ticket_id" --arg ws "$project_name" --arg run "$MEDULLA_RUN_DIR" '
         select(length == 1) | .[0] |
         select(.claimed == true and .status == "in_progress" and
           (.id | ascii_downcase) == ($id | ascii_downcase) and
           .workspace == $ws) |
         . + {workspace: $ws, run_dir: $run}
-      ' "$claim.raw" > "$claim.tmp"
+      ' "$LAUNCH_CLAIM_FILE" > "$claim.tmp"
       mv "$claim.tmp" "$claim"
       cd "${project_dir}"
       bash "${TOOLING_ROOT}/lane/hooks/inject.sh" \

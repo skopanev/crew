@@ -109,10 +109,13 @@ jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\
   say 'run.sh: --gate-timeout must be a positive integer'; exit 2; }
 
 # The host worker owns NTK claims; no Docker or preflight without its receipt.
+claim_file="${LANE_CLAIM_FILE:-}"
+[[ -f "$claim_file" ]] || {
+  say "run.sh: confirmed host claim file required; start through the lane worker"; exit 2; }
 jq -e -s --arg id "$ticket" --arg ws "$project" '
   length == 1 and (.[0] | .claimed == true and .status == "in_progress" and
     .workspace == $ws and (.id | ascii_downcase) == ($id | ascii_downcase))
-' <<<"${LANE_CLAIM_JSON:-}" >/dev/null 2>&1 || {
+' "$claim_file" >/dev/null 2>&1 || {
   say "run.sh: confirmed host claim required; start through the lane worker"; exit 2; }
 
 # Empty host mountpoints are shared by concurrent lane containers.
@@ -132,7 +135,7 @@ check_mountpoint() {
 }
 ticket_source="${LANE_SOURCE:-ntk}"
 if [[ "$ticket_source" == joppa ]]; then
-  ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' <<<"$LANE_CLAIM_JSON")"
+  ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' "$claim_file")"
 elif ! ticket_json="$(node --input-type=module -e '
   import {pathToFileURL} from "node:url";
   const {getTicket} = await import(pathToFileURL(process.argv[1]));
@@ -399,7 +402,7 @@ medulla \
   --var "CBM_MCP_COMMAND=$cbm_connector" \
   --var "CBM_PROJECT=$cbm_project" \
   --var "ticket_id=$ticket" \
-  --var "LAUNCH_CLAIM=${LANE_CLAIM_JSON:-}" \
+  --var "LAUNCH_CLAIM_FILE=$claim_file" \
   --var "TICKET_SOURCE=$ticket_source" \
   --var "TARGET_BRANCH=$target" \
   --var "REPOSITORY_PREFLIGHT=$repository_preflight" \

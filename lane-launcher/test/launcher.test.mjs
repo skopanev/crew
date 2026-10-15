@@ -718,7 +718,7 @@ test('tab opens before claim and the lane starts only after confirmation', async
   assert.equal((await f.run()).code, 0);
   fs.writeFileSync(path.join(f.bins, 'bash'), `#!${process.execPath}
 import fs from 'node:fs';
-const claim = JSON.parse(process.env.LANE_CLAIM_JSON);
+const claim = JSON.parse(fs.readFileSync(process.env.LANE_CLAIM_FILE, 'utf8'));
 if (!claim.claimed || claim.status !== 'in_progress' || claim.id !== 'T1') process.exit(99);
 fs.appendFileSync(process.env.TEST_REQUESTS, 'BASH_START\\n');
 `, {mode: 0o755});
