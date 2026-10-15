@@ -180,7 +180,7 @@ try {
     result.released = run.releaseConfirmed === true;
     result.held = !result.released;
     result.blocked = false;
-    announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · package ownership conflict; lane did not start`);
+    announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · ${run.claimConflict ? 'package ownership conflict' : 'startup failed'}; lane did not start`);
   } else if (joppa) {
     try {
       artifacts ||= fs.existsSync(run.runFolder) ? fs.readdirSync(run.runFolder).sort().reverse()
@@ -189,6 +189,7 @@ try {
       await finishTask(run, stateFile, result, artifacts);
       const tasks = (run.tasks || [{address: run.task}]).map(task => task.address).join(', ');
       if (result.completed) announce(`[lane] DONE ${tasks} · Joppa confirmed`);
+      if (result.released) announce(`[lane] RELEASED ${tasks} · startup failed; Joppa confirmed; no workflow ran`);
       if (result.blockConfirmed) announce(`[lane] BLOCKED ${tasks} · Joppa confirmed; claims released`);
       if (result.held) announce(`[lane] HELD ${tasks} · claims retained with failure evidence`);
     } catch (error) {
