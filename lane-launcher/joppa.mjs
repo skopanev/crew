@@ -163,20 +163,25 @@ export async function nextTask(config) {
       if (!run.joppaWorker && !run.config?.joppa) continue;
       if (!reservations.includes(run)) {
         if (!terminalRetained.has(run)) {
-          const tasks = run.claim ? claimTasks(run) : runTasks(run);
-          require(tasks.length > 0, 'Retained run has no Tasks');
-          let terminal = true;
-          for (const task of tasks) {
-            const current = await api(config, worker, 'joppa_objects', {workspace: config.workspace, address: task.address});
-            require(current.address === task.address && current.historical === false &&
-              typeof current.document?.present === 'boolean' && Number.isSafeInteger(current.current_revision),
-            'Retained Task state is absent or historical');
-            if (current.document.present && !['done', 'retired'].includes(current.process?.status)) {
-              terminal = false;
-              break;
+          try {
+            const tasks = run.claim ? claimTasks(run) : runTasks(run);
+            require(tasks.length > 0, 'Retained run has no Tasks');
+            let terminal = true;
+            for (const task of tasks) {
+              const current = await api(config, worker, 'joppa_objects', {workspace: config.workspace, address: task.address});
+              require(current.address === task.address && current.historical === false &&
+                typeof current.document?.present === 'boolean' && Number.isSafeInteger(current.current_revision),
+              'Retained Task state is absent or historical');
+              if (current.document.present && !['done', 'retired'].includes(current.process?.status)) {
+                terminal = false;
+                break;
+              }
             }
+            terminalRetained.set(run, terminal);
+          } catch (error) {
+            terminalRetained.set(run, false);
+            console.error(`Retained run ${run.executionId} remains occupied: ${error.message}`);
           }
-          terminalRetained.set(run, terminal);
         }
         if (terminalRetained.get(run)) continue;
       }
