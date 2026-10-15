@@ -88,7 +88,7 @@ async function packageFixture(t, mode = 'success') {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const config = {source: 'joppa', workspace: 'fixture', stateDir: root, joppa: {url: `http://127.0.0.1:${server.address().port}`,
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, joppa: {url: `http://127.0.0.1:${server.address().port}`,
     project: 'project:app', workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
     modules: [{name: 'm1', path: 'src/a', paths: ['src/a', 'tests/a']}, {name: 'm2', path: 'src/b', paths: ['src/b', 'tests/b']}]}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',
