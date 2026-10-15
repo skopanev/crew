@@ -4,6 +4,7 @@
   "joppa": {
     "url": "https://joppa.example.com/mcp",
     "project": "project:my-project",
+    "readerTokenFile": "/absolute/private/crew-reader.token",
     "workers": [
       {"actor": "crew-lane-1", "tokenFile": "/absolute/private/crew-lane-1.token"}
     ]
@@ -34,6 +35,7 @@
       "modules": [{"name": "core", "path": ".", "paths": ["src", "tests", "migrations"]}],
       "preflight": null,
       "gateCommands": ["bun run typecheck", "bun run test"],
+      "reviewCommands": ["bun run lint", "bun run test:changed"],
       "testCommand": ["bun", "run", "test"]
     }
   ],

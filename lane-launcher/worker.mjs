@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {laneRunFolder} from './scope.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
-import {claimTask, guardTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
+import {api, claimTask, guardTaskClaims, releaseTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
+import {requirementPlan} from './requirement-delivery.mjs';
+import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 
@@ -53,6 +56,7 @@ process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
 let result, claimRefused = false;
 let artifacts = null;
+let readerDir;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
@@ -71,6 +75,26 @@ try {
   if (adoptedJoppaClaim) await guardTaskClaims(run, () => save(stateFile, run));
   announce(`[lane] CLAIMED ${run.ticket} · in_progress`);
   if (joppa) {
+    const readJoppa = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
+    if (run.config.delivery === 'requirement') {
+      run.requirementDelivery = await requirementPlan(run, readJoppa);
+      if (run.requirementDelivery.planningHeld) {
+        await releaseTaskClaims(run, () => save(stateFile, run), 'Requirement planning is active; lane did not start.');
+        throw new Error('REQUIREMENT_PLANNING_ACTIVE: wait for the planner to release the Requirement');
+      }
+      run.deliveryBranch = run.requirementDelivery.branch;
+      run.requirementDelivery.head = (await repositoryGit(run.config, run.repository,
+        ['ls-remote', 'origin', `refs/heads/${run.deliveryBranch}`])).split(/\s/)[0] || '';
+      save(stateFile, run);
+    }
+    try {
+      await publicationReader(run.config, readJoppa)(run);
+    } catch (error) {
+      if (error.code === 'DEPENDENCY_NOT_LANDED') {
+        await releaseTaskClaims(run, () => save(stateFile, run), error.message + '; lane did not start.');
+      }
+      throw error;
+    }
     run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
       reviewCommands: run.repository.reviewCommands ?? run.config.reviewCommands,
       coderTimeoutSeconds: run.repository.coderTimeoutSeconds ?? run.config.coderTimeoutSeconds,
@@ -82,13 +106,26 @@ try {
   save(stateFile, run);
   fs.mkdirSync(run.runFolder, {recursive: true});
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
-  fs.writeFileSync(claimFile, JSON.stringify(run.claim) + '\n', {mode: 0o600});
+  const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
+    input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks,
+      task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})),
+        joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
+  fs.writeFileSync(claimFile, JSON.stringify({...run.claim, ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
+  if (delivery) {
+    readerDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-joppa-reader-')));
+    fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(readerDir, 'token'));
+    fs.chmodSync(path.join(readerDir, 'token'), 0o600);
+  }
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
       ...(joppa ? {LANE_SOURCE: 'joppa', LANE_REPOSITORY_JSON: JSON.stringify(run.repository),
         LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
         LANE_DELIVERY: run.config.delivery, LANE_DELIVERY_BRANCH: run.deliveryBranch || '',
+        LANE_REQUIREMENT_BRANCH: run.requirementDelivery?.branch || '',
+        LANE_REQUIREMENT_HEAD: run.requirementDelivery?.head || '',
+        LANE_REQUIREMENT_FINAL: String(run.requirementDelivery?.final ?? false),
+        LANE_REQUIREMENT_READER_DIR: readerDir || '',
         EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
@@ -119,6 +156,7 @@ try {
     error: message};
   process.exitCode = 2;
 } finally {
+  if (readerDir) fs.rmSync(readerDir, {recursive: true, force: true});
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
   if (!joppa && result.status !== 'exited' && run.claim) {
     const adopted = fs.existsSync(run.runFolder) && fs.readdirSync(run.runFolder).some(name => {
@@ -184,6 +222,7 @@ try {
     result.released = run.releaseConfirmed === true;
     result.held = !result.released;
     result.blocked = false;
+    if (result.released) result.tasks = run.releaseResults;
     announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · ${run.claimConflict ? 'package ownership conflict' : 'startup failed'}; lane did not start`);
   } else if (joppa) {
     try {

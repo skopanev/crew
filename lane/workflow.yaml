@@ -15,6 +15,11 @@ vars:
   REPOSITORY_PREFLIGHT: __ntkrc__
   DELIVERY: target
   DELIVERY_BRANCH: ''
+  REQUIREMENT_BRANCH: ''
+  REQUIREMENT_HEAD: ''
+  REQUIREMENT_FINAL: 'false'
+  REQUIREMENT_READER_FILE: ''
+  SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
   LANE_SHARED_LOCK_DIR: ''
   ticket_test_command: '[]'
@@ -39,6 +44,7 @@ nodes:
     timeout: 120
     on_signal:
       READY: cbm_discovery
+      REQUIREMENT_READY: create_worktree
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -94,7 +100,13 @@ nodes:
         exit 1
       fi
       rm -f "$_sc.err" "$_sc.reply"
-      echo '<signal:READY>lane prepared</signal:READY>'
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+        printf '<signal:var key=SCOUT_SOURCE>%s</signal:var>\n' "$LANE_WORKTREE"
+        echo '<signal:REQUIREMENT_READY>Prepare the requirement checkout before source inspection.</signal:REQUIREMENT_READY>'
+      else
+        printf '<signal:var key=SCOUT_SOURCE>%s</signal:var>\n' "$project_dir"
+        echo '<signal:READY>lane prepared</signal:READY>'
+      fi
   cbm_discovery:
     timeout: 900
     env:
@@ -127,7 +139,7 @@ nodes:
       Artifacts: {{var:RUN_ARTIFACTS}}.
       Task: {{var:ticket_id}}. Source: {{var:TICKET_SOURCE}}. Workspace: {{var:project_name}}.
       Module: {{var:module_name}}.
-      Source checkout: {{var:project_dir}}.
+      Source checkout: {{var:SCOUT_SOURCE}}.
       CBM project: {{var:CBM_PROJECT}}.
       Repository checks: {{var:review_commands}}
       Test command: {{var:ticket_test_command}}
@@ -149,6 +161,7 @@ nodes:
     on_signal:
       READY: implement_code
       VERIFY_EXISTING: prepare_review
+      REQUIREMENT_SCOUT: cbm_discovery
       NO_GIT_KEY: notify_failure
       FETCH_FAILED: notify_failure
       NO_TARGET_BRANCH: notify_failure
@@ -158,6 +171,84 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
+      restore_recovery() {
+        recovery_note=""
+        if jq -e '.recovery != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
+          recovery_ref="$(jq -r '.recovery.ref // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+          recovery_sha="$(jq -r '.recovery.sha // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+          recovery_tree="$(jq -r '.recovery.tree // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+          recovery_base="$(jq -r '.recovery.base // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+          recovery_instruction="$(jq -r '.recovery.instruction // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+          case "$recovery_ref" in
+            refs/heads/recovery/*) ;;
+            *) echo "RECOVERY_VERIFY_FAILED: invalid recovery ref ${recovery_ref}" >&2; exit 1 ;;
+          esac
+          remote_ref="refs/remotes/origin/${recovery_ref#refs/heads/}"
+          fetched_sha="$(git rev-parse --verify --quiet "${remote_ref}^{commit}" || true)"
+          if [ -z "$fetched_sha" ] || [ "$fetched_sha" != "$recovery_sha" ]; then
+            echo "RECOVERY_VERIFY_FAILED: ${recovery_ref} is ${fetched_sha:-missing}, expected ${recovery_sha}" >&2
+            exit 1
+          fi
+          recovery_source=false
+          git merge-base --is-ancestor "$recovery_base" "refs/remotes/origin/${target}" && recovery_source=true
+          if [ -n "${REQUIREMENT_BRANCH:-}" ] && [ -n "${REQUIREMENT_HEAD:-}" ]; then
+            git merge-base --is-ancestor "$REQUIREMENT_HEAD" "$recovery_base" && recovery_source=true
+          fi
+          if [ -z "$recovery_base" ] \
+             || ! git merge-base --is-ancestor "$recovery_base" "$recovery_sha" \
+             || [ "$recovery_source" != true ]; then
+            echo "RECOVERY_VERIFY_FAILED: recovery base ${recovery_base} is not an ancestor of ${recovery_sha} and origin/${target}" >&2
+            exit 1
+          fi
+          fetched_tree="$(git rev-parse --verify --quiet "${recovery_sha}^{tree}" || true)"
+          base_tree="$(git rev-parse --verify --quiet "${recovery_base}^{tree}" || true)"
+          if [ -z "$recovery_tree" ] || [ "$fetched_tree" != "$recovery_tree" ] || [ "$fetched_tree" = "$base_tree" ]; then
+            echo "RECOVERY_VERIFY_FAILED: ${recovery_sha} tree is ${fetched_tree:-missing}, expected ${recovery_tree} above ${base_tree:-missing}" >&2
+            exit 1
+          fi
+          if ! git diff -z --no-renames --name-only "${recovery_base}..${recovery_sha}" \
+             | jq -R -s -e --slurpfile ticket "$MEDULLA_RUN_DIR/artifacts/ticket.json" '
+               ($ticket[0].modulePaths // []) as $roots |
+               split("\u0000") | (if length > 0 and .[-1] == "" then .[:-1] else . end) |
+               length > 0 and ($roots | length > 0) and all(.[]; . as $f |
+                 ($f | length > 0) and ($f | test("[\r\n]") | not) and ($f | split("/") | index("..") | not) and
+                 any($roots[]; . as $r | $r != "" and ($r == "." or $f == $r or ($f | startswith(($r | sub("/+$"; "")) + "/"))))
+               )
+             ' >/dev/null; then
+            echo "RECOVERY_VERIFY_FAILED: recovery diff ${recovery_base}..${recovery_sha} is empty or outside modulePaths" >&2
+            exit 1
+          fi
+          if [ "${MEDULLA_LAST_SIGNAL:-}" != "DUPLICATE" ]; then
+            git checkout -B "ticket-${ticket_id}" "$recovery_sha"
+            if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+              git rebase --onto "$task_base" "$recovery_base" || {
+                echo 'RECOVERY_VERIFY_FAILED: checkpoint conflicts with the current requirement branch' >&2; exit 1; }
+              printf '%s\n' "$task_base" > .git/lane-base
+            else
+              printf '%s\n' "$recovery_base" > .git/lane-base
+            fi
+            recovery_note=" ${recovery_instruction}"
+          fi
+        fi
+      }
+      if [ -n "${REQUIREMENT_BRANCH:-}" ] && [ "${MEDULLA_LAST_NODE:-}" = cbm_discovery ]; then
+        cd "$LANE_WORKTREE"
+        [ "$(git symbolic-ref --short HEAD)" = "ticket-${ticket_id}" ] || exit 1
+        target="$(bash "$TOOLING_ROOT/lane/bin/target.sh" "$project_dir")"
+        task_base="$(cat .git/lane-base)"
+        if [ ! -s "$MEDULLA_RUN_DIR/artifacts/scout.txt" ]; then
+          printf '%s\n' "${MEDULLA_LAST_MESSAGE:-No scout report was supplied.}" > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
+        fi
+        if [ "${MEDULLA_LAST_SIGNAL:-}" = DUPLICATE ]; then
+          printf '%s\n' "$TICKET_CHECKS" > "$MEDULLA_RUN_DIR/artifacts/ticket-checks.json"
+          echo '<signal:var key=VERIFY_ONLY>true</signal:var>'
+          echo '<signal:VERIFY_EXISTING>Verify existing behavior on the requirement branch.</signal:VERIFY_EXISTING>'
+        else
+          restore_recovery
+          printf '<signal:READY>Requirement checkout is ready for this Task.%s</signal:READY>\n' "${recovery_note:-}"
+        fi
+        exit 0
+      fi
       # Every Git write belongs to this checkout, including objects and refs.
       if [ -n "$(ls -A "${LANE_WORKTREE}")" ]; then
         echo "<signal:BRANCH_HAS_WORK>checkout retained at ${LANE_WORKTREE}; inspect before retrying</signal:BRANCH_HAS_WORK>"
@@ -191,56 +282,25 @@ nodes:
         echo "<signal:NO_TARGET_BRANCH>origin/${target} does not exist after fetch</signal:NO_TARGET_BRANCH>"
         exit 0
       fi
-      git checkout -B "ticket-${ticket_id}" "origin/${target}"
+      checkout_base="origin/${target}"
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+        actual="$(git rev-parse --verify --quiet "refs/remotes/origin/${REQUIREMENT_BRANCH}^{commit}" || true)"
+        [ "$actual" = "${REQUIREMENT_HEAD:-}" ] || {
+          echo '<signal:FETCH_FAILED>Requirement branch changed after claim; retry with its current head.</signal:FETCH_FAILED>'; exit 0; }
+        [ -z "$actual" ] || checkout_base="origin/${REQUIREMENT_BRANCH}"
+      fi
+      git checkout -B "ticket-${ticket_id}" "$checkout_base"
+      git rev-parse HEAD > .git/lane-base
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+        git merge --no-edit "origin/${target}" >> "$MEDULLA_RUN_DIR/artifacts/fetch.txt" 2>&1 || {
+          git status --short > "$MEDULLA_RUN_DIR/artifacts/rebase-status.txt"
+          git merge --abort || exit 1
+          echo '<signal:FETCH_FAILED>Default branch merge conflicts; see artifacts/fetch.txt.</signal:FETCH_FAILED>'; exit 0; }
+      fi
+      task_base="$(git rev-parse HEAD)"
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
-      recovery_note=""
-      if jq -e '.recovery != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
-        recovery_ref="$(jq -r '.recovery.ref // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
-        recovery_sha="$(jq -r '.recovery.sha // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
-        recovery_tree="$(jq -r '.recovery.tree // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
-        recovery_base="$(jq -r '.recovery.base // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
-        recovery_instruction="$(jq -r '.recovery.instruction // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
-        case "$recovery_ref" in
-          refs/heads/recovery/*) ;;
-          *) echo "RECOVERY_VERIFY_FAILED: invalid recovery ref ${recovery_ref}" >&2; exit 1 ;;
-        esac
-        remote_ref="refs/remotes/origin/${recovery_ref#refs/heads/}"
-        fetched_sha="$(git rev-parse --verify --quiet "${remote_ref}^{commit}" || true)"
-        if [ -z "$fetched_sha" ] || [ "$fetched_sha" != "$recovery_sha" ]; then
-          echo "RECOVERY_VERIFY_FAILED: ${recovery_ref} is ${fetched_sha:-missing}, expected ${recovery_sha}" >&2
-          exit 1
-        fi
-        if [ -z "$recovery_base" ] \
-           || ! git merge-base --is-ancestor "$recovery_base" "$recovery_sha" \
-           || ! git merge-base --is-ancestor "$recovery_base" "refs/remotes/origin/${target}"; then
-          echo "RECOVERY_VERIFY_FAILED: recovery base ${recovery_base} is not an ancestor of ${recovery_sha} and origin/${target}" >&2
-          exit 1
-        fi
-        fetched_tree="$(git rev-parse --verify --quiet "${recovery_sha}^{tree}" || true)"
-        base_tree="$(git rev-parse --verify --quiet "${recovery_base}^{tree}" || true)"
-        if [ -z "$recovery_tree" ] || [ "$fetched_tree" != "$recovery_tree" ] || [ "$fetched_tree" = "$base_tree" ]; then
-          echo "RECOVERY_VERIFY_FAILED: ${recovery_sha} tree is ${fetched_tree:-missing}, expected ${recovery_tree} above ${base_tree:-missing}" >&2
-          exit 1
-        fi
-        if ! git diff -z --no-renames --name-only "${recovery_base}..${recovery_sha}" \
-           | jq -R -s -e --slurpfile ticket "$MEDULLA_RUN_DIR/artifacts/ticket.json" '
-             ($ticket[0].modulePaths // []) as $roots |
-             split("\u0000") | (if length > 0 and .[-1] == "" then .[:-1] else . end) |
-             length > 0 and ($roots | length > 0) and all(.[]; . as $f |
-               ($f | length > 0) and ($f | test("[\r\n]") | not) and ($f | split("/") | index("..") | not) and
-               any($roots[]; . as $r | $r != "" and ($r == "." or $f == $r or ($f | startswith(($r | sub("/+$"; "")) + "/"))))
-             )
-           ' >/dev/null; then
-          echo "RECOVERY_VERIFY_FAILED: recovery diff ${recovery_base}..${recovery_sha} is empty or outside modulePaths" >&2
-          exit 1
-        fi
-        if [ "${MEDULLA_LAST_SIGNAL:-}" != "DUPLICATE" ]; then
-          git checkout -B "ticket-${ticket_id}" "$recovery_sha"
-          printf '%s\n' "$recovery_base" > .git/lane-base
-          recovery_note=" ${recovery_instruction}"
-        fi
-      fi
+      if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
         bash scripts/install-git-hooks.sh
@@ -284,6 +344,10 @@ nodes:
         else
           deps=" NOTE: bun install did not complete. Full log: ${MEDULLA_RUN_DIR}/artifacts/bun-install.txt"
         fi
+      fi
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
+        echo '<signal:REQUIREMENT_SCOUT>Inspect this requirement checkout before implementation.</signal:REQUIREMENT_SCOUT>'
+        exit 0
       fi
       # Preserve the scout report; use its signal as data only when the report is missing.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
@@ -388,8 +452,10 @@ nodes:
       fi
       # A resolved rebase may have commits to land with an empty index.
       target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
+      change_base="origin/${target}"
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then change_base="$(cat .git/lane-base)"; fi
       if [ "${VERIFY_ONLY}" != "true" ] && git diff --cached --quiet "$base" -- 2>/dev/null \
-         && [ -z "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ]; then
+         && [ -z "$(git log --oneline "${change_base}..HEAD" 2>/dev/null)" ]; then
         echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
         exit 0
       fi
@@ -404,7 +470,7 @@ nodes:
           exit 0
         fi
       fi
-      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" != branch ]; then
+      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = target ]; then
         rc=0
         bash "${TOOLING_ROOT}/lane/bin/rebase.sh" "$target" || rc=$?
         case "$rc" in
@@ -415,7 +481,9 @@ nodes:
       fi
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
-      git diff --binary "origin/${target}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
+      review_base="origin/${target}"
+      if [ -n "${REQUIREMENT_BRANCH:-}" ]; then review_base="$(cat .git/lane-base)"; fi
+      git diff --binary "${review_base}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
       export gate_commands="${review_commands:-$gate_commands}"
       if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
         echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
@@ -596,6 +664,9 @@ nodes:
       VERIFIED: cleanup
       LAND_FAILED: notify_failure
       CONFLICT: git_fix
+      MERGE_CONFLICT: notify_failure
+      REQUIREMENT_GATE_FAIL: notify_failure
+      REQUIREMENT_CHANGED: notify_failure
       GATE_FAIL: reject_gate
       __failed__: notify_failure
       __timeout__: notify_failure
@@ -622,7 +693,7 @@ nodes:
       gate_commands="${review_commands:-$gate_commands}" python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
         echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
 
-      if [ "${VERIFY_ONLY}" = "true" ]; then
+      if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         git diff --cached --quiet HEAD || {
           echo '<signal:LAND_FAILED>verification changed source files</signal:LAND_FAILED>'; exit 0; }
         git fetch origin
@@ -633,7 +704,7 @@ nodes:
         exit 0
       fi
 
-      [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
+      [ "$DELIVERY" = requirement ] || [ -n "$(git log --oneline "origin/${target}..HEAD" 2>/dev/null)" ] || {
         echo "<signal:LAND_FAILED>nothing to land: no commit above origin/${target}</signal:LAND_FAILED>"; exit 0; }
 
       export PATH="/home/medulla/.bun/bin:${PATH}"
@@ -642,6 +713,25 @@ nodes:
         "${TOOLING_ROOT}/lane/bin/land.sh" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
         cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
       }
+
+      if [ "$DELIVERY" = requirement ]; then
+        [ -n "${REQUIREMENT_BRANCH:-}" ] || {
+          echo '<signal:LAND_FAILED>Requirement branch is missing.</signal:LAND_FAILED>'; exit 0; }
+        # Publish reviewed Task work before the full gate. A failure keeps this branch.
+        task_base="$(cat .git/lane-base)"
+        rc=0
+        gate_commands="${review_commands:-$gate_commands}" \
+          bash "$TOOLING_ROOT/lane/bin/land.sh" "$REQUIREMENT_BRANCH" \
+          > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
+        printf '%s\n' "$task_base" > .git/lane-base
+        cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
+        [ "$rc" -eq 0 ] || {
+          echo "<signal:LAND_FAILED>Requirement publication exited $rc.</signal:LAND_FAILED>"; exit 0; }
+        [ "${REQUIREMENT_FINAL:-false}" = true ] || exit 0
+        # Existing-code verification still needs full gates before requirement delivery.
+        export VERIFY_ONLY=false
+        echo '<signal:var key=VERIFY_ONLY>false</signal:var>'
+      fi
 
       if [ "$DELIVERY" = branch ]; then
         if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify >/dev/null 2>&1; then
@@ -695,9 +785,12 @@ nodes:
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       head_sha="$(git -C "${LANE_WORKTREE}" rev-parse HEAD)"
       target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
-      if [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = branch ]; then target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"; fi
+      if { [ "${VERIFY_ONLY}" != true ] && [ "$DELIVERY" = branch ]; } \
+        || { [ "$DELIVERY" = requirement ] && [ "${REQUIREMENT_FINAL:-false}" != true ]; }; then
+        target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
+      fi
       cd "${project_dir}"
-      if [ "${VERIFY_ONLY}" = "true" ]; then
+      if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         touch "${LANE_WORKTREE}/.git/lane-verified"
         printf 'Ticket: %s\nVerified existing SHA: %s\nTarget: %s\nChecks and review passed; no commit or push.\n' \
           "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/verification.txt"
@@ -712,7 +805,7 @@ nodes:
         cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
         exit 1
       fi
-      if [ "${VERIFY_ONLY}" = "true" ]; then
+      if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         echo "<signal:VERIFIED>Existing implementation verified at ${head_sha}; ticket is to_test.</signal:VERIFIED>"
         exit 0
       fi

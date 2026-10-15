@@ -4,6 +4,8 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
 import {dependencyCheck} from './dependencies.mjs';
+import {parsePublication, requirementBranch} from './requirement-delivery.mjs';
+import {publicationReader} from './publication-guard.mjs';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
@@ -69,6 +71,11 @@ export function validateJoppa(config) {
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
     require(repo.reviewCommands == null || Array.isArray(repo.reviewCommands) && repo.reviewCommands.length && repo.reviewCommands.every(text),
       'Repository reviewCommands must be a nonempty array of check commands');
+    if (config.delivery === 'requirement') {
+      const review = repo.reviewCommands ?? config.reviewCommands;
+      require(Array.isArray(review) && review.length && review.every(text),
+        'Requirement delivery needs explicit reviewCommands for lint and focused tests');
+    }
     require(repo.gateTimeoutSeconds == null || (Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0),
       'Repository gateTimeoutSeconds must be a positive integer');
     require(repo.coderTimeoutSeconds == null || (Number.isSafeInteger(repo.coderTimeoutSeconds) && repo.coderTimeoutSeconds > 0),
@@ -85,7 +92,13 @@ export function validateJoppa(config) {
     }
     ids.add(repo.id); paths.add(folder);
   }
-  require(['branch', 'target'].includes(config.delivery), 'delivery must be branch or target');
+  require(['branch', 'target', 'requirement'].includes(config.delivery), 'delivery must be branch, target or requirement');
+  if (config.delivery === 'requirement') {
+    const reader = joppa.readerTokenFile;
+    require(text(reader) && path.isAbsolute(reader) && fs.statSync(reader).isFile() &&
+      (fs.statSync(reader).mode & 0o077) === 0, 'Requirement delivery needs a private read-only joppa.readerTokenFile');
+    require(!tokens.has(fs.realpathSync(reader)), 'The Joppa reader must not use a worker mutation token');
+  }
   require(text(config.worktreeRoot) && path.isAbsolute(config.worktreeRoot) &&
     inside(path.resolve(config.worktreeRoot), root) && path.resolve(config.worktreeRoot) !== root,
     'worktreeRoot must be a directory inside sourceRoot');
@@ -170,6 +183,7 @@ export async function nextTask(config) {
     const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
     if (mine.total) { held++; continue; }
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
+    const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const eligible = [], {object, group} = await occupancyReader(config, worker);
     const occupied = new Set();
     for (const run of [...reservations, ...retained]) {
@@ -217,7 +231,16 @@ export async function nextTask(config) {
         require(current.address === task.address && current.current_revision === task.revision, 'Task changed during queue selection');
         taskInput(config, current);
         const context = await group(task.address);
-        if (!occupied.has(`${context.requirement}\n${context.repository}`)) eligible.push({...task, ...context});
+        if (occupied.has(`${context.requirement}\n${context.repository}`)) continue;
+        try {
+          await publications({config, tasks: [{address: task.address}], requirement: context.requirement,
+            repository: config.repositories.find(repo => repo.id === context.repository),
+            requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}});
+        } catch (error) {
+          if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
+          throw error;
+        }
+        eligible.push({...task, ...context});
       }
       cursor = page.next_cursor;
     } while (cursor);
@@ -449,8 +472,22 @@ export async function guardTaskClaims(run, persist) {
   });
   if (!conflict) return;
   run.claimConflict = conflict;
+  await releaseTaskClaims(run, persist,
+    `Another actor holds ${conflict.address} in this Requirement and repository. Lane did not start.`);
+  throw new Error(`PACKAGE_ALREADY_HELD: ${conflict.address} belongs to ${conflict.actor}; this run released its own Tasks before startup`);
+}
+
+export async function releaseTaskClaims(run, persist, reason) {
+  const claims = claimTasks(run), objects = [];
+  for (const claim of claims) {
+    const object = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
+    require(object.address === claim.address && object.process?.status === 'in_progress' &&
+      object.process.assignee === run.joppaWorker.actor && contractDigest(object) === claim.digest,
+      'PACKAGE_RELEASE_UNCONFIRMED: Task holder or contract changed');
+    objects.push(object);
+  }
   run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
-    revision: object.current_revision, reason: `Another actor holds ${conflict.address} in this Requirement and repository. Lane did not start.`})));
+    revision: object.current_revision, reason})));
   persist();
   try { await mutateTasks(run, run.releaseRequest); }
   catch (error) { throw new Error(`PACKAGE_RELEASE_UNCONFIRMED: ${error.message}`); }
@@ -459,13 +496,12 @@ export async function guardTaskClaims(run, persist) {
     const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
     require(current.address === claim.address && current.historical === false && current.document?.present === true &&
       Number.isSafeInteger(current.current_revision) && current.process?.status === 'open' &&
-      current.process.assignee === null && !current.process.claim && !current.process.done && !current.process.retired,
+      current.process.assignee === null && !current.process.claim && !current.process.blocked && !current.process.done && !current.process.retired,
       'PACKAGE_RELEASE_UNCONFIRMED: Joppa did not confirm every Task as current and unclaimed');
     run.releaseResults.push({address: claim.address, revision: current.current_revision, status: 'open'});
   }
   run.releaseConfirmed = true;
   persist();
-  throw new Error(`PACKAGE_ALREADY_HELD: ${conflict.address} belongs to ${conflict.actor}; this run released its own Tasks before startup`);
 }
 
 function isImplementTimeout(artifacts) {
@@ -545,9 +581,10 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const report = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(file => fs.existsSync(file));
     require(report, 'Checked publication evidence is missing; Task remains held');
     const evidence = fs.readFileSync(report, 'utf8');
-    const sha = evidence.match(/(?:Landed SHA|Verified existing SHA): ([0-9a-f]{40,64})\b/)?.[1];
-    const target = evidence.match(/^Target: (.+)$/m)?.[1];
-    const expected = report.endsWith('verification.txt') || run.config.delivery === 'target' ? run.repository.targetBranch : run.deliveryBranch || `ticket-${run.executionId}`;
+    const {sha, target} = parsePublication(evidence);
+    const expected = run.config.delivery === 'requirement'
+      ? run.requirementDelivery.final ? run.repository.targetBranch : run.requirementDelivery.branch
+      : report.endsWith('verification.txt') || run.config.delivery === 'target' ? run.repository.targetBranch : run.deliveryBranch || `ticket-${run.executionId}`;
     require(sha && target === expected, 'Publication evidence does not match the configured delivery');
     const env = {...process.env, GIT_SSH_COMMAND: `ssh -F /dev/null -i ${quote(path.join(run.config.sshDir, 'id_ed25519'))} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${quote(path.join(run.config.sshDir, 'known_hosts'))}`};
     const remote = await new Promise((resolve, reject) => execFile('git', ['-C', run.repository.path, 'ls-remote', 'origin', `refs/heads/${target}`],

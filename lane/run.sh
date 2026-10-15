@@ -231,6 +231,11 @@ say "run.sh: sources RO: $source_root"
 say "run.sh: worktree RW: $worktree (private .git)"
 
 mounts=(--mount "$source_root")
+requirement_reader=""
+if [[ -n "${LANE_REQUIREMENT_READER_DIR:-}" ]]; then
+  mounts+=(--mount "$LANE_REQUIREMENT_READER_DIR")
+  requirement_reader="/workspace/$(basename "$LANE_REQUIREMENT_READER_DIR")/token"
+fi
 node --input-type=module -e '
   import {pathToFileURL} from "node:url";
   const {validateWritableDirs} = await import(pathToFileURL(process.argv[1]));
@@ -279,7 +284,8 @@ cleanup() {
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
     elif [[ "$code" -eq 0 ]]; then
       cleanup_target="$target"
-      if [[ "$ticket_source" == joppa && "${LANE_DELIVERY:-branch}" == branch ]]; then
+      if [[ "$ticket_source" == joppa ]] && { [[ "${LANE_DELIVERY:-branch}" == branch ]] \
+        || [[ "${LANE_DELIVERY:-}" == requirement && "${LANE_REQUIREMENT_FINAL:-false}" != true ]]; }; then
         cleanup_target="${LANE_DELIVERY_BRANCH:-ticket-$ticket}"
         [[ ! -f "$worktree/.git/lane-verified" ]] || cleanup_target="$target"
       fi
@@ -454,6 +460,10 @@ medulla \
   --var "REPOSITORY_PREFLIGHT=$repository_preflight" \
   --var "DELIVERY=${LANE_DELIVERY:-target}" \
   --var "DELIVERY_BRANCH=${LANE_DELIVERY_BRANCH:-}" \
+  --var "REQUIREMENT_BRANCH=${LANE_REQUIREMENT_BRANCH:-}" \
+  --var "REQUIREMENT_HEAD=${LANE_REQUIREMENT_HEAD:-}" \
+  --var "REQUIREMENT_FINAL=${LANE_REQUIREMENT_FINAL:-false}" \
+  --var "REQUIREMENT_READER_FILE=$requirement_reader" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
