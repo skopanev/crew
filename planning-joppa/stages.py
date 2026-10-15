@@ -170,15 +170,20 @@ def prompt_assignment(assignment):
             result[level]["verification"] = assignment["joppa"]["objects"][item["id"]]["process"].get("verification")
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
+    def prompt_data(item):
+        terminal_task = item.get("kind") == assignment["joppa"]["task_type"] and (
+            item["process"].get("done") or item["process"].get("retired"))
+        return {key: value for key, value in item["document"]["data"].items()
+                if key != "contract" or not terminal_task}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
         "test_status": assignment["joppa"]["test_status"],
         "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "revision": task["current_revision"],
-                   "data": task["document"]["data"], "links": task["document"]["links"],
+                   "data": prompt_data(task), "links": task["document"]["links"],
                    "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                   for task in tasks],
-        "objects": {address: {"revision": item["current_revision"], "data": item["document"]["data"],
+        "objects": {address: {"revision": item["current_revision"], "data": prompt_data(item),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
                               "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
@@ -199,6 +204,8 @@ def prompt_assignment(assignment):
     result["decisions"] = [json.dumps({key: decisions.get(key) for key in
         ("confirmed", "comments", "sources", "issues")}, ensure_ascii=False)]
     result["knowledge_query"] = assignment["knowledge_query"]
+    result["details_file"] = str(shared.artifacts() / "input.json")
+    result["details_note"] = "Read relevant omitted Task contracts in details_file before proposing new work or declaring reuse or duplication."
     return result
 
 
