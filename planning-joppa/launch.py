@@ -15,6 +15,8 @@ OUTPUT_CONTRACT = """This is Joppa planning. Plan the supplied scope.
 Use the standard plan shape. Each Task also needs action: create or update.
 For update, include target (an existing Task under the supplied AC) and revision (its current document revision).
 Preserve its owner, worker assignment, parent and other document fields.
+For update, preserve an existing How step 0 verbatim as steps[0]. Keep its Repository and Module unchanged.
+This recovery step precedes the maximum five mechanism steps. Critics must check its relevance to the current AC.
 Reuse existing suitable Tasks instead of duplicating their work. Omit unchanged, done and retired Tasks.
 An implement plan needs at most five mechanism steps, reuse choices and observable AC and module checks for every Task.
 Do not emit shallow implementation Tasks. Lane decides files, functions and test placement.

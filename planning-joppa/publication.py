@@ -196,6 +196,7 @@ def validate_one(plan, assignment):
                for value in (task["id"], task.get("target"))}
     for task in normalized.get("tasks", []):
         require(task.get("action") in ("create", "update", "retire"), "Task action must be create, update or retire")
+        existing = None
         if task["action"] in ("update", "retire"):
             address = text(task.get("target"), "Task target")
             require(address in inventory and address not in targets, "update must target one existing Task under this AC")
@@ -205,6 +206,20 @@ def validate_one(plan, assignment):
             targets.add(address)
         else:
             require("target" not in task and "revision" not in task, "new Task cannot replace an existing Task")
+        if task["action"] != "retire":
+            steps = strings(task.get("steps"), "task.steps")
+            body = existing["document"]["data"].get("contract", "") if existing else ""
+            how = re.search(r"(?ms)^How:\s*\n(.*?)(?=^Checks:|\Z)", body)
+            recovery = re.findall(r"(?m)^0\. [^\r\n]+$", how[1] if how else "")
+            require(len(recovery) <= 1, "Task has multiple recovery steps")
+            if recovery:
+                for field, key in (("Repository", "repository"), ("Module", "module")):
+                    require(re.findall(r"^" + field + r":[ \t]*([^\r\n]+)$", body, re.M) == [task[key]],
+                            f"recovery step 0 scope mismatch: {task['target']}")
+                require(steps[0] == recovery[0], f"Task must preserve recovery step 0: {task['target']}")
+                task["steps"] = steps[1:]
+            require(not any(re.match(r"\s*0\.\s", step) for step in task["steps"]),
+                    "Task cannot add or duplicate recovery step 0")
         dependencies = strings(task.get("depends_on"), "task.depends_on", empty=True)
         require(not set(dependencies).intersection(retired), "Task cannot depend on a Task retired by this plan")
         require(task["action"] != "retire" or not dependencies, "retirement cannot add dependencies")
@@ -293,8 +308,12 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
 def contract(task, plan):
     lines = ["Goal: " + task["outcome"], "",
              f"Repository: {task['repository']}", f"Module: {task['module']}", "", "How:"]
+    steps = task["steps"]
+    if steps[0].startswith("0. "):
+        lines.append(steps[0])
+        steps = steps[1:]
     lines.extend(f"{number}. " + re.sub(r"^\s*\d+\.\s+", "", step)
-                 for number, step in enumerate(task["steps"], 1))
+                 for number, step in enumerate(steps, 1))
     lines += ["", "Checks:"]
     for check in task["checks"]:
         method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
