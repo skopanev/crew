@@ -42,10 +42,9 @@ REQUIREMENT_CONTRACT = """Plan all selected criteria in this Requirement as one 
 The input joppa.criteria lists the selected ACs. Each Task needs its exact ac address.
 Include criteria: [{ac: full-address, disposition: implement or verify_existing}] for every selected AC.
 Every acceptance_check also needs its exact ac address. Keep complete mechanisms and observable checks.
-Group implementation work by repository. Declare required local prerequisites in depends_on to establish plan order.
-Crew persists that order as [01], [02] Task title prefixes within each repository package.
-Do not add same-package Joppa depends_on links. The package coder executes Tasks in order.
-Preserve external prerequisites, including other repository packages. Do not create a package object.
+Each Task runs and lands independently. Keep each Task within one repository and module.
+Declare depends_on only when a Task requires another Task's delivered output, including within this Requirement.
+Crew numbers Task titles for display. Title order does not replace dependencies. Do not create a package object.
 Reuse existing Tasks and proven test bindings. Do not create verification Tasks for behavior that existing tests prove.
 """
 

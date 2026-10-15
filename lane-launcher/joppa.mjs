@@ -212,13 +212,11 @@ export async function nextTask(config) {
     } while (cursor);
     available = Math.max(available, eligible.length);
     if (eligible.length) {
-      const task = eligible[0];
-      const tasks = [...new Map(eligible.filter(item => item.requirement === task.requirement && item.repository === task.repository)
-        .map(item => [item.address, item])).values()]
-        .sort((a, b) => taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))
-        .map(item => ({address: item.address, revision: item.revision, title: item.title}));
-      require(tasks.length <= 100, 'Repository package exceeds the Joppa 100-operation atomic batch limit; no Tasks claimed');
-      return {candidate: {id: tasks[0].address, title: task.title, revision: tasks[0].revision,
+      const first = eligible[0];
+      const task = eligible.filter(item => item.requirement === first.requirement && item.repository === first.repository)
+        .sort((a, b) => taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
+      const tasks = [{address: task.address, revision: task.revision, title: task.title}];
+      return {candidate: {id: task.address, title: task.title, revision: task.revision,
         tasks, requirement: task.requirement, repository: task.repository}, worker, available, held};
     }
   }
