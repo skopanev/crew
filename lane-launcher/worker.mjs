@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
+import {laneRunFolder} from './scope.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {claimTask, guardTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
 import {formatLaneLine} from './lane-log.mjs';
@@ -75,6 +76,11 @@ try {
     save(stateFile, run);
   }
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
+  run.runFolder = laneRunFolder(run.runFolder, run.config.id);
+  save(stateFile, run);
+  fs.mkdirSync(run.runFolder, {recursive: true});
+  const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
+  fs.writeFileSync(claimFile, JSON.stringify(run.claim) + '\n', {mode: 0o600});
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
@@ -82,7 +88,7 @@ try {
         LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
         LANE_DELIVERY: run.config.delivery, LANE_DELIVERY_BRANCH: run.deliveryBranch || '',
         EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
-      ...(run.claim ? {LANE_CLAIM_JSON: JSON.stringify(run.claim)} : {})}, detached: true,
+      LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
     // Keep original bytes on disk; presentation colors apply only to the tab.

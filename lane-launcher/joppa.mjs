@@ -478,7 +478,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
     const container = /^\[medulla\] (medulla-sess-[\w.-]+) never became ready\b/m.exec(output)?.[1];
     const checkout = run.config.worktreeRoot && run.executionId && path.join(run.config.worktreeRoot, run.executionId);
-    const nativeEmpty = !fs.existsSync(run.runFolder) || fs.readdirSync(run.runFolder).length === 0;
+    const nativeEmpty = !fs.existsSync(run.runFolder) || fs.readdirSync(run.runFolder).every(name => name === 'launch-claim.json');
     const startupFailed = result.status === 'failed' && container && checkout && nativeEmpty && !fs.existsSync(checkout) &&
       objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) &&

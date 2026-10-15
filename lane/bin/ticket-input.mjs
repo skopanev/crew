@@ -14,10 +14,10 @@ try {
   const workspace = readOnly ? args[3] : process.env.project_name;
   const runDir = process.env.MEDULLA_RUN_DIR;
   if (!id || !workspace || (!readOnly && !runDir)) throw new Error('Ticket, workspace and run directory are required');
-  const claim = readOnly ? (() => {
+  const claim = (() => {
     try { return JSON.parse(fs.readFileSync(path.join(runDir, 'artifacts/claim.json'), 'utf8')); }
-    catch { return null; }
-  })() : JSON.parse(process.env.LAUNCH_CLAIM || '{}');
+    catch (error) { if (readOnly) return null; throw error; }
+  })();
   const ticket = claim?.source === 'joppa' ? claim.ticket : await getTicket(id, workspace);
   if (ticket.id.toLowerCase() !== id.toLowerCase() && ticket.address !== id) throw new Error('Ticket source returned a different ticket');
   if (claim?.source === 'joppa' && claim.workspace !== workspace) throw new Error('Joppa Task belongs to another workspace');
