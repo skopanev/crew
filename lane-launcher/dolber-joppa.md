@@ -51,6 +51,7 @@ Completion failures also write a Joppa note. Each retry uses a separate candidat
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
 | `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
+| `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | Publish a candidate branch, or land on the configured target |
@@ -60,6 +61,10 @@ Only configured repositories enter Git and CBM refresh. No `.ntkrc` is required 
 `worktreeRoot` sets the checkout directory inside `sourceRoot`. Each Task has a stable execution ID.
 The table shows the full Task address, stage or reason code, run ID, start time and duration.
 NTK Dolber keeps its existing config and commands.
+
+`coderTimeoutSeconds` requires Medulla support for `--node-timeout` in the host runtime and the selected image.
+An older engine rejects the flag before coding. The cap cannot extend the workflow's coder timeout.
+It does not limit expert review or landing. A resumed run keeps its saved cap.
 
 Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.

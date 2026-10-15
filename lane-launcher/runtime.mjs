@@ -48,6 +48,7 @@ export function laneArgs(config, ticket) {
     '--cbm-mcp-command', config.cbmMcpCommand, '--cbm-cache-dir', config.cbmCacheDir,
     '--test-command', JSON.stringify(config.testCommand || []),
     '--gate-timeout', String(config.gateTimeoutSeconds ?? 900),
+    ...(config.coderTimeoutSeconds != null ? ['--coder-timeout', String(config.coderTimeoutSeconds)] : []),
     '--ssh-dir', config.sshDir,
     ...(config.sharedLockDir ? ['--shared-lock-dir', config.sharedLockDir] : []),
     ...config.readOnlyRepos.flatMap(repo => ['--mount-ro', repo]),

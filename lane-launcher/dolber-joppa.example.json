@@ -10,6 +10,7 @@
   },
   "limit": 1,
   "gateTimeoutSeconds": 900,
+  "coderTimeoutSeconds": 1800,
   "intervalSeconds": 60,
   "launchLanes": false,
   "closeTabOnExit": true,
