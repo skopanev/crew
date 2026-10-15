@@ -140,6 +140,15 @@ The result maps each Task address to its confirmed status and revision in `resul
 A confirmed workflow failure blocks all held Tasks atomically.
 An uncertain claim, worker state, or outcome retains the Tasks for inspection.
 
+A single Task can return to the queue after an `implement_code` timeout before any landing attempt.
+The worker requires a stopped session container and a clean checkpoint with new changes inside the Task scope.
+It verifies the remote recovery ref, saves a typed Joppa note, and moves the checkout before releasing the Task.
+It deletes the moved checkout only after Joppa confirms the release.
+The next claim checks the Task and acceptance context, then restores the exact checkpoint before coding.
+The coder completes the remaining work. Normal checks, expert review, and landing still apply.
+Changed context, missing remote evidence, or an uncertain release requires inspection. The worker does not restart from an empty checkout.
+This recovery does not apply after landing starts, during expert review, or after a workflow deadline.
+
 ## Status-only CLI
 
 ```bash
