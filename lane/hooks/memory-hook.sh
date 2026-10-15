@@ -223,7 +223,7 @@ if [[ "$event" == SessionStart ]]; then
   # и другие роли флота продолжают получать их целиком.
   [[ -z "${EQUILL_RULE_MODULES:-}" ]] || args+=(--where "module=$EQUILL_RULE_MODULES")
   if [[ "${EQUILL_ROLE:-}" == crew-lane-* ]]; then
-    args+=(--where "key=tickets.attachments_and_scoped_search,tickets.unit_cap,tickets.pm.08,tickets.pm.18,tickets.pm.criterion")
+    args+=(--where "key=tickets.attachments_and_scoped_search,tickets.unit_cap,tickets.pm.08,tickets.pm.18,tickets.pm.criterion,tickets.checks.focused_targets")
   fi
 
   warn=""

@@ -253,16 +253,19 @@ export async function main(argv) {
   }
   const state = {message: ac || requirement ? `Planning ${ac || requirement}` :
     monitor ? 'Monitoring existing runs' : 'Checking ready Requirements', error: null};
-  let current = null, screen, child, stopped = false, wake, termination, selection;
+  let current = null, screen, child, stopped = false, wake, termination, selection, nextCheck;
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, current);
     const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
       paint, 6, {identityLabel: 'REQ / AC', titleLabel: 'TEXT'});
+    const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
+    const footer = left == null ? 'Ctrl+C to stop' :
+      `Next check in ${paint('blue', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`;
     return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
-      closed ? (stopped ? 'Stopped' : 'Completed') : 'Refresh 5s · Ctrl+C to stop'].join('\n');
+      closed ? (stopped ? 'Stopped' : 'Completed') : footer].join('\n');
   };
   const draw = () => {
     try { if (screen) screen.draw(); else process.stdout.write(render() + '\n'); }
@@ -292,8 +295,11 @@ export async function main(argv) {
   let ticker, lock;
   const attempted = new Set();
   const pause = () => new Promise(resolve => {
-    const timer = setTimeout(() => { wake = null; resolve(); }, interval * 1000);
-    wake = () => { clearTimeout(timer); wake = null; resolve(); };
+    nextCheck = performance.now() + interval * 1000;
+    draw();
+    const finish = () => { nextCheck = null; wake = null; resolve(); };
+    const timer = setTimeout(finish, interval * 1000);
+    wake = () => { clearTimeout(timer); finish(); };
     if (stopped) wake();
   });
   try {
