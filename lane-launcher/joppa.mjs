@@ -4,10 +4,11 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {parsePublication, requirementBranch} from './requirement-delivery.mjs';
+import {parsePublication, requirementBranch, requirementPlan} from './requirement-delivery.mjs';
 import {publicationReader} from './publication-guard.mjs';
+import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {createHash, randomUUID} from 'node:crypto';
-import {readRun, runDirectories, save, command, quote} from './runtime.mjs';
+import {readRun, runDirectories, save, command, quote, alive} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -111,6 +112,7 @@ export function api(config, worker, tool, arguments_, {signal} = {}) {
 }
 
 export function runHoldsTasks(run) {
+  if (run.finalizeOnly) return !run.result && (!run.worker || alive(run.worker.pid));
   if (run.releaseConfirmed === true) return false;
   if (!run.result || run.result.held || run.claimRequest && !run.claim && !run.claimRejected) return true;
   if (run.claim && !run.result.completed && !run.result.blockConfirmed) return true;
@@ -121,11 +123,14 @@ export function runHoldsTasks(run) {
 }
 
 async function occupancyReader(config, worker) {
+  const check = (condition, message) => {
+    if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
+  };
   const schema = await api(config, worker, 'joppa_tree', {workspace: config.workspace}), objects = new Map();
   const object = async address => {
     if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
     const current = await objects.get(address);
-    require(current?.address === address && current.document?.present === true && current.historical === false,
+    check(current?.address === address && current.document?.present === true && current.historical === false,
       'Task ownership context is absent or historical');
     return current;
   };
@@ -134,27 +139,28 @@ async function occupancyReader(config, worker) {
     const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
     const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
     if (!configured.length) return null;
-    require(declarations.length === 1, 'Held Task repository declaration is ambiguous');
+    check(declarations.length === 1, 'Held Task repository declaration is ambiguous');
     const repository = configured[0][1].trim(), seen = new Set();
     let parent = current.document.parent;
     while (parent) {
-      require(!seen.has(parent), 'Task parent context contains a cycle');
+      check(!seen.has(parent), 'Task parent context contains a cycle');
       seen.add(parent);
       const context = await object(parent);
       if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
       parent = context.document.parent;
     }
-    throw new Error('Task needs a requirement ancestor');
+    throw Object.assign(new Error('Task needs a requirement ancestor'), {code: 'CANDIDATE_INVALID'});
   };
   return {object, group};
 }
 
-async function heldTasks(config, worker, visit) {
+async function heldTasks(config, worker, visit, inventory) {
   let cursor;
   do {
     const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace,
       purpose: 'implementation', view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
     for (const task of page.tasks) {
+      inventory?.push(task);
       if (task.status === 'done' || task.status === 'retired' || task.status !== 'in_progress' && !task.assignee) continue;
       await visit(task);
     }
@@ -185,7 +191,7 @@ export async function nextTask(config) {
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const eligible = [], {object, group} = await occupancyReader(config, worker);
-    const occupied = new Set();
+    const occupied = new Set(), inventory = [];
     for (const run of [...reservations, ...retained]) {
       if (!run.joppaWorker && !run.config?.joppa) continue;
       if (!reservations.includes(run)) {
@@ -219,37 +225,67 @@ export async function nextTask(config) {
     await heldTasks(config, worker, async task => {
       const context = await group(task.address);
       if (context) occupied.add(`${context.requirement}\n${context.repository}`);
-    });
+    }, inventory);
     let cursor;
     do {
       const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
         purpose: 'implementation', view: 'available', limit: 100, ...(cursor ? {cursor} : {}),
         ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
-      for (const task of page.tasks) if ((await dependencies(task.address)).ready) {
-        require(text(task.address) && Number.isSafeInteger(task.revision), 'Joppa returned an invalid Task');
-        const current = await object(task.address);
-        require(current.address === task.address && current.current_revision === task.revision, 'Task changed during queue selection');
-        taskInput(config, current);
-        const context = await group(task.address);
-        if (occupied.has(`${context.requirement}\n${context.repository}`)) continue;
+      for (const task of page.tasks) {
         try {
+          if (!(await dependencies(task.address)).ready) continue;
+          const current = await object(task.address);
+          if (!text(task.address) || !Number.isSafeInteger(task.revision) ||
+              current.current_revision !== task.revision) continue;
+          try { taskInput(config, current); }
+          catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }
+          const context = await group(task.address);
+          if (!context || occupied.has(`${context.requirement}\n${context.repository}`)) continue;
           await publications({config, tasks: [{address: task.address}], requirement: context.requirement,
             repository: config.repositories.find(repo => repo.id === context.repository),
             requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}});
+          eligible.push({...task, ...context});
         } catch (error) {
           if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
+          if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID'].includes(error.code)) {
+            console.error(`${task.address}: ${error.message}; skipping this Task`);
+            continue;
+          }
           throw error;
         }
-        eligible.push({...task, ...context});
       }
       cursor = page.next_cursor;
     } while (cursor);
     available = Math.max(available, eligible.length);
-    if (eligible.length) {
+    if (config.delivery === 'requirement') {
+      const candidate = await finalizationCandidate({config, worker,
+        read: (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}),
+        object, group, rows: inventory, occupied, runs});
+      if (candidate) return {candidate, worker, available: available + 1, held};
+    }
+    while (eligible.length) {
       const first = eligible[0];
       const task = eligible.filter(item => item.requirement === first.requirement && item.repository === first.repository)
         .sort((a, b) => taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
       const tasks = [{address: task.address, revision: task.revision, title: task.title}];
+      if (config.delivery === 'requirement') {
+        let paused = true;
+        try {
+          const plan = await requirementPlan({config, requirement: task.requirement, repository: task.repository, tasks},
+            (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
+          paused = plan.planningHeld;
+        } catch (error) {
+          if (error.code !== 'CANDIDATE_INVALID') throw error;
+          console.error(`${task.requirement}: ${error.message}; skipping this Requirement unit`);
+        }
+        if (paused) {
+          for (let index = eligible.length - 1; index >= 0; index--) {
+            if (eligible[index].requirement === task.requirement && eligible[index].repository === task.repository) eligible.splice(index, 1);
+          }
+          available = eligible.length;
+          continue;
+        }
+      }
       return {candidate: {id: task.address, title: task.title, revision: task.revision,
         tasks, requirement: task.requirement, repository: task.repository}, worker, available, held};
     }

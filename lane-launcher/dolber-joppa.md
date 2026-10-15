@@ -36,8 +36,13 @@ Set `reviewCommands` to lint and focused tests for the Task change.
 Intermediate Tasks complete on the Requirement branch. They do not run full gates or `afterLand`.
 The last Task runs full `gateCommands` under the shared target lock before target delivery.
 Crew checks the live Task set again before this push. A changed set or active planner prevents delivery.
-Failed final gates retain the Requirement candidate and block the last Task.
+Failed final gates retain the last Task checkout and block that Task.
+The failed Task does not publish its changes to the shared Requirement branch.
 The planner must create scoped repair work. Crew does not reopen completed Tasks.
+If retirement leaves only completed Tasks, Crew selects the unpublished Requirement branch for finalization.
+This run executes full gates and target delivery without a Task claim or agent nodes.
+A failed finalization writes a Requirement note. It waits until the source, target, or Task context changes.
+A repeated finalization checks target ancestry under the lock and skips checks and push if the code already landed.
 This mode requires `sharedLockDir` and a server-enforced read-only `joppa.readerTokenFile`.
 Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
 The host confirms the exact remote SHA before it calls `complete_task`.

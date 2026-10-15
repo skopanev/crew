@@ -36,25 +36,31 @@ export function publicationReader(config, read) {
 
 export async function guardPublications(run, read, ancestor) {
   const schema = (await read('joppa_tree', {})).schema.types;
+  const invalid = message => {
+    const error = new Error(`DEPENDENCY_INVALID: ${message}`);
+    error.code = 'DEPENDENCY_INVALID';
+    throw error;
+  };
   const cache = new Map(), visited = new Set();
   const object = async (address, allowAbsent = false) => {
     if (!cache.has(address)) cache.set(address, read('joppa_objects', {address}));
     const value = await cache.get(address);
-    if (value.address !== address || value.historical !== false || !value.document ||
+    if (!value || value.address !== address || value.historical !== false || !value.document ||
         !allowAbsent && value.document.present !== true) {
-      throw new Error('Dependency context is absent or historical');
+      invalid(`Dependency context is absent or historical: ${address}`);
     }
+    if (!schema[value.kind]) invalid(`Dependency type is absent from the schema: ${address}`);
     return value;
   };
   const requirement = async value => {
     const seen = new Set();
     while (value) {
-      if (seen.has(value.address)) throw new Error('Dependency parent cycle');
+      if (seen.has(value.address)) invalid('Dependency parent cycle');
       seen.add(value.address);
       if (schema[value.kind]?.role === 'requirement') return value.address;
       value = value.document.parent ? await object(value.document.parent) : null;
     }
-    throw new Error('Dependency Task has no requirement ancestor');
+    invalid('Dependency Task has no requirement ancestor');
   };
   const pending = message => {
     const error = new Error(`DEPENDENCY_NOT_LANDED: ${message}`);
@@ -75,7 +81,7 @@ export async function guardPublications(run, read, ancestor) {
         }
         const declarations = [...(target.document.data?.contract || '').matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
         const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
-        if (!repo) throw new Error(`Dependency repository is not configured: ${target.address}`);
+        if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
         let publication;
         try { publication = parsePublication(target.process.done); }
         catch { pending(`${target.address} has no exact publication evidence`); }

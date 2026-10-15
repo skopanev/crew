@@ -1,7 +1,9 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
 
-const require = (condition, message) => { if (!condition) throw new Error(message); };
+const require = (condition, message) => {
+  if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
+};
 const text = value => typeof value === 'string' && value.trim();
 const validAddress = value => Boolean(text(value)) && value === value.trim() && value.includes(':') &&
   !/[\0-\x1f\x7f\s]/.test(value) && value.split(':').every(Boolean);
@@ -74,7 +76,8 @@ export async function requirementPlan(run, read) {
     require(run.config.repositories.some(repo => repo?.id === repository), 'Requirement delivery repository is not configured');
   }
   const rawOwn = run.claim?.tasks || run.tasks || (run.task ? [{address: run.task, revision: run.taskRevision}] : []);
-  require(Array.isArray(rawOwn) && rawOwn.length > 0, 'Requirement delivery needs current run Tasks');
+  require(Array.isArray(rawOwn) && (rawOwn.length > 0 || run.finalizeOnly === true),
+    'Requirement delivery needs current run Tasks or finalizeOnly');
   const ownByAddress = new Map();
   for (const item of rawOwn) {
     const entry = typeof item === 'string' ? {address: item} : item;
@@ -142,19 +145,13 @@ export async function requirementPlan(run, read) {
         require(!visitedTree.has(item.address), `Criterion tree contains a cycle: ${item.address}`);
         visitedTree.add(item.address);
         if (types[item.kind]?.role === 'ac') {
-          const listedRev = item.revision ?? item.current_revision;
-          const hasInline = Number.isSafeInteger(listedRev) && listedRev > 0 &&
-            (item.process !== undefined || item.planning_claim !== undefined);
-          const full = hasInline ? null : await object(item.address);
-          if (full && !present(full)) continue;
-          const revision = full ? full.current_revision : listedRev;
-          const proc = full ? full.process : item.process;
-          const rawClaim = full ? (full.process?.planning_claim ?? full.planning_claim) : (item.process?.planning_claim ?? item.planning_claim);
+          const full = await object(item.address);
+          if (!present(full)) continue;
           criteriaByAddress.set(item.address, {
             address: item.address,
-            revision,
-            process_revision: Number.isSafeInteger(proc?.revision) ? proc.revision : null,
-            planning_claim: normalizeClaim(rawClaim),
+            revision: full.current_revision,
+            process_revision: Number.isSafeInteger(full.process?.revision) ? full.process.revision : null,
+            planning_claim: normalizeClaim(full.process?.planning_claim ?? full.planning_claim),
           });
         }
         await collectCriteria(item.address, item.kind);
@@ -205,7 +202,7 @@ export async function requirementPlan(run, read) {
     if (value.process?.status === 'blocked' || listedStatus === 'blocked' || Boolean(value.process?.blocked)) return 'blocked';
     if (value.process?.status === 'in_progress' || listedStatus === 'in_progress') return 'in_progress';
     if (value.process?.status === 'open' || listedStatus === 'open') return 'open';
-    throw new Error(`Task has an invalid process status: ${value.address}`);
+    throw Object.assign(new Error(`Task has an invalid process status: ${value.address}`), {code: 'CANDIDATE_INVALID'});
   };
   const taskRecord = (value, status, reviewRequired, finishing) => ({
     address: value.address,
@@ -294,12 +291,13 @@ export async function requirementPlan(run, read) {
   const requirementTasks = [...requirementTasksByAddress.values()].sort((a, b) => a.address.localeCompare(b.address));
   const manifest = [...manifestByAddress.values()].sort((a, b) => a.address.localeCompare(b.address));
   const planningHeld = Boolean(reqClaim) || criteria.some(item => Boolean(item.planning_claim));
-  const final = !planningHeld && manifest.every(item => item.finishing);
+  const final = !planningHeld && manifest.every(item => item.finishing) &&
+    (ownByAddress.size > 0 || requirementTasks.some(item => item.status === 'done'));
   const fingerprint = createHash('sha256').update(JSON.stringify({
     requirement: {address: requirement, revision: reqObject.current_revision, process_revision: reqProcessRev, planning_claim: reqClaim},
     repository,
     criteria,
     tasks: requirementTasks,
   })).digest('hex');
-  return {branch, requirement, repository, final, planningHeld, fingerprint, manifest, tasks: manifest};
+  return {branch, requirement, repository, final, planningHeld, fingerprint, manifest};
 }
