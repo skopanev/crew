@@ -184,6 +184,53 @@ nodes:
       fi
       git checkout -B "ticket-${ticket_id}" "origin/${target}"
       git rev-parse HEAD > .git/lane-base
+      recovery_note=""
+      if jq -e '.recovery != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
+        recovery_ref="$(jq -r '.recovery.ref // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+        recovery_sha="$(jq -r '.recovery.sha // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+        recovery_tree="$(jq -r '.recovery.tree // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+        recovery_base="$(jq -r '.recovery.base // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+        recovery_instruction="$(jq -r '.recovery.instruction // empty' "$MEDULLA_RUN_DIR/artifacts/ticket.json")"
+        case "$recovery_ref" in
+          refs/heads/recovery/*) ;;
+          *) echo "RECOVERY_VERIFY_FAILED: invalid recovery ref ${recovery_ref}" >&2; exit 1 ;;
+        esac
+        remote_ref="refs/remotes/origin/${recovery_ref#refs/heads/}"
+        fetched_sha="$(git rev-parse --verify --quiet "${remote_ref}^{commit}" || true)"
+        if [ -z "$fetched_sha" ] || [ "$fetched_sha" != "$recovery_sha" ]; then
+          echo "RECOVERY_VERIFY_FAILED: ${recovery_ref} is ${fetched_sha:-missing}, expected ${recovery_sha}" >&2
+          exit 1
+        fi
+        if [ -z "$recovery_base" ] \
+           || ! git merge-base --is-ancestor "$recovery_base" "$recovery_sha" \
+           || ! git merge-base --is-ancestor "$recovery_base" "refs/remotes/origin/${target}"; then
+          echo "RECOVERY_VERIFY_FAILED: recovery base ${recovery_base} is not an ancestor of ${recovery_sha} and origin/${target}" >&2
+          exit 1
+        fi
+        fetched_tree="$(git rev-parse --verify --quiet "${recovery_sha}^{tree}" || true)"
+        base_tree="$(git rev-parse --verify --quiet "${recovery_base}^{tree}" || true)"
+        if [ -z "$recovery_tree" ] || [ "$fetched_tree" != "$recovery_tree" ] || [ "$fetched_tree" = "$base_tree" ]; then
+          echo "RECOVERY_VERIFY_FAILED: ${recovery_sha} tree is ${fetched_tree:-missing}, expected ${recovery_tree} above ${base_tree:-missing}" >&2
+          exit 1
+        fi
+        if ! git diff -z --no-renames --name-only "${recovery_base}..${recovery_sha}" \
+           | jq -R -s -e --slurpfile ticket "$MEDULLA_RUN_DIR/artifacts/ticket.json" '
+             ($ticket[0].modulePaths // []) as $roots |
+             split("\u0000") | (if length > 0 and .[-1] == "" then .[:-1] else . end) |
+             length > 0 and ($roots | length > 0) and all(.[]; . as $f |
+               ($f | length > 0) and ($f | test("[\r\n]") | not) and ($f | split("/") | index("..") | not) and
+               any($roots[]; . as $r | $r != "" and ($r == "." or $f == $r or ($f | startswith(($r | sub("/+$"; "")) + "/"))))
+             )
+           ' >/dev/null; then
+          echo "RECOVERY_VERIFY_FAILED: recovery diff ${recovery_base}..${recovery_sha} is empty or outside modulePaths" >&2
+          exit 1
+        fi
+        if [ "${MEDULLA_LAST_SIGNAL:-}" != "DUPLICATE" ]; then
+          git checkout -B "ticket-${ticket_id}" "$recovery_sha"
+          printf '%s\n' "$recovery_base" > .git/lane-base
+          recovery_note=" ${recovery_instruction}"
+        fi
+      fi
       # Use repository setup when present; otherwise bind its tracked hooks locally.
       if [ -f scripts/install-git-hooks.sh ]; then
         bash scripts/install-git-hooks.sh
@@ -240,7 +287,7 @@ nodes:
         echo "<signal:VERIFY_EXISTING>Check existing implementation at $(git rev-parse HEAD). ${deps:-}</signal:VERIFY_EXISTING>"
         exit 0
       fi
-      echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}</signal:READY>"
+      echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}${recovery_note:-}</signal:READY>"
 
   implement_code:
     timeout: 7200   # writing the code

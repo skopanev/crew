@@ -192,7 +192,12 @@ try {
       await finishTask(run, stateFile, result, artifacts);
       const tasks = (run.tasks || [{address: run.task}]).map(task => task.address).join(', ');
       if (result.completed) announce(`[lane] DONE ${tasks} · Joppa confirmed`);
-      if (result.released) announce(`[lane] RELEASED ${tasks} · startup failed; Joppa confirmed; no workflow ran`);
+      if (result.released) {
+        announce(result.checkpointed
+          ? `[lane] RELEASED ${tasks} · checkpoint ${run.recovery.sha.slice(0, 12)} saved on ${run.recovery.ref}; Joppa confirmed`
+          : `[lane] RELEASED ${tasks} · startup failed; Joppa confirmed; no workflow ran`);
+        if (run.recovery?.cleanupError) announce(`[lane] Cleanup failed: ${run.recovery.cleanupError}`);
+      }
       if (result.blockConfirmed) announce(`[lane] BLOCKED ${tasks} · Joppa confirmed; claims released`);
       if (result.held) announce(`[lane] HELD ${tasks} · claims retained with failure evidence`);
     } catch (error) {
