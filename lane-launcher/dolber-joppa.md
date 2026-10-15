@@ -29,18 +29,29 @@ The existing lane runs discovery, implementation or verification, configured che
 
 `delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
 `delivery: "target"` lands the candidate on the configured `targetBranch`.
+`delivery: "requirement"` keeps one branch for each Requirement and repository.
+Tasks use that branch in sequence and merge the current target before implementation.
+Each Task runs `reviewCommands` and expert review before publication.
+Set `reviewCommands` to lint and focused tests for the Task change.
+Intermediate Tasks complete on the Requirement branch. They do not run full gates or `afterLand`.
+The last Task runs full `gateCommands` under the shared target lock before target delivery.
+Crew checks the live Task set again before this push. A changed set or active planner prevents delivery.
+Failed final gates retain the Requirement candidate and block the last Task.
+The planner must create scoped repair work. Crew does not reopen completed Tasks.
+This mode requires `sharedLockDir` and a server-enforced read-only `joppa.readerTokenFile`.
+Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
 The host confirms the exact remote SHA before it calls `complete_task`.
 For target delivery, it also accepts the checked SHA as an ancestor of the current target.
 Joppa `done` records execution. It does not accept the AC or Requirement.
 
 ## Failure
 
-The deployed Joppa API has no failed or blocked Task transition.
-Dolber records a failure note and retains the confirmed claim. It does not release failed work into an immediate retry loop.
-That worker actor cannot take another Task until its claim is resolved.
+Dolber blocks confirmed failures with evidence and releases their claims.
+An uncertain claim or outcome stays held until inspection confirms the result.
+That worker actor cannot take another Task while its claim remains held.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.
 A lost completion response requires inspection. Do not rerun code which was already published.
-Completion failures also write a Joppa note. Each retry uses a separate candidate branch.
+Completion failures also write a Joppa note. Branch delivery uses a separate candidate branch for each retry.
 
 ## Config fields
 
@@ -48,13 +59,14 @@ Completion failures also write a Joppa note. Each retry uses a separate candidat
 |---|---|
 | `joppa.project` | Select Tasks for one Joppa project address |
 | `joppa.workers` | Separate actors and host token files for parallel lanes |
+| `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
 | `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
-| `delivery` | Publish a candidate branch, or land on the configured target |
+| `delivery` | `branch`, `target`, or `requirement` |
 
 `sourceRoot` can contain several repositories or be the repository itself.
 Only configured repositories enter Git and CBM refresh. No `.ntkrc` is required for Joppa.
@@ -70,6 +82,13 @@ Config changes apply only to new claims. Existing runs keep their captured argum
 Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.
 Earlier receipts remain in their existing directories.
+Requirement delivery runs full gates only before final target delivery.
+
+Before Docker, each new worker checks the exact publication SHA of completed prerequisites.
+Tasks in the same Requirement and repository can use their shared Requirement branch in this mode.
+Other consumers require that SHA on the prerequisite repository's configured target branch.
+Missing publication evidence or an unlanded SHA releases the new claim before any repository code runs.
+Upgrade all Task consumers together. A consumer that trusts only `done` can read unpublished code.
 
 `afterLand` receives four arguments: checkout path, landed SHA, target branch, and the target SHA before this push.
 The fourth argument defines the complete delivered change range, including all Task commits after rebase.
