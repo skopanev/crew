@@ -65,7 +65,9 @@ Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.
 Earlier receipts remain in their existing directories.
 
-`afterLand` receives the checkout path, landed SHA and target branch as three arguments.
+`afterLand` receives four arguments: checkout path, landed SHA, target branch, and the target SHA before this push.
+The fourth argument defines the complete delivered change range, including all Task commits after rebase.
+Older workers supply only three arguments. A hook that needs the range must reject a missing fourth argument.
 Crew uses the hook version in the canonical checkout when the lane ends.
 Its working directory is the checkout. It has 120 seconds, followed by a five-second stop limit.
 It must use existing check results. It must not change HEAD or source files.
