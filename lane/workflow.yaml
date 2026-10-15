@@ -183,6 +183,7 @@ nodes:
         exit 0
       fi
       git checkout -B "ticket-${ticket_id}" "origin/${target}"
+      # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
       recovery_note=""
       if jq -e '.recovery != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
