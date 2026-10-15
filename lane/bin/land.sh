@@ -22,10 +22,9 @@ if [[ -n "$before" ]] && ! git merge-base --is-ancestor "$before" "$sha" 2>/dev/
   exit 3
 fi
 
-# Reuse the checkout base for the complete range delivered by this push.
-if [[ -n "$before" ]]; then
-  printf '%s\n' "$before" > .git/lane-base
-fi
+# Replace the checkout base with the pre-push target tip for afterLand.
+# An empty value means the target does not exist; afterLand must not infer a base.
+printf '%s\n' "$before" > .git/lane-base
 git push origin "$sha:refs/heads/$target"
 after="$(git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
 echo "lane-push: after=$after"
