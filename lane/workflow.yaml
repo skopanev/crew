@@ -386,7 +386,7 @@ nodes:
       fi
       echo "<signal:SNAPSHOT>snapshot: $tree. Declared checks passed on this tree; commands, exit codes and logs: $receipt</signal:SNAPSHOT>"
   expert_review:
-    timeout: 1800
+    timeout: 480
     max_parallel: 3
     # Retry a reviewer that returns no verdict.
     max_attempts: 2
