@@ -6,6 +6,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
               --gate-command <shell command> [...]
+              [--review-command <shell command>]...
               --test-command '["runner", "args"]' [--gate-timeout <seconds>]
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
@@ -27,6 +28,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --planning-task    local Task id in that plan; repository/module must match.
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
+  --review-command  optional check before review; defaults to the gate commands.
   --test-command  required runner argument array for existing-code verification.
   --gate-timeout  maximum seconds per check; defaults to 900.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
@@ -56,6 +58,7 @@ gate_timeout=900
 also=()
 writable=()
 gate_commands=()
+review_commands=()
 passthrough=()
 while (( $# )); do
   case "$1" in
@@ -76,6 +79,7 @@ while (( $# )); do
     --cbm-mcp-command) cbm_command="${2:-}"; shift 2 ;;
     --cbm-cache-dir) cbm_cache="${2:-}"; shift 2 ;;
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
+    --review-command) review_commands+=("${2:-}"); shift 2 ;;
     --gate-timeout) gate_timeout="${2:-}"; shift 2 ;;
     --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
@@ -98,10 +102,14 @@ fi
 [[ -n "$cbm_cache" && -d "$cbm_cache" ]] || { say "run.sh: --cbm-cache-dir must name the existing shared CBM store"; exit 2; }
 (( ${#gate_commands[@]} )) || { say "run.sh: --gate-command is required"; usage; }
 [[ -n "$dispatcher_id" ]] || { say "run.sh: --dispatcher-id is required"; usage; }
-for command in "${gate_commands[@]}"; do
+for command in "${gate_commands[@]}" ${review_commands[@]+"${review_commands[@]}"}; do
   [[ -n "${command//[[:space:]]/}" ]] || { say "run.sh: empty gate command"; exit 2; }
 done
 gate_json="$(printf '%s\0' "${gate_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
+review_json="$gate_json"
+if (( ${#review_commands[@]} )); then
+  review_json="$(printf '%s\0' "${review_commands[@]}" | jq -Rs 'split("\u0000")[:-1]')"
+fi
 jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$test_command" >/dev/null || {
   say 'run.sh: --test-command must be a nonempty JSON argument array'; exit 2; }
 
@@ -413,6 +421,7 @@ medulla \
   --var "project_dir=$project_dir" \
   --var "module_name=$module" \
   --var "gate_commands=$gate_json" \
+  --var "review_commands=$review_json" \
   --var "gate_timeout_seconds=$gate_timeout" \
   --var "LANE_SHARED_LOCK_DIR=${shared_lock_dir:+/workspace/$(basename "$shared_lock_dir")}" \
   --var "ticket_test_command=$test_command" \

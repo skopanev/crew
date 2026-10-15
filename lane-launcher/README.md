@@ -38,6 +38,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `readWriteDirs` | Existing absolute directories mounted writable at `/workspace/<directory-name>`; defaults to `[]` |
 | `sharedLockDir` | Required for target delivery: one existing shared directory directly under `sourceRoot`, mounted writable at `/workspace/<directory-name>` |
 | `gateCommands` | Required check commands run against the lane's candidate |
+| `reviewCommands` | Optional checks before expert review. Defaults to `gateCommands`. Full `gateCommands` remain mandatory before push |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
 

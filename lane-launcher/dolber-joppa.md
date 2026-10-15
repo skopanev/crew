@@ -49,6 +49,7 @@ Completion failures also write a Joppa note. Each retry uses a separate candidat
 | `joppa.project` | Select Tasks for one Joppa project address |
 | `joppa.workers` | Separate actors and host token files for parallel lanes |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
+| `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `delivery` | Publish a candidate branch, or land on the configured target |
@@ -58,3 +59,7 @@ Only configured repositories enter Git and CBM refresh. No `.ntkrc` is required 
 `worktreeRoot` sets the checkout directory inside `sourceRoot`. Each Task has a stable execution ID.
 The table shows the full Task address, stage or reason code, run ID, start time and duration.
 NTK Dolber keeps its existing config and commands.
+
+Expert review uses the receipt for `reviewCommands`. Landing replaces
+`artifacts/gates/current.json` with the full gate receipt before push.
+Earlier receipts remain in their existing directories.

@@ -69,6 +69,10 @@ export function configFrom(file, env = process.env, {dryRun = false, source = 'n
       config.gateCommands.some(check => typeof check !== 'string' || !check.trim())) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');
   }
+  if (config.reviewCommands != null && (!Array.isArray(config.reviewCommands) || !config.reviewCommands.length ||
+      config.reviewCommands.some(check => typeof check !== 'string' || !check.trim()))) {
+    throw new Error('reviewCommands must be a nonempty array of check commands');
+  }
   if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
   if (!Array.isArray(config.readWriteDirs)) throw new Error('readWriteDirs must be an array');
   if (!Array.isArray(config.testCommand) || !config.testCommand.length || config.testCommand.some(arg => typeof arg !== 'string' || !arg.trim())) {

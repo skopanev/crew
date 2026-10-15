@@ -7,6 +7,7 @@ vars:
   REJECT_ROUNDS: '3'
   ticket_title: ''
   gate_commands: '[]'
+  review_commands: ''
   gate_timeout_seconds: '900'
   LAUNCH_CLAIM_FILE: ''
   TICKET_SOURCE: ntk
@@ -299,6 +300,7 @@ nodes:
       ticket_title: '{{var:ticket_title}}'
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       gate_commands: '{{var:gate_commands}}'
+      review_commands: '{{var:review_commands}}'
       gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
@@ -357,6 +359,7 @@ nodes:
       tree="$(git write-tree)"
       base="$(git rev-parse HEAD)"
       git diff --binary "origin/${target}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
+      export gate_commands="${review_commands:-$gate_commands}"
       if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
         echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
         exit 0
@@ -513,6 +516,7 @@ nodes:
       ticket_test_command: '{{var:ticket_test_command}}'
       ticket_title: '{{var:ticket_title}}'
       gate_commands: '{{var:gate_commands}}'
+      review_commands: '{{var:review_commands}}'
       gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
       LANE_SHARED_LOCK_DIR: '{{var:LANE_SHARED_LOCK_DIR}}'
       module_name: '{{var:module_name}}'
@@ -521,7 +525,7 @@ nodes:
       TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
-    # Bounded target-lock wait (3600s), gate (3600s) and Git operations.
+    # Bound final checks, target lock wait and integration retries.
     timeout: 8100
     on_signal:
       VERIFIED: cleanup
@@ -550,7 +554,7 @@ nodes:
         echo "<signal:LAND_FAILED>untracked files appeared after review: ${new_files}</signal:LAND_FAILED>"; exit 0; }
       have_tree="$(git write-tree)"
       [ "$have_tree" = "$want_tree" ] || { echo "<signal:LAND_FAILED>сажаем не то, что смотрела панель: $have_tree против $want_tree</signal:LAND_FAILED>"; exit 0; }
-      python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
+      gate_commands="${review_commands:-$gate_commands}" python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
         echo "<signal:LAND_FAILED>no passing gates for this candidate</signal:LAND_FAILED>"; exit 0; }
 
       if [ "${VERIFY_ONLY}" = "true" ]; then
@@ -575,6 +579,14 @@ nodes:
       }
 
       if [ "$DELIVERY" = branch ]; then
+        if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify >/dev/null 2>&1; then
+          if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
+            echo '<signal:GATE_FAIL>Final candidate checks failed; see artifacts/gates for logs and receipts.</signal:GATE_FAIL>'
+            exit 0
+          fi
+        fi
+        python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify || {
+          echo '<signal:LAND_FAILED>Final gate receipt is invalid.</signal:LAND_FAILED>'; exit 0; }
         target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
         land
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
