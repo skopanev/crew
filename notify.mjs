@@ -7,6 +7,7 @@ const events = new Set(['READY', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
 
 export function reasonCode(event) {
+  if (event.warning) return event.warning;
   if (event.event === 'READY') return '';
   if (event.event === 'TIMEOUT') return 'TIMEOUT';
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(event.signal || '') ? event.signal :
@@ -27,11 +28,11 @@ export async function notify(config, event) {
   }
   const stage = [event.node, event.event === 'TIMEOUT' ? event.model : undefined]
     .filter(Boolean).map(clean).join(' · ');
-  const header = `${event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
+  const header = `${event.warning ? '🟡' : event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
   const reason = reasonCode(event);
-  const message = [header, ticketLine, stage, reason && `Reason: ${reason}`]
+  const message = [header, ticketLine, stage, reason && `${event.warning ? 'Warning' : 'Reason'}: ${reason}`]
     .filter(Boolean).join('\n');
   const token = process.env.TELEGRAM_BOT_TOKEN || (route.envFile &&
     fs.readFileSync(route.envFile, 'utf8').match(/^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN\s*=\s*(.*?)\s*$/m)?.[1]
@@ -72,6 +73,7 @@ export function completionEvent(run, result, artifacts) {
     runId: path.basename(path.dirname(run.runFolder)),
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
+  if (result.code === 0 && result.postLandWarning) event.warning = 'POST_LAND_FAILED';
   if (result.blocked && result.code === 73) return {...event, signal: 'WORKTREE_PREEXISTED', summary: result.error};
   if (result.code === 0) return event;
   if (!artifacts) {

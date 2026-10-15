@@ -106,6 +106,9 @@ try {
     child.once('close', (code, receivedSignal) => resolve({code, signal: receivedSignal || signal}));
   });
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
+  const postLand = fs.readFileSync(path.join(dir, 'output.log'), 'utf8')
+    .match(/^run\.sh: POST_LAND_FAILED: ([^\r\n]+)/m);
+  if (postLand) result.postLandWarning = postLand[1];
   if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
   const message = run.claim || signal ? error.message :

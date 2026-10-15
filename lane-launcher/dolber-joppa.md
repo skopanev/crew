@@ -52,6 +52,7 @@ Completion failures also write a Joppa note. Each retry uses a separate candidat
 | `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
+| `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | Publish a candidate branch, or land on the configured target |
 
 `sourceRoot` can contain several repositories or be the repository itself.
@@ -63,3 +64,12 @@ NTK Dolber keeps its existing config and commands.
 Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.
 Earlier receipts remain in their existing directories.
+
+`afterLand` receives the checkout path, landed SHA and target branch as three arguments.
+Crew uses the hook version in the canonical checkout when the lane ends.
+Its working directory is the checkout. It has 120 seconds, followed by a five-second stop limit.
+It must use existing check results. It must not change HEAD or source files.
+Crew checks HEAD and Git status afterward. A failed hook retains the checkout and records `POST_LAND_FAILED`
+in the run result, table and notification. The log and result include the retry command.
+Confirmed Task completion remains valid. A completed Task's retained checkout does not occupy its Requirement group.
+Branch delivery and verification without a push do not run this hook.

@@ -53,6 +53,7 @@ TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
+after_land=""
 test_command='[]'
 gate_timeout=900
 also=()
@@ -169,6 +170,7 @@ if [[ "$ticket_source" == joppa ]]; then
   repo="$(cd "$repo" && pwd -P)"
   target="$(jq -er '.targetBranch' <<<"$LANE_REPOSITORY_JSON")"
   repository_preflight="$(jq -r '.preflight // empty' <<<"$LANE_REPOSITORY_JSON")"
+  after_land="$(jq -r '.afterLand // empty' <<<"$LANE_REPOSITORY_JSON")"
   worktree_root="${LANE_WORKTREE_ROOT:?Joppa needs worktreeRoot}"
   [[ "$repo" == "$source_root" || "$repo" == "$source_root/"* ]] || {
     say 'run.sh: configured repository escapes sourceRoot'; exit 2; }
@@ -260,7 +262,7 @@ else
 fi
 
 cleanup() {
-  local code=$? base head changes cleanup_target
+  local code=$? base head changes cleanup_target hook_rc retry retain_worktree=false
   if [[ "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
     if [[ -z "$(ls -A "$worktree")" ]]; then
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
@@ -274,10 +276,27 @@ cleanup() {
         && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
         && [[ -z "$changes" ]] \
         && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$cleanup_target"; then
-        if rm -rf -- "$worktree"; then
-          printf 'run.sh: removed completed worktree: %s\r\n' "$worktree"
-        else
-          say "run.sh: cannot remove completed worktree: $worktree" >&2
+        if [[ -n "$after_land" && "$cleanup_target" == "$target" && ! -f "$worktree/.git/lane-verified" ]]; then
+          head="$(git -C "$worktree" rev-parse HEAD)"
+          printf -v retry 'cd %q && timeout --kill-after=5s 120s %q %q %q %q' \
+            "$worktree" "$repo/$after_land" "$worktree" "$head" "$target"
+          hook_rc=0
+          (cd "$worktree" && timeout --kill-after=5s 120s "$repo/$after_land" "$worktree" "$head" "$target") || hook_rc=$?
+          if [[ "$hook_rc" -ne 0 ]] \
+            || [[ "$(git -C "$worktree" rev-parse HEAD 2>/dev/null)" != "$head" ]] \
+            || ! changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
+            || [[ -n "$changes" ]]; then
+            say "run.sh: POST_LAND_FAILED: retry: $retry"
+            say "run.sh: retained landed worktree: $worktree (afterLand exit $hook_rc)"
+            retain_worktree=true
+          fi
+        fi
+        if [[ "$retain_worktree" == false ]]; then
+          if rm -rf -- "$worktree"; then
+            printf 'run.sh: removed completed worktree: %s\r\n' "$worktree"
+          else
+            say "run.sh: cannot remove completed worktree: $worktree" >&2
+          fi
         fi
       else
         say "run.sh: retained worktree: clean landed state not confirmed at $worktree" >&2
