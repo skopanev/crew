@@ -180,7 +180,7 @@ export function createDashboard(config, paint) {
     const rows = runs.slice(0, 30).map(run => {
       const {result, worker} = run;
       const status = statusFor(run);
-      const stage = result ? (status === 'READY' ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
+      const stage = result ? (status === 'READY' && !result.postLandWarning ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
