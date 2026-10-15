@@ -262,7 +262,7 @@ else
 fi
 
 cleanup() {
-  local code=$? base head changes cleanup_target hook_rc retry retain_worktree=false
+  local code=$? base head changes cleanup_target hook_rc retry land_base retain_worktree=false
   if [[ "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
     if [[ -z "$(ls -A "$worktree")" ]]; then
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
@@ -278,10 +278,17 @@ cleanup() {
         && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$cleanup_target"; then
         if [[ -n "$after_land" && "$cleanup_target" == "$target" && ! -f "$worktree/.git/lane-verified" ]]; then
           head="$(git -C "$worktree" rev-parse HEAD)"
-          printf -v retry 'cd %q && timeout --kill-after=5s 120s %q %q %q %q' \
-            "$worktree" "$repo/$after_land" "$worktree" "$head" "$target"
-          hook_rc=0
-          (cd "$worktree" && timeout --kill-after=5s 120s "$repo/$after_land" "$worktree" "$head" "$target") || hook_rc=$?
+          land_base="$(cat "$worktree/.git/lane-base" 2>/dev/null || true)"
+          printf -v retry 'cd %q && timeout --kill-after=5s 120s %q %q %q %q %q' \
+            "$worktree" "$repo/$after_land" "$worktree" "$head" "$target" "$land_base"
+          hook_rc=2
+          if [[ "$land_base" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
+            && git -C "$worktree" merge-base --is-ancestor "$land_base" "$head"; then
+            hook_rc=0
+            (cd "$worktree" && timeout --kill-after=5s 120s "$repo/$after_land" "$worktree" "$head" "$target" "$land_base") || hook_rc=$?
+          else
+            say 'run.sh: pre-land target SHA is missing or invalid; afterLand was not run'
+          fi
           if [[ "$hook_rc" -ne 0 ]] \
             || [[ "$(git -C "$worktree" rev-parse HEAD 2>/dev/null)" != "$head" ]] \
             || ! changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
