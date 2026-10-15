@@ -693,7 +693,7 @@ nodes:
             saved=" Recovery commit failed; worktree retained at ${LANE_WORKTREE}."
           fi
         else
-          saved=" Worktree clean; no recovery commit created."
+          saved=" Clean worktree at ${LANE_WORKTREE}; existing HEAD $(git -C "${LANE_WORKTREE}" rev-parse HEAD 2>/dev/null || printf unknown). No additional recovery commit created."
         fi
       fi
       msg="${msg}${saved}"
