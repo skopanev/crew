@@ -78,7 +78,7 @@ nodes:
            --profile agent.context.target --role crew-lane-scout \
            --project "$project_name" \
            --process crew-lane-scout --coordinate rules=none --json >"$_sc.reply" 2>"$_sc.err" \
-          && jq -er 'select(.ok == true) | .content | select(type == "string" and test("\\S"))' "$_sc.reply" >"$_sc.tmp" 2>>"$_sc.err"; then
+          && jq -er 'select(.ok != false) | .content | select(type == "string" and test("\\S"))' "$_sc.reply" >"$_sc.tmp" 2>>"$_sc.err"; then
           mv "$_sc.tmp" "$_sc"
           break
         fi
@@ -87,6 +87,8 @@ nodes:
       done
       if [ ! -s "$_sc" ]; then
         rm -f "$_sc.tmp"
+        printf '\nEquill response:\n' >> "$_sc.err"
+        cat "$_sc.reply" >> "$_sc.err"
         echo "Scout contract unavailable after 3 attempts; response: $_sc.reply; error: $_sc.err" >&2
         cat "$_sc.err" >&2
         exit 1
@@ -430,7 +432,7 @@ nodes:
              --profile agent.context.target --role crew-lane-qa --process crew-lane-qa \
              --project "$project_name" \
              --coordinate rules=none --json >"$qa.reply" 2>"$qa.err" \
-            && jq -er 'select(.ok == true) | .content | select(type == "string" and test("\\S"))' "$qa.reply" >"$qa.tmp" 2>>"$qa.err"; then
+            && jq -er 'select(.ok != false) | .content | select(type == "string" and test("\\S"))' "$qa.reply" >"$qa.tmp" 2>>"$qa.err"; then
             mv "$qa.tmp" "$qa"
             break
           fi
@@ -439,6 +441,8 @@ nodes:
         done
         if [ ! -s "$qa" ]; then
           rm -f "$qa.tmp"
+          printf '\nEquill response:\n' >> "$qa.err"
+          cat "$qa.reply" >> "$qa.err"
           echo "QA contract unavailable after 3 attempts; response: $qa.reply; error: $qa.err" >&2
           cat "$qa.err" >&2
           exit 1
