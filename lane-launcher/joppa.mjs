@@ -490,18 +490,38 @@ export async function finishTask(run, stateFile, result, artifacts) {
       objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) &&
       !command('docker', ['ps', '-a', '--filter', `name=${container}`, '--format', '{{.Names}}']);
-    if (!preexisting && !startupFailed && (!failureFile || !fs.existsSync(failureFile))) {
+    if (startupFailed) {
+      run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
+        revision: object.current_revision, reason: 'Session container never became ready. No native workflow ran; unused checkout removed.'})));
+      persist();
+      await mutateTasks(run, run.releaseRequest);
+      run.releaseResults = [];
+      for (const claim of claims) {
+        const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
+        require(current.address === claim.address && current.historical === false && current.document?.present === true &&
+          Number.isSafeInteger(current.current_revision) && current.process?.status === 'open' &&
+          current.process.assignee === null && !current.process.claim && !current.process.blocked &&
+          !current.process.done && !current.process.retired,
+          'STARTUP_RELEASE_UNCONFIRMED: Joppa did not confirm every Task as current and unclaimed');
+        run.releaseResults.push({address: claim.address, revision: current.current_revision, status: 'open'});
+      }
+      run.releaseConfirmed = true;
+      result.released = true;
+      result.blocked = false;
+      result.tasks = run.releaseResults;
+      persist();
+      return;
+    }
+    if (!preexisting && (!failureFile || !fs.existsSync(failureFile))) {
       await noteHeldTask(run, stateFile, startup || result.error || 'Lane startup failed');
       result.held = true;
       return;
     }
     result.blocked = true;
-    const failure = preexisting ? startup : startupFailed ?
-      'Session container never became ready. Container and unused checkout are absent. No native workflow ran.' :
-      fs.readFileSync(failureFile, 'utf8');
+    const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
     run.blockRequest ||= batchRequest(run, objects.map(object => ({
       op: 'block_task', id: object.address, revision: object.current_revision,
-      reason: preexisting ? 'WORKTREE_PREEXISTED' : startupFailed ? 'STARTUP_FAILED' : reasonCode(completionEvent(run, result, artifacts)),
+      reason: preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts)),
       evidence: `${failure || 'Lane failed'}\nTask: ${object.address}\nRun: ${path.basename(path.dirname(stateFile))}`})));
     persist();
     await mutateTasks(run, run.blockRequest);
