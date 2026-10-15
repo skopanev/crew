@@ -162,6 +162,9 @@ export async function tick(config, display = null) {
     strict: config.strict, has_module: true, dry_run: true};
   const selected = config.source === 'joppa' ? await nextTask(config) : null;
   const candidate = selected ? selected.candidate : await nextTicket(query);
+  if (selected && candidate && (candidate.tasks?.length !== 1 || candidate.tasks[0].address !== candidate.id)) {
+    throw new Error('A new Joppa lane must contain exactly its selected Task');
+  }
   try {
     const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
     const open = selected ? selected.available : await countTickets({...filter, status: 'open'});

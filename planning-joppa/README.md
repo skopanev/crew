@@ -60,12 +60,12 @@ Requirement planning selects all current ready ACs under one schema Requirement.
 It obeys `ac_ids` and excludes green ACs, active worker claims and all unmet blocking dependencies.
 This includes dependencies on sibling ACs. A later package plans them after their prerequisites finish.
 It reads the Requirement, selected ACs, parents, decisions and existing related Tasks in one native run.
-Each planned Task keeps its AC parent. Publication groups execution by repository without creating package objects.
-Task titles preserve execution order with numeric prefixes within each repository package.
+Each planned Task keeps its AC parent and runs and lands independently.
+Task titles have numeric prefixes within each repository for display.
 New indices follow retained unfinished Tasks' numeric prefixes. Nonselected legacy Tasks keep their deterministic fallback order.
 Dependencies on retained Tasks stay external prerequisites. A plan cannot reverse their approved order.
-The package coder executes that order. Same-package Tasks do not receive blocking `depends_on` links.
-External dependencies, including other repository packages, remain explicit.
+Use blocking `depends_on` links when a Task requires another Task's delivered output, including within one repository.
+Independent Tasks have no ordering dependency. Title order does not replace dependencies.
 Every selected AC has its own implementation or existing-test-binding disposition and observable acceptance checks.
 Claims use one atomic batch. Publication saves Tasks, binds proven tests and finishes changed ACs in one atomic batch.
 Unchanged AC contracts release their claims. The Joppa batch limit remains 100 operations.

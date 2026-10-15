@@ -121,17 +121,19 @@ Capacity includes only Docker lane containers and pending reservations belonging
 ## Joppa execution
 
 For Joppa, start the dispatcher with `--source joppa --config <file>`.
-The dispatcher selects all executable Tasks for one Requirement and repository.
-Task title prefixes such as `[01]` and `[02]` define their execution order.
-External dependencies still control eligibility, including dependencies between repositories.
-One lane uses one coder session, checkout, gate cycle, expert review, and landing for those Tasks.
+The dispatcher selects one executable Task per lane.
+Task title prefixes such as `[01]` and `[02]` break selection ties within one Requirement and repository.
+Blocking dependencies control eligibility, including dependencies within the same Requirement and repository.
+One lane uses one coder session, checkout, gate cycle, expert review, and landing for that Task.
 
-The worker claims all selected Tasks in one `joppa_batch` request before Docker starts.
-Packages above the server limit of 100 operations fail without a partial claim.
-Each Task keeps its contract, writable roots, revision, and acceptance context in `claim.tasks` and `ticket.tasks`.
-The aggregate `modulePaths` lists the union of those roots. It does not expand an individual Task scope.
-Completion checks every Task and acceptance context before one atomic completion request.
-Each completion receives the same checked landing evidence and its own Task address.
+Before upgrading a dispatcher that used grouped runs, pause admission and audit its unclaimed Tasks.
+Each Task must land independently. Replan coupled Tasks or exclude them through the existing Joppa review state.
+Preserve active worker and planner claims. Resume only after every selectable Task passes this audit.
+
+The worker claims the selected Task before Docker starts. New runs cannot claim multiple Tasks.
+Existing package claims retain their original completion and release rules.
+Each Task keeps its contract, writable roots, revision, and acceptance context.
+Completion checks the Task and acceptance context against the confirmed landing evidence.
 
 `launch.json` stores the ordered `tasks`, the Requirement address, and the saved atomic requests.
 The result maps each Task address to its confirmed status and revision in `result.tasks`.

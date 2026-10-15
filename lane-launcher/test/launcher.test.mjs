@@ -99,11 +99,11 @@ async function packageFixture(t, mode = 'success') {
   return {root, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
 }
 
-test('Joppa package selects all executable repository Tasks in plan order', async t => {
+test('Joppa selects one executable Task in plan order', async t => {
   const f = await packageFixture(t);
   f.queue.push('task:t1');
   const selected = await nextTask(f.run.config);
-  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1', 'task:t2']);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert.equal(selected.candidate.requirement, 'req:r');
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });

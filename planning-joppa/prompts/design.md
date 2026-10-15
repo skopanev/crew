@@ -20,9 +20,9 @@ Include citations for the assertions and affected implementation. A name or a so
 Inspect the actual assertions. Cover every Then and Evidence item. Missing tests or behavior are implementation work.
 When critic findings are supplied, resolve each blocking finding or refute it with source evidence.
 Keep one Task in one repository and module. Add dependencies only when outputs require them.
-For Requirement scope, group Tasks by repository and declare the required execution order.
-Explicitly update or retire every unfinished Task under the selected ACs. Do not omit it from the package order.
-The package coder executes that order. Crew omits same-package dependency links and preserves external dependency links.
+Each Task must run and land independently. Declare dependencies only for required outputs, including within one repository.
+Explicitly update or retire every unfinished Task under the selected ACs.
+Title order does not replace depends_on links. Keep independent Tasks independent.
 For Requirement scope, add criteria: [{ac, disposition}] for every selected AC.
 Each Task and acceptance check must name its selected ac. Follow each AC's implementation or existing-test-binding disposition.
 Apply the supplied writing rules. Return only one JSON object:

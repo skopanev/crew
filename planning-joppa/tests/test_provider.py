@@ -175,7 +175,7 @@ class ProviderTests(unittest.TestCase):
             (old / "release.json").write_text(json.dumps(release))
             check("criterion:a")
 
-    def test_requirement_packages_keep_order_without_internal_dependency_links(self):
+    def test_requirement_tasks_keep_order_and_internal_dependency_links(self):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})
         data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
@@ -199,7 +199,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([command["parent"] for command in saves], ["criterion:a", "criterion:b", "criterion:c"])
         self.assertEqual([command["data"]["title"][:4] for command in saves], ["[01]", "[02]", "[01]"])
         self.assertEqual(saves[0]["links"][0]["target"], "work:dependency")
-        self.assertEqual(saves[1]["links"], [])
+        self.assertIn({"target": {"$ref": "task1/address"}, "revision": {"$ref": "task1/saved_revision"},
+                       "relation": "depends_on", "blocking": True}, saves[1]["links"])
         self.assertEqual(saves[2]["links"][0]["target"], {"$ref": "task2/address"})
         self.assertEqual([operation["command"]["ac"] for operation in commands[-3:]],
                          ["criterion:a", "criterion:b", "criterion:c"])

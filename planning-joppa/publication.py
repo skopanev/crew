@@ -331,16 +331,6 @@ def operations(plan, assignment):
     retired = {task["target"] for task in plan["tasks"] if task["action"] == "retire"}
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
     changed, counters = set(), package_counters(plan, assignment)
-    local = {task["id"]: task for task in plan["tasks"]}
-    def same_package(task, dependency):
-        if not grouped:
-            return False
-        other = local.get(dependency)
-        if not other:
-            other = next((value for value in local.values() if value.get("target") == dependency), None)
-        if other:
-            return other["repository"] == task["repository"]
-        return False
     for number, task in enumerate(ordered_tasks(plan["tasks"]), 1):
         ac = task["ac"]
         scope = context.criterion_assignment(assignment, ac)
@@ -371,10 +361,8 @@ def operations(plan, assignment):
         data["projects"] = projects
         links = deepcopy(existing["document"].get("links", [])) if existing else []
         links = [link for link in links if not (link.get("blocking") and link.get("relation") == "depends_on"
-                                                and (link.get("target") in retired or same_package(task, link.get("target"))))]
+                                                and link.get("target") in retired)]
         for dependency in task["depends_on"]:
-            if same_package(task, dependency):
-                continue
             canonical = aliases.get(dependency, dependency)
             if dependency in refs:
                 target, revision = {"$ref": refs[dependency] + "/address"}, {"$ref": refs[dependency] + "/saved_revision"}
