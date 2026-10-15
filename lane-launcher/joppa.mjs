@@ -71,6 +71,8 @@ export function validateJoppa(config) {
       'Repository reviewCommands must be a nonempty array of check commands');
     require(repo.gateTimeoutSeconds == null || (Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0),
       'Repository gateTimeoutSeconds must be a positive integer');
+    require(repo.coderTimeoutSeconds == null || (Number.isSafeInteger(repo.coderTimeoutSeconds) && repo.coderTimeoutSeconds > 0),
+      'Repository coderTimeoutSeconds must be a positive integer');
     require(Array.isArray(repo.testCommand) && repo.testCommand.length && repo.testCommand.every(text), 'Repository needs testCommand');
     require(repo.preflight === null || (text(repo.preflight) && !path.isAbsolute(repo.preflight) &&
       inside(path.resolve(folder, repo.preflight), folder)), 'Repository needs preflight: relative executable path or null');

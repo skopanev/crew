@@ -8,6 +8,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               --gate-command <shell command> [...]
               [--review-command <shell command>]...
               --test-command '["runner", "args"]' [--gate-timeout <seconds>]
+              [--coder-timeout <seconds>]
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
@@ -31,6 +32,7 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
   --review-command  optional check before review; defaults to the gate commands.
   --test-command  required runner argument array for existing-code verification.
   --gate-timeout  maximum seconds per check; defaults to 900.
+  --coder-timeout  cap each coder attempt; cannot extend the workflow timeout.
   --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
   --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
   --shared-lock-dir  a shared lock directory directly under the source root, mounted writable.
@@ -56,6 +58,7 @@ planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}
 after_land=""
 test_command='[]'
 gate_timeout=900
+coder_timeout=""
 also=()
 writable=()
 gate_commands=()
@@ -82,6 +85,10 @@ while (( $# )); do
     --gate-command) gate_commands+=("${2:-}"); shift 2 ;;
     --review-command) review_commands+=("${2:-}"); shift 2 ;;
     --gate-timeout) gate_timeout="${2:-}"; shift 2 ;;
+    --coder-timeout)
+      coder_timeout="${2:-}"
+      [[ "$coder_timeout" =~ ^[1-9][0-9]*$ ]] || { say 'run.sh: --coder-timeout must be a positive integer'; exit 2; }
+      shift 2 ;;
     --test-command) test_command="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
@@ -116,6 +123,10 @@ jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\
 
 [[ "$gate_timeout" =~ ^[1-9][0-9]*$ ]] || {
   say 'run.sh: --gate-timeout must be a positive integer'; exit 2; }
+coder_args=()
+if [[ -n "$coder_timeout" ]]; then
+  coder_args=(--node-timeout "implement_code=$coder_timeout")
+fi
 
 # The host worker owns NTK claims; no Docker or preflight without its receipt.
 claim_file="${LANE_CLAIM_FILE:-}"
@@ -432,6 +443,7 @@ medulla \
   --cwd-ro \
   -w "${WORKFLOW_DIR#"$TOOLING_ROOT"/}" \
   --runs-folder "$RUNS_FOLDER" \
+  ${coder_args[@]+"${coder_args[@]}"} \
   "${mounts[@]}" \
   --var "CBM_MCP_COMMAND=$cbm_connector" \
   --var "CBM_PROJECT=$cbm_project" \

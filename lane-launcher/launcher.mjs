@@ -62,6 +62,9 @@ export function configFrom(file, env = process.env, {dryRun = false, source = 'n
   for (const field of ['limit', 'intervalSeconds', 'gateTimeoutSeconds']) {
     if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
   }
+  if (config.coderTimeoutSeconds != null && (!Number.isSafeInteger(config.coderTimeoutSeconds) || config.coderTimeoutSeconds < 1)) {
+    throw new Error('coderTimeoutSeconds must be a positive integer');
+  }
   // A stable dispatcher identity owns its lock, reservations and containers.
   config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (!config.launchLanes) return config;
