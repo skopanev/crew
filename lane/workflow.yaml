@@ -277,6 +277,7 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
+      EQUILL_PHASE=unit.
       Follow your Equill contract.
       Current handoff: {{last.message}}
       Repository checks: {{var:gate_commands}}
@@ -761,6 +762,7 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
+      EQUILL_PHASE=land.
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
       1. In {{var:LANE_WORKTREE}}, read the target with
@@ -768,9 +770,11 @@ nodes:
          restart git rebase onto origin/<target_branch>.
       2. Resolve conflicts preserving the ticket's AC and target-branch changes,
          stage resolved files and complete the rebase.
-      3. Run relevant checks and write {{var:RUN_ARTIFACTS}}/git-fix-report.txt
-         with resolved files, commands, results and any remaining blocker.
-      4. Emit OK when resolved and checks pass; otherwise GATE_FAIL with the blocker.
+      3. Confirm a clean Git status, no unmerged paths, and no rebase state.
+         Run git diff --check origin/<target_branch>...HEAD.
+      4. Write {{var:RUN_ARTIFACTS}}/git-fix-report.txt with resolved files and blockers.
+         Emit OK when the rebase and Git checks pass. Otherwise emit GATE_FAIL.
+         prepare_review runs the tests and lint checks.
 
   reject_gate:
     env:
