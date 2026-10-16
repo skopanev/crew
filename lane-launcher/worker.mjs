@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {createInterface} from 'node:readline';
-import {save, read, herdr, laneArgs} from './runtime.mjs';
+import {save, read, herdr, laneArgs, runDirectories} from './runtime.mjs';
 import {laneRunFolder} from './scope.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {api, claimTask, guardTaskClaims, releaseTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
@@ -273,14 +273,27 @@ try {
       if (['MERGE_CONFLICT', 'REQUIREMENT_GATE_FAIL'].includes(reasonCode)) {
         result.finalizeFailed = {head, targetHead, fingerprint, reasonCode};
       }
-      const failure = artifacts && path.join(artifacts, 'failure.txt');
-      const details = failure && fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : result.error || 'Finalization failed';
-      run.finalizationFailureRequest = {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note',
-        target: run.requirement, id: randomUUID(), reply_to: null,
-        text: `Requirement finalization failed.\nBranch: ${run.deliveryBranch}\nHead: ${head}\nTarget head: ${targetHead}\nRun: ${path.basename(dir)}\n${details.slice(0, 1500)}`}};
-      save(stateFile, run);
-      try { await api(run.config, run.joppaWorker, 'joppa_command', run.finalizationFailureRequest); }
-      catch (error) { result.noteError = error.message; }
+      try {
+        const noted = runDirectories(run.config.stateDir).some(priorDir => {
+          if (path.resolve(priorDir) === path.resolve(dir)) return false;
+          let prior;
+          try { prior = read(path.join(priorDir, 'launch.json')); }
+          catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+          const previous = prior.requirementDelivery;
+          return prior.finalizeOnly && prior.finalizationFailureRequest && prior.requirement === run.requirement &&
+            (prior.repositoryId || prior.repository?.id) === run.repository.id && previous?.head === head &&
+            previous.targetHead === targetHead && previous.fingerprint === fingerprint;
+        });
+        if (!noted) {
+          const failure = artifacts && path.join(artifacts, 'failure.txt');
+          const details = failure && fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : result.error || 'Finalization failed';
+          run.finalizationFailureRequest = {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note',
+            target: run.requirement, id: randomUUID(), reply_to: null,
+            text: `Requirement finalization failed.\nBranch: ${run.deliveryBranch}\nHead: ${head}\nTarget head: ${targetHead}\nRun: ${path.basename(dir)}\n${details.slice(0, 1500)}`}};
+          save(stateFile, run);
+          await api(run.config, run.joppaWorker, 'joppa_command', run.finalizationFailureRequest);
+        }
+      } catch (error) { result.noteError = error.message; }
     }
   } else if (joppa && run.releaseRequest) {
     result.released = run.releaseConfirmed === true;
@@ -317,22 +330,26 @@ try {
           announce(`[lane] Cannot record outcome note: ${noteError.message}`);
         }
       }
-      if (run.config.delivery === 'requirement' && run.requirementDelivery && !run.requirementDelivery.final && artifacts) {
-        const receipt = path.join(artifacts, 'landing.txt');
-        try {
-          const publication = parsePublication(fs.readFileSync(receipt, 'utf8'));
-          if (publication.target === run.requirementDelivery.branch) {
-            const diagnosis = `REQUIREMENT_HEAD_UNCONFIRMED: Task ${run.task} reported ${publication.sha} on ${publication.target}, but completion was not confirmed. Inspect the saved completion request. Retry it only if the Task contract is unchanged. Otherwise, the operator must restore the prior Requirement head.`;
-            announce(`[lane] ${diagnosis}`);
-            run.publicationFailureRequest ||= {workspace: run.workspace, request_id: randomUUID(),
-              command: {op: 'note', target: run.requirement, id: randomUUID(), reply_to: null, text: diagnosis}};
-            save(stateFile, run);
-            await api(run.config, run.joppaWorker, 'joppa_command', run.publicationFailureRequest);
-          }
-        } catch (noteError) {
-          if (noteError.code !== 'ENOENT') result.noteError = noteError.message;
-        }
+
+    }
+  }
+  if (joppa && !run.finalizeOnly && !result.completed && result.status === 'failed' &&
+      run.requirementDelivery?.final === false && typeof run.requirementDelivery.head === 'string') {
+    try {
+      const {branch, head: before} = run.requirementDelivery;
+      const head = (await repositoryGit(run.config, run.repository,
+        ['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0] || '';
+      if (head && head !== before) {
+        const diagnosis = `REQUIREMENT_HEAD_UNCONFIRMED: ${branch} moved from ${before || '<absent>'} to ${head} during failed Task ${run.task}. Completion was not confirmed. Inspect the saved completion request. Retry it only if the Task contract is unchanged. Otherwise, the operator must restore the prior Requirement head.`;
+        announce(`[lane] ${diagnosis}`);
+        run.publicationFailureRequest ||= {workspace: run.workspace, request_id: randomUUID(),
+          command: {op: 'note', target: run.requirement, id: randomUUID(), reply_to: null, text: diagnosis}};
+        save(stateFile, run);
+        await api(run.config, run.joppaWorker, 'joppa_command', run.publicationFailureRequest);
       }
+    } catch (error) {
+      result.noteError = error.message;
+      announce(`[lane] Requirement publication check failed: ${error.message}`);
     }
   }
   // Record completion first: closing this pane can terminate this process immediately.

@@ -177,6 +177,7 @@ nodes:
       FINALIZE_READY: git_landing
       NO_GIT_KEY: notify_failure
       FETCH_FAILED: notify_failure
+      MERGE_CONFLICT: notify_failure
       NO_TARGET_BRANCH: notify_failure
       BRANCH_HAS_WORK: notify_failure
       __failed__: notify_failure
@@ -308,7 +309,7 @@ nodes:
         git merge --no-edit "origin/${target}" >> "$MEDULLA_RUN_DIR/artifacts/fetch.txt" 2>&1 || {
           git status --short > "$MEDULLA_RUN_DIR/artifacts/rebase-status.txt"
           git merge --abort || exit 1
-          echo '<signal:FETCH_FAILED>Default branch merge conflicts; see artifacts/fetch.txt.</signal:FETCH_FAILED>'; exit 0; }
+          echo '<signal:MERGE_CONFLICT>Default branch merge conflicts; see artifacts/fetch.txt.</signal:MERGE_CONFLICT>'; exit 0; }
       fi
       task_base="$(git rev-parse HEAD)"
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
