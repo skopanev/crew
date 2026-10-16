@@ -16,7 +16,7 @@ const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !
 const tones = {red: 31, blue: '1;34', yellow: '1;33', description: 33, ready: '1;38;2;70;230;90', available: '1;32', accent: '1;36', line: 36, finished: 37};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
-export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run]';
+export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run | --monitor]';
 export function configFrom(file, env = process.env, {dryRun = false, source = 'ntk'} = {}) {
   const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
     preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
@@ -241,12 +241,36 @@ export async function main(argv) {
     else if (!argv[i].startsWith('-') && !selectedConfig) {
       file = path.resolve(argv[i]); selectedConfig = true;
     }
-    else if (['--once', '--dry-run'].includes(argv[i]) && mode === 'loop') mode = argv[i].slice(2);
+    else if (['--once', '--dry-run', '--monitor'].includes(argv[i]) && mode === 'loop') mode = argv[i].slice(2);
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, source === 'joppa' ? 'dolber-joppa.example.json' : 'dolber.example.json')} to this path and fill in workspace.`);
   const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', source});
+  if (mode === 'monitor') {
+    if (!process.stdout.isTTY) throw new Error('--monitor needs a terminal');
+    const dashboard = createDashboard({...config, monitorOnly: true}, paint);
+    dashboard.state.message = '';
+    const draw = () => { dashboard.refresh(); dashboard.draw(null); };
+    let ticker, stop;
+    try {
+      draw();
+      ticker = setInterval(draw, 5000);
+      await new Promise(resolve => {
+        stop = resolve;
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+      });
+    } finally {
+      clearInterval(ticker);
+      if (stop) {
+        process.off('SIGINT', stop);
+        process.off('SIGTERM', stop);
+      }
+      dashboard.close();
+    }
+    return;
+  }
   preflight(config);
   if (mode === 'dry-run') { await tick(config); return; }
   fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});

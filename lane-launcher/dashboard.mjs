@@ -186,7 +186,7 @@ export function createDashboard(config, paint) {
     });
     output.push(...renderRunTable(rows, paint, 7 + footer.length));
     output.push(...footer);
-    output.push(stopped ? 'Stopped' : left == null ? 'Checking tickets · Ctrl+C to stop' :
+    output.push(stopped ? 'Stopped' : config.monitorOnly ? 'Dispatch paused · Ctrl+C to close' : left == null ? 'Checking tickets · Ctrl+C to stop' :
       `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);
     return output.join('\n');
   }
