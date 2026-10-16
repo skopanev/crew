@@ -10,7 +10,7 @@ import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {laneRunFolder} from './scope.mjs';
 import {claimTicket, reopenStartupClaim, blockStartupClaim, attachReport} from './ntk.mjs';
 import {api, claimTask, guardTaskClaims, releaseTaskClaims, finishTask, noteHeldTask} from './joppa.mjs';
-import {requirementPlan, parsePublication} from './requirement-delivery.mjs';
+import {requirementPlan, parsePublication, assertRequirementHead} from './requirement-delivery.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
@@ -97,6 +97,11 @@ try {
       run.deliveryBranch = run.requirementDelivery.branch;
       run.requirementDelivery.head = (await repositoryGit(run.config, run.repository,
         ['ls-remote', 'origin', `refs/heads/${run.deliveryBranch}`])).split(/\s/)[0] || '';
+      try { assertRequirementHead(run.requirementDelivery, run.requirementDelivery.head); }
+      catch (error) {
+        if (!run.finalizeOnly) await releaseTaskClaims(run, () => save(stateFile, run), error.message + '; lane did not start.');
+        throw error;
+      }
       if (run.finalizeOnly) {
         if (!run.requirementDelivery.head) throw new Error('REQUIREMENT_CHANGED: requirement branch is absent');
         run.requirementDelivery.targetHead = (await repositoryGit(run.config, run.repository,
@@ -263,7 +268,11 @@ try {
     }
     if (!result.completed && run.requirementDelivery) {
       const {head, targetHead, fingerprint} = run.requirementDelivery;
-      result.finalizeFailed = {head, targetHead, fingerprint};
+      let reasonCode;
+      try { reasonCode = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8')).signal; } catch {}
+      if (['MERGE_CONFLICT', 'REQUIREMENT_GATE_FAIL'].includes(reasonCode)) {
+        result.finalizeFailed = {head, targetHead, fingerprint, reasonCode};
+      }
       const failure = artifacts && path.join(artifacts, 'failure.txt');
       const details = failure && fs.existsSync(failure) ? fs.readFileSync(failure, 'utf8') : result.error || 'Finalization failed';
       run.finalizationFailureRequest = {workspace: run.workspace, request_id: randomUUID(), command: {op: 'note',
@@ -306,6 +315,22 @@ try {
         } catch (noteError) {
           result.noteError = noteError.message;
           announce(`[lane] Cannot record outcome note: ${noteError.message}`);
+        }
+      }
+      if (run.config.delivery === 'requirement' && run.requirementDelivery && !run.requirementDelivery.final && artifacts) {
+        const receipt = path.join(artifacts, 'landing.txt');
+        try {
+          const publication = parsePublication(fs.readFileSync(receipt, 'utf8'));
+          if (publication.target === run.requirementDelivery.branch) {
+            const diagnosis = `REQUIREMENT_HEAD_UNCONFIRMED: Task ${run.task} reported ${publication.sha} on ${publication.target}, but completion was not confirmed. Inspect the saved completion request. Retry it only if the Task contract is unchanged. Otherwise, the operator must restore the prior Requirement head.`;
+            announce(`[lane] ${diagnosis}`);
+            run.publicationFailureRequest ||= {workspace: run.workspace, request_id: randomUUID(),
+              command: {op: 'note', target: run.requirement, id: randomUUID(), reply_to: null, text: diagnosis}};
+            save(stateFile, run);
+            await api(run.config, run.joppaWorker, 'joppa_command', run.publicationFailureRequest);
+          }
+        } catch (noteError) {
+          if (noteError.code !== 'ENOENT') result.noteError = noteError.message;
         }
       }
     }

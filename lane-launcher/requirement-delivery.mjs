@@ -41,6 +41,13 @@ export function parsePublication(evidence) {
   };
 }
 
+export function assertRequirementHead(plan, head) {
+  if (!head || plan.publications.some(item => item.sha === head && item.target === plan.branch)) return;
+  const error = new Error(`REQUIREMENT_HEAD_UNCONFIRMED: ${plan.branch} at ${head} has no current DONE Task publication`);
+  error.code = 'REQUIREMENT_HEAD_UNCONFIRMED';
+  throw error;
+}
+
 function normalizeClaim(raw) {
   if (raw === null || raw === undefined || raw === false) return null;
   if (typeof raw === 'string') {
@@ -215,6 +222,7 @@ export async function requirementPlan(run, read) {
     finishing,
   });
 
+  const publications = [];
   const manifestByAddress = new Map();
   const requirementTasksByAddress = new Map();
   for (const [address, own] of ownByAddress) {
@@ -262,6 +270,13 @@ export async function requirementPlan(run, read) {
       requirementTasksByAddress.set(current.address, taskRecord(current, status, reviewRequired, false));
       if (status === 'retired') continue;
       if (status === 'done') {
+        if (!reviewRequired && current.process?.status === 'done' && !current.process?.retired) {
+          try {
+            const {sha, target} = parsePublication(current.process.done);
+            publications.push({task: current.address, sha, target});
+          }
+          catch { /* A DONE Task without exact evidence cannot confirm a Requirement head. */ }
+        }
         if (reviewRequired) {
           manifestByAddress.set(current.address, {
             address: current.address,
@@ -293,11 +308,13 @@ export async function requirementPlan(run, read) {
   const planningHeld = Boolean(reqClaim) || criteria.some(item => Boolean(item.planning_claim));
   const final = !planningHeld && manifest.every(item => item.finishing) &&
     (ownByAddress.size > 0 || requirementTasks.some(item => item.status === 'done'));
+  publications.sort((a, b) => a.task.localeCompare(b.task));
   const fingerprint = createHash('sha256').update(JSON.stringify({
     requirement: {address: requirement, revision: reqObject.current_revision, process_revision: reqProcessRev, planning_claim: reqClaim},
     repository,
     criteria,
     tasks: requirementTasks,
+    publications,
   })).digest('hex');
-  return {branch, requirement, repository, final, planningHeld, fingerprint, manifest};
+  return {branch, requirement, repository, final, planningHeld, fingerprint, manifest, publications};
 }

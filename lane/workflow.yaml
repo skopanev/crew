@@ -739,6 +739,8 @@ nodes:
         [ -n "${REQUIREMENT_BRANCH:-}" ] || {
           echo '<signal:LAND_FAILED>Requirement branch is missing.</signal:LAND_FAILED>'; exit 0; }
         if [ "${REQUIREMENT_FINAL:-false}" != true ]; then
+          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --publish || {
+            echo '<signal:REQUIREMENT_CHANGED>Task claim or Requirement context changed before publication.</signal:REQUIREMENT_CHANGED>'; exit 0; }
           task_base="$(cat .git/lane-base)"
           rc=0
           gate_commands="${review_commands:-$gate_commands}" \

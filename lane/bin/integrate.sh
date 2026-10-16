@@ -14,9 +14,10 @@ for attempt in 1 2; do
   rc=0
   if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
     timeout 120 git fetch origin > "$artifacts/fetch.txt" 2>&1 || fail LAND_FAILED 'Target fetch failed before requirement integration.'
+    actual_req_head="$(git rev-parse --verify --quiet "origin/${REQUIREMENT_BRANCH}^{commit}" || true)"
+    [ "$actual_req_head" = "${REQUIREMENT_HEAD:-}" ] ||
+      fail REQUIREMENT_CHANGED 'Requirement branch moved before finalization.'
     if [ "${FINALIZE_ONLY:-false}" = true ]; then
-      [ "$(git rev-parse "origin/${REQUIREMENT_BRANCH}")" = "$REQUIREMENT_HEAD" ] ||
-        fail REQUIREMENT_CHANGED 'Requirement branch moved before finalization.'
       if git merge-base --is-ancestor "$REQUIREMENT_HEAD" "origin/$target"; then
         git checkout --detach "origin/$target" || fail LAND_FAILED 'Cannot inspect the delivered target.'
         touch .git/lane-verified

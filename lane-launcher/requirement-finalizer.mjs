@@ -1,5 +1,5 @@
 // Select a finalize-only candidate when all Tasks in a requirement unit are done on the requirement branch.
-import {parsePublication, requirementBranch, requirementPlan} from './requirement-delivery.mjs';
+import {parsePublication, requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
 
 const text = value => typeof value === 'string' && value.trim();
@@ -22,11 +22,12 @@ function sameFailedFinalizer(runs, requirement, repository, head, targetHead, fi
     const priorRepo = prior.repositoryId || prior.repository?.id || prior.repository ||
       (prior.config?.repositories?.length === 1 ? prior.config.repositories[0]?.id : null);
     if (priorRepo !== repository) continue;
-    const failed = prior.result?.finalizeFailed || prior.finalizeFailed ||
-      (prior.result && prior.result.completed !== true && prior.requirementDelivery ? prior.requirementDelivery : null);
-    if (failed && failed.head === head && failed.targetHead === targetHead && failed.fingerprint === fingerprint) {
-      return true;
-    }
+    if (!prior.result || prior.result.completed) continue;
+    const failed = prior.result.finalizeFailed || prior.requirementDelivery;
+    if (!failed || failed.head !== head || failed.targetHead !== targetHead || failed.fingerprint !== fingerprint) continue;
+    if (['MERGE_CONFLICT', 'REQUIREMENT_GATE_FAIL'].includes(prior.result.finalizeFailed?.reasonCode)) return true;
+    const finished = Date.parse(prior.result.finishedAt);
+    if (Number.isFinite(finished) && Date.now() < finished + 60_000) return true;
   }
   return false;
 }
@@ -139,6 +140,7 @@ export async function finalizationCandidate({config, read, object, group, rows =
 
       plan = await requirementPlan({requirement, repository, finalizeOnly: true, tasks: [], config}, read);
       if (!plan.final || plan.planningHeld) continue;
+      assertRequirementHead(plan, head);
       if (sameFailedFinalizer(runs, requirement, repository, head, targetHead, plan.fingerprint)) continue;
 
       const title = current.document?.data?.title || row.title || `${requirement}: ${repository}`;
@@ -153,7 +155,10 @@ export async function finalizationCandidate({config, read, object, group, rows =
         requirementDelivery: {...plan, head, targetHead},
       };
     } catch (error) {
-      if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID'].includes(error?.code)) continue;
+      if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID', 'REQUIREMENT_HEAD_UNCONFIRMED'].includes(error?.code)) {
+        console.error(`${row.address}: ${error.message}; skipping this Requirement unit`);
+        continue;
+      }
       throw error;
     }
   }

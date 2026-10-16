@@ -4,8 +4,8 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {parsePublication, requirementBranch, requirementPlan} from './requirement-delivery.mjs';
-import {publicationReader} from './publication-guard.mjs';
+import {parsePublication, requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
+import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {createHash, randomUUID} from 'node:crypto';
 import {readRun, runDirectories, save, command, quote, alive} from './runtime.mjs';
@@ -274,9 +274,12 @@ export async function nextTask(config) {
           const plan = await requirementPlan({config, requirement: task.requirement, repository: task.repository, tasks},
             (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
           paused = plan.planningHeld;
+          if (!paused) assertRequirementHead(plan, (await repositoryGit(config, config.repositories.find(repo => repo.id === task.repository),
+            ['ls-remote', 'origin', `refs/heads/${plan.branch}`])).split(/\s/)[0] || '');
         } catch (error) {
-          if (error.code !== 'CANDIDATE_INVALID') throw error;
-          console.error(`${task.requirement}: ${error.message}; skipping this Requirement unit`);
+          if (!['CANDIDATE_INVALID', 'REQUIREMENT_HEAD_UNCONFIRMED'].includes(error.code)) throw error;
+          paused = true;
+          console.error(`${task.address}: ${error.message}; skipping this Requirement unit`);
         }
         if (paused) {
           for (let index = eligible.length - 1; index >= 0; index--) {
