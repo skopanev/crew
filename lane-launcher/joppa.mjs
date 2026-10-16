@@ -111,6 +111,8 @@ export function api(config, worker, tool, arguments_, {signal} = {}) {
   return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal});
 }
 
+const hasRecoveryCheckpoint = recovery => Boolean(recovery?.task || recovery?.ref || recovery?.sha);
+
 export function runHoldsTasks(run) {
   if (run.finalizeOnly) return !run.result && (!run.worker || alive(run.worker.pid));
   if (run.releaseConfirmed === true) return false;
@@ -118,7 +120,7 @@ export function runHoldsTasks(run) {
   if (run.claim && !run.result.completed && !run.result.blockConfirmed) return true;
   return Boolean(run.completionRequest && !run.result.completed || run.blockRequest && !run.result.blockConfirmed ||
     run.releaseRequest && !run.releaseConfirmed || run.recoveryNoteRequest && !run.releaseConfirmed ||
-    run.recovery && !run.releaseConfirmed ||
+    hasRecoveryCheckpoint(run.recovery) && !run.releaseConfirmed ||
     run.result.blocked && !run.result.blockConfirmed || /JOPPA_OUTCOME_UNCONFIRMED/.test(run.result.error || ''));
 }
 
@@ -578,7 +580,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
   if (run.releaseConfirmed === true) return;
   require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Tasks remain held for inspection');
   require(!run.recoveryNoteRequest, 'RECOVERY_NOTE_UNCONFIRMED: Task remains held for inspection');
-  require(!run.recovery, 'RECOVERY_HANDOFF_UNCONFIRMED: Task remains held for inspection');
+  require(!hasRecoveryCheckpoint(run.recovery), 'RECOVERY_HANDOFF_UNCONFIRMED: Task remains held for inspection');
   if (!run.claim) return;
   const persist = () => save(stateFile, run);
   const claims = claimTasks(run);
