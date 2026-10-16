@@ -41,7 +41,7 @@ The failed Task does not publish its changes to the shared Requirement branch.
 The planner must create scoped repair work. Crew does not reopen completed Tasks.
 If retirement leaves only completed Tasks, Crew selects the unpublished Requirement branch for finalization.
 This run executes full gates and target delivery without a Task claim or agent nodes.
-A failed finalization writes a Requirement note.
+A failed finalization records one Requirement note request per source head, target head and Task context.
 Merge conflicts and failed full gates wait until the source, target, or Task context changes.
 Other failures retry after 60 seconds. Existing run results supply the retry time.
 A repeated finalization checks target ancestry under the lock and skips checks and push if the code already landed.
@@ -50,7 +50,8 @@ Crew mounts a temporary copy of that reader token. Worker mutation tokens stay o
 The host confirms the exact remote SHA before it calls `complete_task`.
 Each nonempty Requirement head must match a current DONE Task publication before another run adopts it.
 Crew also checks the Task holder, contract and planning ownership immediately before an intermediate push.
-If a push succeeds but completion fails, Crew records `REQUIREMENT_HEAD_UNCONFIRMED` in the log and a Requirement note.
+After any failed intermediate run, Crew checks the remote Requirement head.
+If it changed, Crew records `REQUIREMENT_HEAD_UNCONFIRMED` in the log and a Requirement note.
 Inspect the saved completion request. Retry that request only when its Task contract remains unchanged.
 If the contract changed, the operator must restore the prior Requirement head. Crew never force-pushes a rollback.
 For target delivery, it also accepts the checked SHA as an ancestor of the current target.
