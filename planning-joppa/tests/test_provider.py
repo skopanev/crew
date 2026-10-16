@@ -100,6 +100,10 @@ class ProviderTests(unittest.TestCase):
         context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
         with self.assertRaisesRegex(ValueError, "no longer holds"):
             context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": {**own, "position": 24}})
+        objects["criterion:b"]["document"]["present"] = False
+        context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+        with self.assertRaisesRegex(ValueError, "another Requirement criterion"):
+            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:b": own})
 
     def test_retained_sibling_order_and_dependencies_remain_approved(self):
         data, value = assignment(), plan()
@@ -402,6 +406,9 @@ class ProviderTests(unittest.TestCase):
             {"target": "criterion:a", "revision": 3, "relation": "depends_on", "blocking": True}]
         detail = {"position": 20, "requirement": {"current_revision": 3, "revisions": [{"number": 3,
             "acs": [{"id": address} for address in ("criterion:a", "criterion:b", "criterion:c")]}]}}
+        objects["criterion:archived"] = item("criterion:archived", "rule:r")
+        objects["criterion:archived"]["document"]["present"] = False
+        detail["requirement"]["revisions"][0]["acs"].insert(0, {"id": "criterion:archived"})
         class Server:
             def call(self, name, args):
                 if name == "joppa_tree":
@@ -420,6 +427,9 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(requirement["address"], "rule:r")
         self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a"])
         self.assertEqual(snapshot["criteria"], ["criterion:a"])
+        self.assertNotIn("criterion:archived", snapshot["objects"])
+        with self.assertRaisesRegex(ValueError, "object is absent"):
+            context.load(Server(), config, "criterion:archived")
         config["ac_ids"] = ["criterion:c"]
         with self.assertRaisesRegex(ValueError, "no ready criteria"):
             context.load_requirement(Server(), config, "r")
@@ -434,6 +444,10 @@ class ProviderTests(unittest.TestCase):
             context.load_requirement(Server(), config, "r")
         resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a"])
         self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a"])
+        objects["criterion:a"]["document"]["links"] = [
+            {"target": "criterion:archived", "revision": 3, "relation": "depends_on", "blocking": True}]
+        with self.assertRaisesRegex(ValueError, "object is absent"):
+            context.load_requirement(Server(), config, "r", ["criterion:a"])
 
     def test_retirement_uses_the_existing_atomic_publication(self):
         data, value = assignment(), plan()
