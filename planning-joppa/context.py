@@ -99,11 +99,18 @@ def pending_work_page(api, config, assignment):
             return result
 
 
-def object_read(api, workspace, address):
+def object_read(api, workspace, address, allow_archived=False):
     result = api.call("joppa_objects", {"workspace": workspace, "address": address})
-    require(result.get("document", {}).get("present") is True, f"object is absent: {address}")
+    present = result.get("document", {}).get("present")
+    require(present is True or allow_archived and present is False, f"object is absent: {address}")
     require(result.get("historical") is False, f"current object required: {address}")
     return result
+
+
+def current_criteria(api, workspace, revision):
+    """Exclude archived criteria from the Requirement revision's roster."""
+    return [object for item in revision.get("acs", [])
+            if (object := object_read(api, workspace, item["id"], allow_archived=True))["document"]["present"]]
 
 
 def source(object):
@@ -218,11 +225,11 @@ def load_once(api, config, ac_id):
     meaning = {key: value for key, value in revision.items() if key not in ("tasks", "runs")}
     meaning["comments"] = req_detail.get("comments")
     siblings = []
-    for criterion in revision.get("acs", []):
-        address = criterion["id"]
+    for sibling in current_criteria(api, workspace, revision):
+        address = sibling["address"]
         if address == ac_id:
             continue
-        sibling = get(address)
+        objects[address] = sibling
         require(types[sibling["kind"]].get("role") == "ac", "Requirement contains a non-criterion child")
         siblings.append(sibling)
         for kind, definition in types.items():
@@ -303,7 +310,7 @@ def load_requirement(api, config, req_id, selected=None):
     detail = api.call("joppa_read", {"workspace": workspace, "req": req_id})["requirement"]
     revision = detail["revisions"][0]
     require(revision["number"] == detail["current_revision"], "Requirement read returned another revision")
-    addresses = [item["id"] for item in revision.get("acs", [])]
+    addresses = [item["address"] for item in current_criteria(api, workspace, revision)]
     require(addresses, "Requirement has no current criteria")
     assignment, snapshot, _ = load(api, config, addresses[0])
     require(assignment["requirement"]["id"] == req_id, "criterion belongs to another Requirement")
@@ -411,7 +418,7 @@ def planning_idle(api, config, assignment, expected=None):
     """Do not split one Requirement between concurrent planning runs."""
     expected = expected or {}
     revision = json.loads(assignment["decisions"][0])
-    addresses = {item["id"] for item in revision.get("acs", [])} | {assignment["ac"]["id"]}
+    addresses = {item["address"] for item in current_criteria(api, config["workspace"], revision)} | {assignment["ac"]["id"]}
     require(set(expected).issubset(addresses), "planning receipt contains another Requirement criterion")
     for address in addresses:
         object = object_read(api, config["workspace"], address)
