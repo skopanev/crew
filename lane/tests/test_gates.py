@@ -126,6 +126,12 @@ class GateTests(unittest.TestCase):
         self.assertNotIn("lane-push: HEAD=", result.stdout)
 
     def test_clean_rebase_runs_fresh_checks_before_pushing_without_new_review(self):
+        self.check_rebased_landing(False)
+
+    def test_failed_post_rebase_checks_leave_the_remote_target_unchanged(self):
+        self.check_rebased_landing(True)
+
+    def check_rebased_landing(self, failing):
         # The origin is another directory in this disposable fixture.
         remote = self.root / "origin.git"
         subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
@@ -133,6 +139,8 @@ class GateTests(unittest.TestCase):
         self.git("push", "-q", "origin", "HEAD:develop")
         self.git("commit", "-qm", "candidate")
         initial = self.git("rev-parse", "HEAD")
+        if failing:
+            self.env['gate_commands'] = '["test ! -f independent.txt"]'
         self.gate("run")
         artifacts = self.root / "run/artifacts"
         (artifacts / "reviewed-tree.txt").write_text(self.git("write-tree") + "\n" + initial)
@@ -164,6 +172,11 @@ class GateTests(unittest.TestCase):
                                     cwd=self.repo, env=self.env, capture_output=True,
                                     text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
+        if failing:
+            self.assertIn('<signal:GATE_FAIL>', result.stdout)
+            self.assertEqual(self.git('ls-remote', 'origin', 'refs/heads/develop').split()[0], moved)
+            self.gate('verify', succeeds=False)
+            return
         self.assertNotIn('<signal:REBASED>', result.stdout)
         self.assertNotIn('<signal:LAND_FAILED>', result.stdout, result.stderr)
         landed = self.git('rev-parse', 'HEAD')

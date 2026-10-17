@@ -13,6 +13,7 @@ class ClaimCleanupTests(unittest.TestCase):
     def test_claim_receipt_requires_a_confirmed_response(self):
         cases = [
             ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", True),
+            ({"id":"t1", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", True),
             ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "", True),
             ({"id":"T1", "status":"open", "claimed":False, "workspace":"test"}, "fixture contract", False),
             ({"id":"OTHER", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", False),
@@ -45,6 +46,7 @@ class ClaimCleanupTests(unittest.TestCase):
                 receipt = root / "run/artifacts/claim.json"
                 if adopted:
                     self.assertEqual(result.returncode, 0 if contract else 1, result.stderr)
+                    self.assertIn(f'<signal:var key=RUN_ARTIFACTS>{root}/run/artifacts</signal:var>', result.stdout)
                     claim = json.loads(receipt.read_text())
                     self.assertEqual(claim["workspace"], "test")
                     self.assertEqual(claim["run_dir"], str(root / "run"))
