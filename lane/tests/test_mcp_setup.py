@@ -1,6 +1,7 @@
 """Check MCP configuration and bridge identity without accounts or live services."""
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
@@ -14,7 +15,8 @@ LANE = Path(__file__).resolve().parents[1]
 class McpSetupTests(unittest.TestCase):
     def test_launcher_refuses_an_old_bridge_identity(self):
         source = (LANE / 'run.sh').read_text()
-        guard = source[source.index('bridge_pid="'):source.index('\nequill_vars=(')]
+        start = source.index('# An already-running old bridge')
+        guard = source[start:source.index('\nequill_vars=(', start)]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'bridge.pid').write_text(str(os.getpid()))
@@ -58,11 +60,14 @@ class McpSetupTests(unittest.TestCase):
             env = dict(os.environ, MEDULLA_BRIDGE=str(root), EQUILL_BIN=str(equill),
                        EQUILL_ACTOR='host-admin-fixture', EQUILL_BRIDGE_POLL='0.01')
             with subprocess.Popen(['bash', str(LANE / 'bridge/equill-bridge.sh')], env=env,
+                                  start_new_session=True,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True) as process:
                 try:
                     bridge = root / 'equill'
                     self.wait_for(bridge / 'bridge.pid', process)
-                    self.assertEqual((bridge / 'bridge.identity').read_text().strip(), f'lane:{process.pid}')
+                    bridge_pid = int((bridge / 'bridge.pid').read_text())
+                    os.kill(bridge_pid, 0)
+                    self.assertEqual((bridge / 'bridge.identity').read_text().strip(), f'lane:{bridge_pid}')
                     for index, verb in enumerate(('context', 'search', 'record', 'revoke')):
                         key = f'fixture-{index}'
                         request = bridge / 'req' / f'{key}.json'
@@ -78,7 +83,7 @@ class McpSetupTests(unittest.TestCase):
                         else:
                             self.assertEqual(rc.read_text(), '2')
                 finally:
-                    process.terminate()
+                    os.killpg(process.pid, signal.SIGTERM)
                     process.wait(timeout=3)
 
     @staticmethod

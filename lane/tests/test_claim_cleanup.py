@@ -4,62 +4,61 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import shutil
 import unittest
 from test_failure_outcome import shell_body
 
 
 class ClaimCleanupTests(unittest.TestCase):
     def test_claim_receipt_requires_a_confirmed_response(self):
-        for response, rc, contract, transferred in [(*case, False) for case in [('{"id":"T1","status":"in_progress","claimed":true}', 0, 'fixture contract'),
-                                      ('{"id":"T1","status":"in_progress","claimed":true}', 0, ''),
-                                      ('{"id":"T1","status":"open","claimed":false}', 0, 'fixture contract'),
-                                      ('{"id":"OTHER","status":"in_progress","claimed":true}', 0, 'fixture contract'),
-                                      ('', 1, 'fixture contract')]] + [
-                ('{"id":"T1","status":"in_progress","claimed":true,"workspace":"test"}', 0, 'fixture contract', True),
-                ('{"id":"T1","status":"in_progress","claimed":true,"workspace":"other"}', 0, 'fixture contract', True)]:
-            with self.subTest(response=response, rc=rc, contract=contract), tempfile.TemporaryDirectory() as d:
+        cases = [
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", True),
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "", True),
+            ({"id":"T1", "status":"open", "claimed":False, "workspace":"test"}, "fixture contract", False),
+            ({"id":"OTHER", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", False),
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"other"}, "fixture contract", False),
+            (None, "fixture contract", False),
+        ]
+        for response, contract, adopted in cases:
+            with self.subTest(response=response, contract=contract), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
-                (root / 'lane/hooks').mkdir(parents=True)
-                (root / 'lane/bin').mkdir()
-                (root / 'lane-launcher').mkdir()
-                (root / 'bin').mkdir()
-                (root / 'lane/hooks/inject.sh').write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
-                (root / 'lane/hooks/codex-home.sh').write_text('exit 0\n')
-                (root / 'lane-launcher/ntk-status').write_text('touch "$TOOLING_ROOT/start-called"\nprintf "%s" "$RESPONSE"\nexit "$RESPONSE_RC"\n')
-                (root / 'lane-launcher/ntk.mjs').write_text(
+                for folder in ("lane/hooks", "lane/bin", "lane-launcher", "bin"):
+                    (root / folder).mkdir(parents=True, exist_ok=True)
+                (root / "lane/hooks/inject.sh").write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
+                (root / "lane/hooks/codex-home.sh").write_text("exit 0\n")
+                (root / "lane-launcher/ntk.mjs").write_text(
                     'export async function getTicket(id) { return {id, body: "fixture acceptance"}; }\n')
-                helper = Path(__file__).resolve().parents[1] / 'bin/ticket-input.mjs'
-                (root / 'lane/bin/ticket-input.mjs').write_text(helper.read_text())
-                equill = root / 'bin/equill'
+                helper = Path(__file__).resolve().parents[1] / "bin/ticket-input.mjs"
+                (root / "lane/bin/ticket-input.mjs").write_text(helper.read_text())
+                equill = root / "bin/equill"
                 equill.write_text('#!/bin/sh\nprintf "%s" "$CONTRACT_RESPONSE"\n')
                 equill.chmod(0o755)
-                env = dict(os.environ, TOOLING_ROOT=d, project_dir=d, ticket_id='T1', project_name='test',
-                           MEDULLA_RUN_DIR=str(root / 'run'), RESPONSE=response, RESPONSE_RC=str(rc),
-                           LAUNCH_CLAIM=response if transferred else '',
-                           CONTRACT_RESPONSE=json.dumps({'content': contract}),
-                           PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'])
-                body = shell_body('ntk_claim').replace('/tmp/', d + '/')
-                result = subprocess.run(['bash', '-c', body], env=env, capture_output=True, text=True)
-                receipt = root / 'run/artifacts/claim.json'
-                self.assertEqual((root / 'start-called').exists(), not transferred)
-                if response and json.loads(response).get('claimed') and 'OTHER' not in response and json.loads(response).get('workspace', 'test') == 'test':
+                claim_file = root / "host-claim.json"
+                if response is not None:
+                    claim_file.write_text(json.dumps(response))
+                env = dict(os.environ, TOOLING_ROOT=d, project_dir=d, ticket_id="T1", project_name="test",
+                           MEDULLA_RUN_DIR=str(root / "run"), LAUNCH_CLAIM_FILE=str(claim_file),
+                           CONTRACT_RESPONSE=json.dumps({"content": contract}),
+                           PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
+                body = shell_body("prepare").replace("/tmp/", d + "/")
+                result = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True)
+                receipt = root / "run/artifacts/claim.json"
+                if adopted:
                     self.assertEqual(result.returncode, 0 if contract else 1, result.stderr)
-                    if not contract:
-                        self.assertIn('Scout contract unavailable', result.stderr)
-                        self.assertFalse((root / 'run/artifacts/scout-contract.txt').exists())
-                    else:
-                        self.assertIn('<signal:CLAIMED>', result.stdout)
                     claim = json.loads(receipt.read_text())
-                    self.assertIn(f'<signal:var key=RUN_ARTIFACTS>{root}/run/artifacts</signal:var>',
-                                  result.stdout)
-                    self.assertEqual(claim['workspace'], 'test')
-                    self.assertEqual(claim['run_dir'], str(root / 'run'))
-                    ticket = json.loads((root / 'run/artifacts/ticket.json').read_text())
-                    self.assertEqual(ticket['body'], 'fixture acceptance')
+                    self.assertEqual(claim["workspace"], "test")
+                    self.assertEqual(claim["run_dir"], str(root / "run"))
+                    if contract:
+                        self.assertIn("<signal:READY>", result.stdout)
+                        ticket = json.loads((root / "run/artifacts/ticket.json").read_text())
+                        self.assertEqual(ticket["body"], "fixture acceptance")
+                    else:
+                        self.assertIn("Scout contract unavailable", result.stderr)
+                        self.assertFalse((root / "run/artifacts/scout-contract.txt").exists())
                 else:
+                    self.assertNotEqual(result.returncode, 0)
                     self.assertFalse(receipt.exists())
-                    self.assertFalse((root / 'run/artifacts/ticket.json').exists())
-                    self.assertTrue(result.returncode != 0 or 'CLAIM_REFUSED' in result.stdout)
+                    self.assertFalse((root / "run/artifacts/ticket.json").exists())
 
     def test_cleanup_preserves_landing_and_fails_when_to_test_fails(self):
         for rc in (0, 1):
@@ -67,6 +66,8 @@ class ClaimCleanupTests(unittest.TestCase):
                 root = Path(d)
                 bins = root / 'bin'
                 bins.mkdir()
+                (root / 'lane/bin').mkdir(parents=True)
+                shutil.copy(Path(__file__).resolve().parents[1] / 'bin/target.sh', root / 'lane/bin/target.sh')
                 for name, script in {
                     'git': '#!/bin/sh\nif [ "$3" = rev-parse ]; then echo abcdef123456; fi\n',
                     'jq': '#!/bin/sh\necho develop\n',
@@ -83,6 +84,6 @@ class ClaimCleanupTests(unittest.TestCase):
                 self.assertIn('Landed SHA: abcdef123456', (root / 'run/artifacts/landing.txt').read_text())
                 if rc:
                     self.assertNotIn('<signal:LANDED>', result.stdout)
-                    self.assertIn('Do not rerun implementation', (root / 'run/artifacts/outcome.txt').read_text())
+                    self.assertIn('Do not rerun work', (root / 'run/artifacts/outcome.txt').read_text())
                 else:
                     self.assertIn('<signal:LANDED>', result.stdout)

@@ -1,5 +1,6 @@
 """Opt-in Docker check of real worktree stages and filesystem permissions."""
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -41,6 +42,8 @@ class SourceMountTests(unittest.TestCase):
                 '// Local stand-in: this test never contacts NTK.\nconsole.log("fixture status");\n')
             (runs / 'create.sh').write_text(shell_body('create_worktree'))
             (runs / 'cleanup.sh').write_text(shell_body('cleanup'))
+            (runs / 'artifacts').mkdir()
+            shutil.copy(Path(__file__).resolve().parents[1] / 'bin/target.sh', tooling / 'lane/bin/target.sh')
             script = '''set -euo pipefail
 trap 'cat "$MEDULLA_RUN_DIR/"*.log 2>/dev/null || true' EXIT
 for source in /workspace/sources/repo/README.md /workspace/sources/companion/README.md /workspace/sources/repo/.git/config /workspace/sources/repo/.git/index; do
@@ -72,7 +75,8 @@ echo 'PASS: source writes denied; context readable; worktree commit and cleanup 
                        source_root='/workspace/sources', ticket_id='fixture', project_name='fixture',
                        TOOLING_ROOT='/workspace', MEDULLA_RUN_DIR=str(runs),
                        LANE_WORKTREE='/workspace/fixture')
-            args = ['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'bash']
+            args = ['docker', 'run', '--rm', '--cpus', '1', '--memory', '512m',
+                    '--network', 'none', '--entrypoint', 'bash']
             for source, target, mode in ((tooling, '/workspace', 'ro'),
                                          (root / 'sources', '/workspace/sources', 'ro'),
                                          (wt, '/workspace/fixture', 'rw'),

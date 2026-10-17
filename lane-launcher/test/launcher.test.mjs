@@ -8,7 +8,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
-import {save, read, laneArgs} from '../runtime.mjs';
+import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId, runHoldsTasks} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 
@@ -505,26 +505,19 @@ test('launches require sourceRoot and pass no repository override', async t => {
   save(f.configFile, {...f.config, repo: path.join(f.root, 'sources/repo')});
   assert.throws(() => configFrom(f.configFile, f.env), /repo was removed/);
 });
-test('worker records completion before notifying; bus failure preserves lane outcome', async t => {
+test('worker records completion before notifying; Telegram failure preserves lane outcome', async t => {
   const f = await setup(t);
   fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 0\n', {mode: 0o755});
-  fs.writeFileSync(path.join(f.bins, 'agentbus'), `#!${process.execPath}
-import fs from 'node:fs';
-if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(99);
-fs.writeFileSync(process.env.TEST_NOTIFY, JSON.stringify(process.argv.slice(2)));
-console.error('fixture delivery failure');
-process.exit(1);
-`, {mode: 0o755});
   const dir = path.join(f.root, 'worker');
   fs.mkdirSync(dir);
   const file = path.join(dir, 'launch.json');
-  save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture', from: 'crew-fixture'}},
+  save(file, {config: {...f.config, notify: {chatId: 'fixture'}},
     ticket: 'T1', workspace: 'test', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
   const sent = path.join(dir, 'sent.json');
-  const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json'), TEST_NOTIFY: sent});
+  const result = await execute(worker, [file], notificationEnv(f, file, sent, true));
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(read(path.join(dir, 'result.json')).code, 0);
-  assert.match(read(sent).at(-1), /^CREW READY \| T1 \|/);
+  assert.equal(read(path.join(dir, 'launch.json')).result.code, 0);
+  assert.equal(read(sent).text, '🟢 READY\nTicket: T1');
   assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
 });
 const queueReads = f => f.calls.filter(call => call.url.startsWith('/v1/tickets/next')).length;
@@ -533,18 +526,14 @@ for (const forceColor of ['0', '1']) {
     const f = await setup(t);
     const reason = '[sync] shared CBM refused tools/call: index worker ended with exit_nonzero';
     fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\nprintf '%s\\n\\n' '${reason}' >&2\nexit 2\n`, {mode: 0o755});
-    fs.writeFileSync(path.join(f.bins, 'agentbus'), `#!${process.execPath}
-import fs from 'node:fs';
-fs.writeFileSync(process.env.TEST_NOTIFY, JSON.stringify(process.argv.slice(2)));
-`, {mode: 0o755});
     const dir = path.join(f.root, 'worker');
     fs.mkdirSync(dir);
     const file = path.join(dir, 'launch.json'), sent = path.join(dir, 'sent.json');
-    save(file, {config: {...f.config, notify: {to: 'fixture', room: 'fixture'}},
+    save(file, {config: {...f.config, notify: {chatId: 'fixture'}},
       ticket: 'T1', workspace: 'test', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
-    await execute(worker, [file], {...f.env, FORCE_COLOR: forceColor, NO_COLOR: undefined, TEST_NOTIFY: sent});
-    assert.equal(read(path.join(dir, 'result.json')).error, reason);
-    assert.ok(read(sent).at(-1).includes(`CREW FAILED | T1 | ${reason} |`));
+    await execute(worker, [file], {...notificationEnv(f, file, sent), FORCE_COLOR: forceColor, NO_COLOR: undefined});
+    assert.match(read(path.join(dir, 'launch.json')).result.error, /Lane exited 2/);
+    assert.equal(read(sent).text, '🔴 FAILED\nTicket: T1\nReason: EXIT_2');
     assert.ok(fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes(reason + '\n\n'));
     assert.ok(!fs.readFileSync(path.join(dir, 'output.log'), 'utf8').includes('\x1b['));
     assert.equal(f.calls.filter(call => call.url.includes('/start')).length, 1);
@@ -573,12 +562,28 @@ function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
     child.on('close', code => resolve({code, stdout, stderr}));
   });
 }
+function notificationEnv(f, stateFile, sentFile, fail = false) {
+  const preload = path.join(f.root, 'telegram-fixture.mjs');
+  fs.writeFileSync(preload, `import fs from 'node:fs';
+const original = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (!String(url).startsWith('https://api.telegram.org/')) return original(url, options);
+  if (!JSON.parse(fs.readFileSync(process.env.TEST_RESULT)).result) throw new Error('completion not saved');
+  fs.writeFileSync(process.env.TEST_NOTIFY, options.body);
+  if (process.env.TEST_NOTIFY_FAILURE === '1') throw new Error('fixture delivery failure');
+  return {ok: true, json: async () => ({ok: true})};
+};
+`);
+  return {...f.env, TEST_RESULT: stateFile, TEST_NOTIFY: sentFile, TELEGRAM_BOT_TOKEN: 'fixture-token',
+    TEST_NOTIFY_FAILURE: fail ? '1' : '0', NODE_OPTIONS: `--import=${preload}`};
+}
 async function setup(t, {empty = false, dockerFailure = false, launchLanes = true, claimRefused = false, claimHttpStatus = 409, claimResponse, reportUploadFailure = false, countFailure = false, noReady = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-launcher-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const bins = path.join(root, 'bin');
   fs.writeFileSync(path.join(root, 'cbm-mcp.py'), '# connector fixture\n');
-  for (const dir of [bins, path.join(root, 'sources/repo/.git'), path.join(root, 'ssh')]) {
+  for (const dir of [bins, path.join(root, 'sources/repo/.git'), path.join(root, 'ssh'),
+    path.join(root, 'sources/locks'), path.join(root, 'cbm-cache')]) {
     fs.mkdirSync(dir, {recursive: true});
   }
   const events = path.join(root, 'events.jsonl'), panes = path.join(root, 'panes.json');
@@ -599,7 +604,7 @@ if (args[0] === 'tab' && args[1] === 'create') {
 }
 if (args[1] === 'list') result = {panes};
 if (args[1] === 'close' && process.env.TEST_RESULT) {
-  if (!fs.existsSync(process.env.TEST_RESULT)) process.exit(2);
+  if (!JSON.parse(fs.readFileSync(process.env.TEST_RESULT)).result) process.exit(2);
 }
 if (args[1] === 'run' && process.env.TEST_RUN_FAILURE === '1') process.exit(1);
 if (args[0] === 'pane' && ['run', 'close'].includes(args[1])) process.exit(0);
@@ -654,7 +659,8 @@ console.log(JSON.stringify({result}));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const config = {id: 'test-project', workspace: 'test', project: 'project', tags: ['crew'], strict: true,
     launchLanes, sourceRoot: path.join(root, 'sources'),
-    cbmMcpCommand: path.join(root, 'cbm-mcp.py'), cbmCacheDir: root, sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
+    cbmMcpCommand: path.join(root, 'cbm-mcp.py'), cbmCacheDir: path.join(root, 'cbm-cache'), sshDir: path.join(root, 'ssh'), gateCommands: ['true'],
+    testCommand: ['true'], sharedLockDir: path.join(root, 'sources/locks'),
     stateDir: path.join(root, 'state'), herdr, herdrWorkspace: 'different-config-workspace'};
   const configFile = path.join(root, 'config.json');
   save(configFile, config);
@@ -683,10 +689,11 @@ test('open tagged ticket launches once; pending tab consumes the only slot', asy
   assert.deepEqual(create.slice(0, 4), ['tab', 'create', '--workspace', 'workspace']);
   assert.ok(create.includes('--no-focus'));
   assert.ok(events.find(args => args[1] === 'run')[3].includes('worker.mjs'));
+  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 17 open/);
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
-  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 17 open/);
+  assert.doesNotMatch(result.stdout, /Tickets with tags/);
   assert.equal(queueReads(f), 1);
 });
 for (const [options, expected] of [
@@ -708,7 +715,7 @@ for (const [options, expected] of [
     assert.equal(result.code, 2, result.stderr);
     assert.ok(result.stdout.includes(expected));
     if (expected === 'CLAIM_UNCERTAIN') assert.match(result.stdout, /check T1 in NTK before retrying/);
-    assert.equal(read(path.join(dir, 'result.json')).code, 2);
+    assert.equal(read(path.join(dir, 'launch.json')).result.code, 2);
     assert.equal(fs.existsSync(started), false);
     assert.ok(!f.calls.some(call => call.method === 'PATCH'));
   });
@@ -758,7 +765,7 @@ test('tab creation failure does not claim or modify the ticket', async t => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /no ticket was claimed/);
   assert.ok(!f.calls.some(call => call.url.includes('/start') || call.method === 'PATCH'));
-  assert.equal(read(path.join(runState(f), 'result.json')).status, 'failed');
+  assert.equal(read(path.join(runState(f), 'launch.json')).result.status, 'failed');
 });
 test('worker startup failure reopens; adopted workflow failure and changed tickets do not', async t => {
   for (const scenario of ['startup', 'adopted', 'done']) {
@@ -773,7 +780,7 @@ test('worker startup failure reopens; adopted workflow failure and changed ticke
     }
     if (scenario === 'done') f.setStatus('done');
     await execute(worker, [path.join(dir, 'launch.json')], f.env);
-    const result = read(path.join(dir, 'result.json'));
+    const result = read(path.join(dir, 'launch.json')).result;
     assert.equal(result.reopened === true, scenario === 'startup', scenario);
     assert.equal(f.calls.some(call => call.method === 'PATCH'), scenario === 'startup', scenario);
     if (scenario === 'done') assert.match(result.reopenError, /Ticket changed/);
@@ -795,7 +802,7 @@ for (const scenario of ['blocked', 'upload-failed', 'done', 'unclaimed', 'adopte
       save(path.join(artifacts, 'claim.json'), {...run.claim, run_dir: path.dirname(artifacts)});
     }
     const output = await execute(worker, [file], f.env);
-    const result = read(path.join(dir, 'result.json'));
+    const result = read(path.join(dir, 'launch.json')).result;
     const blocked = scenario === 'blocked' || scenario === 'upload-failed';
     assert.equal(result.blocked === true, blocked);
     assert.equal(result.reopened === true, scenario === 'unrelated-code');
@@ -821,8 +828,8 @@ test('existing external Docker lane prevents a queue read', async t => {
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 0);
-  assert.equal(countReads(f).length, 2);
-  assert.match(result.stdout, /Tickets with tags \[workspace=test, tags=crew, strict=true\]: 17 open/);
+  assert.equal(countReads(f).length, 0);
+  assert.doesNotMatch(result.stdout, /Tickets with tags/);
 });
 test('another dispatcher and unscoped containers do not occupy this dispatcher', async t => {
   const f = await setup(t);
@@ -858,7 +865,7 @@ test('completed lane frees capacity even when its Herdr tab remains', async t =>
   const f = await setup(t);
   assert.equal((await f.run()).code, 0);
   const [runId] = fs.readdirSync(path.join(f.stateDir, 'runs'));
-  save(path.join(f.stateDir, 'runs', runId, 'result.json'), {status: 'exited', code: 0});
+  save(path.join(f.stateDir, 'runs', runId, 'launch.json'), {...read(path.join(f.stateDir, 'runs', runId, 'launch.json')), result: {status: 'exited', code: 0}});
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 0 of 1/);
@@ -926,9 +933,12 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   const f = await setup(t, {launchLanes: false});
   const folder = path.join(f.root, 'dolber folder');
   fs.mkdirSync(folder);
-  for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs']) {
+  for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs',
+    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'dependencies.mjs',
+    'requirement-delivery.mjs', 'publication-guard.mjs', 'requirement-finalizer.mjs']) {
     fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(folder, file));
   }
+  fs.copyFileSync(fileURLToPath(new URL('../../notify.mjs', import.meta.url)), path.join(f.root, 'notify.mjs'));
   const config = {...f.config, tags: ['open', 'agent-ready'], strict: false,
     preferTags: ['KYC', 'ceo60', 'KYT'], intervalSeconds: 60,
     project: '', sourceRoot: '', cbmMcpCommand: '', sshDir: '', gateCommands: []};
@@ -950,7 +960,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   assert.equal(query.searchParams.get('strict'), 'false');
   assert.equal(query.searchParams.get('dry_run'), 'true');
   assert.equal(query.searchParams.has('project'), false);
-  assert.equal(f.calls.length, 3);
+  assert.equal(f.calls.length, 2);
   for (const call of countReads(f)) {
     const countQuery = new URL(call.url, 'http://fixture');
     assert.equal(countQuery.searchParams.get('workspace'), 'test');
@@ -960,7 +970,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
     assert.equal(countQuery.searchParams.has('prefer'), false);
   }
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
-  assert.deepEqual(fs.readdirSync(path.join(f.stateDir, 'runs')), []);
+  assert.deepEqual(runDirectories(f.stateDir), []);
 });
 test('--dry-run overrides live config, previews once and never calls Herdr or claims work', async t => {
   const f = await setup(t);
@@ -973,12 +983,12 @@ test('--dry-run overrides live config, previews once and never calls Herdr or cl
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /T1 \(preview: запуск отключён\)/);
   assert.doesNotMatch(result.stdout, /pause /);
-  assert.equal(f.calls.length, 3);
+  assert.equal(f.calls.length, 2);
   const query = queueQuery(f);
   assert.equal(query.pathname, '/v1/tickets/next');
   assert.equal(query.searchParams.get('dry_run'), 'true');
   assert.ok(!fs.existsSync(f.events));
-  assert.deepEqual(fs.readdirSync(path.join(f.stateDir, 'runs')), []);
+  assert.deepEqual(runDirectories(f.stateDir), []);
   assert.equal(fs.readFileSync(f.configFile, 'utf8'), before);
 });
 test('--dry-run exits with an error when Docker cannot be inspected', async t => {
@@ -1008,13 +1018,13 @@ test('preview loop repeats after its interval and Ctrl+C releases the dispatcher
     child.once('error', error => { clearTimeout(timer); reject(error); });
   });
   assert.equal(code, 0, errors);
-  assert.equal(f.calls.length, 6);
+  assert.equal(f.calls.length, 4);
   assert.ok(!fs.existsSync(f.events));
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
-test('terminal countdown ticks in place and Ctrl+C during the pause releases the lock', async t => {
+test('terminal dashboard refreshes the countdown and Ctrl+C releases the lock', async t => {
   const f = await setup(t, {launchLanes: false});
-  save(f.configFile, {...f.config, intervalSeconds: 2});
+  save(f.configFile, {...f.config, intervalSeconds: 10});
   const tty = path.join(f.root, 'tty.cjs');
   fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
   const child = spawn(process.execPath, ['--require', tty, launcher, '--config', f.configFile],
@@ -1023,20 +1033,20 @@ test('terminal countdown ticks in place and Ctrl+C during the pause releases the
   let output = '', errors = '', signalled = false;
   child.stdout.on('data', data => {
     output += data;
-    if (!signalled && output.includes('Next check in 00:01')) {
+    if (!signalled && /Next check in 00:0[4-6]/.test(output)) {
       signalled = true; child.kill('SIGINT');
     }
   });
   child.stderr.on('data', data => errors += data);
   const code = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('countdown did not stop')); }, 5000);
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('countdown did not stop')); }, 8000);
     child.once('close', code => { clearTimeout(timer); resolve(code); });
     child.once('error', error => { clearTimeout(timer); reject(error); });
   });
   assert.equal(code, 0, errors);
-  assert.ok(output.includes('\r\x1b[2KNext check in 00:02'));
-  assert.ok(output.includes('\r\x1b[2KNext check in 00:01'));
-  assert.ok(output.includes('\r\x1b[2K\nstopped'));
+  assert.match(output, /Next check in 00:10/);
+  assert.match(output, /Next check in 00:0[4-6]/);
+  assert.match(output, /Stopped/);
   assert.equal(queueReads(f), 1);
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
@@ -1047,7 +1057,7 @@ for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
     fs.writeFileSync(path.join(f.bins, 'bash'), `#!/bin/sh\nprintf 'lane-output\\n'\nexit ${exitCode}\n`, {mode: 0o755});
     const dir = path.join(f.root, 'worker');
     fs.mkdirSync(dir);
-    const artifacts = path.join(dir, 'lane/fixture/artifacts');
+    const artifacts = path.join(laneRunFolder(path.join(dir, 'lane'), f.config.id), 'fixture/artifacts');
     fs.mkdirSync(path.join(artifacts, 'gates/check'), {recursive: true});
     fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'candidate checks failed');
     save(path.join(artifacts, 'gates/check/receipt.json'), {checks: [
@@ -1055,9 +1065,9 @@ for (const exitCode of [0, 7]) for (const closeTabOnExit of [false, true]) {
     const file = path.join(dir, 'launch.json');
     save(file, {config: {...f.config, closeTabOnExit}, ticket: 'T1', workspace: 'test',
       args: ['--ticket-id', 'T1'], pane: 'owned-pane', runFolder: path.join(dir, 'lane')});
-    const result = await execute(worker, [file], {...f.env, TEST_RESULT: path.join(dir, 'result.json')});
+    const result = await execute(worker, [file], {...f.env, TEST_RESULT: file});
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(read(path.join(dir, 'result.json')).code, exitCode);
+    assert.equal(read(path.join(dir, 'launch.json')).result.code, exitCode);
     assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /lane-output/);
     if (exitCode) assert.match(result.stdout, /FAILED check: bun run docs:links · exit 1/);
     else assert.doesNotMatch(result.stdout, /FAILED check:/);
