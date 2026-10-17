@@ -81,6 +81,22 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
             publication.operations(value, data)
 
+    def test_unchanged_task_can_retain_its_acceptance_check(self):
+        data, value = assignment(), plan()
+        old = data["joppa"]["tasks"][0]
+        old["document"]["data"]["contract"] = publication.contract(deepcopy(value["tasks"][0]), value)
+        value["tasks"][0]["checks"] = [{"scenario": "Another mechanism", "expected": "Another output"}]
+        self.assertEqual(publication.operations(value, data)[0]["command"]["revision"], 0)
+        for field in ("done", "retired"):
+            with self.subTest(field=field):
+                old["process"][field] = "Finished"
+                with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
+                    publication.operations(value, data)
+                old["process"][field] = None
+        value["tasks"][0].update(action="update", target="work:old", revision=3)
+        with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
+            publication.operations(value, data)
+
     def test_direct_ac_filter_refuses_before_claim(self):
         spec = importlib.util.spec_from_file_location("joppa_stage_filter", ROOT / "planning-joppa/stages.py")
         stage = importlib.util.module_from_spec(spec)
