@@ -329,7 +329,10 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
 
 
 def check_line(check):
-    method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
+    method = check.get("scenario", "")
+    if "command" in check:
+        command = f"{check['command']} (cwd: {check['cwd']})"
+        method = f"{method} [{command}]" if method else command
     return method + " => " + check["expected"]
 
 
