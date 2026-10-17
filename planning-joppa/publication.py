@@ -102,16 +102,15 @@ def criterion_plan(plan, assignment, address):
 
 
 def package_counters(plan, assignment):
-    """Keep approved sibling Tasks. New indices follow their retained prefixes."""
+    """Reserve existing Task indices before numbering new work."""
     if assignment["joppa"].get("scope") != "requirement":
         return {}
     criteria = {item["id"] for item in context.selected_criteria(assignment)}
     for value in assignment.get("decisions", []):
         criteria.update(item["id"] for item in json.loads(value).get("acs", []))
-    targets = {task["target"]: task for task in plan["tasks"] if task.get("target")}
     counters = {}
     for existing in assignment["joppa"]["objects"].values():
-        if (existing["address"] in targets or existing["document"].get("parent") not in criteria
+        if (existing["document"].get("parent") not in criteria
                 or existing["process"].get("done") or existing["process"].get("retired")):
             continue
         data = existing["document"]["data"]
@@ -123,12 +122,22 @@ def package_counters(plan, assignment):
         repository = repository[0]
         match = re.match(r"^\[(\d+)\]\s", data.get("title", ""))
         counters[repository] = max(counters.get(repository, 0), int(match[1]) if match else 0)
-        for link in existing["document"].get("links", []):
-            target = targets.get(link.get("target"))
-            require(not (link.get("relation") == "depends_on" and link.get("blocking") is True
-                         and target and target["repository"] == repository),
-                    f"retained Task {existing['address']} requires planned Task {link.get('target')}; their approved order cannot be preserved")
     return counters
+
+
+def task_title(task, objects, counters):
+    """Preserve update labels. Dependencies determine execution order."""
+    existing = objects.get(task.get("target"), {})
+    data = existing.get("document", {}).get("data", {})
+    prefix = re.match(r"^\[(\d+)\]\s", data.get("title", ""))
+    repository = task["repository"]
+    same_repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", data.get("contract", ""), re.M) == [repository]
+    if prefix and same_repository:
+        number = int(prefix[1])
+    else:
+        counters[repository] = counters.get(repository, 0) + 1
+        number = counters[repository]
+    return f"[{number:02d}] " + re.sub(r"^\[\d+\]\s*", "", text(task.get("title"), "task.title"))
 
 
 def validate(plan, assignment):
@@ -164,9 +173,7 @@ def validate(plan, assignment):
     counters = package_counters(plan, assignment)
     for task in ordered:
         if task.get("action") != "retire":
-            repository = task.get("repository")
-            counters[repository] = counters.get(repository, 0) + 1
-            title = f"[{counters[repository]:02d}] " + re.sub(r"^\[\d+\]\s*", "", text(task.get("title"), "task.title"))
+            title = task_title(task, assignment["joppa"]["objects"], counters)
             schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
             require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
         for dependency in task.get("depends_on", []):
@@ -238,6 +245,14 @@ def validate_one(plan, assignment):
         require(not dependencies.intersection(retired) or address in updates,
                 f"retirement requires an update that removes the dependency from {address}")
     validation.plan(normalized, assignment)
+    if plan.get("disposition") == "implement" and any(task["action"] != "retire" for task in normalized["tasks"]):
+        fields = ("scenario", "command", "cwd", "expected")
+        for check in plan["acceptance_checks"]:
+            specification = {key: check[key] for key in fields if key in check}
+            require(any(task["action"] != "retire" and task["repository"] == check["repository"]
+                        and any({key: own[key] for key in fields if key in own} == specification
+                                for own in task["checks"]) for task in normalized["tasks"]),
+                    "every AC acceptance check must be assigned to Task checks in its repository")
     schema = assignment["joppa"]["task_schema"]
     limit = schema.get("title_preview_length", 64)
     for task in plan.get("tasks", []):
@@ -348,8 +363,7 @@ def operations(plan, assignment):
         # Verification evidence remains a separate operation.
         title = task["title"]
         if grouped:
-            counters[task["repository"]] = counters.get(task["repository"], 0) + 1
-            title = f"[{counters[task['repository']]:02d}] " + re.sub(r"^\[\d+\]\s*", "", title)
+            title = task_title(task, objects, counters)
             require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
         data.update(title=title, contract=contract(task, plan))
         project = repositories[task["repository"]]["project"]
