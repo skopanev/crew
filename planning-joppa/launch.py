@@ -19,6 +19,7 @@ For update, preserve an existing How step 0 verbatim as steps[0]. Keep its Repos
 This recovery step precedes the maximum five mechanism steps. Critics must check its relevance to the current AC.
 Reuse existing suitable Tasks instead of duplicating their work. Omit unchanged, done and retired Tasks.
 An implement plan needs at most five mechanism steps, reuse choices and observable AC and module checks for every Task.
+Assign each AC acceptance_check verbatim to checks of a Task in its repository, after its required dependencies.
 Do not emit shallow implementation Tasks. Lane decides files, functions and test placement.
 Use Joppa MCP to inspect relevant Tasks, ACs, Requirements, capabilities and domains in the configured workspace.
 Search before creating Tasks. Read the full current object before reuse or a dependency.

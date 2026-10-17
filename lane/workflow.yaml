@@ -607,7 +607,7 @@ nodes:
       __default__: notify_failure
     shell: |
       python3 - <<'PY'
-      import json, os, pathlib, sys
+      import json, os, pathlib, re, sys
 
       VERDICTS = {"CLEAR", "REJECT"}
       manifest = os.environ.get("MEDULLA_MANIFEST_EXPERT_REVIEW", "")
@@ -623,6 +623,8 @@ nodes:
           return found.pop() if len(found) == 1 else ""
 
       go, findings, notes, incomplete = 0, [], [], []
+      art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
+      art.mkdir(parents=True, exist_ok=True)
       seats = [r.get("slug") or (r.get("input") or {}).get("slug") for r in rows]
       if sorted(str(s) for s in seats) != ["architecture", "codereview", "security"]:
           incomplete.append("Expected one result from each of the three reviewer seats.")
@@ -630,6 +632,19 @@ nodes:
           v = verdict(r)
           who = r.get("harness") or "?"
           result = v or 'no verdict'
+          seat = r.get("slug") or (r.get("input") or {}).get("slug")
+          report = ""
+          if seat in {"architecture", "codereview", "security"}:
+              try:
+                  report = (art / f"{seat}.md").read_text()
+              except OSError:
+                  pass
+          if not re.search(r"^COVERAGE:[ \t]*\S[^\r\n]*$", report, re.M):
+              incomplete.append(f"{who}: missing report or coverage statement")
+          high = re.findall(r"^- HIGH\b[^\r\n]*", report, re.M)
+          if v == "CLEAR" and high:
+              v = "REJECT"
+              result = "REJECT: HIGH findings contradict CLEAR"
           if r.get("timed_out"):
               v = ""
               result = f"TIMEOUT ({r.get('model') or '?'}, rc={r.get('rc')}, attempts={r.get('attempts')})"
@@ -639,13 +654,12 @@ nodes:
           line = f"- {who}: {result} {r.get('message') or ''}".strip()
           # Keep every reviewer result, including nonblocking findings.
           notes.append(line)
+          notes.extend(high)
           if v == "CLEAR":
               go += 1
           else:
               findings.append(line)
 
-      art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
-      art.mkdir(parents=True, exist_ok=True)
       # Preserve full verdict history across rounds.
       with (art / "panel-findings.txt").open("a") as fh:
           fh.write("\n".join(notes) + "\n---\n")

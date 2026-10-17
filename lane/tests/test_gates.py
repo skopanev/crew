@@ -86,6 +86,26 @@ class GateTests(unittest.TestCase):
         self.gate("run", succeeds=False)
         self.gate("verify", succeeds=False)
 
+    def test_duplicate_checks_cannot_replace_required_repository_gates(self):
+        artifacts = self.root / "run/artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "ticket-checks.json").write_text(json.dumps([
+            {"ac": "criterion:required", "argv": ["grep", "-Fq", "--", "candidate", "code.txt"]}
+        ]))
+        self.env.update(VERIFY_ONLY="true", gate_commands='["exit 23"]')
+        self.gate("run", succeeds=False)
+        self.gate("verify", succeeds=False)
+
+    def test_duplicate_receipt_contains_repository_and_ticket_checks(self):
+        artifacts = self.root / "run/artifacts"
+        artifacts.mkdir(parents=True)
+        check = {"ac": "criterion:required", "argv": ["test", "-f", "code.txt"]}
+        (artifacts / "ticket-checks.json").write_text(json.dumps([check]))
+        self.env["VERIFY_ONLY"] = "true"
+        self.gate("run")
+        self.assertEqual(self.receipt()["commands"], ["printf passed", check])
+        self.gate("verify")
+
     def test_gate_mutation_needs_new_candidate(self):
         self.env["gate_commands"] = '["echo changed > code.txt; git add code.txt"]'
         self.gate("run", succeeds=False)

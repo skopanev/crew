@@ -51,7 +51,7 @@ def plan():
     return {"disposition": "implement", "outcome": "Criterion output", "necessity": "Required work",
             "approach": "Use the existing mechanism", "rationale": "Minimum sufficient scope",
             "alternatives": ["Existing behavior does not supply the output"], "blockers": [],
-            "acceptance_checks": [{"repository": "service", "scenario": "Criterion action", "expected": "Criterion output"}],
+            "acceptance_checks": [{"repository": "service", **deepcopy(task["checks"][0])}],
             "tasks": [task]}
 
 
@@ -67,6 +67,20 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_acceptance_checks_cannot_disappear_from_published_tasks(self):
+        data, value = assignment(), plan()
+        check = {"repository": "service", "scenario": "Exercise the complete criterion", "expected": "Required result"}
+        value["acceptance_checks"] = [check]
+        with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
+            publication.operations(value, data)
+        value["tasks"][0]["checks"].append({key: val for key, val in check.items() if key != "repository"})
+        saved = publication.operations(value, data)[0]["command"]
+        self.assertIn("Exercise the complete criterion => Required result", saved["data"]["contract"])
+        value["acceptance_checks"][0]["repository"] = "client"
+        data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
+        with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
+            publication.operations(value, data)
+
     def test_direct_ac_filter_refuses_before_claim(self):
         spec = importlib.util.spec_from_file_location("joppa_stage_filter", ROOT / "planning-joppa/stages.py")
         stage = importlib.util.module_from_spec(spec)
@@ -126,11 +140,19 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
         old = data["joppa"]["objects"]["work:old"]
         old["process"]["blocked"] = {"reason": "Failed"}
+        old["document"]["data"].update(title="[03] Existing work", contract="Repository: service\nModule: core")
+        retained["document"]["data"]["title"] = "[07] Approved work"
         data["joppa"]["tasks"] = [old]
         value["tasks"][0].update(action="update", target="work:old", revision=3, depends_on=[])
         retained["document"]["links"] = [{"target": "work:old", "revision": 3, "relation": "depends_on", "blocking": True}]
-        with self.assertRaisesRegex(ValueError, "retained Task work:retained requires planned Task work:old"):
-            publication.operations(value, data)
+        commands = publication.operations(value, data)
+        self.assertTrue(commands[0]["command"]["data"]["title"].startswith("[03] "))
+        self.assertEqual(retained["document"]["links"][0]["target"], "work:old")
+        new = deepcopy(plan()["tasks"][0])
+        new.update(id="new", depends_on=["first"])
+        value["tasks"].append(new)
+        commands = publication.operations(value, data)
+        self.assertTrue(commands[1]["command"]["data"]["title"].startswith("[08] "))
 
     def test_cross_criterion_retirement_cannot_become_a_dependency(self):
         data, value = assignment(), plan()
