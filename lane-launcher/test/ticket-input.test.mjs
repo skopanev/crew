@@ -28,8 +28,9 @@ for (const readOnly of [false, true]) for (const outcome of ['success', 'unavail
       NTK_CONFIG: path.join(root, 'missing'), NTK_KEY: 'fixture-key',
       NTK_URL: `http://127.0.0.1:${server.address().port}`};
     const file = path.join(root, 'artifacts/ticket.json');
+    fs.mkdirSync(path.dirname(file));
+    fs.writeFileSync(path.join(root, 'artifacts/claim.json'), JSON.stringify({id: 'T1', workspace: 'fixture', claimed: true}));
     if (readOnly) {
-      fs.mkdirSync(path.dirname(file));
       fs.writeFileSync(file, 'original ticket artifact');
     }
     const result = await new Promise((resolve, reject) => {

@@ -74,7 +74,7 @@ class WorktreeCleanupTests(unittest.TestCase):
                 result = subprocess.run(['bash', '-c', script], env=env,
                                         capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, code, result.stderr)
-                self.assertEqual(wt.exists(), case not in ('empty', 'unchanged'))
+                self.assertEqual(wt.exists(), case not in ('empty', 'unchanged', 'ignored'))
                 if wt.exists() and case != 'symlink':
                     self.assertTrue((wt / 'source.txt').exists())
 

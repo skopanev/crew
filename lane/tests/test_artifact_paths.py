@@ -20,8 +20,8 @@ class ArtifactPathTests(unittest.TestCase):
         while end < len(lines) and (not lines[end] or lines[end].startswith('      ')):
             end += 1
         prompt = textwrap.dedent('\n'.join(lines[start:end]))
-        publish = '\n'.join(line for line in shell_body('ntk_claim').splitlines()
-                            if 'signal:var key=RUN_ARTIFACTS' in line or '<signal:CLAIMED>' in line)
+        publish = '\n'.join(line for line in shell_body('prepare').splitlines()
+                            if 'signal:var key=RUN_ARTIFACTS' in line or '<signal:READY>' in line)
         with tempfile.TemporaryDirectory(prefix='crew-artifact-path-') as directory:
             root = Path(directory).resolve()
             checkout = root / 'checkout'
@@ -43,7 +43,7 @@ WRITE
                 "  ticket_id: fixture-ticket\n"
                 f"  LANE_WORKTREE: {json.dumps(str(checkout))}\n"
                 "nodes:\n  publish:\n    on_signal:\n"
-                "      CLAIMED: review\n      __default__: __exit_fail__\n"
+                "      READY: review\n      __default__: __exit_fail__\n"
                 "    shell: |\n" + textwrap.indent(publish, '      ') + '\n'
                 "  review:\n    inputs:\n"
                 "      - slug: architecture\n      - slug: codereview\n      - slug: security\n"

@@ -1,6 +1,7 @@
 """Real Git fixtures; no network, queues, Docker, or agent harnesses."""
 
 import json
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -21,7 +22,7 @@ class GateTests(unittest.TestCase):
         self.repo = self.root / "repo"
         self.repo.mkdir()
         self.env = dict(os.environ, MEDULLA_RUN_DIR=str(self.root / "run"),
-                        ticket_id="fixture-task", project_dir=str(self.repo),
+                        ticket_id="fixture-task", project_name="fixture", project_dir=str(self.repo),
                         module_name="fixture-module", gate_commands='["printf passed"]',
                         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
         self.git("init", "-q")
@@ -124,12 +125,13 @@ class GateTests(unittest.TestCase):
         self.assertIn("candidate changed", result.stderr)
         self.assertNotIn("lane-push: HEAD=", result.stdout)
 
-    def test_clean_rebase_returns_to_checks_and_review_before_any_push(self):
+    def test_clean_rebase_runs_fresh_checks_before_pushing_without_new_review(self):
         # The origin is another directory in this disposable fixture.
         remote = self.root / "origin.git"
         subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
         self.git("remote", "add", "origin", str(remote))
         self.git("push", "-q", "origin", "HEAD:develop")
+        self.git("commit", "-qm", "candidate")
         initial = self.git("rev-parse", "HEAD")
         self.gate("run")
         artifacts = self.root / "run/artifacts"
@@ -152,37 +154,40 @@ class GateTests(unittest.TestCase):
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
                         TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo),
-                        project_name="fixture", ticket_title="fixture")
-        result = subprocess.run(["bash", "-c", shell_body("git_landing")],
-                                cwd=self.repo, env=self.env, capture_output=True,
-                                text=True, timeout=15)
+                        project_name="fixture", ticket_title="fixture",
+                        LANE_SHARED_LOCK_DIR=str(self.root / 'locks'))
+        (self.root / 'locks').mkdir()
+        # integrate.sh runs while its caller holds the target lock.
+        with (self.root / 'locks/target.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = subprocess.run(["bash", str(LANE / 'bin/integrate.sh'), 'develop'],
+                                    cwd=self.repo, env=self.env, capture_output=True,
+                                    text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("<signal:REBASED>", result.stdout)
-        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/develop").split()[0],
-                         moved)
-        self.gate("verify", succeeds=False)
-        (artifacts / "qa-contract.txt").write_text("fixture QA context")
-        result = subprocess.run(["bash", "-c", shell_body("prepare_review")],
-                                cwd=self.repo, env=self.env, capture_output=True,
-                                text=True, timeout=15)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("<signal:SNAPSHOT>", result.stdout)
+        self.assertNotIn('<signal:REBASED>', result.stdout)
+        self.assertNotIn('<signal:LAND_FAILED>', result.stdout, result.stderr)
+        landed = self.git('rev-parse', 'HEAD')
+        self.assertNotEqual(landed, initial)
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/develop").split()[0], landed)
+        self.git('merge-base', '--is-ancestor', moved, landed)
         self.gate("verify")
         self.assertEqual(self.receipt()["tree"], self.git("rev-parse", "HEAD^{tree}"))
 
     def test_launcher_refuses_missing_checks_before_reading_queue(self):
         self.env["LANE_RUNS_FOLDER"] = str(self.root / "launcher-runs")
         (self.root / "shared-cbm.py").write_text("# fixture connector\n")
+        (self.root / "shared-cbm.py").chmod(0o755)
         result = subprocess.run(["bash", str(LANE / "run.sh"), "--ticket-id", "fixture",
                                  "--project", "fixture", "--source-root", str(self.root),
-                                 "--cbm-mcp-command", str(self.root / "shared-cbm.py")],
+                                 "--cbm-mcp-command", str(self.root / "shared-cbm.py"),
+                                 "--cbm-cache-dir", str(self.root), "--shared-lock-dir", str(self.root / "locks")],
                                 env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
         self.assertIn("--gate-command is required", result.stderr)
 
     def test_launcher_rejects_removed_repository_flags(self):
         # Passthrough would otherwise hand Medulla a writable source mount.
-        for flag in ("--repo", "--mount-rw", f"--mount-rw={self.repo}"):
+        for flag in ("--repo", f"--repo={self.repo}"):
             with self.subTest(flag=flag):
                 args = [flag] if "=" in flag else [flag, str(self.repo)]
                 result = subprocess.run(["bash", str(LANE / "run.sh"), "--ticket-id", "fixture",
@@ -201,7 +206,8 @@ class GateTests(unittest.TestCase):
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
-                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo))
+                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch')
+        self.git('update-ref', 'refs/remotes/origin/develop', 'HEAD')
         for content, rc in (("", 0), (" \n", 0), ("fixture QA contract", 1),
                             ("fixture QA contract", 0)):
             with self.subTest(content=content, rc=rc):

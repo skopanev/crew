@@ -6,24 +6,38 @@ import path from 'node:path';
 import {notify, notifyCompletion, completionEvent} from '../../notify.mjs';
 import {formatLaneLine} from '../lane-log.mjs';
 
-const config = {notify: {to: 'messenger', room: 'conv.test', from: 'crew-test'}};
-test('notification queues one literal message without invoking a shell', () => {
+const config = {notify: {chatId: '-100123', threadId: 7}};
+function telegram(t, send) {
+  const previous = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = 'fixture-token';
+  t.after(() => {
+    if (previous === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previous;
+  });
+  t.mock.method(globalThis, 'fetch', send);
+}
+test('notification sends one literal ticket and reason code directly to Telegram', async t => {
   let call;
-  notify(config, {event: 'READY', id: 'T1', summary: 'Ready\nwith | $(literal)'},
-    (...args) => { call = args; });
-  assert.equal(call[0], 'agentbus');
-  assert.deepEqual(call[1].slice(0, 5), ['send', 'conv.test', '--to', 'messenger', '--fyi']);
-  assert.equal(call[1][5], 'CREW READY | T1 | Ready with   $(literal) | -');
-  assert.equal(call[2].env.AGENTBUS_FROM, 'crew-test');
-  assert.equal(call[2].shell, undefined);
-  assert.equal(call[2].timeout, 15000);
+  telegram(t, async (...args) => {
+    call = args;
+    return {ok: true, json: async () => ({ok: true})};
+  });
+  assert.equal(await notify(config, {event: 'FAILED', id: 'T1$(literal)', signal: 'GATE_FAIL',
+    summary: 'private details', runId: 'private-run', log: '/private/output.log'}), true);
+  assert.equal(call[0], 'https://api.telegram.org/botfixture-token/sendMessage');
+  assert.equal(call[1].method, 'POST');
+  const body = JSON.parse(call[1].body);
+  assert.equal(body.chat_id, '-100123');
+  assert.equal(body.message_thread_id, 7);
+  assert.equal(body.text, '🔴 FAILED\nTicket: T1$(literal)\nReason: GATE_FAIL');
+  assert.deepEqual(body.entities.map(e => body.text.slice(e.offset, e.offset + e.length)), ['🔴 FAILED', 'T1$(literal)']);
+  assert.equal(call[1].signal.aborted, false);
 });
-test('disabled notifications skip artifact reads; send errors are not swallowed', () => {
-  assert.equal(notifyCompletion({config: {}}, {}, '/missing'), false);
-  assert.throws(() => notify(config, {event: 'TIMEOUT', id: 'T1'}, () => {}), /node and model/);
-  assert.throws(() => notify(config, {event: 'FAILED', id: 'T1'}, () => {
-    throw new Error('bus unavailable');
-  }), /bus unavailable/);
+test('disabled notifications skip artifact reads; send errors redact credentials and remain errors', async t => {
+  assert.equal(await notifyCompletion({config: {}}, {}, '/missing'), false);
+  await assert.rejects(notify(config, {event: 'TIMEOUT', id: 'T1'}), /node and model/);
+  telegram(t, async () => { throw new Error('delivery failed for fixture-token'); });
+  await assert.rejects(notify(config, {event: 'FAILED', id: 'T1'}), /delivery failed for \[redacted\]/);
 });
 test('preflight blocker notification includes the worktree reason without workflow artifacts', () => {
   const event = completionEvent({ticket: 'T1', runFolder: '/fixture/lane'},

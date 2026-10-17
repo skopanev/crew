@@ -136,9 +136,13 @@ class AdmissionTests(unittest.TestCase):
             root = Path(temp)
             tooling = root / "tooling"
             (tooling / "lane").mkdir(parents=True)
+            (tooling / "lane/bridge").mkdir()
             (tooling / "lane-launcher").mkdir()
             shutil.copy(crew / "lane/run.sh", tooling / "lane/run.sh")
+            (tooling / "lane/bridge/cbm-connect.py").write_text(
+                "import pathlib,sys\npathlib.Path(sys.argv[4]).write_text('# connector fixture\\n')\n")
             shutil.copy(crew / "lane-launcher/scope.mjs", tooling / "lane-launcher/scope.mjs")
+            shutil.copy(crew / "lane-launcher/runtime.mjs", tooling / "lane-launcher/runtime.mjs")
             (tooling / "planning").symlink_to(crew / "planning", target_is_directory=True)
             (tooling / "lane-launcher/ntk.mjs").write_text('export async function getTicket() { return {module:"repo/src"}; }\n')
             repo = root / "repo"
@@ -146,6 +150,14 @@ class AdmissionTests(unittest.TestCase):
             (repo / ".ntkrc").write_text('{"target_branch":"develop"}\n')
             cbm = root / "cbm-mcp.py"
             cbm.write_text("# shared connector fixture\n")
+            cbm.chmod(0o755)
+            cache = root / "cache"
+            cache.mkdir()
+            locks = root / "locks"
+            locks.mkdir()
+            claim = root / "claim.json"
+            claim.write_text(json.dumps({"id": "test-ticket", "workspace": "test",
+                                         "claimed": True, "status": "in_progress"}))
             bridge = root / "bridge"
             binary = root / "bin"
             binary.mkdir()
@@ -180,11 +192,13 @@ if os.environ.get('EXPIRE_DURING_SETUP'):
             env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
                    "LANE_RUNS_FOLDER": str(root / "runs"), "MEDULLA_BRIDGE": str(bridge),
                    "TEST_BRIDGE_PID": str(os.getpid()),
+                   "LANE_CLAIM_FILE": str(claim),
                    "TEST_RECEIPT": str(receipt), "LAUNCH_MARKER": str(marker)}
             command = ["bash", str(tooling / "lane/run.sh"), "--ticket-id", "test-ticket", "--project", "test",
                        "--dispatcher-id", "fixture",
-                       "--source-root", str(root), "--cbm-mcp-command", str(cbm), "--gate-command", "true",
-                       "--planning-result", str(receipt), "--planning-task", "one"]
+                       "--source-root", str(root), "--cbm-mcp-command", str(cbm), "--cbm-cache-dir", str(cache),
+                       "--shared-lock-dir", str(locks), "--test-command", '["true"]', "--gate-command", "true",
+                       "--planning-result", str(receipt), "--planning-task", "one", "--dry-run"]
             for scenario, code in (("expired", 3), ("read_error", 2), ("missing_image", 2), ("expired_during_setup", 3), ("fresh", 0)):
                 with self.subTest(scenario=scenario):
                     result["completed_at"] = (datetime.now(timezone.utc) - timedelta(days=1 if scenario == "expired" else 0)).isoformat()

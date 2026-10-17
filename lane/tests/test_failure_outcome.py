@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import textwrap
+import re
+import shlex
 import unittest
 
 
@@ -26,7 +28,13 @@ def shell_body(node):
     end = start
     while end < len(lines) and (not lines[end] or lines[end].startswith("      ")):
         end += 1
-    return textwrap.dedent("\n".join(lines[start:end])) + "\n"
+    # Medulla supplies workflow defaults before it runs each shell node.
+    defaults = []
+    block = WORKFLOW.read_text().split('vars:\n', 1)[1].split('\nnodes:', 1)[0]
+    for key, raw in re.findall(r'^  (\w+): (.*)$', block, re.M):
+        value = raw[1:-1] if raw.startswith("'") and raw.endswith("'") else raw
+        defaults.append(f'if [ -z "${{{key}+x}}" ]; then {key}={shlex.quote(value)}; fi')
+    return '\n'.join(defaults) + '\n' + textwrap.dedent("\n".join(lines[start:end])) + "\n"
 
 
 class FailureOutcomeTests(unittest.TestCase):
