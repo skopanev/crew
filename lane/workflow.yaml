@@ -646,7 +646,7 @@ nodes:
                   pass
           if not re.search(r"^COVERAGE:[ \t]*\S[^\r\n]*$", report, re.M):
               incomplete.append(f"{who}: missing report or coverage statement")
-          high = re.findall(r"^- HIGH\b[^\r\n]*", report, re.M)
+          high = re.findall(r"^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])(?:\*\*|__)?[^\r\n]*", report, re.M)
           if v == "CLEAR" and high:
               v = "REJECT"
               result = "REJECT: HIGH findings contradict CLEAR"

@@ -38,10 +38,12 @@ class ReviewPanelTests(unittest.TestCase):
             return result.stdout, (artifacts / "panel-findings.txt").read_text()
 
     def test_clear_signal_cannot_hide_a_high_finding(self):
-        output, history = self.panel("## FINDINGS\n- HIGH - Missing authorization - src/api.rs:2 - exposure - FIX: check access\nCOVERAGE: assigned behavior\n")
-        self.assertIn("<signal:REJECT>", output)
-        self.assertNotIn("<signal:CLEAR>", output)
-        self.assertIn("Missing authorization", history)
+        for label in ("- HIGH", "  - **HIGH**", "* __HIGH__"):
+            with self.subTest(label=label):
+                output, history = self.panel(f"## FINDINGS\n{label} - Missing authorization - src/api.rs:2 - exposure - FIX: check access\nCOVERAGE: assigned behavior\n")
+                self.assertIn("<signal:REJECT>", output)
+                self.assertNotIn("<signal:CLEAR>", output)
+                self.assertIn("Missing authorization", history)
 
     def test_missing_report_or_coverage_cannot_clear(self):
         for report in (None, "NONE\n", "NONE\nCOVERAGE:   \n"):

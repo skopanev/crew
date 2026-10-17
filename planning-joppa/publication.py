@@ -247,11 +247,19 @@ def validate_one(plan, assignment):
     validation.plan(normalized, assignment)
     if plan.get("disposition") == "implement" and any(task["action"] != "retire" for task in normalized["tasks"]):
         fields = ("scenario", "command", "cwd", "expected")
+        retained = [task for task in inventory.values() if task["address"] not in targets
+                    and not task["process"].get("done") and not task["process"].get("retired")]
         for check in plan["acceptance_checks"]:
             specification = {key: check[key] for key in fields if key in check}
-            require(any(task["action"] != "retire" and task["repository"] == check["repository"]
-                        and any({key: own[key] for key in fields if key in own} == specification
-                                for own in task["checks"]) for task in normalized["tasks"]),
+            assigned = any(task["action"] != "retire" and task["repository"] == check["repository"]
+                           and any({key: own[key] for key in fields if key in own} == specification
+                                   for own in task["checks"]) for task in normalized["tasks"])
+            for task in retained:
+                body = task["document"]["data"].get("contract", "")
+                checks = body.partition("\nChecks:\n")[2].splitlines()
+                assigned |= (re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) == [check["repository"]]
+                             and check_line(check) in checks)
+            require(assigned,
                     "every AC acceptance check must be assigned to Task checks in its repository")
     schema = assignment["joppa"]["task_schema"]
     limit = schema.get("title_preview_length", 64)
@@ -320,6 +328,11 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
             "source changed while checking existing test evidence")
 
 
+def check_line(check):
+    method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
+    return method + " => " + check["expected"]
+
+
 def contract(task, plan):
     lines = ["Goal: " + task["outcome"], "",
              f"Repository: {task['repository']}", f"Module: {task['module']}", "", "How:"]
@@ -331,8 +344,7 @@ def contract(task, plan):
                  for number, step in enumerate(steps, 1))
     lines += ["", "Checks:"]
     for check in task["checks"]:
-        method = check.get("scenario") or f"{check['command']} (cwd: {check['cwd']})"
-        lines.append(method + " => " + check["expected"])
+        lines.append(check_line(check))
     return "\n".join(lines)
 
 
