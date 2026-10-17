@@ -625,16 +625,21 @@ nodes:
       go, findings, notes, incomplete = 0, [], [], []
       art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
       art.mkdir(parents=True, exist_ok=True)
+      inputs = json.loads((pathlib.Path(manifest).parent / "inputs.json").read_text())
+      expected = [item["slug"] for item in inputs]
+      if (not expected or len(set(expected)) != len(expected)
+              or any(not isinstance(seat, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", seat) for seat in expected)):
+          sys.exit("Reviewer inputs need distinct valid slugs")
       seats = [r.get("slug") or (r.get("input") or {}).get("slug") for r in rows]
-      if sorted(str(s) for s in seats) != ["architecture", "codereview", "security"]:
-          incomplete.append("Expected one result from each of the three reviewer seats.")
+      if sorted(str(s) for s in seats) != sorted(expected):
+          incomplete.append("Expected one result from every configured reviewer seat.")
       for r in rows:
           v = verdict(r)
           who = r.get("harness") or "?"
           result = v or 'no verdict'
           seat = r.get("slug") or (r.get("input") or {}).get("slug")
           report = ""
-          if seat in {"architecture", "codereview", "security"}:
+          if seat in expected:
               try:
                   report = (art / f"{seat}.md").read_text()
               except OSError:
