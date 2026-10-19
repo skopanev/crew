@@ -8,6 +8,7 @@ import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {confirmed, findingKey, source, validate} from '../common.mjs';
 import {prepare, publish, recheck} from '../../audit-joppa/adapter.mjs';
+import {preflight, verifySearches} from '../cbm.mjs';
 
 async function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-audit-test-'));
@@ -74,7 +75,7 @@ async function fixture(t) {
   t.after(() => new Promise(resolve => server.close(resolve)));
   const token = path.join(root, 'user-token'); fs.writeFileSync(token, 'fixture-only');
   const config = {url: `http://127.0.0.1:${server.address().port}`, token_file: token, workspace: 'fixture', project: 'fixture',
-    repositories: [{id: 'backend', path: repo}], inbox: {kind: 'incoming', owner: 'person'}};
+    repositories: [{id: 'backend', path: repo, cbm_project: 'backend-index'}], inbox: {kind: 'incoming', owner: 'person'}};
   const input = await prepare(config);
   input.repositories = config.repositories.map(repo => ({...repo, head: source(repo)}));
   const finding = {id: 'access', kind: 'contradiction', title: 'Non-owner reads private data',
@@ -223,6 +224,32 @@ test('finding identity ignores display wording and evidence ordering', async t =
   assert.equal(findingKey(f.finding), findingKey({...f.finding, title: 'Another title', actual: 'Same effect'}));
 });
 
+test('both harnesses need successful CBM searches in the configured project', () => {
+  const repos = [{cbm_project: 'backend-index'}];
+  const call = {type: 'item.completed', item: {type: 'mcp_tool_call', server: 'codebase-memory',
+    tool: 'search_graph', status: 'completed', arguments: {project: 'backend-index'}, result: {isError: false}}};
+  verifySearches([call], 'codex', repos);
+  assert.throws(() => verifySearches([], 'codex', repos), /CBM search/);
+  assert.throws(() => verifySearches([{...call, item: {...call.item, error: 'Disconnected'}}], 'codex', repos), /CBM search/);
+  assert.throws(() => verifySearches([call], 'codex', [{cbm_project: 'another-index'}]), /CBM search/);
+  const use = {type: 'assistant', message: {content: [{type: 'tool_use', id: 'cbm',
+    name: 'mcp__codebase-memory__search_code', input: {project: 'backend-index'}}]}};
+  const result = {type: 'user', message: {content: [{type: 'tool_result', tool_use_id: 'cbm', content: 'Search result'}]}};
+  verifySearches([use, result], 'claude-code', repos);
+  assert.throws(() => verifySearches([use], 'claude-code', repos), /CBM search/);
+  assert.throws(() => verifySearches([use, {type: 'user', message: {content: [{...result.message.content[0], is_error: true}]}}],
+    'claude-code', repos), /CBM search/);
+});
+
+test('CBM preflight rejects an unavailable shared project before agents start', async t => {
+  const f = await fixture(t), binary = path.join(f.root, 'cbm');
+  const config = {...f.config, cbm_command: binary, cbm_store: f.root, cbm_root: f.root};
+  fs.writeFileSync(binary, `#!${process.execPath}\nconsole.log(JSON.stringify({isError:true}));\n`, {mode: 0o755});
+  assert.throws(() => preflight(config), /CBM refused/);
+  fs.writeFileSync(binary, `#!${process.execPath}\nconsole.log(JSON.stringify({structuredContent:{status:'ready',project:'backend-index',root_path:${JSON.stringify(f.root)}}}));\n`);
+  assert.throws(() => preflight(config), /not ready/);
+});
+
 test('real Medulla audits, reviews and publishes only confirmed findings', async t => {
   const medulla = execFileSync('which', ['medulla'], {encoding: 'utf8'}).trim();
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -232,12 +259,14 @@ test('real Medulla audits, reviews and publishes only confirmed findings', async
       fs.mkdirSync(bins);
       const report = {...f.report, findings: found ? [f.finding] : []};
       fs.writeFileSync(path.join(f.root, 'report.json'), JSON.stringify(report));
-      for (const name of ['codex', 'claude', 'equill']) {
+      for (const name of ['codex', 'claude', 'equill', 'cbm']) {
         const script = path.join(bins, name);
         fs.writeFileSync(script, `#!${process.execPath}\n` + `
 const fs = require('node:fs');
 const name = require('node:path').basename(process.argv[1]);
-if (name === 'equill') {
+if (name === 'cbm') {
+ console.log(JSON.stringify({structuredContent:{status:'ready',project:'backend-index',root_path:require('node:path').join(process.env.CBM_ALLOWED_ROOT,'source')}}));
+} else if (name === 'equill') {
  const role='crew-audit-auditor';
  const records=[{name:role,actor:role},...[10,20,30].map(step=>({process:role,step}))];
  console.log(JSON.stringify({ok:true,content:records.map(x=>JSON.stringify(x)).join('\\n\\n'),
@@ -247,6 +276,11 @@ if (name === 'equill') {
   fs.appendFileSync(process.env.AUDIT_TEST_EVENTS,name+'\\n');
   const report=JSON.parse(fs.readFileSync(process.env.AUDIT_TEST_REPORT));
   const result=name==='codex'?report:{verdicts:report.findings.map(x=>({id:x.id,verdict:'confirmed',reason:'Both source and specification support the discrepancy.'}))};
+  if(name==='codex') console.log(JSON.stringify({type:'item.completed',item:{type:'mcp_tool_call',server:'codebase-memory',tool:'search_graph',status:'completed',arguments:{project:'backend-index'},result:{isError:false}}}));
+  else {
+   console.log(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'cbm',name:'mcp__codebase-memory__search_graph',input:{project:'backend-index'}}]}}));
+   console.log(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'cbm',content:'Verified source result'}]}}));
+  }
   console.log(JSON.stringify(name==='codex'?{type:'item.completed',item:{type:'agent_message',text:JSON.stringify(result)}}:{type:'result',is_error:false,result:JSON.stringify(result)}));
  });
 }
@@ -254,6 +288,7 @@ if (name === 'equill') {
         fs.chmodSync(script, 0o755);
       }
       const configuration = {...f.config, equill_store: f.root, equill_actor: 'fixture',
+        cbm_root: f.root, cbm_store: f.root, cbm_command: path.join(bins, 'cbm'),
         reader_toml: 'mcp_servers={}', reader_config: '{"mcpServers":{}}', reader_tools: 'Read,Grep,Glob'};
       const configFile = path.join(f.root, 'config.json'); fs.writeFileSync(configFile, JSON.stringify(configuration));
       const runs = path.join(f.root, 'runs');

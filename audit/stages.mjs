@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {command, confirmed, hash, read, require, source, text, validate, write} from './common.mjs';
+import {preflight, verifySearches} from './cbm.mjs';
 
 const artifacts = path.join(process.env.MEDULLA_RUN_DIR || '.', 'artifacts');
 const config = () => read(process.env.AUDIT_CONFIG);
@@ -40,10 +41,11 @@ function result() {
     body = last.result;
   }
   require(text(body), 'Agent must return final JSON');
-  return JSON.parse(body.replace(/^```json\s*\n/, '').replace(/\n```\s*$/, '').trim());
+  return {report: JSON.parse(body.replace(/^```json\s*\n/, '').replace(/\n```\s*$/, '').trim()), events};
 }
 async function prepare() {
   const settings = config();
+  preflight(settings);
   const input = await (await adapter()).prepare(settings);
   input.repositories = settings.repositories.map(repo => ({...repo, head: source(repo)}));
   const rules = contract(settings);
@@ -60,7 +62,11 @@ async function prepare() {
   signal('PREPARED', 'Current source, specification and audit rules loaded');
 }
 async function capture(kind) {
-  const report = result();
+  const {report, events} = result();
+  const input = read(path.join(artifacts, 'input.json'));
+  const repositories = kind === 'audit' ? input.repositories : input.repositories.filter(repo =>
+    read(path.join(artifacts, 'findings.json')).findings.some(finding => finding.code.some(item => item.repository === repo.id)));
+  verifySearches(events, process.env.MEDULLA_HARNESS, repositories);
   if (kind === 'audit') {
     validate(report, read(path.join(artifacts, 'input.json')));
     write(path.join(artifacts, 'findings.json'), report);
