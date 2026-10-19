@@ -1,0 +1,76 @@
+version: '2'
+start: prepare
+timeout: 1800
+defaults:
+  timeout: 120
+nodes:
+  prepare:
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" prepare'
+    on_signal:
+      PREPARED: audit
+      __timeout__: __exit_fail__
+      __failed__: __exit_fail__
+  audit:
+    timeout: 900
+    agent:
+      harness: codex
+      model: '{{var:AUDIT_MODEL}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - --ignore-user-config
+        - -c
+        - '{{var:AUDIT_MCP_TOML}}'
+    prompt: |
+      Execute the mandatory Equill contract:
+      {{var:AUDIT_CONTRACT}}
+      Read the audit input: {{var:AUDIT_INPUT}}.
+      Inspect current code and the authoritative specification. Use the read-only service MCP for more context.
+      Return only JSON:
+      {"inspected":[{"repository":"configured ID","path":"tracked source file"}],"limitations":[],
+       "findings":[{"id":"unique ID","kind":"contradiction or excess","title":"Short finding",
+         "actual":"Implemented behavior","required":"Required behavior","impact":"Observable effect",
+         "code":[{"repository":"configured ID","path":"tracked source file","line":1,"quote":"Exact source lines"}],
+         "spec":[{"address":"source address","revision":1,"quote":"Exact specification text"}],
+         "boundary":"For excess only: the explicit scope restriction"}]}
+      Use an empty findings list when no deviation is supported. State inspection limits.
+    post: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" capture audit'
+    on_signal:
+      FINDINGS: review
+      NO_FINDINGS: finish
+      __timeout__: __exit_fail__
+      __failed__: __exit_fail__
+      __default__: __exit_fail__
+  review:
+    timeout: 600
+    agent:
+      harness: claude-code
+      model: '{{var:REVIEW_MODEL}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - --strict-mcp-config
+        - --setting-sources=
+        - --mcp-config
+        - '{{var:AUDIT_MCP_CONFIG}}'
+        - --allowedTools
+        - '{{var:AUDIT_READ_TOOLS}}'
+    prompt: |
+      Execute the mandatory Equill contract as an independent verifier:
+      {{var:AUDIT_CONTRACT}}
+      Read the input {{var:AUDIT_INPUT}} and proposed findings {{var:AUDIT_FINDINGS}}.
+      Read the actual cited source and specification. Verify the complete control flow and owner decisions.
+      Return only {"verdicts":[{"id":"proposed finding ID","verdict":"confirmed or dismissed","reason":"Evidence and explanation"}]}.
+      Cover every proposed finding once. Add no findings. Do not change any state.
+    post: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" capture review'
+    on_signal:
+      REVIEWED: finish
+      __timeout__: __exit_fail__
+      __failed__: __exit_fail__
+      __default__: __exit_fail__
+  finish:
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" finish'
+    on_signal:
+      AUDITED: __exit_ok__
+      __timeout__: __exit_fail__
+      __failed__: __exit_fail__

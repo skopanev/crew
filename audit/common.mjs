@@ -1,0 +1,86 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+
+export const require = (ok, message) => { if (!ok) throw new Error(message); };
+export const text = value => typeof value === 'string' && value.trim().length > 0;
+export const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function write(file, value) {
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n', {mode: 0o600});
+  fs.renameSync(file + '.tmp', file);
+}
+export function command(binary, args, options = {}) {
+  return execFileSync(binary, args, {encoding: 'utf8', timeout: 60_000, ...options});
+}
+export function source(repo) {
+  const git = (...args) => command('git', ['-C', repo.path, ...args]).trim();
+  require(!git('status', '--porcelain', '--untracked-files=no'), `Tracked source is dirty: ${repo.id}`);
+  return git('rev-parse', 'HEAD');
+}
+function trackedFile(item, repositories) {
+  const repo = repositories.find(repo => repo.id === item.repository);
+  require(repo && text(item.path) && !path.isAbsolute(item.path)
+    && !item.path.split(/[\\/]/).includes('..'), 'Invalid code evidence path');
+  const root = fs.realpathSync(repo.path), file = fs.realpathSync(path.join(root, item.path));
+  require(file.startsWith(root + path.sep), 'Code evidence escapes its repository');
+  require(command('git', ['--literal-pathspecs', '-C', root, 'ls-files', '-z', '--error-unmatch', '--', item.path]) === item.path + '\0',
+    'Code evidence must identify one tracked file');
+  return file;
+}
+export function codeEvidence(item, repositories) {
+  const file = trackedFile(item, repositories);
+  require(Number.isSafeInteger(item.line) && item.line > 0 && text(item.quote), 'Code evidence needs a line and quote');
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const quote = item.quote.split('\n');
+  require(lines.slice(item.line - 1, item.line - 1 + quote.length).join('\n') === item.quote,
+    `Code evidence does not match ${item.repository}:${item.path}:${item.line}`);
+}
+export function validate(report, input) {
+  require(report && Array.isArray(report.findings) && Array.isArray(report.inspected)
+    && Array.isArray(report.limitations) && report.limitations.every(text), 'Invalid audit report');
+  for (const item of report.inspected) {
+    const file = trackedFile(item, input.repositories);
+    require(fs.statSync(file).size > 0, 'An inspected source file is empty');
+  }
+  require(input.repositories.every(repo => report.inspected.some(item => item.repository === repo.id)),
+    'Audit must inspect every configured repository');
+  const ids = new Set();
+  for (const finding of report.findings) {
+    require(text(finding.id) && !ids.has(finding.id), 'Finding IDs must be unique');
+    ids.add(finding.id);
+    require(['contradiction', 'excess'].includes(finding.kind), 'Only implemented contradictions or excess behavior may enter the inbox');
+    for (const key of ['title', 'actual', 'required', 'impact']) require(text(finding[key]), `Finding needs ${key}`);
+    require(Array.isArray(finding.code) && finding.code.length, 'Finding needs code evidence');
+    finding.code.forEach(item => codeEvidence(item, input.repositories));
+    require(Array.isArray(finding.spec) && finding.spec.length, 'Finding needs authoritative specification evidence');
+    for (const reference of finding.spec) {
+      const spec = input.specification.find(item => item.address === reference.address);
+      require(spec && spec.revision === reference.revision && text(reference.quote)
+        && spec.text.includes(reference.quote), 'Specification evidence is absent, stale or invented');
+    }
+    if (finding.kind === 'excess') require(text(finding.boundary)
+      && finding.spec.some(reference => reference.quote.includes(finding.boundary)),
+      'Excess behavior needs an explicit cited scope boundary');
+  }
+  return report;
+}
+export function confirmed(report, review) {
+  require(review && Array.isArray(review.verdicts), 'Independent review is missing');
+  const expected = new Set(report.findings.map(item => item.id));
+  require(review.verdicts.length === expected.size, 'Review must cover every finding');
+  const seen = new Set();
+  for (const item of review.verdicts) {
+    require(expected.has(item.id) && !seen.has(item.id) && ['confirmed', 'dismissed'].includes(item.verdict)
+      && text(item.reason), 'Invalid independent finding verdict');
+    seen.add(item.id);
+  }
+  return report.findings.filter(finding => review.verdicts.find(item => item.id === finding.id).verdict === 'confirmed');
+}
+export function findingKey(finding) {
+  return hash({kind: finding.kind,
+    code: finding.code.map(({repository, path, quote}) => ({repository, path, quote})).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    spec: finding.spec.map(({address, quote}) => ({address, quote})).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))});
+}

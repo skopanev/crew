@@ -1,6 +1,6 @@
 # Crew
 
-Medulla workflows for preparing and implementing tickets.
+Medulla workflows for preparing tickets, implementing them and auditing code against the specification.
 
 ## Workflows
 
@@ -11,6 +11,8 @@ Medulla workflows for preparing and implementing tickets.
   land it, and set `to_test`. A workflow failure sets `blocked` with a report.
 - [Dolber](lane-launcher/README.md): select open tickets and launch lanes within
   the configured dispatcher limit.
+- [Auditor](audit/README.md): send confirmed code and specification deviations to an inbox.
+  Missing implementation does not produce findings.
 
 ## Configuration
 
@@ -42,7 +44,7 @@ All lanes access shared host CBM storage through the configured connector. Crew
 does not copy databases, start CBM daemons, or index worktrees. Equill supplies
 role contracts and memory.
 `roles/*.jsonl` are recovery snapshots; the live Equill store is authoritative.
-Lane and planning snapshots cover their six roles; the shared snapshot contains
+Lane, planning and audit snapshots cover their seven roles; the shared snapshot contains
 the common rules included in their contracts.
 Do not import a stale snapshot over that store.
 
@@ -52,12 +54,12 @@ Enable the Crew pre-push hook in each checkout:
 git config core.hooksPath .githooks
 ```
 
-Before each push it exports these six live contracts and their shared rules.
+Before each push it exports these seven live contracts and their shared rules.
 If snapshots change, the push stops: commit `roles/*.jsonl` and push again.
 An Equill error also stops the push. The store defaults to `~/.equill/dev`;
 override it with `EQUILL_STORE`. Run `python3 roles/export.py` to export manually.
 Export is one-way: `git pull` never updates another machine's store. Lane and
-planning runs therefore start with `python3 roles/export.py --check`, and stop
+planning and audit runs therefore start with `python3 roles/export.py --check`, and stop
 when the live store differs from the committed snapshots. Bring the older side
 up to date, then start again.
 

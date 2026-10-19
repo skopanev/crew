@@ -1,0 +1,13 @@
+{
+  "url": "https://joppa.example.com/mcp",
+  "workspace": "product",
+  "project": "product",
+  "token_file": "/path/to/user-oauth-token",
+  "equill_store": "/path/to/equill-store",
+  "equill_actor": "registered-store-reader",
+  "runs_folder": "/path/to/audit-runs",
+  "repositories": [{"id": "service", "path": "/path/to/service"}],
+  "inbox": {"kind": "configured-input-type", "owner": "user-id"},
+  "audit_model": "gpt-6.1-sol",
+  "review_model": "claude-sonnet-5-5"
+}
