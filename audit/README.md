@@ -8,6 +8,8 @@ Graph: `prepare → audit → review → finish`. No findings skip the review st
 The auditor uses `gpt-6.1-sol` with high effort. An independent `claude-sonnet-5-5` reviewer checks each proposed finding.
 The launch configuration can change both models. Rules come from the live Equill process `crew-audit-auditor`.
 The rules enter each model stage. They do not depend on a hook before each tool call.
+Both agents use the existing shared CBM index through the same native server as planning and development.
+Start with a scoped CBM search. Verify its results in current source.
 
 The core workflow contains no service API or project identifiers.
 A service adapter supplies `prepare`, `recheck` and `publish` operations.
@@ -33,6 +35,11 @@ Use a registered Equill reader for `equill_actor`.
 The normal command runs one audit. It does not start a dispatcher or a background daemon.
 
 The configuration selects repository paths, workspace, inbox kind and inbox owner.
+Set `cbm_root`, `cbm_store` and each repository's existing `cbm_project`, as in the planner configuration.
+Optional `cbm_command` selects the native server executable. It defaults to `CBM_BIN` or `codebase-memory-mcp`.
+Preflight requires a ready shared project whose source root matches the configured repository.
+Both agents receive only the ten CBM read tools. The workflow checks actual successful search calls for the inspected repositories.
+It does not copy a database, index a repository or start a watcher.
 The inbox type must have `inbox: true` in the workspace schema.
 Set `inbox.parent` when that type requires a parent.
 Set `inbox.body_field` when its text field differs from `body`.
