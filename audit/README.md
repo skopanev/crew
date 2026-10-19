@@ -85,7 +85,8 @@ It will reuse or change specification nodes and create or update Tasks under par
 It will mark the History item processed with the resulting node addresses.
 Joppa stores the tree, History and processing results. Crew owns the planning workflow.
 
-The History intake API is under development. This repository does not yet implement that intake planner.
+Joppa provides `joppa_history` and `joppa_history_mark` for this handoff.
+This repository does not yet implement that intake planner.
 The existing AC and Requirement planner remains separate. Do not treat an inbox finding as an implementation contract.
 The current inbox schema can require `source`; supply it through `inbox.fields`.
 
