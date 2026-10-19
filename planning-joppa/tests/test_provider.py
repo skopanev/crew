@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 from common import read
 import context
-from mcp import MCPError, Rejected
+from mcp import MCPError, Rejected, Reader
 import publication
 
 
@@ -67,6 +67,15 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_read_only_reader_can_omit_planning_capture(self):
+        obj = item("criterion:a")
+        api = Fake(result=obj)
+        reader = Reader(api, "example", None)
+        self.assertEqual(reader.call("joppa_objects", {"address": "criterion:a"}), obj)
+        self.assertEqual(api.calls[0][1]["workspace"], "example")
+        with self.assertRaises(MCPError):
+            reader.call("joppa_batch", {"operations": []})
+
     def test_acceptance_checks_cannot_disappear_from_published_tasks(self):
         data, value = assignment(), plan()
         check = {"repository": "service", "scenario": "Exercise the complete criterion", "expected": "Required result"}

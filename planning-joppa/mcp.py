@@ -144,7 +144,7 @@ class Reader:
         if address and ":" not in address:
             raise MCPError("Use a full kind:id object address")
         result = self.api.call(name, args)
-        if address and not args.get("revision") and not args.get("history"):
+        if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
             obj = result if name == "joppa_objects" else context.object_read(self.api, self.workspace, address)
             context.capture_object(self.target, self.workspace, obj)
@@ -203,10 +203,10 @@ if __name__ == "__main__":
     parser.add_argument("--url", required=True)
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--token-file", required=True)
-    parser.add_argument("--artifacts", required=True)
+    parser.add_argument("--artifacts")
     args = parser.parse_args()
     try:
-        serve(Reader(Joppa(args.url, args.token_file), args.workspace, Path(args.artifacts)))
+        serve(Reader(Joppa(args.url, args.token_file), args.workspace, Path(args.artifacts) if args.artifacts else None))
     except (MCPError, ValueError, OSError) as error:
         print("Joppa reader: " + str(error), file=sys.stderr)
         sys.exit(1)

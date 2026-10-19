@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export live Crew contracts as recovery drafts, without store metadata.
 
-`export.py --check [lane|planning|shared ...]` writes nothing. It exits 1 when
+`export.py --check [lane|planning|audit|shared ...]` writes nothing. It exits 1 when
 the live store differs from the committed snapshots, so a lane or planning run
 on another machine stops instead of using stale roles. Export is one-way
 (store -> snapshot): `git pull` alone never updates a machine's store.
@@ -18,6 +18,7 @@ import tempfile
 GROUPS = {
     "lane": ("scout", "coder", "qa"),
     "planning": ("researcher", "designer", "critic"),
+    "audit": ("auditor",),
 }
 DIRECTORY = Path(__file__).resolve().parent
 
