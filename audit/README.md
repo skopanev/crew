@@ -38,7 +38,7 @@ The configuration selects repository paths, workspace, inbox kind and inbox owne
 Set `cbm_root`, `cbm_store` and each repository's existing `cbm_project`, as in the planner configuration.
 Optional `cbm_command` selects the native server executable. It defaults to `CBM_BIN` or `codebase-memory-mcp`.
 Preflight requires a ready shared project whose source root matches the configured repository.
-Both agents receive only the ten CBM read tools. The workflow checks actual successful search calls for the inspected repositories.
+Both agents permit ten CBM read tools. The workflow checks actual successful search calls for the inspected repositories.
 It does not copy a database, index a repository or start a watcher.
 The inbox type must have `inbox: true` in the workspace schema.
 Set `inbox.parent` when that type requires a parent.
@@ -68,6 +68,19 @@ An archived matching entry stops publication for inspection.
 An uncertain write leaves `artifacts/publication.json` for inspection. The workflow does not repeat an uncertain mutation blindly.
 A confirmed service refusal records `rejected`. An explicit rerun can retry after correction.
 The service can change after the final check. Findings therefore name their exact source commits and specification revisions.
+
+## Inbox and planning
+
+The auditor records evidence in the inbox. It does not create Tasks.
+The agreed Joppa handoff uses History: a new inbox note creates an open History item.
+The Crew intake planner will read the oldest open item, with a default limit of one.
+It will reuse or change specification nodes and create or update Tasks under parents permitted by the schema.
+It will mark the History item processed with the resulting node addresses.
+Joppa stores the tree, History and processing results. Crew owns the planning workflow.
+
+The History intake API is under development. This repository does not yet implement that intake planner.
+The existing AC and Requirement planner remains separate. Do not treat an inbox finding as an implementation contract.
+The current inbox schema can require `source`; supply it through `inbox.fields`.
 
 ## Verification
 

@@ -7,6 +7,12 @@ export const require = (ok, message) => { if (!ok) throw new Error(message); };
 export const text = value => typeof value === 'string' && value.trim().length > 0;
 export const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function parseReport(body) {
+  try { return JSON.parse(body.trim()); } catch {}
+  const blocks = [...body.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```/g)];
+  require(blocks.length === 1, 'Return one final JSON report');
+  return JSON.parse(blocks[0][1]);
+}
 export function write(file, value) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
   fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n', {mode: 0o600});
