@@ -56,8 +56,9 @@ nodes:
         - --allowedTools
         - '{{var:AUDIT_READ_TOOLS}}'
     prompt: |
+      Start with CBM search_graph or search_code for {{var:AUDIT_REVIEW_SCOPE}}.
       Execute the mandatory Equill contract as an independent verifier:
-      {{var:AUDIT_CONTRACT}}
+      {{var:AUDIT_REVIEW_CONTRACT}}
       Read the input {{var:AUDIT_INPUT}} and proposed findings {{var:AUDIT_FINDINGS}}.
       Read the actual cited source and specification. Verify the complete control flow and owner decisions.
       Return only {"verdicts":[{"id":"proposed finding ID","verdict":"confirmed or dismissed","reason":"Evidence and explanation"}]}.

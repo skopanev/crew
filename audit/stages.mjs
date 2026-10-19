@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {command, confirmed, hash, read, require, source, text, validate, write} from './common.mjs';
+import {command, confirmed, hash, parseReport, read, require, source, text, validate, write} from './common.mjs';
 import {preflight, verifySearches} from './cbm.mjs';
 
 const artifacts = path.join(process.env.MEDULLA_RUN_DIR || '.', 'artifacts');
@@ -25,7 +25,9 @@ function contract(settings) {
   const records = reply.content.split('\n\n').filter(text).map(value => JSON.parse(value));
   require(records.some(item => item.name === name) && [10, 20, 30].every(step =>
     records.some(item => item.process === name && item.step === step)), 'Audit Equill steps are incomplete');
-  return {content: reply.content, digest: reply.bundle_digest};
+  const phase = steps => records.filter(item => item.step === undefined || steps.includes(item.step))
+    .map(item => JSON.stringify(item)).join('\n\n');
+  return {content: reply.content, audit: phase([10, 20]), review: phase([10, 30]), digest: reply.bundle_digest};
 }
 function result() {
   require(process.env.MEDULLA_BODY_RC === '0', 'Audit agent did not finish');
@@ -41,7 +43,7 @@ function result() {
     body = last.result;
   }
   require(text(body), 'Agent must return final JSON');
-  return {report: JSON.parse(body.replace(/^```json\s*\n/, '').replace(/\n```\s*$/, '').trim()), events};
+  return {report: parseReport(body), events};
 }
 async function prepare() {
   const settings = config();
@@ -55,7 +57,8 @@ async function prepare() {
   write(path.join(artifacts, 'config.json'), settings);
   variable('AUDIT_CONFIG', path.join(artifacts, 'config.json'));
   variable('AUDIT_INPUT', path.join(artifacts, 'input.json'));
-  variable('AUDIT_CONTRACT', rules.content);
+  variable('AUDIT_CONTRACT', rules.audit);
+  variable('AUDIT_REVIEW_CONTRACT', rules.review);
   variable('AUDIT_MCP_TOML', settings.reader_toml);
   variable('AUDIT_MCP_CONFIG', settings.reader_config);
   variable('AUDIT_READ_TOOLS', settings.reader_tools);
@@ -71,6 +74,8 @@ async function capture(kind) {
     validate(report, read(path.join(artifacts, 'input.json')));
     write(path.join(artifacts, 'findings.json'), report);
     variable('AUDIT_FINDINGS', path.join(artifacts, 'findings.json'));
+    variable('AUDIT_REVIEW_SCOPE', input.repositories.filter(repo => report.findings.some(finding =>
+      finding.code.some(item => item.repository === repo.id))).map(repo => ({repository: repo.id, project: repo.cbm_project})));
     signal(report.findings.length ? 'FINDINGS' : 'NO_FINDINGS', `${report.findings.length} proposed finding(s)`);
   } else {
     confirmed(read(path.join(artifacts, 'findings.json')), report);

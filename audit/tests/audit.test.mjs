@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {confirmed, findingKey, source, validate} from '../common.mjs';
+import {confirmed, findingKey, parseReport, source, validate} from '../common.mjs';
 import {prepare, publish, recheck} from '../../audit-joppa/adapter.mjs';
 import {preflight, verifySearches} from '../cbm.mjs';
 
@@ -241,6 +241,12 @@ test('both harnesses need successful CBM searches in the configured project', ()
     'claude-code', repos), /CBM search/);
 });
 
+test('a final fenced report can follow a status sentence without accepting multiple reports', () => {
+  const body = 'Review complete.\n```json\n{"verdicts":[]}\n```';
+  assert.deepEqual(parseReport(body), {verdicts: []});
+  assert.throws(() => parseReport(body + '\n```json\n{}\n```'), /one final JSON/);
+});
+
 test('CBM preflight rejects an unavailable shared project before agents start', async t => {
   const f = await fixture(t), binary = path.join(f.root, 'cbm');
   const config = {...f.config, cbm_command: binary, cbm_store: f.root, cbm_root: f.root};
@@ -272,7 +278,9 @@ if (name === 'cbm') {
  console.log(JSON.stringify({ok:true,content:records.map(x=>JSON.stringify(x)).join('\\n\\n'),
  receipt:{projection:'ready',degraded:false,empty:false},bundle_digest:'fixture',selected_record_ids:['fixture']}));
 } else {
+ let prompt=''; process.stdin.on('data', part=>{prompt+=part;});
  process.stdin.resume(); process.stdin.on('end',()=>{
+  fs.writeFileSync(require('node:path').join(process.env.AUDIT_TEST_PROMPTS,name),prompt);
   fs.appendFileSync(process.env.AUDIT_TEST_EVENTS,name+'\\n');
   const report=JSON.parse(fs.readFileSync(process.env.AUDIT_TEST_REPORT));
   const result=name==='codex'?report:{verdicts:report.findings.map(x=>({id:x.id,verdict:'confirmed',reason:'Both source and specification support the discrepancy.'}))};
@@ -281,7 +289,9 @@ if (name === 'cbm') {
    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'cbm',name:'mcp__codebase-memory__search_graph',input:{project:'backend-index'}}]}}));
    console.log(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'cbm',content:'Verified source result'}]}}));
   }
-  console.log(JSON.stringify(name==='codex'?{type:'item.completed',item:{type:'agent_message',text:JSON.stringify(result)}}:{type:'result',is_error:false,result:JSON.stringify(result)}));
+  const fence=String.fromCharCode(96).repeat(3);
+  const delivery='Review complete.\\n'+fence+'json\\n'+JSON.stringify(result)+'\\n'+fence;
+  console.log(JSON.stringify(name==='codex'?{type:'item.completed',item:{type:'agent_message',text:JSON.stringify(result)}}:{type:'result',is_error:false,result:delivery}));
  });
 }
 `);
@@ -300,7 +310,8 @@ if (name === 'cbm') {
         const child = spawn(medulla, args, {cwd: f.root,
           env: {...process.env, PATH: bins + path.delimiter + process.env.PATH,
             EQUILL_BIN: path.join(bins, 'equill'), MEDULLA_DOCKER: '1', MEDULLA_STREAM: '0',
-            AUDIT_TEST_REPORT: path.join(f.root, 'report.json'), AUDIT_TEST_EVENTS: path.join(f.root, 'events')},
+            AUDIT_TEST_REPORT: path.join(f.root, 'report.json'), AUDIT_TEST_EVENTS: path.join(f.root, 'events'),
+            AUDIT_TEST_PROMPTS: f.root},
           stdio: ['ignore', 'pipe', 'pipe']});
         let output = ''; child.stdout.on('data', part => { output += part; }); child.stderr.on('data', part => { output += part; });
         const timer = setTimeout(() => child.kill('SIGKILL'), 30_000);
@@ -313,6 +324,15 @@ if (name === 'cbm') {
       assert.equal(outcome.published.length, found ? 1 : 0);
       assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, found ? 1 : 0);
       assert.deepEqual(fs.readFileSync(path.join(f.root, 'events'), 'utf8').trim().split('\n'), found ? ['codex', 'claude'] : ['codex']);
+      const auditPrompt = fs.readFileSync(path.join(f.root, 'codex'), 'utf8');
+      assert.match(auditPrompt, /"step":20/);
+      assert.doesNotMatch(auditPrompt, /"step":30/);
+      if (found) {
+        const reviewPrompt = fs.readFileSync(path.join(f.root, 'claude'), 'utf8');
+        assert.match(reviewPrompt, /"step":30/);
+        assert.doesNotMatch(reviewPrompt, /"step":20/);
+        assert.match(reviewPrompt, /Start with CBM search_graph or search_code.*backend-index/);
+      }
     });
   }
 });
