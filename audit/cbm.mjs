@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {command, require, text} from './common.mjs';
+import {command, require, successfulCalls, text} from './common.mjs';
 
 export const readTools = ['list_projects', 'search_graph', 'search_code', 'get_code_snippet', 'query_graph',
   'trace_path', 'get_graph_schema', 'get_architecture', 'index_status', 'check_index_coverage'];
@@ -28,25 +28,7 @@ export function preflight(config) {
 }
 
 export function verifySearches(events, harness, repositories) {
-  const searches = new Set();
-  const names = ['search_graph', 'search_code'];
-  if (harness === 'codex') {
-    for (const event of events) {
-      const call = event.item;
-      if (event.type === 'item.completed' && call?.type === 'mcp_tool_call' && call.server === 'codebase-memory'
-        && names.includes(call.tool) && call.status === 'completed' && !call.error && !call.result?.isError) {
-        searches.add(call.arguments?.project);
-      }
-    }
-  } else if (harness === 'claude-code') {
-    const used = new Map();
-    for (const event of events) for (const block of event.message?.content || []) {
-      if (event.type === 'assistant' && block.type === 'tool_use'
-        && names.some(name => block.name === `mcp__codebase-memory__${name}`)) used.set(block.id, block.input?.project);
-      if (event.type === 'user' && block.type === 'tool_result' && !block.is_error && used.has(block.tool_use_id)) {
-        searches.add(used.get(block.tool_use_id));
-      }
-    }
-  }
+  const searches = new Set(successfulCalls(events, harness).filter(call => call.server === 'codebase-memory'
+    && ['search_graph', 'search_code'].includes(call.tool)).map(call => call.arguments?.project));
   require(repositories.every(repo => searches.has(repo.cbm_project)), 'Audit agent has no successful scoped CBM search for every inspected repository');
 }

@@ -25,14 +25,17 @@ nodes:
       Execute the mandatory Equill contract:
       {{var:AUDIT_CONTRACT}}
       Read the audit input: {{var:AUDIT_INPUT}}.
-      Inspect current code and the authoritative specification. Use the read-only service MCP for more context.
+      Inspect implemented code behavior. Use the read-only service MCP to find its current requirements and context.
       Return only JSON:
       {"inspected":[{"repository":"configured ID","path":"tracked source file"}],"limitations":[],
-       "findings":[{"id":"unique ID","kind":"contradiction or excess","title":"Short finding",
+       "findings":[{"id":"unique ID","kind":"contradiction or uncovered","title":"Short finding",
          "actual":"Implemented behavior","required":"Required behavior","impact":"Observable effect",
          "code":[{"repository":"configured ID","path":"tracked source file","line":1,"quote":"Exact source lines"}],
          "spec":[{"address":"source address","revision":1,"quote":"Exact specification text"}],
-         "boundary":"For excess only: the explicit scope restriction"}]}
+         "spec_searches":["For uncovered only: exact whole-workspace search query"],
+         "why_uncovered":"For uncovered only: why current requirements do not cover this observable behavior",
+         "decision":"For uncovered only: ask the owner whether to specify, change or remove the behavior"}]}
+      For uncovered behavior, use spec: [] and omit required. It needs no invented requirement quotation.
       Use an empty findings list when no deviation is supported. State inspection limits.
     post: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" capture audit'
     on_signal:
@@ -57,6 +60,8 @@ nodes:
         - '{{var:AUDIT_READ_TOOLS}}'
     prompt: |
       Start with CBM search_graph or search_code for {{var:AUDIT_REVIEW_SCOPE}}.
+      Repeat these specification searches through the service MCP: {{var:AUDIT_REVIEW_SPEC_SEARCHES}}.
+      Use each exact query across the whole workspace, without a kind or type filter.
       Execute the mandatory Equill contract as an independent verifier:
       {{var:AUDIT_REVIEW_CONTRACT}}
       Read the input {{var:AUDIT_INPUT}} and proposed findings {{var:AUDIT_FINDINGS}}.
