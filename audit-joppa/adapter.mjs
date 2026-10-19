@@ -49,7 +49,7 @@ export async function prepare(config) {
   require(inbox?.inbox === true, 'Configured type is not an inbox');
   const rows = await inventory(config);
   const parent = config.inbox.parent && rows.find(item => item.address === config.inbox.parent && item.present !== false);
-  require(config.inbox.parent ? parent && inbox.parents?.includes(parent.kind) : inbox.root === true,
+  require(config.inbox.parent ? parent && (inbox.parents?.includes('*') || inbox.parents?.includes(parent.kind)) : inbox.root === true,
     'Configured inbox parent is absent or its kind is not allowed');
   const candidates = scope(config, schema, rows);
   require(candidates.length, 'Audit specification is empty');
