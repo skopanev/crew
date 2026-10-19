@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {callJoppa} from '../lane-launcher/joppa-api.mjs';
-import {findingKey, hash, read, require, text, write} from '../audit/common.mjs';
+import {findingKey, hash, read, require, write} from '../audit/common.mjs';
 
 const api = (config, tool, args) => callJoppa(config.url, config.token_file, tool, {workspace: config.workspace, ...args});
 async function inventory(config, kind) {
@@ -14,16 +14,14 @@ async function inventory(config, kind) {
   } while (cursor);
   return items;
 }
+const strings = value => typeof value === 'string' ? [value]
+  : value && typeof value === 'object' ? Object.values(value).flatMap(strings) : [];
 const document = object => ({address: object.address, revision: object.current_revision,
   kind: object.kind, text: JSON.stringify({data: object.document.data, annotations: object.annotations || {}}, null, 2)
-    + '\n' + Object.values(object.document.data).filter(value => typeof value === 'string').join('\n'),
+    + '\n' + strings([object.document.data, object.annotations]).join('\n'),
   document: object.document, annotations: object.annotations || {}, files: object.files || [], references: object.references || []});
-export async function prepare(config) {
-  const tree = await api(config, 'joppa_tree', {});
-  const schema = tree.schema.types;
-  const inbox = schema[config.inbox.kind];
-  require(inbox?.inbox === true && (config.inbox.parent || inbox.root === true), 'Configured type is not an inbox at this parent');
-  const rows = (await inventory(config)).filter(item => item.present !== false);
+function scope(config, schema, inventory) {
+  const rows = inventory.filter(item => item.present !== false);
   const selected = new Set(config.roots || []);
   if (selected.size) {
     require([...selected].every(address => rows.some(item => item.address === address)), 'An audit root is absent');
@@ -41,8 +39,19 @@ export async function prepare(config) {
       }
     }
   }
-  const candidates = rows.filter(item => (!selected.size || selected.has(item.address))
+  return rows.filter(item => (!selected.size || selected.has(item.address))
     && schema[item.kind]?.role !== 'task' && schema[item.kind]?.inbox !== true);
+}
+export async function prepare(config) {
+  const tree = await api(config, 'joppa_tree', {});
+  const schema = tree.schema.types;
+  const inbox = schema[config.inbox.kind];
+  require(inbox?.inbox === true, 'Configured type is not an inbox');
+  const rows = await inventory(config);
+  const parent = config.inbox.parent && rows.find(item => item.address === config.inbox.parent && item.present !== false);
+  require(config.inbox.parent ? parent && inbox.parents?.includes(parent.kind) : inbox.root === true,
+    'Configured inbox parent is absent or its kind is not allowed');
+  const candidates = scope(config, schema, rows);
   require(candidates.length, 'Audit specification is empty');
   const specification = [];
   // Limit simultaneous API reads without starting more model sessions.
@@ -55,14 +64,15 @@ export async function prepare(config) {
   }
   require(hash((await api(config, 'joppa_tree', {})).schema) === hash(tree.schema), 'Schema changed while preparing audit');
   return {workspace: config.workspace, project: config.project, specification, schema: tree.schema,
-    scope: config.roots || [], inbox: config.inbox};
+    scope: config.roots || [], inbox: config.inbox, title_limit: inbox.title_preview_length ?? 64};
 }
 export async function recheck(config, input, findings = []) {
   const tree = await api(config, 'joppa_tree', {});
   require(hash(tree.schema) === hash(input.schema), 'Joppa schema changed during audit');
-  const rows = await inventory(config);
-  const revisions = new Map(rows.filter(item => item.present !== false).map(item => [item.address, item.revision]));
-  require(input.specification.every(item => revisions.get(item.address) === item.revision), 'Specification changed during audit; rerun it');
+  const rows = scope(config, tree.schema.types, await inventory(config));
+  const revisions = new Map(rows.map(item => [item.address, item.revision]));
+  require(revisions.size === input.specification.length
+    && input.specification.every(item => revisions.get(item.address) === item.revision), 'Specification changed during audit; rerun it');
   const documents = new Map(input.specification.map(item => [item.address, item]));
   const cited = new Set(findings.flatMap(finding => finding.spec.map(item => item.address)));
   for (const address of cited) {
@@ -88,6 +98,7 @@ export async function publish(config, findings, input, artifacts) {
     if (existing.has(address)) {
       const current = await api(config, 'joppa_objects', {address});
       require(current.document?.data.audit_key === key, 'Audit inbox ID collision');
+      require(current.document.present === true, 'Matching audit inbox entry is archived; inspect it before retry');
       reused.push(address); continue;
     }
     const body = [`Actual: ${finding.actual}`, `Required: ${finding.required}`, `Impact: ${finding.impact}`,
@@ -98,7 +109,8 @@ export async function publish(config, findings, input, artifacts) {
       parent: config.inbox.parent || null,
       data: {...config.inbox.fields, title: finding.title, owner: config.inbox.owner,
         [config.inbox.body_field || 'body']: body, status: 'unprocessed', audit_key: key},
-      links: finding.spec.map(item => ({target: item.address, revision: item.revision, relation: 'related', blocking: false})),
+      links: [...new Map(finding.spec.map(item => [item.address,
+        {target: item.address, revision: item.revision, relation: 'related', blocking: false}])).values()],
       reason: 'Record an independently verified code and specification discrepancy.',
       ...(input.schema.types[config.inbox.kind].question ? {question_checked: input.schema.types[config.inbox.kind].question} : {})}});
     published.push(address);
@@ -108,8 +120,8 @@ export async function publish(config, findings, input, artifacts) {
   const request = {workspace: config.workspace, request_id: `crew-audit-${hash(operations)}`, operations};
   let saved;
   try { saved = read(file); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  require(!saved || saved.status === 'confirmed', 'Earlier inbox publication is uncertain; inspect it before retry');
-  if (saved) return saved.result;
+  require(!saved || ['confirmed', 'rejected'].includes(saved.status), 'Earlier inbox publication is uncertain; inspect it before retry');
+  if (saved?.status === 'confirmed') return saved.result;
   write(file, {status: 'pending', request});
   try {
     const response = await api(config, 'joppa_batch', request);
@@ -118,7 +130,7 @@ export async function publish(config, findings, input, artifacts) {
     write(file, {status: 'confirmed', request, result});
     return result;
   } catch (error) {
-    write(file, {status: 'uncertain', request, error: error.message});
+    write(file, {status: error.rejected === true ? 'rejected' : 'uncertain', request, error: error.message});
     throw error;
   }
 }

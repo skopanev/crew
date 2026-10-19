@@ -53,6 +53,9 @@ export function validate(report, input) {
     ids.add(finding.id);
     require(['contradiction', 'excess'].includes(finding.kind), 'Only implemented contradictions or excess behavior may enter the inbox');
     for (const key of ['title', 'actual', 'required', 'impact']) require(text(finding[key]), `Finding needs ${key}`);
+    if (input.title_limit !== undefined) require(Number.isSafeInteger(input.title_limit)
+      && input.title_limit > 0 && [...finding.title].length <= input.title_limit,
+      `Finding title exceeds the configured ${input.title_limit} character limit`);
     require(Array.isArray(finding.code) && finding.code.length, 'Finding needs code evidence');
     finding.code.forEach(item => codeEvidence(item, input.repositories));
     require(Array.isArray(finding.spec) && finding.spec.length, 'Finding needs authoritative specification evidence');

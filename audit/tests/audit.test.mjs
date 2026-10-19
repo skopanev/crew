@@ -29,7 +29,7 @@ async function fixture(t) {
     ['measure:private', object('measure:private', {title: 'Owner access', description: 'A non-owner receives refusal.', owner: 'person'}, 'outcome:access')]
   ]);
   const calls = [];
-  let loseReply = false;
+  let loseReply = false, rejectBatch = false;
   const server = http.createServer(async (request, response) => {
     if (request.method === 'DELETE') { response.end(); return; }
     let body = ''; for await (const part of request) body += part;
@@ -46,11 +46,19 @@ async function fixture(t) {
         if (args.address) value = objects.get(args.address);
         else value = {items: [...objects.values()].filter(item => !args.kind || item.kind === args.kind)
           .map(item => ({address: item.address, kind: item.kind, parent: item.document.parent,
-            present: true, revision: item.current_revision})), next_cursor: null};
+            present: item.document.present, revision: item.current_revision})), next_cursor: null};
       } else if (name === 'joppa_batch') {
+        if (rejectBatch) {
+          response.setHeader('Content-Type', 'application/json');
+          response.end(JSON.stringify({jsonrpc: '2.0', id: rpc.id,
+            result: {isError: true, structuredContent: {error: 'Rejected fixture publication'}}}));
+          return;
+        }
         value = {results: args.operations.map(({command: op}) => {
           assert.equal(op.op, 'save_object'); assert.equal(op.kind, 'incoming');
           assert.equal(op.question_checked, schema.types.incoming.question);
+          assert.ok([...op.data.title].length <= (schema.types.incoming.title_preview_length ?? 64));
+          assert.equal(new Set(op.links.map(link => `${link.target}:${link.relation}`)).size, op.links.length);
           const address = `${op.kind}:${op.id}`;
           objects.set(address, object(address, op.data, op.parent));
           return {command: {op: 'save_object'}, address, saved_revision: 1};
@@ -74,7 +82,8 @@ async function fixture(t) {
     code: [{repository: 'backend', path: 'access.js', line: 2, quote: '  return true;'}],
     spec: [{address: 'outcome:access', revision: 1, quote: 'Only the owner can read.'}]};
   const report = {inspected: [{repository: 'backend', path: 'access.js'}], limitations: [], findings: [finding]};
-  return {root, repo, config, input, finding, report, objects, calls, loseReply: () => { loseReply = true; }};
+  return {root, repo, config, input, finding, report, objects, calls, schema,
+    loseReply: () => { loseReply = true; }, rejectBatch: value => { rejectBatch = value; }};
 }
 
 test('missing implementation cannot become an inbox finding', async t => {
@@ -116,6 +125,65 @@ test('only configured inbox documents are created and a repeated audit reuses th
   const second = await publish(f.config, [{...f.finding, title: 'Another wording'}], f.input, path.join(f.root, 'another-run'));
   assert.deepEqual(second.reused, first.published);
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+  await recheck(f.config, f.input);
+});
+
+test('two quotations from one specification object produce one link', async t => {
+  const f = await fixture(t);
+  const finding = {...f.finding, spec: [...f.finding.spec, {...f.finding.spec[0], quote: 'owner can read.'}]};
+  validate({...f.report, findings: [finding]}, f.input);
+  await publish(f.config, [finding], f.input, path.join(f.root, 'run'));
+  assert.equal(f.calls.find(call => call.name === 'joppa_batch').args.operations[0].command.links.length, 1);
+});
+
+test('inbox schema supplies the title limit in Unicode characters', async t => {
+  const f = await fixture(t);
+  assert.equal(f.input.title_limit, 64);
+  assert.throws(() => validate({...f.report, findings: [{...f.finding, title: 'x'.repeat(65)}]}, f.input), /character limit/);
+  f.schema.types.incoming.title_preview_length = 2;
+  const input = {...await prepare(f.config), repositories: f.input.repositories};
+  assert.equal(input.title_limit, 2);
+  validate({...f.report, findings: [{...f.finding, title: '🟢🟢'}]}, input);
+  assert.throws(() => validate(f.report, input), /2 character limit/);
+});
+
+test('an archived finding is not reused or overwritten', async t => {
+  const f = await fixture(t);
+  const result = await publish(f.config, [f.finding], f.input, path.join(f.root, 'first'));
+  f.objects.get(result.published[0]).document.present = false;
+  await assert.rejects(publish(f.config, [f.finding], f.input, path.join(f.root, 'second')), /archived/);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+});
+
+test('a confirmed service refusal permits an explicit corrected retry', async t => {
+  const f = await fixture(t), run = path.join(f.root, 'run');
+  f.rejectBatch(true);
+  await assert.rejects(publish(f.config, [f.finding], f.input, run), /Rejected fixture/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(run, 'publication.json'))).status, 'rejected');
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+  f.rejectBatch(false);
+  const corrected = {...f.finding, title: 'Corrected title'};
+  assert.equal((await publish(f.config, [corrected], f.input, run)).published.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(run, 'publication.json'))).status, 'confirmed');
+});
+
+test('parent kinds and new specification objects are checked', async t => {
+  const f = await fixture(t);
+  f.config.inbox.parent = 'outcome:access';
+  await assert.rejects(prepare(f.config), /parent/);
+  f.schema.types.incoming.parents = ['outcome'];
+  const input = await prepare(f.config);
+  const current = structuredClone(f.objects.get('measure:private'));
+  current.address = 'measure:added';
+  f.objects.set(current.address, current);
+  await assert.rejects(recheck(f.config, input), /Specification changed/);
+});
+
+test('multiline owner comments remain exact citable text', async t => {
+  const f = await fixture(t), quote = 'Owner decision:\nKeep access private.';
+  f.objects.get('outcome:access').annotations = {comments: [{text: quote}]};
+  const input = {...await prepare(f.config), repositories: f.input.repositories};
+  validate({...f.report, findings: [{...f.finding, spec: [{...f.finding.spec[0], quote}]}]}, input);
 });
 
 test('source and specification changes invalidate the audit', async t => {

@@ -45,6 +45,7 @@ Agents can read related service context through MCP. A finding must cite specifi
 
 Audit only clean tracked source. Untracked files do not supply code evidence.
 Each finding needs an observable effect, exact source lines and an exact specification quotation with its revision.
+The inbox schema supplies the title limit. Multiple quotations from one object produce one link.
 Excess functionality also needs a quoted scope restriction.
 The independent reviewer confirms or dismisses each finding. It cannot add findings.
 
@@ -56,7 +57,9 @@ An empty report means no confirmed deviation in that inspection. It does not cer
 The Joppa writer creates only new documents of the configured inbox type.
 It preserves existing specification, code, Tasks, test results and readiness.
 Stable finding IDs prevent a repeated audit from creating another identical inbox entry.
+An archived matching entry stops publication for inspection.
 An uncertain write leaves `artifacts/publication.json` for inspection. The workflow does not repeat an uncertain mutation blindly.
+A confirmed service refusal records `rejected`. An explicit rerun can retry after correction.
 The service can change after the final check. Findings therefore name their exact source commits and specification revisions.
 
 ## Verification
