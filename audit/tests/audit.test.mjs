@@ -172,7 +172,12 @@ test('parent kinds and new specification objects are checked', async t => {
   f.config.inbox.parent = 'outcome:access';
   await assert.rejects(prepare(f.config), /parent/);
   f.schema.types.incoming.parents = ['outcome'];
+  await prepare(f.config);
+  f.schema.types.incoming.parents = ['*'];
   const input = await prepare(f.config);
+  f.config.inbox.parent = 'outcome:absent';
+  await assert.rejects(prepare(f.config), /parent/);
+  f.config.inbox.parent = 'outcome:access';
   const current = structuredClone(f.objects.get('measure:private'));
   current.address = 'measure:added';
   f.objects.set(current.address, current);
