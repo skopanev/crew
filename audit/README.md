@@ -1,6 +1,9 @@
 # Code and specification audit
 
-This Medulla workflow reports implemented behavior that contradicts the current specification or violates an explicit scope boundary.
+This Medulla workflow starts from implemented code behavior and compares it with current requirements.
+It reports contradictions and observable product behavior with no matching requirement.
+Uncovered behavior needs an owner decision: specify it, change it or remove it.
+The absence of a requirement does not prove that the code is wrong.
 It skips missing implementation, missing tests and unsupported preferences.
 Helper code and implementation choices need no separate specification entry.
 
@@ -46,18 +49,22 @@ Set `inbox.body_field` when its text field differs from `body`.
 Use `inbox.fields` for additional required document fields.
 Optional `roots` restricts the specification to named objects, their descendants and their ancestors.
 Without roots, the adapter reads the configured workspace. It excludes Task and inbox documents from authoritative specification input.
-Agents can read related service context through MCP. A finding must cite specification text in the recorded audit scope.
+Agents read related service context through MCP. A contradiction must cite specification text in the recorded audit scope.
+Uncovered behavior requires a complete workspace specification. Partial `roots` cannot establish that no requirement exists.
 
 ## Evidence and publication
 
 Audit only clean tracked source. Untracked files do not supply code evidence.
-Each finding needs an observable effect, exact source lines and an exact specification quotation with its revision.
+Each finding needs an observable effect and exact source lines.
+A contradiction also needs an exact specification quotation with its revision.
+Uncovered behavior records the specification searches, missing coverage and requested owner decision. It invents no requirement quotation.
 The inbox schema supplies the title limit. Multiple quotations from one object produce one link.
-Excess functionality also needs a quoted scope restriction.
 The independent reviewer confirms or dismisses each finding. It cannot add findings.
+Both stages must complete the recorded specification searches before they can declare behavior uncovered.
 
 The workflow checks code, specification revisions, schema and Equill rules again before publication.
 It also rereads cited objects and their parents to detect changed owner comments or attachments.
+For uncovered behavior, it rereads the complete specification to check the claim of missing coverage.
 Changed evidence stops publication. Audit output identifies the inspected files and inspection limits.
 An empty report means no confirmed deviation in that inspection. It does not certify the entire product.
 

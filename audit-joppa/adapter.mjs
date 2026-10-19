@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {callJoppa} from '../lane-launcher/joppa-api.mjs';
-import {findingKey, hash, read, require, write} from '../audit/common.mjs';
+import {findingKey, hash, read, require, successfulCalls, write} from '../audit/common.mjs';
 
 const api = (config, tool, args) => callJoppa(config.url, config.token_file, tool, {workspace: config.workspace, ...args});
 async function inventory(config, kind) {
@@ -20,6 +20,17 @@ const document = object => ({address: object.address, revision: object.current_r
   kind: object.kind, text: JSON.stringify({data: object.document.data, annotations: object.annotations || {}}, null, 2)
     + '\n' + strings([object.document.data, object.annotations]).join('\n'),
   document: object.document, annotations: object.annotations || {}, files: object.files || [], references: object.references || []});
+async function currentDocuments(config, addresses) {
+  const documents = [];
+  for (let offset = 0; offset < addresses.length; offset += 4) {
+    const objects = await Promise.all(addresses.slice(offset, offset + 4).map(address => api(config, 'joppa_objects', {address})));
+    for (const object of objects) {
+      require(object.document?.present === true && object.historical === false, 'Current specification object required');
+      documents.push(document(object));
+    }
+  }
+  return documents;
+}
 function scope(config, schema, inventory) {
   const rows = inventory.filter(item => item.present !== false);
   const selected = new Set(config.roots || []);
@@ -53,18 +64,21 @@ export async function prepare(config) {
     'Configured inbox parent is absent or its kind is not allowed');
   const candidates = scope(config, schema, rows);
   require(candidates.length, 'Audit specification is empty');
-  const specification = [];
-  // Limit simultaneous API reads without starting more model sessions.
-  for (let offset = 0; offset < candidates.length; offset += 4) {
-    const objects = await Promise.all(candidates.slice(offset, offset + 4).map(item => api(config, 'joppa_objects', {address: item.address})));
-    for (const object of objects) {
-      require(object.document?.present === true && object.historical === false, 'Current specification object required');
-      specification.push(document(object));
-    }
-  }
+  const specification = await currentDocuments(config, candidates.map(item => item.address));
   require(hash((await api(config, 'joppa_tree', {})).schema) === hash(tree.schema), 'Schema changed while preparing audit');
   return {workspace: config.workspace, project: config.project, specification, schema: tree.schema,
-    scope: config.roots || [], inbox: config.inbox, title_limit: inbox.title_preview_length ?? 64};
+    scope: config.roots || [], specification_complete: !config.roots?.length,
+    inbox: config.inbox, title_limit: inbox.title_preview_length ?? 64};
+}
+export function verifySearches(events, harness, findings, input) {
+  const uncovered = findings.filter(finding => finding.kind === 'uncovered');
+  if (!uncovered.length) return;
+  const queries = new Set(successfulCalls(events, harness).filter(call => call.server === 'joppa'
+    && call.tool === 'joppa_search' && (!call.arguments?.workspace || call.arguments.workspace === input.workspace)
+    && !call.arguments?.kind)
+    .map(call => call.arguments.query));
+  require(uncovered.every(finding => finding.spec_searches.every(query => queries.has(query))),
+    'Uncovered behavior needs successful whole-workspace specification searches in this stage');
 }
 export async function recheck(config, input, findings = []) {
   const tree = await api(config, 'joppa_tree', {});
@@ -74,14 +88,15 @@ export async function recheck(config, input, findings = []) {
   require(revisions.size === input.specification.length
     && input.specification.every(item => revisions.get(item.address) === item.revision), 'Specification changed during audit; rerun it');
   const documents = new Map(input.specification.map(item => [item.address, item]));
-  const cited = new Set(findings.flatMap(finding => finding.spec.map(item => item.address)));
+  const cited = new Set(findings.some(finding => finding.kind === 'uncovered')
+    ? input.specification.map(item => item.address) : findings.flatMap(finding => finding.spec.map(item => item.address)));
   for (const address of cited) {
     const parent = documents.get(address)?.document.parent;
     if (parent) cited.add(parent);
   }
-  for (const address of cited) {
-    const previous = documents.get(address);
-    require(previous && hash(document(await api(config, 'joppa_objects', {address}))) === hash(previous),
+  for (const current of await currentDocuments(config, [...cited])) {
+    const previous = documents.get(current.address);
+    require(previous && hash(current) === hash(previous),
       'Cited specification or owner context changed during audit; rerun it');
   }
 }
@@ -101,9 +116,12 @@ export async function publish(config, findings, input, artifacts) {
       require(current.document.present === true, 'Matching audit inbox entry is archived; inspect it before retry');
       reused.push(address); continue;
     }
-    const body = [`Actual: ${finding.actual}`, `Required: ${finding.required}`, `Impact: ${finding.impact}`,
+    const body = [`Kind: ${finding.kind}`, `Actual: ${finding.actual}`,
+      finding.kind === 'uncovered' ? `Owner decision: ${finding.decision}` : `Required: ${finding.required}`, `Impact: ${finding.impact}`,
       ...finding.code.map(item => `Code: ${item.repository}:${item.path}:${item.line}\n${item.quote}`),
       ...finding.spec.map(item => `Spec: ${item.address} revision ${item.revision}\n${item.quote}`),
+      ...(finding.kind === 'uncovered' ? [`Specification queries: ${finding.spec_searches.join('; ')}`,
+        `No matching requirement: ${finding.why_uncovered}`, `Specification snapshot: ${hash(input.specification)}`] : []),
       `Source commits: ${input.repositories.map(repo => `${repo.id}=${repo.head}`).join(', ')}`].join('\n\n');
     operations.push({command: {op: 'save_object', kind: config.inbox.kind, id, revision: 0,
       parent: config.inbox.parent || null,

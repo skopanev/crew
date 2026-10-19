@@ -67,18 +67,21 @@ async function prepare() {
 async function capture(kind) {
   const {report, events} = result();
   const input = read(path.join(artifacts, 'input.json'));
+  const proposal = kind === 'audit' ? validate(report, input) : validate(read(path.join(artifacts, 'findings.json')), input);
+  if (kind !== 'audit') confirmed(proposal, report);
   const repositories = kind === 'audit' ? input.repositories : input.repositories.filter(repo =>
-    read(path.join(artifacts, 'findings.json')).findings.some(finding => finding.code.some(item => item.repository === repo.id)));
+    proposal.findings.some(finding => finding.code.some(item => item.repository === repo.id)));
   verifySearches(events, process.env.MEDULLA_HARNESS, repositories);
+  const service = await adapter();
+  if (service.verifySearches) service.verifySearches(events, process.env.MEDULLA_HARNESS, proposal.findings, input);
   if (kind === 'audit') {
-    validate(report, read(path.join(artifacts, 'input.json')));
     write(path.join(artifacts, 'findings.json'), report);
     variable('AUDIT_FINDINGS', path.join(artifacts, 'findings.json'));
     variable('AUDIT_REVIEW_SCOPE', input.repositories.filter(repo => report.findings.some(finding =>
       finding.code.some(item => item.repository === repo.id))).map(repo => ({repository: repo.id, project: repo.cbm_project})));
+    variable('AUDIT_REVIEW_SPEC_SEARCHES', [...new Set(report.findings.flatMap(finding => finding.spec_searches || []))]);
     signal(report.findings.length ? 'FINDINGS' : 'NO_FINDINGS', `${report.findings.length} proposed finding(s)`);
   } else {
-    confirmed(read(path.join(artifacts, 'findings.json')), report);
     write(path.join(artifacts, 'review.json'), report);
     signal('REVIEWED', 'Every proposed finding has an independent verdict');
   }

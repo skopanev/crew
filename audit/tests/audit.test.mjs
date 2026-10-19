@@ -5,16 +5,18 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import {execFileSync, spawn} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {confirmed, findingKey, parseReport, source, validate} from '../common.mjs';
-import {prepare, publish, recheck} from '../../audit-joppa/adapter.mjs';
+import {prepare, publish, recheck, verifySearches as verifySpecificationSearches} from '../../audit-joppa/adapter.mjs';
 import {preflight, verifySearches} from '../cbm.mjs';
 
 async function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-audit-test-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const repo = path.join(root, 'source'); fs.mkdirSync(repo);
-  fs.writeFileSync(path.join(repo, 'access.js'), 'export function allowed() {\n  return true;\n}\n');
+  fs.writeFileSync(path.join(repo, 'package.json'), '{"type":"module"}\n');
+  fs.writeFileSync(path.join(repo, 'access.js'), 'export function allowed() {\n  return true;\n}\n'
+    + "export function reportRoute(path) {\n  return path === '/legacy-export' ? {body: 'report'} : null;\n}\n");
   const git = (...args) => execFileSync('git', ['-C', repo, ...args], {encoding: 'utf8'}).trim();
   git('init', '-q'); git('add', '.');
   git('-c', 'user.name=fixture', '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'source fixture');
@@ -95,12 +97,12 @@ test('missing implementation cannot become an inbox finding', async t => {
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0);
 });
 
-test('invented source, stale spec and unsupported excess are rejected', async t => {
+test('invented source, stale spec and unsupported finding kinds are rejected', async t => {
   const f = await fixture(t);
   for (const change of [
     {code: [{...f.finding.code[0], quote: '  return false;'}]},
     {spec: [{...f.finding.spec[0], revision: 2}]},
-    {kind: 'excess', boundary: 'This helper was not requested.'}
+    {kind: 'unrequested-helper'}
   ]) assert.throws(() => validate({...f.report, findings: [{...f.finding, ...change}]}, f.input));
   assert.throws(() => validate({...f.report, inspected: [{repository: 'backend', path: '../user-token'}]}, f.input), /path|escapes/);
 });
@@ -110,6 +112,57 @@ test('independent review must cover each finding and can dismiss it', async t =>
   assert.deepEqual(confirmed(f.report, {verdicts: [{id: 'access', verdict: 'dismissed', reason: 'The cited path is not reachable.'}]}), []);
   assert.throws(() => confirmed(f.report, {verdicts: []}), /every finding/);
   assert.throws(() => confirmed(f.report, {verdicts: [{id: 'another', verdict: 'confirmed', reason: 'Claim'}]}), /Invalid/);
+});
+
+function uncovered(f) {
+  return {id: 'legacy-export', kind: 'uncovered', title: 'Public export has no requirement',
+    actual: 'The legacy export route returns a public report.', impact: 'A public feature has no specification owner decision.',
+    code: [{repository: 'backend', path: 'access.js', line: 5,
+      quote: "  return path === '/legacy-export' ? {body: 'report'} : null;"}],
+    spec: [], spec_searches: ['legacy export report'], why_uncovered: 'Current requirements describe access control and do not describe report export.',
+    decision: 'Should the owner specify, change or remove this public export?'};
+}
+
+test('observable behavior without a requirement can enter the inbox as an owner decision', async t => {
+  const f = await fixture(t), finding = uncovered(f);
+  const {reportRoute} = await import(pathToFileURL(path.join(f.repo, 'access.js')));
+  assert.equal(reportRoute('/legacy-export').body, 'report');
+  validate({...f.report, findings: [finding]}, f.input);
+  const result = await publish(f.config, [finding], f.input, path.join(f.root, 'run'));
+  const note = f.objects.get(result.published[0]).document.data;
+  assert.match(note.body, /Kind: uncovered/);
+  assert.match(note.body, /Owner decision: Should/);
+  assert.match(note.body, /Specification snapshot:/);
+  assert.doesNotMatch(note.body, /Required: undefined/);
+});
+
+test('an incomplete specification cannot prove that a behavior has no requirement', async t => {
+  const f = await fixture(t);
+  f.config.roots = ['outcome:access'];
+  const partial = {...await prepare(f.config), repositories: f.input.repositories};
+  assert.throws(() => validate({...f.report, findings: [uncovered(f)]}, partial), /Partial specification/);
+  await assert.rejects(recheck(f.config, f.input, [uncovered(f)]).then(async () => {
+    f.objects.get('measure:private').annotations = {comments: [{text: 'The owner approves the export.'}]};
+    await recheck(f.config, f.input, [uncovered(f)]);
+  }), /owner context changed/);
+});
+
+test('both stages must actually search the full specification before declaring uncovered behavior', async t => {
+  const f = await fixture(t), finding = uncovered(f);
+  const call = {type: 'item.completed', item: {type: 'mcp_tool_call', server: 'joppa', tool: 'joppa_search',
+    status: 'completed', arguments: {workspace: 'fixture', query: finding.spec_searches[0]}}};
+  verifySpecificationSearches([call], 'codex', [finding], f.input);
+  verifySpecificationSearches([{...call, item: {...call.item,
+    arguments: {query: finding.spec_searches[0]}}}], 'codex', [finding], f.input);
+  assert.throws(() => verifySpecificationSearches([{...call, item: {...call.item,
+    arguments: {...call.item.arguments, workspace: 'another-workspace'}}}], 'codex', [finding], f.input), /whole-workspace/);
+  assert.throws(() => verifySpecificationSearches([], 'codex', [finding], f.input), /whole-workspace/);
+  assert.throws(() => verifySpecificationSearches([{...call, item: {...call.item,
+    arguments: {...call.item.arguments, kind: 'measure'}}}], 'codex', [finding], f.input), /whole-workspace/);
+  const uses = [{type: 'assistant', message: {content: [{type: 'tool_use', id: 'spec-search',
+    name: 'mcp__joppa__joppa_search', input: call.item.arguments}]}},
+  {type: 'user', message: {content: [{type: 'tool_result', tool_use_id: 'spec-search', content: 'No matching requirement'}]}}];
+  verifySpecificationSearches(uses, 'claude-code', [finding], f.input);
 });
 
 test('only configured inbox documents are created and a repeated audit reuses them', async t => {
@@ -259,11 +312,12 @@ test('CBM preflight rejects an unavailable shared project before agents start', 
 test('real Medulla audits, reviews and publishes only confirmed findings', async t => {
   const medulla = execFileSync('which', ['medulla'], {encoding: 'utf8'}).trim();
   const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const found of [true, false]) {
-    await t.test(found ? 'confirmed discrepancy' : 'no discrepancy', async t => {
+  for (const mode of ['contradiction', 'uncovered', 'none']) {
+    const found = mode !== 'none';
+    await t.test(mode, async t => {
       const f = await fixture(t), bins = path.join(f.root, 'bin');
       fs.mkdirSync(bins);
-      const report = {...f.report, findings: found ? [f.finding] : []};
+      const report = {...f.report, findings: found ? [mode === 'uncovered' ? uncovered(f) : f.finding] : []};
       fs.writeFileSync(path.join(f.root, 'report.json'), JSON.stringify(report));
       for (const name of ['codex', 'claude', 'equill', 'cbm']) {
         const script = path.join(bins, name);
@@ -288,6 +342,13 @@ if (name === 'cbm') {
   else {
    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'cbm',name:'mcp__codebase-memory__search_graph',input:{project:'backend-index'}}]}}));
    console.log(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'cbm',content:'Verified source result'}]}}));
+  }
+  for(const [index,query] of report.findings.flatMap(x=>x.spec_searches||[]).entries()) {
+   if(name==='codex') console.log(JSON.stringify({type:'item.completed',item:{type:'mcp_tool_call',server:'joppa',tool:'joppa_search',status:'completed',arguments:{workspace:'fixture',query}}}));
+   else {
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'spec-'+index,name:'mcp__joppa__joppa_search',input:{workspace:'fixture',query}}]}}));
+    console.log(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'spec-'+index,content:'No matching requirement'}]}}));
+   }
   }
   const fence=String.fromCharCode(96).repeat(3);
   const delivery='Review complete.\\n'+fence+'json\\n'+JSON.stringify(result)+'\\n'+fence;
