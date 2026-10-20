@@ -27,10 +27,17 @@ def store_path():
     return os.environ.get("EQUILL_STORE", str(Path.home() / ".equill/dev"))
 
 
-def collect():
-    """Read every live contract; return {group: snapshot file content}."""
-    snapshots = {group: {} for group in (*GROUPS, "shared")}
+def collect(only=None):
+    """Read requested contracts. Shared rules come from lane and planning."""
+    requested = set(only or (*GROUPS, "shared"))
+    selected = requested.intersection(GROUPS)
+    if "shared" in requested:
+        selected.update(("lane", "planning"))
+    snapshots = {group: {} for group in (*GROUPS, "shared")
+                 if group in selected or group == "shared"}
     for group, roles in GROUPS.items():
+        if group not in selected:
+            continue
         for role in roles:
             name = f"crew-{group}-{role}"
             result = subprocess.run(
@@ -73,7 +80,7 @@ def collect():
 
 def check(groups):
     """Return the snapshot files whose content differs from the live store."""
-    contents = collect()
+    contents = collect(only=groups)
     stale = []
     for group in groups or contents:
         target = DIRECTORY / f"crew-{group}-records.jsonl"

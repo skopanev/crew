@@ -31,7 +31,9 @@ sh ./lane-launcher/auditor-joppa.sh /path/to/audit.json
 Copy `audit-joppa/config.example.json` to a local configuration file.
 Use one credential belonging to the invoking user. The workflow creates no agent identities or separate reader tokens.
 The read-only MCP bridge uses that same credential. Only the final host stage can publish inbox entries.
-Use a registered Equill reader for `equill_actor`.
+Use a registered Equill actor permitted to record context receipts for `equill_actor`.
+The role export preflight also uses the Equill actor `audit`. Add `audit` to the store writers before running the auditor.
+Lane and planning role checks do not require the `audit` actor.
 
 `--dry-run` checks the configuration and prints the selected graph inputs without API calls, agents or writes.
 `--no-publish` runs both model stages and saves the confirmed findings without inbox writes.
