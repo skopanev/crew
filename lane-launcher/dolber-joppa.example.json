@@ -4,9 +4,9 @@
   "joppa": {
     "url": "https://joppa.example.com/mcp",
     "project": "project:my-project",
-    "readerTokenFile": "/absolute/private/crew-reader.token",
+    "mcpCommand": ["node", "/absolute/private/broker-joppa-host.mjs"],
     "workers": [
-      {"actor": "crew-lane-1", "tokenFile": "/absolute/private/crew-lane-1.token"}
+      {"actor": "existing-user-id"}
     ]
   },
   "limit": 1,

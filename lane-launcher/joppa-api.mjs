@@ -1,9 +1,33 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {McpClient} from './mcp-client.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const maxBytes = 8 * 1024 * 1024;
+const clients = new Map();
+process.once('beforeExit', () => { for (const client of clients.values()) client.close(); });
+
+function toolValue(result, tool, token = '') {
+  if (!object(result)) throw new Error('Joppa returned an invalid tool result');
+  let structured = result.structuredContent;
+  const texts = (result.content || []).filter(item => item.type === 'text').map(item => item.text);
+  if (!object(structured)) {
+    try { structured = texts.length === 1 ? JSON.parse(texts[0]) : null; }
+    catch { structured = null; }
+  }
+  if (result.isError) {
+    let detail = object(structured) ? structured.error : null;
+    if (object(detail)) detail = detail.message || detail.code;
+    if (typeof detail !== 'string') detail = texts.join(' ') || 'TOOL_ERROR';
+    if (token) detail = detail.replaceAll(token, '[credential]');
+    const error = new Error(`Joppa ${tool}: ${detail.replaceAll('\n', ' ').slice(0, 2000)}`);
+    error.rejected = true;
+    throw error;
+  }
+  if (!object(structured)) throw new Error(`Joppa ${tool} returned no object`);
+  return structured;
+}
 
 async function responseMessage(response, id) {
   const reader = response.body?.getReader();
@@ -34,12 +58,28 @@ async function responseMessage(response, id) {
   }
 }
 
-export async function callJoppa(url, tokenFile, tool, arguments_, {signal} = {}) {
+export async function callJoppa(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
   const endpoint = new URL(url);
   const local = endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname);
   if (!(endpoint.protocol === 'https:' || local) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
     throw new Error('Joppa needs HTTPS or loopback HTTP without URL credentials');
   }
+  if (mcpCommand !== undefined) {
+    if (!Array.isArray(mcpCommand) || !mcpCommand.length ||
+        mcpCommand.some(arg => typeof arg !== 'string' || !arg.trim() || arg.includes('\0'))) {
+      throw new Error('Joppa mcpCommand must contain an executable and its arguments');
+    }
+    const key = JSON.stringify(mcpCommand);
+    if (!clients.has(key)) clients.set(key, new McpClient(mcpCommand));
+    const client = clients.get(key);
+    try {
+      return toolValue(await client.request('tools/call', {name: tool, arguments: arguments_}, {signal}), tool);
+    } catch (error) {
+      if (!error.rejected) { client.close(); clients.delete(key); }
+      throw error;
+    }
+  }
+  if (typeof tokenFile !== 'string') throw new Error('Joppa needs mcpCommand or a token file');
   const filename = tokenFile.startsWith('~/') ? path.join(os.homedir(), tokenFile.slice(2)) : tokenFile;
   const token = (await fs.readFile(filename, 'utf8')).trim();
   if (!token) throw new Error('Joppa token file is empty');
@@ -82,23 +122,7 @@ export async function callJoppa(url, tokenFile, tool, arguments_, {signal} = {})
     protocol = initialized.protocolVersion || '2025-03-26';
     await rpc('notifications/initialized', {}, true);
     const result = await rpc('tools/call', {name: tool, arguments: arguments_});
-    if (!object(result)) throw new Error('Joppa returned an invalid tool result');
-    let structured = result.structuredContent;
-    const texts = (result.content || []).filter(item => item.type === 'text').map(item => item.text);
-    if (!object(structured)) {
-      try { structured = texts.length === 1 ? JSON.parse(texts[0]) : null; }
-      catch { structured = null; }
-    }
-    if (result.isError) {
-      let detail = object(structured) ? structured.error : null;
-      if (object(detail)) detail = detail.message || detail.code;
-      if (typeof detail !== 'string') detail = texts.join(' ') || 'TOOL_ERROR';
-      const error = new Error(`Joppa ${tool}: ${detail.replaceAll(token, '[credential]').replaceAll('\n', ' ').slice(0, 2000)}`);
-      error.rejected = true;
-      throw error;
-    }
-    if (!object(structured)) throw new Error(`Joppa ${tool} returned no object`);
-    return structured;
+    return toolValue(result, tool, token);
   } finally {
     if (session) {
       try {

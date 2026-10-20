@@ -2,7 +2,7 @@
   "url": "https://joppa.example.com/mcp",
   "workspace": "product",
   "project": "product",
-  "token_file": "/path/to/user-oauth-token",
+  "mcp_command": ["node", "/path/to/broker-joppa-host.mjs"],
   "equill_store": "/path/to/equill-store",
   "equill_actor": "registered-store-reader",
   "runs_folder": "/path/to/audit-runs",
