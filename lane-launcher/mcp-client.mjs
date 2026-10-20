@@ -209,4 +209,3 @@ McpClient.prototype.close = function () {
   process.off('exit', this.onProcessExit);
   this._failAll(new Error('Joppa MCP client is closed'));
 };
-
