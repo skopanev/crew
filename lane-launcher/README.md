@@ -16,6 +16,7 @@ Optional `args` supplies extra arguments for that action. The example keeps the 
 The example starts the auditor immediately and then every 12 hours with `--interval-seconds 43200`.
 Audits run in sequence. A failed audit does not stop the schedule. Ctrl+C stops the current audit and the schedule.
 Optional `prepare` supplies a command argument array to run once before creating tabs, such as the Broker connector generator.
+For a host connector, use Broker 0.9.17 or later with `--target host`. Give JavaScript connectors a `.cjs` extension.
 The command uses no shell. A preparation failure leaves all three tabs unopened.
 `--dry-run` prints all three commands without creating tabs or starting workflows.
 

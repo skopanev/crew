@@ -2,7 +2,7 @@
   "url": "https://joppa.example.com/mcp",
   "workspace": "product",
   "project": "product",
-  "mcp_command": ["node", "/path/to/broker-joppa-host.mjs"],
+  "mcp_command": ["node", "/path/to/broker-joppa-host.cjs"],
   "equill_store": "/path/to/equill-store",
   "equill_actor": "registered-store-reader",
   "runs_folder": "/path/to/audit-runs",
