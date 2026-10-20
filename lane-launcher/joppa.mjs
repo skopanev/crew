@@ -27,10 +27,18 @@ export function validateJoppa(config) {
   require((url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
     !url.username && !url.password && !url.search && !url.hash, 'Joppa needs HTTPS or loopback HTTP without URL credentials');
   require(joppa.project.includes(':'), 'joppa.project must be a full object address');
-  require(Array.isArray(joppa.workers) && joppa.workers.length >= config.limit, 'Each lane slot needs a separate Joppa worker');
+  const sharedLogin = joppa.mcpCommand !== undefined;
+  if (sharedLogin) require(Array.isArray(joppa.mcpCommand) && joppa.mcpCommand.length &&
+    joppa.mcpCommand.every(arg => text(arg) && !arg.includes('\0')), 'Joppa mcpCommand needs an executable and arguments');
+  require(Array.isArray(joppa.workers) && joppa.workers.length >= (sharedLogin ? 1 : config.limit),
+    sharedLogin ? 'Joppa needs the existing user actor' : 'Each lane slot needs a separate Joppa worker');
+  if (sharedLogin) require(joppa.workers.length === 1, 'A shared Joppa login uses exactly one existing user actor');
+  if (sharedLogin) require(config.delivery !== 'requirement',
+    'Shared Joppa login currently supports target or branch delivery');
   const actors = new Set(), tokens = new Set();
   for (const worker of joppa.workers) {
     require(text(worker.actor) && !actors.has(worker.actor), 'Joppa worker actors must be distinct');
+    if (sharedLogin) { actors.add(worker.actor); continue; }
     require(text(worker.tokenFile) && path.isAbsolute(worker.tokenFile), 'Joppa worker tokenFile must be absolute');
     const token = fs.realpathSync(worker.tokenFile);
     require(fs.statSync(token).isFile() && !tokens.has(token), 'Joppa worker token files must be distinct files');
@@ -94,7 +102,7 @@ export function validateJoppa(config) {
     ids.add(repo.id); paths.add(folder);
   }
   require(['branch', 'target', 'requirement'].includes(config.delivery), 'delivery must be branch, target or requirement');
-  if (config.delivery === 'requirement') {
+  if (config.delivery === 'requirement' && !sharedLogin) {
     const reader = joppa.readerTokenFile;
     require(text(reader) && path.isAbsolute(reader) && fs.statSync(reader).isFile() &&
       (fs.statSync(reader).mode & 0o077) === 0, 'Requirement delivery needs a private read-only joppa.readerTokenFile');
@@ -108,7 +116,7 @@ export function validateJoppa(config) {
 }
 
 export function api(config, worker, tool, arguments_, {signal} = {}) {
-  return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal});
+  return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal, mcpCommand: config.joppa.mcpCommand});
 }
 
 const hasRecoveryCheckpoint = recovery => Boolean(recovery?.task || recovery?.ref || recovery?.sha);
@@ -187,9 +195,11 @@ export async function nextTask(config) {
   const terminalRetained = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
-    if (busy.has(worker.actor)) continue;
-    const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
-    if (mine.total) { held++; continue; }
+    if (!config.joppa.mcpCommand) {
+      if (busy.has(worker.actor)) continue;
+      const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
+      if (mine.total) { held++; continue; }
+    }
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const eligible = [], {object, group} = await occupancyReader(config, worker);

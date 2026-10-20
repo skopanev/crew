@@ -2,7 +2,8 @@ import path from 'node:path';
 import {callJoppa} from '../lane-launcher/joppa-api.mjs';
 import {findingKey, hash, read, require, successfulCalls, write} from '../audit/common.mjs';
 
-const api = (config, tool, args) => callJoppa(config.url, config.token_file, tool, {workspace: config.workspace, ...args});
+const api = (config, tool, args) => callJoppa(config.url, config.token_file, tool,
+  {workspace: config.workspace, ...args}, {mcpCommand: config.mcp_command});
 async function inventory(config, kind) {
   const items = [];
   let cursor;

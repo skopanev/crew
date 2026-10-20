@@ -84,7 +84,8 @@ def main():
         return 0
     for binary in (executable, variables["CBM_BIN"], variables["EQUILL_BIN"], "codex", "claude", "opencode", "agy", "git"):
         require(shutil.which(binary), f"required executable missing: {binary}")
-    require(Path(config["token_file"]).is_file(), "Joppa token file is unavailable")
+    if not config.get("mcp_command"):
+        require(Path(config["token_file"]).is_file(), "Joppa token file is unavailable")
     if not os.environ.get("CREW_SKIP_ROLE_CHECK"):
         result = subprocess.run([sys.executable, str(workflow.parent / "roles/export.py"), "--check", "planning", "shared"],
                                 env={**os.environ, "EQUILL_STORE": config["equill_store"]}, capture_output=True, text=True)

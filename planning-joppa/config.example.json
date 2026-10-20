@@ -1,8 +1,7 @@
 {
   "workspace": "product",
   "url": "https://joppa.example.com/mcp",
-  "token_file": "/path/to/private/planner.token",
-  "reader_token_file": "/path/to/private/planner-reader.token",
+  "mcp_command": ["node", "/path/to/broker-joppa-host.mjs"],
   "runs_folder": "/path/to/private/planning-runs",
   "worktree_root": "/path/to/source-root/.worktrees",
   "lane_runs_folder": "/path/to/lane-state/crew-dispatchers/dispatcher-id/runs",

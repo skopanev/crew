@@ -1,0 +1,6 @@
+{
+  "name": "my-project",
+  "auditor": {"config": "/path/to/auditor.json", "args": ["--no-publish"]},
+  "dolber": {"config": "/path/to/dolber.json"},
+  "planner": {"config": "/path/to/planner.json"}
+}

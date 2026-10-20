@@ -108,6 +108,29 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
+test('one logged-in user can select independent work while another lane reserves capacity', async t => {
+  const f = await packageFixture(t), config = f.run.config;
+  const proxy = path.join(f.root, 'connector.mjs');
+  const module = new URL('../joppa-api.mjs', import.meta.url).href;
+  fs.writeFileSync(proxy, `import {callJoppa} from ${JSON.stringify(module)};
+import {createInterface} from 'node:readline';
+for await(const line of createInterface({input:process.stdin})) {
+ const r=JSON.parse(line);if(!('id' in r))continue;
+ const result=r.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}}}:
+  {structuredContent:await callJoppa(process.argv[2],process.argv[3],r.params.name,r.params.arguments)};
+ console.log(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
+}`);
+  config.joppa.mcpCommand = [process.execPath, proxy, config.joppa.url, config.joppa.workers[0].tokenFile];
+  delete config.joppa.workers[0].tokenFile;
+  const reserved = path.join(f.root, 'runs', 'active');
+  fs.mkdirSync(reserved, {recursive: true});
+  save(path.join(reserved, 'launch.json'), {...f.run, requirement: 'req:other', repositoryId: 'app'});
+  const selected = await nextTask(config);
+  assert.equal(selected.candidate.id, 'task:t1');
+  assert.equal(f.calls.some(call => call.name === 'joppa_tasks' && call.args.view === 'mine'), false);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
 for (const state of ['live', 'held', 'uncertain']) test(`Joppa package excludes a ${state} local repository reservation`, async t => {
   const f = await packageFixture(t);
   const folder = path.join(f.root, 'runs/11111111-1111-4111-8111-111111111111');
@@ -934,7 +957,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   const folder = path.join(f.root, 'dolber folder');
   fs.mkdirSync(folder);
   for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs',
-    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'dependencies.mjs',
+    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'mcp-client.mjs', 'dependencies.mjs',
     'requirement-delivery.mjs', 'publication-guard.mjs', 'requirement-finalizer.mjs']) {
     fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(folder, file));
   }

@@ -11,12 +11,17 @@ from mcp import Joppa, Rejected
 
 def configuration(path):
     config = read(path)
-    for key in ("workspace", "url", "token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+    for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
         text(config.get(key), "config." + key)
+    if config.get("mcp_command") is not None:
+        from stdio import validate_command
+        validate_command(config["mcp_command"])
+    else:
+        text(config.get("token_file"), "config.token_file")
     require(isinstance(config.get("repositories"), list) and config["repositories"], "config.repositories required")
     root = Path(path).resolve().parent
     for key in ("token_file", "reader_token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
-        if key == "reader_token_file" and key not in config:
+        if key in ("token_file", "reader_token_file") and key not in config:
             continue
         value = Path(config[key]).expanduser()
         config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
@@ -52,7 +57,7 @@ def configuration(path):
 
 
 def client(config):
-    return Joppa(config["url"], config["token_file"])
+    return Joppa(config["url"], config.get("token_file"), config.get("mcp_command"))
 
 
 def pending_work(api, config, assignment):

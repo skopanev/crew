@@ -12,10 +12,17 @@ try {
   require(file && !file.startsWith('-') && args.every(arg => ['--dry-run', '--no-publish'].includes(arg)),
     'Usage: auditor-joppa.sh CONFIG.json [--dry-run | --no-publish]');
   const configFile = path.resolve(file), config = read(configFile), root = path.dirname(configFile);
-  for (const key of ['url', 'workspace', 'token_file', 'equill_store', 'equill_actor', 'project', 'runs_folder', 'cbm_root', 'cbm_store']) {
+  for (const key of ['url', 'workspace', 'equill_store', 'equill_actor', 'project', 'runs_folder', 'cbm_root', 'cbm_store']) {
     require(text(config[key]), `Config needs ${key}`);
   }
-  for (const key of ['token_file', 'equill_store', 'runs_folder', 'cbm_root', 'cbm_store']) config[key] = path.resolve(root, config[key]);
+  for (const key of ['equill_store', 'runs_folder', 'cbm_root', 'cbm_store']) config[key] = path.resolve(root, config[key]);
+  if (config.mcp_command !== undefined) {
+    require(Array.isArray(config.mcp_command) && config.mcp_command.length &&
+      config.mcp_command.every(arg => text(arg) && !arg.includes('\0')), 'mcp_command needs an executable and arguments');
+  } else {
+    require(text(config.token_file), 'Config needs mcp_command or token_file');
+    config.token_file = path.resolve(root, config.token_file);
+  }
   if (config.cbm_command?.includes(path.sep)) config.cbm_command = path.resolve(root, config.cbm_command);
   require(config.inbox && text(config.inbox.kind) && text(config.inbox.owner), 'Config needs inbox kind and owner');
   require(!config.inbox.body_field || text(config.inbox.body_field)
@@ -37,13 +44,14 @@ try {
       repositories: config.repositories.map(({id, cbm_project}) => ({id, cbm_project})), cbm: 'existing shared index'}, null, 2));
     process.exit(0);
   }
-  require(fs.existsSync(config.token_file), 'Configured user token file is unavailable');
+  require(config.mcp_command || fs.existsSync(config.token_file), 'Configured user token file is unavailable');
   command(process.env.PLANNING_PYTHON || 'python3', [path.join(here, '../roles/export.py'), '--check', 'audit', 'shared'],
     {env: {...process.env, EQUILL_STORE: config.equill_store}});
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-audit-'));
   try {
     const reader = {command: process.env.PLANNING_PYTHON || 'python3', args: [path.join(here, '../planning-joppa/mcp.py'),
-      '--url', config.url, '--workspace', config.workspace, '--token-file', config.token_file]};
+      '--url', config.url, '--workspace', config.workspace,
+      ...(config.mcp_command ? ['--mcp-command', JSON.stringify(config.mcp_command)] : ['--token-file', config.token_file])]};
     // TOML inline tables use equals; JSON string and array scalars remain valid.
     const cbm = server(config), json = JSON.stringify;
     config.reader_toml = `mcp_servers={joppa={command=${json(reader.command)},args=${json(reader.args)},required=true},`

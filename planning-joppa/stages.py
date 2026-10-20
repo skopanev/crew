@@ -22,11 +22,15 @@ def settings():
 
 def reader_servers():
     config = settings()
-    token_file = config.get("reader_token_file")
-    require(token_file and Path(token_file).is_file(), "config.reader_token_file must name a read-only Joppa token")
+    if config.get("mcp_command"):
+        authentication = ["--mcp-command", json.dumps(config["mcp_command"])]
+    else:
+        token_file = config.get("reader_token_file")
+        require(token_file and Path(token_file).is_file(), "config.reader_token_file must name a read-only Joppa token")
+        authentication = ["--token-file", token_file]
     return {"joppa": {"command": os.environ["PLANNING_PYTHON"], "args": [
         str(Path(__file__).resolve().with_name("mcp.py")), "--url", config["url"],
-        "--workspace", config["workspace"], "--token-file", token_file,
+        "--workspace", config["workspace"], *authentication,
         "--artifacts", str(shared.artifacts())]}}
 
 

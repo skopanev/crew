@@ -109,11 +109,12 @@ export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
   const blocked = new Map(), active = new Set(), pending = new Map();
-  const dependencies = dependencyCheck((tool, args) => api({joppa: {url: config.url}}, {tokenFile}, tool,
+  const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
+  const dependencies = dependencyCheck((tool, args) => api(service, {tokenFile}, tool,
     {workspace: config.workspace, ...args}, {signal}));
   let cursor;
   do {
-    const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tasks', {
+    const page = await api(service, {tokenFile}, 'joppa_tasks', {
       workspace: config.workspace, view: 'all', limit: 100, ...(cursor ? {cursor} : {}),
     }, {signal});
     for (const task of page.tasks) {
@@ -130,7 +131,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     cursor = page.next_cursor;
   } while (cursor);
   do {
-    const page = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
+    const page = await api(service, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
       ...(cursor ? {cursor} : {}),
     }, {signal});
@@ -144,7 +145,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   } while (cursor);
   for (const ac of blocked.keys()) {
     if (pending.has(ac) || active.has(ac)) continue;
-    const object = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_objects', {
+    const object = await api(service, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, address: ac,
     }, {signal});
     if (object.document?.present === true && object.historical === false &&
@@ -156,7 +157,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const candidates = [...pending.values()];
   for (let offset = 0; offset < candidates.length; offset += 100) {
     const batch = candidates.slice(offset, offset + 100);
-    const checks = await api({joppa: {url: config.url}}, {tokenFile}, 'joppa_tests', {
+    const checks = await api(service, {tokenFile}, 'joppa_tests', {
       workspace: config.workspace, ac: batch.map(row => row.address).join(','),
     }, {signal});
     const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
@@ -207,7 +208,7 @@ export async function groupRequirements(candidates, read) {
 export async function readyRequirements(config, tokenFile, signal) {
   const candidates = await readyCriteria(config, tokenFile, signal);
   if (!candidates.length) return [];
-  return groupRequirements(candidates, (tool, args) => api({joppa: {url: config.url}}, {tokenFile}, tool,
+  return groupRequirements(candidates, (tool, args) => api({joppa: {url: config.url, mcpCommand: config.mcp_command}}, {tokenFile}, tool,
     {workspace: config.workspace, ...args}, {signal}));
 }
 
@@ -243,7 +244,9 @@ export async function main(argv) {
   const interval = config.interval_seconds ?? 60;
   if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
   const tokenFile = config.token_file ? path.resolve(path.dirname(configFile), expand(config.token_file)) : null;
-  if (!ac && !requirement && !monitor && !tokenFile) throw new Error('Config needs token_file for automatic selection');
+  if (!ac && !requirement && !monitor && !tokenFile && !config.mcp_command) {
+    throw new Error('Config needs mcp_command or token_file for automatic selection');
+  }
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
     ...(requirement ? ['--req-id', requirement] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {

@@ -21,14 +21,20 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class Joppa:
-    def __init__(self, url, token_file):
+    def __init__(self, url, token_file=None, mcp_command=None):
         parsed = urlsplit(url)
         local = parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1")
         if not (parsed.scheme == "https" or local) or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise MCPError("Joppa needs HTTPS or loopback HTTP, without URL credentials")
         self.url = url
-        self.token = Path(token_file).expanduser().read_text().strip()
-        if not self.token:
+        self.stdio = None
+        self.token = ""
+        if mcp_command is not None:
+            from stdio import StdioRPC
+            self.stdio = StdioRPC(mcp_command)
+        else:
+            self.token = Path(token_file).expanduser().read_text().strip()
+        if not self.stdio and not self.token:
             raise MCPError("Joppa token file is empty")
         self.opener = build_opener(NoRedirect)
         self.sequence = 0
@@ -39,6 +45,8 @@ class Joppa:
         self.rpc("notifications/initialized", {}, notification=True)
 
     def rpc(self, method, params, notification=False):
+        if self.stdio:
+            return self.stdio.request(method, params, notification)
         self.sequence += 1
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
         if not notification:
@@ -97,7 +105,9 @@ class Joppa:
             if not isinstance(detail, str):
                 detail = " ".join(item.get("text", "") for item in result.get("content", [])
                                   if item.get("type") == "text") or "TOOL_ERROR"
-            detail = detail.replace(self.token, "[credential]").replace("\n", " ")[:2000]
+            if self.token:
+                detail = detail.replace(self.token, "[credential]")
+            detail = detail.replace("\n", " ")[:2000]
             raise Rejected(f"Joppa {name}: {detail}")
         if not isinstance(structured, dict):
             raise MCPError(f"Joppa {name} returned no object")
@@ -202,11 +212,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Read the configured Joppa workspace through MCP stdio.")
     parser.add_argument("--url", required=True)
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--token-file", required=True)
+    credentials = parser.add_mutually_exclusive_group(required=True)
+    credentials.add_argument("--token-file")
+    credentials.add_argument("--mcp-command", type=json.loads)
     parser.add_argument("--artifacts")
     args = parser.parse_args()
     try:
-        serve(Reader(Joppa(args.url, args.token_file), args.workspace, Path(args.artifacts) if args.artifacts else None))
+        serve(Reader(Joppa(args.url, args.token_file, args.mcp_command), args.workspace,
+                     Path(args.artifacts) if args.artifacts else None))
     except (MCPError, ValueError, OSError) as error:
         print("Joppa reader: " + str(error), file=sys.stderr)
         sys.exit(1)
