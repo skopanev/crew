@@ -4,7 +4,7 @@
   "joppa": {
     "url": "https://joppa.example.com/mcp",
     "project": "project:my-project",
-    "mcpCommand": ["node", "/absolute/private/broker-joppa-host.mjs"],
+    "mcpCommand": ["node", "/absolute/private/broker-joppa-host.cjs"],
     "workers": [
       {"actor": "existing-user-id"}
     ]
