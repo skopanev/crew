@@ -9,8 +9,16 @@ import {readTools, server} from '../audit/cbm.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 try {
   const args = process.argv.slice(2), file = args.shift();
+  const intervalIndex = args.indexOf('--interval-seconds');
+  let interval;
+  if (intervalIndex !== -1) {
+    interval = Number(args[intervalIndex + 1]);
+    require(Number.isSafeInteger(interval) && interval > 0 && interval <= 2147483,
+      '--interval-seconds needs an integer from 1 to 2147483');
+    args.splice(intervalIndex, 2);
+  }
   require(file && !file.startsWith('-') && args.every(arg => ['--dry-run', '--no-publish'].includes(arg)),
-    'Usage: auditor-joppa.sh CONFIG.json [--dry-run | --no-publish]');
+    'Usage: auditor-joppa.sh CONFIG.json [--dry-run] [--no-publish] [--interval-seconds N]');
   const configFile = path.resolve(file), config = read(configFile), root = path.dirname(configFile);
   for (const key of ['url', 'workspace', 'equill_store', 'equill_actor', 'project', 'runs_folder', 'cbm_root', 'cbm_store']) {
     require(text(config[key]), `Config needs ${key}`);
@@ -41,7 +49,13 @@ try {
   if (args.includes('--dry-run')) {
     console.log(JSON.stringify({workflow: 'audit', workspace: config.workspace, roots: config.roots || 'workspace',
       models, publication: !args.includes('--no-publish'),
+      ...(interval ? {interval_seconds: interval} : {}),
       repositories: config.repositories.map(({id, cbm_project}) => ({id, cbm_project})), cbm: 'existing shared index'}, null, 2));
+    process.exit(0);
+  }
+  if (interval) {
+    const {repeat} = await import('./repeat.mjs');
+    await repeat(process.execPath, [fileURLToPath(import.meta.url), configFile, ...args], interval);
     process.exit(0);
   }
   require(config.mcp_command || fs.existsSync(config.token_file), 'Configured user token file is unavailable');

@@ -13,6 +13,8 @@ sh ./lane-launcher/start.sh ./lane-launcher/project.json
 The command opens `auditor|name`, `dolber|name` and `planner|name` in the current Herdr workspace.
 It preserves focus and refuses duplicate tab labels. Each action uses its existing launcher and configuration.
 Optional `args` supplies extra arguments for that action. The example keeps the auditor in `--no-publish` mode.
+The example starts the auditor immediately and then every 12 hours with `--interval-seconds 43200`.
+Audits run in sequence. A failed audit does not stop the schedule. Ctrl+C stops the current audit and the schedule.
 Optional `prepare` supplies a command argument array to run once before creating tabs, such as the Broker connector generator.
 The command uses no shell. A preparation failure leaves all three tabs unopened.
 `--dry-run` prints all three commands without creating tabs or starting workflows.

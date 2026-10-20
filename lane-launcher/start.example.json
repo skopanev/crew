@@ -1,6 +1,6 @@
 {
   "name": "my-project",
-  "auditor": {"config": "/path/to/auditor.json", "args": ["--no-publish"]},
+  "auditor": {"config": "/path/to/auditor.json", "args": ["--no-publish", "--interval-seconds", "43200"]},
   "dolber": {"config": "/path/to/dolber.json"},
   "planner": {"config": "/path/to/planner.json"}
 }
