@@ -421,6 +421,9 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package cleanup r
 
 test('Joppa package claims atomically and preserves each Task contract and scope', async t => {
   const f = await packageFixture(t);
+  const itemIds = {'task:t1': 'example-T-FIRST', 'task:t2': 'example-T-SECOND',
+    'ac:a1': 'example-A-FIRST', 'ac:a2': 'example-A-SECOND', 'req:r': 'example-R-PARENT'};
+  for (const [address, itemId] of Object.entries(itemIds)) f.objects.get(address).item_id = itemId;
   await claimTask(f.run, f.persist);
   const mutations = f.calls.filter(call => call.name === 'joppa_batch');
   assert.equal(mutations.length, 1);
@@ -431,6 +434,12 @@ test('Joppa package claims atomically and preserves each Task contract and scope
   assert.match(f.run.claim.ticket.body, /Task 1: task:t1/);
   assert.equal(f.run.claim.ticket.tasks[0].parentContext.address, 'ac:a1');
   assert.equal(f.run.claim.ticket.tasks[1].parentContext.address, 'ac:a2');
+  const serialized = JSON.parse(JSON.stringify(f.run.claim.ticket));
+  for (const task of serialized.tasks) {
+    assert.equal(task.item_id, itemIds[task.address]);
+    assert.equal(task.parentContext.item_id, itemIds[task.parentContext.address]);
+    assert.equal(task.requirementContext.item_id, itemIds['req:r']);
+  }
   assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
 });
 
