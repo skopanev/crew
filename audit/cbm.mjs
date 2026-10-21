@@ -30,5 +30,6 @@ export function preflight(config) {
 export function verifySearches(events, harness, repositories) {
   const searches = new Set(successfulCalls(events, harness).filter(call => call.server === 'codebase-memory'
     && ['search_graph', 'search_code'].includes(call.tool)).map(call => call.arguments?.project));
-  require(repositories.every(repo => searches.has(repo.cbm_project)), 'Audit agent has no successful scoped CBM search for every inspected repository');
+  const missing = repositories.filter(repo => !searches.has(repo.cbm_project)).map(repo => repo.cbm_project);
+  require(!missing.length, `Missing successful CBM search. Call codebase-memory search_graph or search_code with project: ${missing.join(', ')}`);
 }
