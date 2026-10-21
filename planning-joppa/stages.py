@@ -172,6 +172,7 @@ def prompt_assignment(assignment):
             visible.add(item["id"])
         if level == "ac":
             result[level]["verification"] = assignment["joppa"]["objects"][item["id"]]["process"].get("verification")
+        result[level]["item_id"] = assignment["joppa"]["objects"][item["id"]].get("item_id")
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     def prompt_data(item):
@@ -183,11 +184,11 @@ def prompt_assignment(assignment):
         "test_status": assignment["joppa"]["test_status"],
         "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
-        "tasks": [{"address": task["address"], "revision": task["current_revision"],
+        "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],
                    "data": prompt_data(task), "links": task["document"]["links"],
                    "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                   for task in tasks],
-        "objects": {address: {"revision": item["current_revision"], "data": prompt_data(item),
+        "objects": {address: {"item_id": item.get("item_id"), "revision": item["current_revision"], "data": prompt_data(item),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
                               "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
@@ -197,7 +198,7 @@ def prompt_assignment(assignment):
         result["ac"] = {**result["ac"], "text": "Selected Requirement criteria appear below."}
         result["joppa"]["objects"] = {key: item for key, item in result["joppa"]["objects"].items() if key not in ids}
         result["joppa"].update(scope="requirement", criteria=[{
-            "id": item["id"], "revision": item["revision"],
+            "id": item["id"], "item_id": assignment["joppa"]["objects"][item["id"]].get("item_id"), "revision": item["revision"],
             "annotations": assignment["joppa"]["objects"][item["id"]]["annotations"],
             "files": assignment["joppa"]["objects"][item["id"]]["files"],
             **{key: assignment["joppa"]["objects"][item["id"]]["document"].get(key) for key in ("data", "links")}}

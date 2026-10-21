@@ -642,6 +642,17 @@ class ProviderTests(unittest.TestCase):
             legacy.pop("item_id")
             self.assertEqual(context.snapshot_source(obj, types, ac["address"]),
                              context.snapshot_source(legacy, types, ac["address"]))
+        spec = importlib.util.spec_from_file_location("joppa_prompt_projection", ROOT / "planning-joppa/stages.py")
+        stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stage)
+        with patch.object(stage.shared, "artifacts", return_value=Path("/unused")):
+            prompt = stage.prompt_assignment(value)
+            self.assertEqual(prompt["ac"]["item_id"], ac["item_id"])
+            self.assertEqual(prompt["requirement"]["item_id"], req["item_id"])
+            self.assertEqual(prompt["joppa"]["tasks"][0]["item_id"], existing["item_id"])
+            grouped = deepcopy(value)
+            grouped["joppa"].update(scope="requirement", criteria=[value["ac"]], criterion_schemas={})
+            self.assertEqual(stage.prompt_assignment(grouped)["joppa"]["criteria"][0]["item_id"], ac["item_id"])
         self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects", "joppa_tests"}))
         detail["requirement"]["current_revision"] = 8
         with self.assertRaisesRegex(ValueError, "another revision"):
