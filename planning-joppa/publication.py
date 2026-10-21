@@ -354,6 +354,12 @@ def contract(task, plan):
 def operations(plan, assignment):
     validate(plan, assignment)
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
+    targets = {task.get("target") for task in plan["tasks"] if task["action"] in ("update", "retire")}
+    for existing in inventory.values():
+        if (isinstance(existing["process"].get("blocked"), dict)
+                and not existing["process"].get("done") and not existing["process"].get("retired")):
+            require(existing["address"] in targets,
+                    f"blocked Task {existing['address']} needs a new contract or retirement")
     repositories = {item["id"]: item for item in assignment["repositories"]}
     objects = assignment["joppa"]["objects"]
     grouped = assignment["joppa"].get("scope") == "requirement"
@@ -410,6 +416,10 @@ def operations(plan, assignment):
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
             document = existing["document"]
+            if (isinstance(existing["process"].get("blocked"), dict)
+                    and not existing["process"].get("done") and not existing["process"].get("retired")):
+                require(data["contract"] != document["data"].get("contract"),
+                        f"blocked Task {existing['address']} needs a new contract or retirement")
             if data == document["data"] and links == document["links"] and ac == document["parent"]:
                 continue
         ref = "task" + str(number)
