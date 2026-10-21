@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {confirmed, corrected, findingKey, parseReport, source, validate} from '../common.mjs';
+import {confirmed, corrected, findingKey, hash, parseReport, source, validate} from '../common.mjs';
 import {prepare, publish, recheck, verifySearches as verifySpecificationSearches} from '../../audit-joppa/adapter.mjs';
 import {preflight, verifySearches} from '../cbm.mjs';
 
@@ -406,4 +406,121 @@ if (name === 'cbm') {
       }
     });
   }
+});
+
+test('finish rejects stale inputs before any inbox write', async t => {
+  for (const changed of ['source', 'specification']) await t.test(changed, async t => {
+    const f = await fixture(t), run = path.join(f.root, 'run'), artifacts = path.join(run, 'artifacts');
+    fs.mkdirSync(artifacts, {recursive: true});
+    const equill = path.join(f.root, 'equill');
+    const role = 'crew-audit-auditor';
+    const records = [{name: role}, ...[10, 20, 30].map(step => ({process: role, step}))];
+    const reply = {ok: true, content: records.map(JSON.stringify).join('\n\n'), bundle_digest: 'fixture',
+      receipt: {projection: 'ready'}, selected_record_ids: ['fixture']};
+    fs.writeFileSync(equill, `#!${process.execPath}\nconsole.log(${JSON.stringify(JSON.stringify(reply))});\n`, {mode: 0o755});
+    const config = {...f.config, equill_store: f.root, equill_actor: 'fixture'};
+    const configFile = path.join(f.root, 'config.json');
+    fs.writeFileSync(configFile, JSON.stringify(config));
+    for (const [name, value] of Object.entries({'input.json': f.input, 'config-digest.json': hash(config),
+      'contract.json': {digest: 'fixture'}, 'findings.json': f.report,
+      'review.json': {verdicts: [{id: f.finding.id, verdict: 'confirmed', reason: 'Verified'}]}})) {
+      fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value));
+    }
+    if (changed === 'source') execFileSync('git', ['-C', f.repo, '-c', 'user.name=fixture',
+      '-c', 'user.email=fixture@invalid', 'commit', '--allow-empty', '-qm', 'advance source']);
+    else f.objects.get('outcome:access').current_revision++;
+    f.calls.length = 0;
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [fileURLToPath(new URL('../stages.mjs', import.meta.url)), 'finish'],
+        {env: {...process.env, MEDULLA_RUN_DIR: run, AUDIT_CONFIG: configFile, EQUILL_BIN: equill,
+          AUDIT_ADAPTER: fileURLToPath(new URL('../../audit-joppa/adapter.mjs', import.meta.url))},
+        stdio: ['ignore', 'pipe', 'pipe']});
+      let output = '';
+      child.stdout.on('data', part => { output += part; });
+      child.stderr.on('data', part => { output += part; });
+      child.once('error', reject);
+      child.once('close', code => resolve({code, output}));
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.output, changed === 'source' ? /Source changed during audit/ : /Specification changed during audit/);
+    assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+    assert.equal(fs.existsSync(path.join(artifacts, 'publication.json')), false);
+  });
+});
+
+test('runner retries once on pre-publication finish freshness refusal only', async t => {
+  const f = await fixture(t), here = path.dirname(fileURLToPath(import.meta.url));
+  const runner = path.join(here, '../../audit-joppa/run.mjs');
+  const python = path.join(f.root, 'python-ok'), medulla = path.join(f.root, 'medulla-stub');
+  const runs = path.join(f.root, 'runs'), stateFile = path.join(f.root, 'state.json');
+  fs.mkdirSync(runs);
+  fs.writeFileSync(python, `#!${process.execPath}\nprocess.exit(0);\n`, {mode: 0o755});
+  fs.writeFileSync(medulla, `#!${process.execPath}\n` + `
+const fs = require('node:fs');
+const path = require('node:path');
+const stateFile = process.env.AUDIT_TEST_STATE;
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+const attempt = state.calls.length + 1;
+const plan = state.plans[attempt - 1];
+state.calls.push(process.argv.slice(2));
+fs.writeFileSync(stateFile, JSON.stringify(state));
+const runsIndex = process.argv.indexOf('--runs-folder');
+const runsFolder = process.argv[runsIndex + 1];
+const runDir = path.join(runsFolder, 'run-' + attempt);
+fs.rmSync(runDir, {recursive: true, force: true});
+const artifacts = path.join(runDir, 'artifacts');
+const stepDir = path.join(runDir, 'steps/004-finish');
+fs.mkdirSync(artifacts, {recursive: true});
+fs.mkdirSync(stepDir, {recursive: true});
+if (plan.findings !== false) fs.writeFileSync(path.join(artifacts, 'findings.json'), '{"findings":[]}');
+if (plan.publication) fs.writeFileSync(path.join(artifacts, 'publication.json'), '{"status":"uncertain"}');
+if (plan.result) fs.writeFileSync(path.join(artifacts, 'result.json'), '{"status":"audited"}');
+if (plan.ConcurrentDir) {
+  const other = path.join(runsFolder, 'run-zz-concurrent');
+  fs.mkdirSync(path.join(other, 'artifacts'), {recursive: true});
+  fs.writeFileSync(path.join(other, 'artifacts/publication.json'), '{"status":"uncertain"}');
+}
+if (!plan.missingLog) fs.writeFileSync(path.join(stepDir, 'attempt-1-shell.txt'), '[err] ' + (plan.stderr || '') + '\\n');
+fs.writeFileSync(path.join(runDir, 'journal.jsonl'), JSON.stringify({
+  step: 4, node: plan.node || 'finish', kind: 'decision',
+  signal: plan.signal || '__failed__', next: plan.next || '__exit_fail__',
+  log_dir: 'steps/004-finish', message: 'body died: rc=2, 1 attempt(s); stderr: ' + (plan.stderr || '')
+}) + '\\n');
+process.stdout.write(runDir + '\\n');
+process.stderr.write((plan.stderr || 'ok') + '\\n');
+process.exit(plan.exitCode);
+`, {mode: 0o755});
+  const configFile = path.join(f.root, 'runner-config.json');
+  fs.writeFileSync(configFile, JSON.stringify({...f.config, equill_store: f.root, equill_actor: 'fixture',
+    runs_folder: runs, cbm_root: f.root, cbm_store: f.root}));
+  const invoke = plans => {
+    fs.writeFileSync(stateFile, JSON.stringify({calls: [], plans}));
+    const out = execFileSync(process.execPath, [runner, configFile], {
+      env: {...process.env, PLANNING_PYTHON: python, MEDULLA_BIN: medulla, AUDIT_TEST_STATE: stateFile},
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+    });
+    return {out, calls: JSON.parse(fs.readFileSync(stateFile, 'utf8')).calls};
+  };
+  const retried = invoke([
+    {exitCode: 2, stderr: 'audit: Source changed during audit; rerun it', ConcurrentDir: true},
+    {exitCode: 0, signal: 'AUDITED', next: '__exit_ok__', result: true, stderr: 'AUDITED'}
+  ]);
+  assert.equal(retried.calls.length, 2);
+  assert.match(retried.out, /run-1\n.*run-2/s);
+
+  for (const blocked of [
+    [{exitCode: 2, stderr: 'audit: Source changed during audit; rerun it', publication: true},
+      {exitCode: 0, signal: 'AUDITED', next: '__exit_ok__', result: true}],
+    [{exitCode: 2, stderr: 'audit: Joppa schema changed during audit'},
+      {exitCode: 0, signal: 'AUDITED', next: '__exit_ok__', result: true}],
+    [{exitCode: 2, stderr: 'audit: Source changed during audit; rerun it', missingLog: true},
+      {exitCode: 0, signal: 'AUDITED', next: '__exit_ok__', result: true}],
+    [{exitCode: 2, stderr: 'audit: Specification changed during audit; rerun it'},
+      {exitCode: 2, stderr: 'audit: Specification changed during audit; rerun it'},
+      {exitCode: 0, signal: 'AUDITED', next: '__exit_ok__', result: true}]
+  ]) {
+    assert.throws(() => invoke(blocked));
+    assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).calls.length, blocked.length === 3 ? 2 : 1);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).calls.length, 2);
 });

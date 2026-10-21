@@ -49,6 +49,7 @@ nodes:
       __default__: __exit_fail__
   review:
     timeout: 600
+    max_attempts: 2
     agent:
       harness: claude-code
       model: '{{var:REVIEW_MODEL}}'

@@ -1,12 +1,74 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {command, read, require, text, write} from '../audit/common.mjs';
 import {readTools, server} from '../audit/cbm.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const freshnessRefusal = /(?:^|\n|\[err\]\s+|stderr:\s+)audit: (?:(?:Source|Specification|Cited specification or owner context) changed during audit|Audit rules changed); rerun it\s*$/;
+
+function staleFinishFailure(runDir, runsFolder) {
+  if (!runDir) return false;
+  const dir = path.resolve(runDir);
+  if (path.dirname(dir) !== path.resolve(runsFolder) || !fs.existsSync(dir)) return false;
+  const artifacts = path.join(dir, 'artifacts');
+  if (!fs.existsSync(path.join(artifacts, 'findings.json')) ||
+      fs.existsSync(path.join(artifacts, 'publication.json')) ||
+      fs.existsSync(path.join(artifacts, 'result.json'))) return false;
+  try {
+    const lines = fs.readFileSync(path.join(dir, 'journal.jsonl'), 'utf8').trim().split('\n').filter(Boolean);
+    if (!lines.length) return false;
+    const last = JSON.parse(lines.at(-1));
+    if (last.node !== 'finish' || last.signal !== '__failed__' || last.next !== '__exit_fail__') return false;
+    const logFile = last.log_dir && path.join(dir, last.log_dir, 'attempt-1-shell.txt');
+    if (!logFile || !fs.existsSync(logFile)) return false;
+    const detail = fs.readFileSync(logFile, 'utf8');
+    return freshnessRefusal.test(detail) && freshnessRefusal.test(String(last.message || ''));
+  } catch {
+    return false;
+  }
+}
+
+function runMedulla(binary, commandArgs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, commandArgs, {stdio: ['ignore', 'pipe', 'inherit']});
+    let firstLine = '', newlineSeen = false, remainder = Buffer.alloc(0), interrupted = false;
+    const forward = signal => {
+      interrupted = true;
+      child.kill(signal);
+    };
+    const onSigint = () => forward('SIGINT');
+    const onSigterm = () => forward('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    child.stdout.on('data', chunk => {
+      process.stdout.write(chunk);
+      if (!newlineSeen) {
+        remainder = Buffer.concat([remainder, chunk]);
+        const index = remainder.indexOf(0x0a);
+        if (index !== -1) {
+          firstLine = remainder.subarray(0, index).toString('utf8').trim();
+          newlineSeen = true;
+          remainder = Buffer.alloc(0);
+        }
+      }
+    });
+    child.once('error', error => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+      reject(error);
+    });
+    child.once('close', (code, signal) => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+      if (!newlineSeen && remainder.length) firstLine = remainder.toString('utf8').trim();
+      resolve({code: code ?? 2, interrupted: interrupted || Boolean(signal), runDir: firstLine});
+    });
+  });
+}
+
 try {
   const args = process.argv.slice(2), file = args.shift();
   const intervalIndex = args.indexOf('--interval-seconds');
@@ -80,8 +142,12 @@ try {
       AUDIT_NO_PUBLISH: String(args.includes('--no-publish')), ...models};
     const commandArgs = ['-w', path.join(here, '../audit'), '--runs-folder', config.runs_folder, '--print-run-dir'];
     for (const [key, value] of Object.entries(variables)) commandArgs.push('--var', `${key}=${value}`);
-    const result = spawnSync(process.env.MEDULLA_BIN || 'medulla', commandArgs, {stdio: 'inherit'});
-    if (result.error) throw result.error;
-    process.exitCode = result.status ?? 2;
+    const medulla = process.env.MEDULLA_BIN || 'medulla';
+    let result = await runMedulla(medulla, commandArgs);
+    if (result.code !== 0 && !result.interrupted && staleFinishFailure(result.runDir, config.runs_folder)) {
+      console.error('auditor: stale inputs detected at finish before publication; retrying once');
+      result = await runMedulla(medulla, commandArgs);
+    }
+    process.exitCode = result.code;
   } finally { fs.rmSync(temp, {recursive: true, force: true}); }
 } catch (error) { console.error(`auditor: ${error.message}`); process.exitCode = 2; }
