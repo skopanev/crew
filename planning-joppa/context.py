@@ -132,6 +132,7 @@ def test_list(status):
 
 def snapshot_source(object, types, selected_ac=None):
     current = source(object)
+    current.pop("item_id", None)
     for key in ("verification", "pending_run", "summary", "status"):
         current["process"].pop(key, None)
     role = types[object["kind"]].get("role")
