@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {confirmed, findingKey, parseReport, source, validate} from '../common.mjs';
+import {confirmed, corrected, findingKey, parseReport, source, validate} from '../common.mjs';
 import {prepare, publish, recheck, verifySearches as verifySpecificationSearches} from '../../audit-joppa/adapter.mjs';
 import {preflight, verifySearches} from '../cbm.mjs';
 
@@ -112,6 +112,16 @@ test('independent review must cover each finding and can dismiss it', async t =>
   assert.deepEqual(confirmed(f.report, {verdicts: [{id: 'access', verdict: 'dismissed', reason: 'The cited path is not reachable.'}]}), []);
   assert.throws(() => confirmed(f.report, {verdicts: []}), /every finding/);
   assert.throws(() => confirmed(f.report, {verdicts: [{id: 'another', verdict: 'confirmed', reason: 'Claim'}]}), /Invalid/);
+});
+
+test('an audit correction cannot silently lose a proposed finding', () => {
+  const previous = {findings: [{id: 'first'}, {id: 'second'}]};
+  const report = {findings: [{id: 'first'}], limitations: []};
+  assert.throws(() => corrected(report, previous), /withdrawal of finding second/);
+  assert.throws(() => corrected({...report, limitations: ['Withdrawn second: ']}, previous), /withdrawal/);
+  corrected({...report, limitations: ['Withdrawn second: The quotation is absent from the current specification.']}, previous);
+  corrected({findings: previous.findings, limitations: []}, previous);
+  corrected(report, undefined);
 });
 
 function uncovered(f) {

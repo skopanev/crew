@@ -154,6 +154,8 @@ try {
         EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
+  run.launchPgid = child.pid;
+  save(stateFile, run);
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
     // Keep original bytes on disk; presentation colors apply only to the tab.
     stream.on('data', data => fs.writeSync(log, data));

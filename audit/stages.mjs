@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {command, confirmed, hash, parseReport, read, require, source, text, validate, write} from './common.mjs';
+import {command, confirmed, corrected, hash, parseReport, read, require, source, text, validate, write} from './common.mjs';
 import {preflight, verifySearches} from './cbm.mjs';
 
 const artifacts = path.join(process.env.MEDULLA_RUN_DIR || '.', 'artifacts');
@@ -29,9 +29,9 @@ function contract(settings) {
     .map(item => JSON.stringify(item)).join('\n\n');
   return {content: reply.content, audit: phase([10, 20]), review: phase([10, 30]), digest: reply.bundle_digest};
 }
-function result() {
+function result(log = process.env.MEDULLA_ATTEMPT_LOG) {
   require(process.env.MEDULLA_BODY_RC === '0', 'Audit agent did not finish');
-  const events = fs.readFileSync(process.env.MEDULLA_ATTEMPT_LOG, 'utf8').split('\n').flatMap(line => {
+  const events = fs.readFileSync(log, 'utf8').split('\n').flatMap(line => {
     try { return [JSON.parse(line.replace(/^\[out\] /, ''))]; } catch { return []; }
   });
   let body;
@@ -68,6 +68,15 @@ async function capture(kind) {
   const {report, events} = result();
   const input = read(path.join(artifacts, 'input.json'));
   const proposal = kind === 'audit' ? validate(report, input) : validate(read(path.join(artifacts, 'findings.json')), input);
+  if (kind === 'audit') {
+    const log = process.env.MEDULLA_ATTEMPT_LOG;
+    const first = path.join(path.dirname(log), path.basename(log).replace(/^attempt-\d+-/, 'attempt-1-'));
+    let previous;
+    if (first !== log && fs.existsSync(first)) {
+      try { previous = result(first).report; } catch {}
+    }
+    corrected(report, previous);
+  }
   if (kind !== 'audit') confirmed(proposal, report);
   const repositories = kind === 'audit' ? input.repositories : input.repositories.filter(repo =>
     proposal.findings.some(finding => finding.code.some(item => item.repository === repo.id)));

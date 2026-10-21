@@ -16,6 +16,11 @@ Use disposition implement, verify_existing or blocked. A blocked plan needs conc
 An implement plan needs Tasks. A verify_existing plan creates no Task.
 It can retire an unnecessary blocked Task. Each acceptance check names the existing test and assertion evidence.
 Use test (file > test name), evidence (repository:path:line), and optional source_ac for its recorded passing result.
+Match each check to its AC disposition. An implement check uses scenario and expected.
+A verify_existing check uses this shape:
+{"ac":"selected AC address","repository":"registered repository ID","test":"repo-relative/file > test name",
+ "evidence":"repository:test/path:line and repository:implementation/path:line","source_ac":"AC with the stored pass"}
+Omit source_ac when the selected AC supplies the passing result.
 Include citations for the assertions and affected implementation. A name or a source read does not prove a test passed.
 Inspect the actual assertions. Cover every Then and Evidence item. Missing tests or behavior are implementation work.
 When critic findings are supplied, resolve each blocking finding or refute it with source evidence.

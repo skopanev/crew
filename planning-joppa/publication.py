@@ -282,7 +282,7 @@ def binding_checks(plan, assignment):
                 "test address requires file > test name")
         test = inside(repo["path"], parts[0])
         require(test.is_file() and test.suffix, "bound test file does not exist")
-        evidence = text(check.get("evidence"), "acceptance_check.evidence")
+        evidence = text(check.get("evidence"), f"acceptance_check.evidence for {check.get('ac', assignment['ac']['id'])}: {address}")
         citations = re.findall(re.escape(repo["id"]) + r":([^\s:;]+):(\d+)\b", evidence)
         require(citations, "assertion evidence requires repository:path:line")
         paths = {parts[0]}
