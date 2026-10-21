@@ -158,7 +158,6 @@ nodes:
       Read the ticket:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       If the ticket has tasks, inspect every Task contract and its writable roots.
-      Select DUPLICATE only when every Task already satisfies its contract.
 
   create_worktree:
     env:
