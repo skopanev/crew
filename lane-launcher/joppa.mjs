@@ -345,7 +345,6 @@ export function packageInput(run, inputs) {
     body: ['Execute these Tasks in the listed order in one checkout. Keep each Task within its own contract and writable roots.',
       'Run one workflow, required gates, independent review, and landing for the complete package.',
       'Report each Task address, result, and check evidence in coder-report.txt. Review every Task before landing.',
-      'Select existing-code verification only when all Tasks already satisfy their contracts.',
       ...tasks.map((task, index) => `Task ${index + 1}: ${task.address}\nWritable roots: ${JSON.stringify(task.modulePaths)}\n${task.body}`)].join('\n\n'),
     acceptance: tasks.map(task => `${task.address}\n${task.acceptance}`).join('\n\n')};
 }
@@ -412,7 +411,7 @@ export function taskInput(config, object, contexts = object.contexts) {
   require(modulePath, 'Task module is not configured');
   const modulePaths = configuredModule.paths || [modulePath];
   const recovery = latestRecovery(config, object, contractDigest(object), contexts);
-  return {repo, ticket: {id: executionId(object.address), address: object.address, title: data.title,
+  return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,
     body: data.contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: data.contract,
@@ -466,7 +465,7 @@ export async function claimTask(run, persist) {
         Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0,
         'Task parent context is absent or historical');
       const context = {use: 'Acceptance reference. Execute only this Task contract.',
-        address: parent.address, revision: parent.current_revision, data: parent.document.data};
+        address: parent.address, item_id: parent.item_id, revision: parent.current_revision, data: parent.document.data};
       const snapshot = {address: parent.address, revision: parent.current_revision, digest: contractDigest(parent)};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);

@@ -600,6 +600,9 @@ class ProviderTests(unittest.TestCase):
         dom = item("area:domain")
         project = item("project:p")
         existing = item("work:one", "criterion:a", process={"status": "in_progress", "assignee": "worker"})
+        for obj, display_id in ((ac, "example-A-CRITERION"), (req, "example-R-REQUIREMENT"),
+                                (existing, "example-T-EXISTING")):
+            obj["item_id"] = display_id
         objects = {obj["address"]: obj for obj in (ac, req, cap, dom, project, existing)}
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "area": {"role": "group"},
                  "project": {"role": "document"}, "work": {"role": "task", "parents": ["criterion"],
@@ -630,6 +633,11 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(snapshot["requirement"]["comments"], {"decision": "Approved"})
         self.assertNotIn("tasks", snapshot["requirement"])
         self.assertEqual(len(value["joppa"]["tasks"]), 1)
+        self.assertEqual(json.loads(value["ac"]["text"])["item_id"], ac["item_id"])
+        self.assertEqual(json.loads(value["requirement"]["text"])["item_id"], req["item_id"])
+        self.assertEqual(value["joppa"]["tasks"][0]["item_id"], existing["item_id"])
+        for obj in (ac, req, existing):
+            self.assertEqual(value["joppa"]["objects"][obj["address"]]["item_id"], obj["item_id"])
         self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects", "joppa_tests"}))
         detail["requirement"]["current_revision"] = 8
         with self.assertRaisesRegex(ValueError, "another revision"):

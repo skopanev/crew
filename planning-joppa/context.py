@@ -121,7 +121,7 @@ def current_criteria(api, workspace, revision):
 def source(object):
     """Ignore journal position and our own planning claim. Keep meaningful state."""
     process = {key: value for key, value in object.get("process", {}).items() if key != "planning_claim"}
-    return {key: object.get(key) for key in ("address", "kind", "current_revision", "document", "annotations",
+    return {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
                                            "files", "references", "review_required", "work_ready")} | {"process": process}
 
 
