@@ -663,32 +663,54 @@ export async function finishTask(run, stateFile, result, artifacts) {
     }
     result.completed = true;
   } else {
-    const startup = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8').split('\n')
-      .filter(line => /^(run\.sh:|\[sync\]).*(failed|refused|WORKTREE PREEXISTED|disconnected|unavailable|cannot)/i.test(line)).at(-1);
+    const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
+    const startup = output.split(/\r?\n/)
+      .filter(line => /^(run\.sh:|\[sync\]|CBM (?:bridge|preflight):|Crew roles?\b).*(failed|refused|refusing|WORKTREE PREEXISTED|disconnected|unavailable|cannot|timed out|not ready|did not complete|differs from)/i.test(line)).at(-1);
     const preexisting = result.code === 73 && startup?.includes('WORKTREE PREEXISTED:');
     const failureFile = artifacts && path.join(artifacts, 'failure.txt');
-    const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
     const recoveryFailure = output.match(/^RECOVERY_VERIFY_FAILED: [^\r\n]+/m)?.[0];
     if (recoveryFailure) {
       result.held = true;
       result.blocked = false;
       throw new Error(recoveryFailure);
     }
+    const absent = file => {
+      try { fs.lstatSync(file); return false; }
+      catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+    };
     const container = /^\[medulla\] (medulla-sess-[\w.-]+) never became ready\b/m.exec(output)?.[1];
     const checkout = run.config.worktreeRoot && run.executionId && path.join(run.config.worktreeRoot, run.executionId);
+    const checkoutAbsent = Boolean(checkout) && absent(checkout) &&
+      (absent(run.config.worktreeRoot) || !fs.lstatSync(run.config.worktreeRoot).isSymbolicLink());
     const nativeEmpty = !fs.existsSync(run.runFolder) || fs.readdirSync(run.runFolder).every(name => name === 'launch-claim.json');
-    const startupFailed = result.status === 'failed' && container && checkout && nativeEmpty && !fs.existsSync(checkout) &&
-      objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
+    const contractsUnchanged = objects.every((object, index) => contractDigest(object) === claims[index].digest);
+    const runFolders = new Set([run.runFolder, ...(run.runFolder && fs.existsSync(run.runFolder) ? [fs.realpathSync(run.runFolder)] : [])].filter(Boolean));
+    const containerFailed = Boolean(container) &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) &&
       !command('docker', ['ps', '-a', '--filter', `name=${container}`, '--format', '{{.Names}}']);
-    const prepareFailed = result.status === 'failed' && checkout && !fs.existsSync(checkout) &&
-      objects.every((object, index) => contractDigest(object) === claims[index].digest) &&
+    const launchGroupGone = () => {
+      if (!Number.isSafeInteger(run.launchPgid) || run.launchPgid <= 1) return false;
+      try { process.kill(-run.launchPgid, 0); return false; }
+      catch (error) { return error.code === 'ESRCH'; }
+    };
+    const preMedullaFailed = !preexisting &&
+      (Boolean(startup) || output.includes(`run.sh: removed unused worktree: ${checkout}`)) &&
+      !/^\[medulla\] /m.test(output) &&
+      !output.includes('run.sh: retained ') && !output.includes('run.sh: cannot remove ') &&
+      launchGroupGone() &&
+      runFolders.size > 0 &&
+      [...runFolders].every(folder => !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}']));
+    const startupFailed = result.status === 'failed' && !artifacts && checkoutAbsent && nativeEmpty &&
+      contractsUnchanged && (containerFailed || preMedullaFailed);
+    const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) && isPrepareFailure(artifacts);
     if (startupFailed || prepareFailed) {
       run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
         revision: object.current_revision, reason: prepareFailed
           ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
-          : 'Session container never became ready. No native workflow ran; unused checkout removed.'})));
+          : containerFailed
+            ? 'Session container never became ready. No native workflow ran; unused checkout removed.'
+            : 'Lane startup failed before workflow launch. No native workflow ran; unused checkout absent.'})));
       persist();
       await mutateTasks(run, run.releaseRequest);
       run.releaseResults = [];

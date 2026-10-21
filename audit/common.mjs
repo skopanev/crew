@@ -89,7 +89,8 @@ export function validate(report, input) {
     for (const reference of finding.spec) {
       const spec = input.specification.find(item => item.address === reference.address);
       require(spec && spec.revision === reference.revision && text(reference.quote)
-        && spec.text.includes(reference.quote), 'Specification evidence is absent, stale or invented');
+        && spec.text.includes(reference.quote),
+        `Finding ${finding.id}: quote must exactly match ${reference.address}@${reference.revision} in input.specification[].text`);
     }
   }
   return report;
@@ -105,6 +106,14 @@ export function confirmed(report, review) {
     seen.add(item.id);
   }
   return report.findings.filter(finding => review.verdicts.find(item => item.id === finding.id).verdict === 'confirmed');
+}
+export function corrected(report, previous) {
+  for (const finding of Array.isArray(previous?.findings) ? previous.findings : []) {
+    if (!text(finding?.id) || report.findings.some(item => item.id === finding.id)) continue;
+    const prefix = `Withdrawn ${finding.id}: `;
+    require(report.limitations.some(item => item.startsWith(prefix) && text(item.slice(prefix.length))),
+      `Explain withdrawal of finding ${finding.id} in limitations as 'Withdrawn ${finding.id}: <reason>'`);
+  }
 }
 export function findingKey(finding) {
   return hash({kind: finding.kind,

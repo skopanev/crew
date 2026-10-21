@@ -12,6 +12,7 @@ nodes:
       __failed__: __exit_fail__
   audit:
     timeout: 900
+    max_attempts: 2
     agent:
       harness: codex
       model: '{{var:AUDIT_MODEL}}'

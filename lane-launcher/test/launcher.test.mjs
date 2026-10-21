@@ -272,6 +272,56 @@ test('Joppa package unconfirmed worker outcome remains held', async t => {
   assert.match(saved.result.error, /JOPPA_OUTCOME_UNCONFIRMED/);
 });
 
+for (const scenario of ['cbm-sync', 'removed-worktree', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
+  test(`Joppa pre-Medulla startup handling (${scenario}) releases only when unused and confirmed`, async t => {
+    const f = await packageFixture(t);
+    const worktreeRoot = path.join(f.root, 'worktrees'), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'ran');
+    fs.mkdirSync(worktreeRoot);
+    fs.mkdirSync(bins);
+    f.run.config.repositories[0].gateCommands = ['true'];
+    Object.assign(f.run.config, {worktreeRoot, readOnlyRepos: [], gateCommands: ['true'], sshDir: f.root});
+    const checkout = path.join(worktreeRoot, f.run.executionId);
+    const synced = '[sync] app: shared CBM refused tools/call: index worker ended with exit_nonzero';
+    const line = scenario === 'removed-worktree' ? `run.sh: removed unused worktree: ${checkout}` :
+      scenario === 'medulla-started' ? `${synced}\n[medulla] session container medulla-sess-1` :
+      scenario === 'unknown-exit' ? 'unexpected pre-launch crash' : synced;
+    fs.writeFileSync(path.join(bins, 'docker'), `#!/bin/sh\n${scenario === 'docker-present' ? 'echo medulla-sess-1\n' : ''}exit 0\n`, {mode: 0o755});
+    const survivorFile = path.join(f.root, 'survivor.pid');
+    const survivor = scenario === 'surviving-child' ? `sleep 60 </dev/null >/dev/null 2>&1 &\necho $! > '${survivorFile}'\n` : '';
+    t.after(() => {
+      if (fs.existsSync(survivorFile)) {
+        try { process.kill(Number(fs.readFileSync(survivorFile, 'utf8')), 'SIGTERM'); }
+        catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+    });
+    fs.writeFileSync(path.join(bins, 'bash'), `#!/bin/sh\ntouch '${marker}'\nprintf '%s\\r\\n' "${line}" >&2\n${survivor}exit 2\n`, {mode: 0o755});
+    if (scenario === 'checkout-present') fs.mkdirSync(checkout);
+    if (scenario === 'broken-symlink') fs.symlinkSync(path.join(f.root, 'missing-target'), checkout);
+    if (scenario === 'native-run') fs.mkdirSync(path.join(laneRunFolder(f.run.runFolder, f.run.config.id), 'run-1'), {recursive: true});
+    if (scenario === 'contract-changed') {
+      const data = f.objects.get('task:t1').document.data, original = data.contract;
+      Object.defineProperty(data, 'contract', {
+        enumerable: true,
+        get: () => fs.existsSync(marker) ? `${original}\nChanged: after claim` : original,
+      });
+    }
+    f.persist();
+    const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`});
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(fs.existsSync(marker), true, scenario);
+    const saved = read(f.stateFile), released = ['cbm-sync', 'removed-worktree'].includes(scenario);
+    assert.equal(saved.releaseConfirmed === true, released, scenario);
+    assert.equal(saved.result.released === true, released, scenario);
+    assert.equal(saved.result.held === true, !released, scenario);
+    assert.equal(Boolean(saved.result.blocked), false, scenario);
+    assert.equal(runHoldsTasks(saved), !released, scenario);
+    for (const address of ['task:t1', 'task:t2']) {
+      assert.equal(f.objects.get(address).process.status, released ? 'open' : 'in_progress', scenario);
+      assert.equal(f.objects.get(address).process.assignee, released ? null : 'lane-1', scenario);
+    }
+  });
+}
+
 function blockedPackage(f) {
   const root = path.join(f.root, 'worktrees'), runs = path.join(f.root, 'receipts');
   fs.mkdirSync(root);
