@@ -638,6 +638,10 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(value["joppa"]["tasks"][0]["item_id"], existing["item_id"])
         for obj in (ac, req, existing):
             self.assertEqual(value["joppa"]["objects"][obj["address"]]["item_id"], obj["item_id"])
+            legacy = deepcopy(obj)
+            legacy.pop("item_id")
+            self.assertEqual(context.snapshot_source(obj, types, ac["address"]),
+                             context.snapshot_source(legacy, types, ac["address"]))
         self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects", "joppa_tests"}))
         detail["requirement"]["current_revision"] = 8
         with self.assertRaisesRegex(ValueError, "another revision"):
