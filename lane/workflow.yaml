@@ -19,6 +19,7 @@ vars:
   REQUIREMENT_HEAD: ''
   REQUIREMENT_FINAL: 'false'
   REQUIREMENT_READER_FILE: ''
+  JOPPA_READER_COMMAND_JSON: ''
   FINALIZE_ONLY: 'false'
   EQUILL_ACTOR: lane
   EQUILL_STORE: ''
@@ -679,6 +680,8 @@ nodes:
       PY
   git_landing:
     env:
+      JOPPA_READER_COMMAND_JSON: '{{var:JOPPA_READER_COMMAND_JSON}}'
+      REQUIREMENT_READER_FILE: '{{var:REQUIREMENT_READER_FILE}}'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       DELIVERY: '{{var:DELIVERY}}'
       DELIVERY_BRANCH: '{{var:DELIVERY_BRANCH}}'
@@ -734,6 +737,10 @@ nodes:
       fi
 
       if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
+        if [ -n "${JOPPA_READER_COMMAND_JSON:-}${REQUIREMENT_READER_FILE:-}" ]; then
+          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --tasks || {
+            echo '<signal:REQUIREMENT_CHANGED>Task context changed before verification publication.</signal:REQUIREMENT_CHANGED>'; exit 0; }
+        fi
         git diff --cached --quiet HEAD || {
           echo '<signal:LAND_FAILED>verification changed source files</signal:LAND_FAILED>'; exit 0; }
         git fetch origin

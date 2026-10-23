@@ -1,5 +1,6 @@
 // Check dependency delivery before a new worker runs any repository code.
 import {parsePublication} from './requirement-delivery.mjs';
+import {remoteDependencyBlocker} from './dependencies.mjs';
 import {execFile} from 'node:child_process';
 import path from 'node:path';
 import {quote} from './runtime.mjs';
@@ -42,6 +43,7 @@ export async function guardPublications(run, read, ancestor) {
     throw error;
   };
   const cache = new Map(), visited = new Set();
+  let needsReader = false;
   const object = async (address, allowAbsent = false) => {
     if (!cache.has(address)) cache.set(address, read('joppa_objects', {address}));
     const value = await cache.get(address);
@@ -71,6 +73,9 @@ export async function guardPublications(run, read, ancestor) {
     if (visited.has(address)) return;
     visited.add(address);
     const value = await object(address);
+    needsReader ||= (value.remote_links || []).some(link => link.blocking === true);
+    const remote = remoteDependencyBlocker(value);
+    if (remote) pending(`${remote} is not current and satisfied`);
     for (const link of value.document.links || []) {
       if (link.relation !== 'depends_on' || link.blocking !== true) continue;
       const target = await object(link.target, true);
@@ -96,4 +101,5 @@ export async function guardPublications(run, read, ancestor) {
     if (value.document.parent) await visit(value.document.parent);
   }
   for (const task of run.claim?.tasks || run.tasks || [{address: run.task}]) await visit(task.address);
+  return {needsReader};
 }

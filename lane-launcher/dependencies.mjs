@@ -1,15 +1,62 @@
 // Read live dependency state for one queue check. Store no persistent state.
+const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
+
+const validWorkspaceId = value => typeof value === 'string' && Boolean(value.trim()) &&
+  value === value.trim() && !/[\0-\x20\x7f]/.test(value);
+
+const validRemoteLink = (link, ownWorkspace) => Boolean(link && typeof link === 'object' &&
+  validWorkspaceId(link.workspace) && (!ownWorkspace || link.workspace !== ownWorkspace) &&
+  typeof link.target === 'string' && /^[^:\s]+:[^:\s]+$/.test(link.target));
+
+const remoteLinkReady = link => {
+  const status = link.status;
+  if (!status || typeof status !== 'object') return false;
+  if (status.access !== true || status.present !== true || status.satisfied !== true) return false;
+  if (status.review_required !== false) return false;
+  if (!Number.isSafeInteger(status.current_revision) || status.current_revision < 1) return false;
+  return Number.isSafeInteger(link.revision) && link.revision >= 1 && link.revision === status.current_revision;
+};
+
+export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace_key) {
+  if (!object || typeof object !== 'object') throw invalid('Dependency object is invalid');
+  if (ownWorkspace !== undefined && ownWorkspace !== null && !validWorkspaceId(ownWorkspace)) {
+    throw invalid('Dependency object workspace_key is invalid');
+  }
+  if (object.remote_links === undefined || object.remote_links === null) return null;
+  if (!Array.isArray(object.remote_links)) throw invalid('Dependency remote_links must be an array');
+  for (const link of object.remote_links) {
+    if (!link || typeof link !== 'object') throw invalid('Dependency remote link is invalid');
+    if (link.blocking === true && link.relation !== 'depends_on') {
+      throw invalid('Blocking remote link must use depends_on');
+    }
+    if (link.relation !== 'depends_on' || link.blocking !== true) continue;
+    if (!validRemoteLink(link, ownWorkspace)) throw invalid('Dependency remote link target is invalid');
+    if (!remoteLinkReady(link)) return `@${link.workspace}/${link.target}`;
+  }
+  return null;
+}
+
 export function dependencyCheck(read) {
-  const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
   const objects = new Map(), satisfied = new Map(), checked = new Map();
-  let schema, branches;
-  const types = async () => (schema ||= read('joppa_tree', {})).then(result => result.schema.types);
+  let schema, branches, workspaceKey;
+  const checkWorkspaceKey = value => {
+    if (value === undefined || value === null) return;
+    if (!validWorkspaceId(value)) throw invalid('Dependency workspace_key is invalid');
+    if (workspaceKey && workspaceKey !== value) throw invalid('Dependency read crossed workspace boundary');
+    workspaceKey = value;
+  };
+  const types = async () => (schema ||= read('joppa_tree', {}).then(result => {
+    checkWorkspaceKey(result?.workspace_key);
+    return result.schema.types;
+  }));
   const object = async address => {
     if (!objects.has(address)) objects.set(address, read('joppa_objects', {address}));
     const value = await objects.get(address);
-    if (!value?.address || !value.document || value.historical !== false || !Number.isSafeInteger(value.current_revision)) {
+    if (!value?.address || value.address !== address || !value.document || value.historical !== false ||
+        !Number.isSafeInteger(value.current_revision)) {
       throw invalid('Dependency read did not return a current object');
     }
+    checkWorkspaceKey(value.workspace_key);
     return value;
   };
   const present = value => value.document.present === true && value.document.data?.archived !== true;
@@ -85,6 +132,7 @@ export function dependencyCheck(read) {
       parents.add(node.address);
       for (const link of node.document.links || []) {
         if (link.relation !== 'depends_on' || link.blocking !== true) continue;
+        if (link.workspace !== undefined) throw invalid('Dependency workspace link must use remote_links');
         const target = await object(link.target);
         if (!present(target)) continue;
         const task = await role(target) === 'task';
@@ -95,6 +143,8 @@ export function dependencyCheck(read) {
         const blocker = await blockedBy(target.address, next);
         if (blocker) return blocker;
       }
+      const remoteBlocker = remoteDependencyBlocker(node, workspaceKey);
+      if (remoteBlocker) return remoteBlocker;
       node = node.document.parent ? await object(node.document.parent) : null;
     }
     checked.set(start.address, null);

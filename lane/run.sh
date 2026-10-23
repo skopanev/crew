@@ -344,6 +344,7 @@ cleanup() {
     fi
   fi
   [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
+  [[ -z "${joppa_connector_dir:-}" ]] || rm -rf "$joppa_connector_dir"
   return "$code"
 }
 trap cleanup EXIT
@@ -362,6 +363,14 @@ if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
 fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
+joppa_reader_command=""
+if [[ "$ticket_source" == joppa && -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
+  joppa_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/joppa-connector.XXXXXX")"
+  joppa_connector="$joppa_connector_dir/mcp.cjs"
+  python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" --joppa "$joppa_connector"
+  joppa_reader_command="$(jq -cn --arg file "$joppa_connector" '["node", $file]')"
+fi
+unset LANE_JOPPA_MCP_COMMAND_JSON
 cbm_connector="" cbm_project=""
 equill_vars=()
 if [[ "${LANE_FINALIZE_ONLY:-false}" != true ]]; then
@@ -474,6 +483,7 @@ medulla \
   --var "REQUIREMENT_HEAD=${LANE_REQUIREMENT_HEAD:-}" \
   --var "REQUIREMENT_FINAL=${LANE_REQUIREMENT_FINAL:-false}" \
   --var "REQUIREMENT_READER_FILE=$requirement_reader" \
+  --var "JOPPA_READER_COMMAND_JSON=$joppa_reader_command" \
   --var "FINALIZE_ONLY=${LANE_FINALIZE_ONLY:-false}" \
   --var "LANE_WORKTREE=$LANE_WORKTREE" \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \

@@ -110,7 +110,12 @@ try {
       save(stateFile, run);
     }
     try {
-      if (!run.finalizeOnly) await publicationReader(run.config, readJoppa)(run);
+      if (!run.finalizeOnly) {
+        const dependencies = await publicationReader(run.config, readJoppa)(run);
+        if (dependencies.needsReader && !run.config.joppa.mcpCommand && !run.config.joppa.readerTokenFile) {
+          throw new Error('Remote dependency rechecks need joppa.mcpCommand or joppa.readerTokenFile before lane startup');
+        }
+      }
     } catch (error) {
       if (error.code === 'DEPENDENCY_NOT_LANDED') {
         await releaseTaskClaims(run, () => save(stateFile, run), error.message + '; lane did not start.');
@@ -134,8 +139,9 @@ try {
         joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
   const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
     source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;
-  fs.writeFileSync(claimFile, JSON.stringify({...claim, ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
-  if (delivery) {
+  fs.writeFileSync(claimFile, JSON.stringify({...claim, ...(joppa ? {joppa_url: run.config.joppa.url} : {}),
+    ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
+  if (joppa && run.config.joppa.readerTokenFile) {
     readerDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-joppa-reader-')));
     fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(readerDir, 'token'));
     fs.chmodSync(path.join(readerDir, 'token'), 0o600);
@@ -150,6 +156,7 @@ try {
         LANE_REQUIREMENT_HEAD: run.requirementDelivery?.head || '',
         LANE_REQUIREMENT_FINAL: String(run.requirementDelivery?.final ?? false),
         LANE_REQUIREMENT_READER_DIR: readerDir || '',
+        ...(run.config.joppa.mcpCommand ? {LANE_JOPPA_MCP_COMMAND_JSON: JSON.stringify(run.config.joppa.mcpCommand)} : {}),
         LANE_FINALIZE_ONLY: String(run.finalizeOnly === true),
         EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || ''} : {}),
       LANE_CLAIM_FILE: claimFile}, detached: true,

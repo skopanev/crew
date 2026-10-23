@@ -3,7 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
-import {dependencyCheck} from './dependencies.mjs';
+import {dependencyCheck, remoteDependencyBlocker} from './dependencies.mjs';
 import {parsePublication, requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
@@ -18,7 +18,14 @@ const inside = (file, root) => file === root || file.startsWith(root + path.sep)
 export const executionId = address => 'joppa-' + createHash('sha256').update(address).digest('hex').slice(0, 32);
 export const contractDigest = object => createHash('sha256').update(JSON.stringify({
   parent: object.document.parent, data: object.document.data, links: object.document.links,
+  ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
+  ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
 })).digest('hex');
+
+function verifyRemoteDependencies(object) {
+  const link = remoteDependencyBlocker(object);
+  require(!link, `DEPENDENCY_NOT_READY: ${link}`);
+}
 
 export function validateJoppa(config) {
   const joppa = config.joppa;
@@ -415,6 +422,7 @@ export function taskInput(config, object, contexts = object.contexts) {
     body: data.contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: data.contract,
+    ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,
       instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(modulePaths)}. Complete only the remaining work.`}} : {})}};
 }
@@ -465,7 +473,8 @@ export async function claimTask(run, persist) {
         Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0,
         'Task parent context is absent or historical');
       const context = {use: 'Acceptance reference. Execute only this Task contract.',
-        address: parent.address, item_id: parent.item_id, revision: parent.current_revision, data: parent.document.data};
+        address: parent.address, item_id: parent.item_id, revision: parent.current_revision, data: parent.document.data,
+        ...(parent.remote_links?.length ? {remote_links: parent.remote_links} : {})};
       const snapshot = {address: parent.address, revision: parent.current_revision, digest: contractDigest(parent)};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
@@ -509,7 +518,14 @@ export async function guardTaskClaims(run, persist) {
     const object = await reader.object(claim.address);
     require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress',
       'Task holder changed before lane startup; claims remain held for inspection');
+    verifyRemoteDependencies(object);
+    require(contractDigest(object) === claim.digest, 'Task contract changed before lane startup');
     objects.push(object);
+  }
+  for (const context of run.claim.contexts || []) {
+    const object = await reader.object(context.address);
+    verifyRemoteDependencies(object);
+    require(contractDigest(object) === context.digest, 'Acceptance context changed before lane startup');
   }
   let conflict;
   await heldTasks(run.config, run.joppaWorker, async task => {
@@ -601,6 +617,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress',
         'Task holder changed; package outcome not written');
       if (validate) {
+        verifyRemoteDependencies(object);
         require(object.work_ready === true && object.review_required === false && object.process?.review_required !== true,
           'TASK_REVIEW_REQUIRED: Task context needs review; landed package remains held');
         require(contractDigest(object) === claim.digest, 'Task contract changed during execution; package completion refused');
@@ -613,6 +630,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     for (const context of new Map(claims.filter(claim => claim.parent).map(claim => [claim.parent.address, claim.parent])).values()) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
         {workspace: run.workspace, address: context.address});
+      verifyRemoteDependencies(parent);
       require(parent.address === context.address && parent.document?.present === true && parent.historical === false &&
         Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 && parent.work_ready === true &&
         parent.review_required === false && parent.process?.review_required !== true,
@@ -621,6 +639,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     }
     for (const context of run.claim.contexts || []) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: context.address});
+      verifyRemoteDependencies(parent);
       require(parent.address === context.address && parent.document?.present === true && parent.historical === false &&
         contractDigest(parent) === context.digest && parent.review_required === false && parent.process?.review_required !== true,
         'Package acceptance context changed during execution; completion refused');
@@ -664,7 +683,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
   } else {
     const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
     const startup = output.split(/\r?\n/)
-      .filter(line => /^(run\.sh:|\[sync\]|CBM (?:bridge|preflight):|Crew roles?\b).*(failed|refused|refusing|WORKTREE PREEXISTED|disconnected|unavailable|cannot|timed out|not ready|did not complete|differs from)/i.test(line)).at(-1);
+      .filter(line => /^(run\.sh:|\[sync\]|(?:CBM|MCP) (?:bridge|preflight):|Crew roles?\b).*(failed|refused|refusing|WORKTREE PREEXISTED|disconnected|unavailable|cannot|timed out|not ready|did not complete|differs from)/i.test(line)).at(-1);
     const preexisting = result.code === 73 && startup?.includes('WORKTREE PREEXISTED:');
     const failureFile = artifacts && path.join(artifacts, 'failure.txt');
     const recoveryFailure = output.match(/^RECOVERY_VERIFY_FAILED: [^\r\n]+/m)?.[0];

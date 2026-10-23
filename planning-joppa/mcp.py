@@ -133,7 +133,7 @@ class Reader:
             schema = tool["inputSchema"]
             if "workspace" in schema.get("properties", {}):
                 tool["inputSchema"] = {**schema, "properties": {**schema["properties"],
-                    "workspace": {"type": "string", "enum": [self.workspace], "default": self.workspace}}}
+                    "workspace": {"type": "string", "default": self.workspace}}}
             tools.append(tool)
         return tools
 
@@ -146,9 +146,7 @@ class Reader:
         if args.get("item_id"):
             raise MCPError("Use workspace and a full object address instead of item_id")
         if name != "joppa_model_docs":
-            if args.get("workspace", self.workspace) != self.workspace:
-                raise MCPError("The planning reader permits only its configured workspace")
-            args["workspace"] = self.workspace
+            args.setdefault("workspace", self.workspace)
         address = args.get("address") if name == "joppa_objects" else (
             args.get("target") or args.get("req")) if name == "joppa_read" else None
         if address and ":" not in address:
@@ -156,8 +154,8 @@ class Reader:
         result = self.api.call(name, args)
         if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
-            obj = result if name == "joppa_objects" else context.object_read(self.api, self.workspace, address)
-            context.capture_object(self.target, self.workspace, obj)
+            obj = result if name == "joppa_objects" else context.object_read(self.api, args["workspace"], address)
+            context.capture_object(self.target, args["workspace"], obj, self.api)
         return result
 
 
