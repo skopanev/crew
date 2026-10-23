@@ -78,8 +78,12 @@ It reuses related Tasks through dependencies. It edits only Tasks under the sele
 The planner publishes complete implementation mechanisms under their original criteria.
 NTK supports shallow ticket splitting before design in its separate workflow.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
-All planning agents can query Joppa for relevant context across the configured workspace.
-The reader exposes eight read tools. It rejects writes and reads of other workspaces.
+All planning agents can query Joppa for relevant context in the configured workspace and accessible linked workspaces.
+The reader exposes eight read tools and rejects writes. Joppa enforces workspace access.
+Foreign objects keep their immutable workspace IDs, full addresses and separate schemas in the planning snapshot.
+The planner preserves remote links and their status, including inaccessible targets that need review.
+It reads captured foreign contracts again before publication. A changed contract, schema or access refuses publication.
+It writes Tasks only in the configured workspace. It does not create or update remote dependency pins.
 Search results locate objects. Read a full current object before reuse or a dependency.
 The existing snapshot records these reads and checks them again before publication.
 Runtime MCP configs contain the connector command or a legacy credential file path, never credential values.

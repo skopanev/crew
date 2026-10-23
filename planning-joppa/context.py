@@ -121,8 +121,65 @@ def current_criteria(api, workspace, revision):
 def source(object):
     """Ignore journal position and our own planning claim. Keep meaningful state."""
     process = {key: value for key, value in object.get("process", {}).items() if key != "planning_claim"}
-    return {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
-                                           "files", "references", "review_required", "work_ready")} | {"process": process}
+    value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
+                                            "files", "references", "review_required", "work_ready")} | {"process": process}
+    if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
+        value["remote_links"] = object.get("remote_links", [])
+        value["remote_links_revision"] = object.get("remote_links_revision", 0)
+        value["remote_review_required"] = object.get("remote_review_required", False)
+    return value
+
+
+def remote_satisfied(link):
+    status = link.get("status", {})
+    revision = link.get("revision")
+    return (type(revision) is int and revision > 0 and status.get("access") is True
+            and status.get("present") is True and status.get("review_required") is False
+            and status.get("current_revision") == revision and status.get("satisfied") is True)
+
+
+def read_remote_links(api, remote, object):
+    for link in object.get("remote_links", []):
+        if (link.get("status", {}).get("access") is True
+                and link.get("status", {}).get("present") is True):
+            remote_object(api, remote, link["workspace"], link["target"])
+
+
+def remote_key(workspace, address):
+    return "@" + workspace + "/" + address
+
+
+def remote_object(api, remote, workspace, address):
+    """Keep foreign schemas and addresses outside the execution workspace."""
+    schemas = remote.setdefault("schemas", {})
+    objects = remote.setdefault("objects", {})
+    key = remote_key(workspace, address)
+    if workspace not in schemas:
+        schemas[workspace] = api.call("joppa_tree", {"workspace": workspace})["schema"]
+    if key not in objects:
+        value = object_read(api, workspace, address)
+        require(value.get("address") == address, "remote read returned a different object")
+        require(value.get("workspace_key", workspace) == workspace, "remote read returned a different workspace")
+        require(value.get("kind") in schemas[workspace]["types"], "remote object type is absent from its schema")
+        objects[key] = {**source(value), "workspace": workspace}
+    return objects[key]
+
+
+def remote_snapshot(remote):
+    return {"schemas": remote["schemas"], "objects": {
+        key: {**snapshot_source(value, remote["schemas"][value["workspace"]]["types"]),
+              "workspace": value["workspace"]}
+        for key, value in remote["objects"].items()}}
+
+
+def verify_remote(api, remote, expected):
+    """Read every captured foreign contract again before publication."""
+    current = {}
+    for value in expected["objects"].values():
+        remote_object(api, current, value["workspace"], value["address"])
+    unchanged(expected, remote_snapshot(current))
+    remote["schemas"] = {**remote.get("schemas", {}), **current["schemas"]}
+    remote["objects"] = {**remote.get("objects", {}), **current["objects"]}
 
 
 def test_list(status):
@@ -133,6 +190,10 @@ def test_list(status):
 def snapshot_source(object, types, selected_ac=None):
     current = source(object)
     current.pop("item_id", None)
+    current.pop("remote_review_required", None)
+    if current.get("remote_links"):
+        current["remote_links"] = [{key: value for key, value in link.items() if key != "status"}
+                                   for link in current["remote_links"]]
     for key in ("verification", "pending_run", "summary", "status"):
         current["process"].pop(key, None)
     role = types[object["kind"]].get("role")
@@ -175,7 +236,7 @@ def load_once(api, config, ac_id):
     if ":" not in ac_id:
         require(len(ac_types) == 1, "use a full criterion address when the schema has multiple criterion types")
         ac_id = ac_types[0] + ":" + ac_id
-    objects = {}
+    objects, remote = {}, {}
     def get(address):
         if address not in objects:
             objects[address] = object_read(api, workspace, address)
@@ -214,6 +275,7 @@ def load_once(api, config, ac_id):
     for item in [ac, *parents, *tasks]:
         for link in item["document"].get("links", []):
             get(link["target"])
+        read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
                 get(reference["target"])
@@ -255,6 +317,7 @@ def load_once(api, config, ac_id):
     for item in siblings:
         for link in item["document"].get("links", []):
             get(link["target"])
+        read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
                 get(reference["target"])
@@ -281,6 +344,11 @@ def load_once(api, config, ac_id):
                   "knowledge_query": ac["document"]["data"].get("description") or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
                 "requirement": meaning, "tests": test_list(tests)}
+    if remote:
+        assignment["joppa"]["remote"] = remote
+        snapshot["remote"] = remote_snapshot(remote)
+    if tree.get("workspace_key"):
+        assignment["joppa"]["workspace_key"] = tree["workspace_key"]
     validate_input(assignment)
     return assignment, snapshot, ac
 
@@ -321,6 +389,7 @@ def load_requirement(api, config, req_id, selected=None):
     assignment, snapshot, _ = load(api, config, addresses[0])
     require(assignment["requirement"]["id"] == req_id, "criterion belongs to another Requirement")
     objects = assignment["joppa"]["objects"]
+    remote = assignment["joppa"].get("remote", {})
     def get(address):
         if address not in objects:
             objects[address] = source(object_read(api, workspace, address))
@@ -339,6 +408,7 @@ def load_requirement(api, config, req_id, selected=None):
         # Admission needs live ownership. Authored snapshots exclude planning claims.
         ac = object_read(api, workspace, address)
         objects[address] = source(ac)
+        read_remote_links(api, remote, ac)
         work = [item for item in tasks if item["document"]["parent"] == address
                 and not item["process"].get("done") and not item["process"].get("retired")]
         if ((not config.get("ac_ids") or address in config["ac_ids"])
@@ -377,6 +447,9 @@ def load_requirement(api, config, req_id, selected=None):
         while object:
             require(object["address"] not in seen, "parent cycle in Requirement context")
             seen.add(object["address"])
+            if any(link.get("blocking") is True and not remote_satisfied(link)
+                   for link in object.get("remote_links", [])):
+                return False
             for link in object["document"].get("links", []):
                 if link.get("relation") != "depends_on" or link.get("blocking") is not True:
                     continue
@@ -415,6 +488,9 @@ def load_requirement(api, config, req_id, selected=None):
     snapshot["objects"] = {address: snapshot_source(item, types, candidates) for address, item in objects.items()}
     snapshot["tests"] = {address: test_list(tests[address]) for address in candidates}
     snapshot["criteria"] = candidates
+    if remote:
+        assignment["joppa"]["remote"] = remote
+        snapshot["remote"] = remote_snapshot(remote)
     require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
             "workspace changed during Requirement context read")
     return assignment, snapshot, req
@@ -440,24 +516,37 @@ def unchanged(old, new):
     require(digest(old) == digest(new), "Joppa context changed during planning; read the criterion again")
 
 
-def capture_object(target, workspace, object):
+def capture_object(target, workspace, object, api=None):
     """Keep the first full read. Serialize readers on the existing snapshot file."""
     path = Path(target) / "joppa-snapshot.json"
     with path.open("r+") as file:
         fcntl.flock(file, fcntl.LOCK_EX)
         snapshot = json.load(file)
         assignment = read(Path(target) / "input.json")
-        require(assignment["workspace"] == workspace, "reader workspace differs from the run")
         require(object.get("document", {}).get("present") is True and object.get("historical") is False,
                 "reader requires a full current object")
         address = text(object.get("address"), "object.address")
-        types = snapshot["schema"]["types"]
+        scope = snapshot
+        local_keys = {assignment["workspace"], assignment["joppa"].get("workspace_key")}
+        workspace = object.get("workspace_key") or workspace
+        if workspace not in local_keys:
+            require(api is not None, "remote capture needs the authenticated reader")
+            scope = snapshot.setdefault("remote", {"schemas": {}, "objects": {}})
+            if workspace not in scope["schemas"]:
+                scope["schemas"][workspace] = api.call("joppa_tree", {"workspace": workspace})["schema"]
+            types = scope["schemas"][workspace]["types"]
+            key = remote_key(workspace, address)
+        else:
+            types = snapshot["schema"]["types"]
+            key = address
         require(object.get("kind") in types, "object schema changed during planning")
         current = snapshot_source(object, types, [item["id"] for item in selected_criteria(assignment)])
-        if address in snapshot["objects"]:
-            unchanged(snapshot["objects"][address], current)
+        if scope is not snapshot:
+            current["workspace"] = workspace
+        if key in scope["objects"]:
+            unchanged(scope["objects"][key], current)
             return
-        snapshot["objects"][address] = current
+        scope["objects"][key] = current
         # Keep the lock inode stable. Every reader uses this same file.
         file.seek(0)
         json.dump(snapshot, file, ensure_ascii=False, indent=2)
@@ -475,6 +564,10 @@ def refresh_reads(api, config, assignment, snapshot, original):
             assignment["joppa"]["objects"][address] = source(object)
             snapshot["objects"][address] = snapshot_source(object, snapshot["schema"]["types"],
                                                           [item["id"] for item in selected_criteria(assignment)])
+    if original.get("remote"):
+        remote = assignment["joppa"].setdefault("remote", {})
+        verify_remote(api, remote, original["remote"])
+        snapshot["remote"] = remote_snapshot(remote)
     unchanged(original, snapshot)
 
 
@@ -488,4 +581,7 @@ def read_assignment(api, config, target):
             unchanged(expected, snapshot_source(object, snapshot["schema"]["types"],
                                                 [item["id"] for item in selected_criteria(assignment)]))
             assignment["joppa"]["objects"][address] = source(object)
+    if snapshot.get("remote"):
+        remote = assignment["joppa"].setdefault("remote", {})
+        verify_remote(api, remote, snapshot["remote"])
     return assignment

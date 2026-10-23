@@ -25,6 +25,9 @@ fi
 # Replace the checkout base with the pre-push target tip for afterLand.
 # An empty value means the target does not exist; afterLand must not infer a base.
 printf '%s\n' "$before" > .git/lane-base
+if [[ "${DELIVERY:-}" != requirement && -n "${JOPPA_READER_COMMAND_JSON:-}${REQUIREMENT_READER_FILE:-}" ]]; then
+  timeout --kill-after=5s 60s node "$(dirname "${BASH_SOURCE[0]}")/requirement-current.mjs" --tasks
+fi
 git push origin "$sha:refs/heads/$target"
 after="$(git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
 echo "lane-push: after=$after"

@@ -9,11 +9,32 @@ import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
-import {claimTask, finishTask, nextTask, executionId, runHoldsTasks} from '../joppa.mjs';
+import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
+
+test('claim digest tracks authored remote pins without tracking live target status', () => {
+  const object = {document: {parent: 'ac:a', data: {title: 'Implement'}, links: []}};
+  const original = contractDigest(object);
+  object.remote_links = [];
+  assert.equal(contractDigest(object), original);
+  object.remote_links.push({workspace: 'other', target: 'requirement:api', relation: 'depends_on',
+    blocking: true, revision: 1, status: {satisfied: true}});
+  const pinned = contractDigest(object);
+  assert.notEqual(pinned, original);
+  object.remote_links[0].status.satisfied = false;
+  assert.equal(contractDigest(object), pinned);
+  object.remote_links[0].revision = 2;
+  assert.notEqual(contractDigest(object), pinned);
+  object.remote_links = [];
+  object.remote_links_revision = 1;
+  const cleared = contractDigest(object);
+  assert.notEqual(cleared, original);
+  object.remote_links_revision++;
+  assert.notEqual(contractDigest(object), cleared);
+});
 
 async function packageFixture(t, mode = 'success') {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-')));
@@ -272,7 +293,7 @@ test('Joppa package unconfirmed worker outcome remains held', async t => {
   assert.match(saved.result.error, /JOPPA_OUTCOME_UNCONFIRMED/);
 });
 
-for (const scenario of ['cbm-sync', 'removed-worktree', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
+for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
   test(`Joppa pre-Medulla startup handling (${scenario}) releases only when unused and confirmed`, async t => {
     const f = await packageFixture(t);
     const worktreeRoot = path.join(f.root, 'worktrees'), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'ran');
@@ -283,6 +304,7 @@ for (const scenario of ['cbm-sync', 'removed-worktree', 'checkout-present', 'bro
     const checkout = path.join(worktreeRoot, f.run.executionId);
     const synced = '[sync] app: shared CBM refused tools/call: index worker ended with exit_nonzero';
     const line = scenario === 'removed-worktree' ? `run.sh: removed unused worktree: ${checkout}` :
+      scenario === 'mcp-bridge' ? 'MCP bridge: failed: no listener could be started' :
       scenario === 'medulla-started' ? `${synced}\n[medulla] session container medulla-sess-1` :
       scenario === 'unknown-exit' ? 'unexpected pre-launch crash' : synced;
     fs.writeFileSync(path.join(bins, 'docker'), `#!/bin/sh\n${scenario === 'docker-present' ? 'echo medulla-sess-1\n' : ''}exit 0\n`, {mode: 0o755});
@@ -309,7 +331,7 @@ for (const scenario of ['cbm-sync', 'removed-worktree', 'checkout-present', 'bro
     const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`});
     assert.equal(result.code, 2, result.stderr);
     assert.equal(fs.existsSync(marker), true, scenario);
-    const saved = read(f.stateFile), released = ['cbm-sync', 'removed-worktree'].includes(scenario);
+    const saved = read(f.stateFile), released = ['cbm-sync', 'mcp-bridge', 'removed-worktree'].includes(scenario);
     assert.equal(saved.releaseConfirmed === true, released, scenario);
     assert.equal(saved.result.released === true, released, scenario);
     assert.equal(saved.result.held === true, !released, scenario);
@@ -441,6 +463,20 @@ test('Joppa package claims atomically and preserves each Task contract and scope
     assert.equal(task.requirementContext.item_id, itemIds['req:r']);
   }
   assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
+});
+
+test('Joppa claim guard rechecks remote state and authored pin changes before startup', async t => {
+  const f = await packageFixture(t);
+  const link = {workspace: 'remote', target: 'req:r', relation: 'depends_on', blocking: true, revision: 1,
+    status: {access: true, present: true, review_required: false, satisfied: true, current_revision: 1}};
+  f.objects.get('req:r').remote_links = [link];
+  await claimTask(f.run, f.persist);
+  link.status.satisfied = false;
+  await assert.rejects(guardTaskClaims(f.run, f.persist), /DEPENDENCY_NOT_READY: @remote\/req:r/);
+  link.status.satisfied = true;
+  link.revision = link.status.current_revision = 2;
+  await assert.rejects(guardTaskClaims(f.run, f.persist), /Acceptance context changed/);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
 });
 
 for (const mode of ['reject', 'incomplete']) test(`Joppa package ${mode} claim cannot start a lane`, async t => {

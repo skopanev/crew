@@ -173,6 +173,8 @@ def prompt_assignment(assignment):
         if level == "ac":
             result[level]["verification"] = assignment["joppa"]["objects"][item["id"]]["process"].get("verification")
         result[level]["item_id"] = assignment["joppa"]["objects"][item["id"]].get("item_id")
+        if assignment["joppa"]["objects"][item["id"]].get("remote_links"):
+            result[level]["remote_links"] = assignment["joppa"]["objects"][item["id"]]["remote_links"]
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     def prompt_data(item):
@@ -185,13 +187,22 @@ def prompt_assignment(assignment):
         "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],
+                   **({"remote_links": task["remote_links"]} if task.get("remote_links") else {}),
                    "data": prompt_data(task), "links": task["document"]["links"],
                    "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                   for task in tasks],
         "objects": {address: {"item_id": item.get("item_id"), "revision": item["current_revision"], "data": prompt_data(item),
+                              **({"remote_links": item["remote_links"]} if item.get("remote_links") else {}),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
                               "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
+    if assignment["joppa"].get("remote"):
+        remote = assignment["joppa"]["remote"]
+        result["joppa"]["remote"] = {"objects": {key: {**item,
+            "role": remote["schemas"][item["workspace"]]["types"][item["kind"]].get("role")}
+            for key, item in remote["objects"].items()}}
+    if assignment["joppa"].get("workspace_key"):
+        result["joppa"]["workspace_key"] = assignment["joppa"]["workspace_key"]
     if assignment["joppa"].get("scope") == "requirement":
         criteria = context.selected_criteria(assignment)
         ids = {item["id"] for item in criteria}
@@ -199,6 +210,8 @@ def prompt_assignment(assignment):
         result["joppa"]["objects"] = {key: item for key, item in result["joppa"]["objects"].items() if key not in ids}
         result["joppa"].update(scope="requirement", criteria=[{
             "id": item["id"], "item_id": assignment["joppa"]["objects"][item["id"]].get("item_id"), "revision": item["revision"],
+            **({"remote_links": assignment["joppa"]["objects"][item["id"]]["remote_links"]}
+               if assignment["joppa"]["objects"][item["id"]].get("remote_links") else {}),
             "annotations": assignment["joppa"]["objects"][item["id"]]["annotations"],
             "files": assignment["joppa"]["objects"][item["id"]]["files"],
             **{key: assignment["joppa"]["objects"][item["id"]]["document"].get(key) for key in ("data", "links")}}

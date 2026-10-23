@@ -1,5 +1,6 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
+import {remoteDependencyBlocker} from './dependencies.mjs';
 
 const require = (condition, message) => {
   if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
@@ -96,7 +97,7 @@ export async function requirementPlan(run, read) {
   }
   const types = (await read('joppa_tree', {}))?.schema?.types;
   require(types && typeof types === 'object', 'Joppa schema types are missing');
-  const cache = new Map();
+  const cache = new Map(), relevant = new Map();
   const object = async address => {
     require(validAddress(address), 'Joppa object address is invalid');
     if (!cache.has(address)) cache.set(address, read('joppa_objects', {address}));
@@ -107,10 +108,22 @@ export async function requirementPlan(run, read) {
       Boolean(types[value.kind]), `Joppa object is absent, historical, or invalid: ${address}`);
     return value;
   };
+  const remember = async value => {
+    const seen = new Set();
+    while (value && !relevant.has(value.address)) {
+      require(!seen.has(value.address), 'Remote dependency parent cycle');
+      seen.add(value.address);
+      const remote = remoteDependencyBlocker(value);
+      require(!remote, `Remote dependency is not current and satisfied: ${remote}`);
+      relevant.set(value.address, value);
+      value = value.document.parent ? await object(value.document.parent) : null;
+    }
+  };
   const present = value => value.document.present === true && value.document.data?.archived !== true;
   const reqObject = await object(requirement);
   require(present(reqObject) && types[reqObject.kind]?.role === 'requirement',
     'Requirement object is not a current present requirement');
+  await remember(reqObject);
   const reqClaim = normalizeClaim(reqObject.process?.planning_claim ?? reqObject.planning_claim);
   const reqProcessRev = Number.isSafeInteger(reqObject.process?.revision) ? reqObject.process.revision : null;
 
@@ -235,6 +248,7 @@ export async function requirementPlan(run, read) {
     require(!reviewRequired, `Current run Task needs review: ${address}`);
     require(await requirementAncestor(current, true) === requirement, `Current run Task belongs to a different requirement: ${address}`);
     require(taskRepository(current) === repository, `Current run Task belongs to a different repository: ${address}`);
+    await remember(current);
     manifestByAddress.set(address, {address, revision: current.current_revision, status: 'finishing', finishing: true});
     requirementTasksByAddress.set(address, taskRecord(current, status, false, true));
   }
@@ -269,6 +283,7 @@ export async function requirementPlan(run, read) {
       if (taskRepository(current) !== repository) continue;
       requirementTasksByAddress.set(current.address, taskRecord(current, status, reviewRequired, false));
       if (status === 'retired') continue;
+      await remember(current);
       if (status === 'done') {
         if (!reviewRequired && current.process?.status === 'done' && !current.process?.retired) {
           try {
@@ -309,12 +324,17 @@ export async function requirementPlan(run, read) {
   const final = !planningHeld && manifest.every(item => item.finishing) &&
     (ownByAddress.size > 0 || requirementTasks.some(item => item.status === 'done'));
   publications.sort((a, b) => a.task.localeCompare(b.task));
+  const remoteLinks = [...relevant.values()].filter(item => item.remote_links?.length || item.remote_links_revision > 0)
+    .map(item => ({address: item.address, revision: item.remote_links_revision || 0,
+      links: (item.remote_links || []).map(({status, ...link}) => link)}))
+    .sort((a, b) => a.address.localeCompare(b.address));
   const fingerprint = createHash('sha256').update(JSON.stringify({
     requirement: {address: requirement, revision: reqObject.current_revision, process_revision: reqProcessRev, planning_claim: reqClaim},
     repository,
     criteria,
     tasks: requirementTasks,
     publications,
+    ...(remoteLinks.length ? {remote_links: remoteLinks} : {}),
   })).digest('hex');
   return {branch, requirement, repository, final, planningHeld, fingerprint, manifest, publications};
 }

@@ -282,6 +282,19 @@ test('owner context changes invalidate a finding even without a document revisio
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0);
 });
 
+test('remote link edits invalidate cited audit context without changing the document revision', async t => {
+  const f = await fixture(t), object = f.objects.get('outcome:access');
+  object.remote_links_revision = 1;
+  object.remote_links = [{workspace: 'other', target: 'outcome:access', relation: 'related', blocking: false,
+    revision: 1, status: {access: true, present: true, current_revision: 1}}];
+  const input = {...await prepare(f.config), repositories: f.input.repositories};
+  object.remote_links[0].status.current_revision = 2;
+  await recheck(f.config, input, [f.finding]);
+  object.remote_links = [];
+  object.remote_links_revision++;
+  await assert.rejects(recheck(f.config, input, [f.finding]), /owner context changed/);
+});
+
 test('finding identity ignores display wording and evidence ordering', async t => {
   const f = await fixture(t);
   assert.equal(findingKey(f.finding), findingKey({...f.finding, title: 'Another title', actual: 'Same effect'}));

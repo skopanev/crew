@@ -20,7 +20,9 @@ const strings = value => typeof value === 'string' ? [value]
 const document = object => ({address: object.address, revision: object.current_revision,
   kind: object.kind, text: JSON.stringify({data: object.document.data, annotations: object.annotations || {}}, null, 2)
     + '\n' + strings([object.document.data, object.annotations]).join('\n'),
-  document: object.document, annotations: object.annotations || {}, files: object.files || [], references: object.references || []});
+  document: object.document, annotations: object.annotations || {}, files: object.files || [], references: object.references || [],
+  ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
+  ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {})});
 async function currentDocuments(config, addresses) {
   const documents = [];
   for (let offset = 0; offset < addresses.length; offset += 4) {

@@ -148,6 +148,16 @@ The user can hold several independent Tasks. The lane limit and Requirement occu
 Shared-login mode supports `target` and `branch` delivery. `requirement` delivery still requires the legacy reader configuration.
 Existing configurations without `mcpCommand` retain separate worker token behavior.
 
+Each dispatcher writes only to its configured Joppa workspace.
+The planner can read accessible linked contracts in other workspaces through the existing login.
+Foreign objects use an immutable workspace ID and a full object address. Their schemas remain separate.
+Blocking remote links must have a current revision pin and an accessible, present, satisfied target without pending review.
+The worker checks these conditions before startup and again before push. Joppa also checks them when it records completion.
+These checks require `joppa.mcpCommand` or `joppa.readerTokenFile` inside the lane.
+Native MCP uses one Broker connector file per run. The host login stays on the host.
+Remote link creation and revision changes remain explicit specification edits. Local Task saves preserve existing remote links.
+A child workspace status is a display summary. It does not prove the parent AC passed.
+
 For Joppa, start the dispatcher with `--source joppa --config <file>`.
 The dispatcher selects one executable Task per lane.
 Task title prefixes such as `[01]` and `[02]` break selection ties within one Requirement and repository.
