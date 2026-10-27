@@ -321,7 +321,7 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
         run(["git", "-C", repo["path"], "diff", "--quiet", commit, head, "--", *paths])
         if prepared:
             run(["git", "-C", repo["path"], "diff", "--quiet", baseline["head"], head, "--", *paths])
-    require(not any(item.get("status") in ("fail", "missing")
+    require(not any(item.get("status") in ("fail", "missing", "not_run")
                     for item in assignment["joppa"]["test_status"]["tests"]),
             "existing criterion tests contain a failure or missing result")
     require(all(fingerprint(repo) == snapshots.get(repo["id"]) for repo in assignment["repositories"]),

@@ -48,6 +48,9 @@ A repeated finalization checks target ancestry under the lock and skips checks a
 This mode requires `sharedLockDir` and a server-enforced read-only `joppa.readerTokenFile`.
 Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
 The host confirms the exact remote SHA before it calls `complete_task`.
+The command sends that SHA in `commit`. The host then checks the returned Task commit.
+An existing-code check sends the verified remote SHA. It does not create a commit.
+A completed Task records delivered work. Criterion test results decide acceptance separately.
 Each nonempty Requirement head must match a current DONE Task publication before another run adopts it.
 Crew also checks the Task holder, contract and planning ownership immediately before an intermediate push.
 After any failed intermediate run, Crew checks the remote Requirement head.

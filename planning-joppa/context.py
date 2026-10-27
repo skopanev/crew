@@ -123,6 +123,8 @@ def source(object):
     process = {key: value for key, value in object.get("process", {}).items() if key != "planning_claim"}
     value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
                                             "files", "references", "review_required", "work_ready")} | {"process": process}
+    if "contract_revision" in object:
+        value["contract_revision"] = object["contract_revision"]
     if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
         value["remote_links"] = object.get("remote_links", [])
         value["remote_links_revision"] = object.get("remote_links_revision", 0)
@@ -130,12 +132,19 @@ def source(object):
     return value
 
 
+def current_pin(pin, current, contract):
+    return (type(pin) is int and type(current) is int and type(contract) is int
+            and 1 <= contract <= pin <= current)
+
+
 def remote_satisfied(link):
     status = link.get("status", {})
     revision = link.get("revision")
-    return (type(revision) is int and revision > 0 and status.get("access") is True
+    return (current_pin(revision, status.get("current_revision"),
+                        status.get("contract_revision", status.get("current_revision")))
+            and status.get("access") is True
             and status.get("present") is True and status.get("review_required") is False
-            and status.get("current_revision") == revision and status.get("satisfied") is True)
+            and status.get("satisfied") is True)
 
 
 def read_remote_links(api, remote, object):
@@ -167,7 +176,7 @@ def remote_object(api, remote, workspace, address):
 
 def remote_snapshot(remote):
     return {"schemas": remote["schemas"], "objects": {
-        key: {**snapshot_source(value, remote["schemas"][value["workspace"]]["types"]),
+        key: {**snapshot_source(value, remote["schemas"][value["workspace"]]["types"], []),
               "workspace": value["workspace"]}
         for key, value in remote["objects"].items()}}
 
@@ -198,7 +207,7 @@ def snapshot_source(object, types, selected_ac=None):
         current["process"].pop(key, None)
     role = types[object["kind"]].get("role")
     selected = {selected_ac} if isinstance(selected_ac, str) else set(selected_ac or [])
-    if role == "task" or (role == "ac" and selected and object["address"] not in selected):
+    if role == "task" or (role == "ac" and selected_ac is not None and object["address"] not in selected):
         # Sibling execution state does not change the authored planning context.
         current.pop("current_revision")
         current.pop("process")
@@ -206,6 +215,11 @@ def snapshot_source(object, types, selected_ac=None):
         current.pop("review_required")
         current["document"] = {key: value for key, value in current["document"].items()
                                if key in ("data", "parent", "links", "present", "schema_revision")}
+        if role == "task":
+            current.pop("contract_revision", None)
+        elif "contract_revision" in current:
+            current["document"]["data"] = {key: value for key, value in current["document"]["data"].items()
+                                           if key != "tests"}
     if role == "task":
         annotations = dict(current.get("annotations") or {})
         comments = annotations.get("comments")
@@ -455,9 +469,10 @@ def load_requirement(api, config, req_id, selected=None):
                     continue
                 dependency = get(link["target"])
                 revision = link.get("revision")
-                origin = dependency["process"].get("origin_revision")
-                pin = (isinstance(revision, int) and isinstance(origin, int)
-                       and origin <= revision <= dependency["current_revision"]) if types[dependency["kind"]].get("role") == "task" else revision == dependency["current_revision"]
+                origin = (dependency["process"].get("origin_revision")
+                          if types[dependency["kind"]].get("role") == "task"
+                          else dependency.get("contract_revision", dependency["current_revision"]))
+                pin = current_pin(revision, dependency["current_revision"], origin)
                 if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")
@@ -540,7 +555,8 @@ def capture_object(target, workspace, object, api=None):
             types = snapshot["schema"]["types"]
             key = address
         require(object.get("kind") in types, "object schema changed during planning")
-        current = snapshot_source(object, types, [item["id"] for item in selected_criteria(assignment)])
+        current = snapshot_source(object, types, [] if scope is not snapshot else
+                                  [item["id"] for item in selected_criteria(assignment)])
         if scope is not snapshot:
             current["workspace"] = workspace
         if key in scope["objects"]:

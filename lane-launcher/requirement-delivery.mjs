@@ -24,7 +24,7 @@ export function requirementBranch(requirement, repository) {
   return branch;
 }
 
-export function parsePublication(evidence) {
+export function parsePublication(evidence, commit) {
   require(typeof evidence === 'string' && evidence.trim(), 'Publication evidence is missing');
   const shaLines = [...evidence.matchAll(/^(Landed SHA|Verified existing SHA):(.*)$/gm)];
   const targetLines = [...evidence.matchAll(/^Target:(.*)$/gm)];
@@ -34,6 +34,8 @@ export function parsePublication(evidence) {
   const shaMatch = /^[ \t]+([0-9a-f]{40}|[0-9a-f]{64})$/.exec(rawSha);
   const targetMatch = /^[ \t]+(\S+)$/.exec(rawTarget);
   require(shaMatch && targetMatch && validBranch(targetMatch[1]), 'Publication evidence SHA or Target is invalid');
+  require(commit === undefined || commit === null || commit === shaMatch[1],
+    'Task commit differs from its publication evidence');
   return {
     sha: shaMatch[1],
     target: targetMatch[1],
@@ -169,7 +171,7 @@ export async function requirementPlan(run, read) {
           if (!present(full)) continue;
           criteriaByAddress.set(item.address, {
             address: item.address,
-            revision: full.current_revision,
+            revision: full.contract_revision ?? full.current_revision,
             process_revision: Number.isSafeInteger(full.process?.revision) ? full.process.revision : null,
             planning_claim: normalizeClaim(full.process?.planning_claim ?? full.planning_claim),
           });
@@ -287,7 +289,7 @@ export async function requirementPlan(run, read) {
       if (status === 'done') {
         if (!reviewRequired && current.process?.status === 'done' && !current.process?.retired) {
           try {
-            const {sha, target} = parsePublication(current.process.done);
+            const {sha, target} = parsePublication(current.process.done, current.process.commit);
             publications.push({task: current.address, sha, target});
           }
           catch { /* A DONE Task without exact evidence cannot confirm a Requirement head. */ }

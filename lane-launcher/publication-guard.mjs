@@ -88,7 +88,7 @@ export async function guardPublications(run, read, ancestor) {
         const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
         if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
         let publication;
-        try { publication = parsePublication(target.process.done); }
+        try { publication = parsePublication(target.process.done, target.process.commit); }
         catch { pending(`${target.address} has no exact publication evidence`); }
         const internal = run.config.delivery === 'requirement' && repo.id === run.repository.id &&
           await requirement(target) === run.requirement;

@@ -44,6 +44,9 @@ test('requirement publication evidence needs one exact SHA and target', () => {
   const sha = 'a'.repeat(40);
   assert.deepEqual(parsePublication(`Landed SHA: ${sha}\nTarget: req/example\n`),
     {sha, target: 'req/example', kind: 'landed', verified: false});
+  assert.equal(parsePublication(`Landed SHA: ${sha}\nTarget: req/example\n`, sha).sha, sha);
+  assert.equal(parsePublication(`Landed SHA: ${sha}\nTarget: req/example\n`, null).sha, sha);
+  assert.throws(() => parsePublication(`Landed SHA: ${sha}\nTarget: req/example\n`, 'b'.repeat(40)), /Task commit differs/);
   for (const evidence of ['Landed SHA: abc\nTarget: develop',
     `Landed SHA: ${sha}\nVerified existing SHA: ${sha}\nTarget: develop`,
     `Landed SHA: ${sha}\nTarget: develop\nTarget: other`,
@@ -88,6 +91,17 @@ test('requirement fingerprint changes with current contracts and blocks retired 
   assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before.fingerprint);
   f.objects.get('work:one').process.status = 'retired';
   await assert.rejects(requirementPlan(f.run, f.read), /already retired/);
+});
+
+test('requirement fingerprint keeps a criterion current after a test-list-only save', async () => {
+  const f = fixture(), ac = f.objects.get('measure:a');
+  ac.contract_revision = ac.current_revision;
+  const before = (await requirementPlan(f.run, f.read)).fingerprint;
+  ac.current_revision++;
+  ac.document.data.tests = ['checks.test.js > required'];
+  assert.equal((await requirementPlan(f.run, f.read)).fingerprint, before);
+  ac.contract_revision = ac.current_revision;
+  assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before);
 });
 
 test('finalize-only delivery needs completed work and no current planning holder', async () => {
@@ -195,6 +209,22 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
   ];
   assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), null);
   assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
+
+  const criterion = f.objects.get('measure:b');
+  criterion.current_revision = 3;
+  criterion.contract_revision = 1;
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
+  criterion.contract_revision = 2;
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: 'measure:b'});
+  criterion.current_revision = 1;
+  delete criterion.contract_revision;
+
+  f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3, contract_revision: 2})];
+  assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), null);
+  for (const contract_revision of [0, 3, 4, null, true, '2']) {
+    f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3, contract_revision})];
+    assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), '@ws-remote/requirement:api');
+  }
 
   f.objects.get('work:one').remote_links = [
     remoteLink({target: 'work:one', revision: 1}, {current_revision: 1, satisfied: true}),
