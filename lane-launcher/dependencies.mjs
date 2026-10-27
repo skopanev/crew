@@ -8,13 +8,17 @@ const validRemoteLink = (link, ownWorkspace) => Boolean(link && typeof link === 
   validWorkspaceId(link.workspace) && (!ownWorkspace || link.workspace !== ownWorkspace) &&
   typeof link.target === 'string' && /^[^:\s]+:[^:\s]+$/.test(link.target));
 
+const currentPin = (pin, current, contract) => Number.isSafeInteger(pin) &&
+  Number.isSafeInteger(current) && Number.isSafeInteger(contract) &&
+  contract >= 1 && contract <= pin && pin <= current;
+
 const remoteLinkReady = link => {
   const status = link.status;
   if (!status || typeof status !== 'object') return false;
   if (status.access !== true || status.present !== true || status.satisfied !== true) return false;
   if (status.review_required !== false) return false;
-  if (!Number.isSafeInteger(status.current_revision) || status.current_revision < 1) return false;
-  return Number.isSafeInteger(link.revision) && link.revision >= 1 && link.revision === status.current_revision;
+  return currentPin(link.revision, status.current_revision,
+    status.contract_revision === undefined ? status.current_revision : status.contract_revision);
 };
 
 export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace_key) {
@@ -136,9 +140,8 @@ export function dependencyCheck(read) {
         const target = await object(link.target);
         if (!present(target)) continue;
         const task = await role(target) === 'task';
-        const pin = Number.isSafeInteger(link.revision) && (task ?
-          target.process?.origin_revision >= 1 && target.process.origin_revision <= link.revision &&
-            link.revision <= target.current_revision : link.revision === target.current_revision);
+        const pin = currentPin(link.revision, target.current_revision, task ? target.process?.origin_revision :
+          target.contract_revision === undefined ? target.current_revision : target.contract_revision);
         if (!pin || !await isSatisfied(target)) return target.address;
         const blocker = await blockedBy(target.address, next);
         if (blocker) return blocker;

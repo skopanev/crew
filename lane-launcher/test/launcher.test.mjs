@@ -11,6 +11,7 @@ import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
 import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
+import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
 
 const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
@@ -66,7 +67,12 @@ async function packageFixture(t, mode = 'success') {
     calls.push({name, args});
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
-    else if (name === 'joppa_objects') value = objects.get(args.address);
+    else if (name === 'joppa_objects') value = args.address ? objects.get(args.address) : {
+      items: [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
+        address: object.address, revision: object.current_revision, contract_revision: object.contract_revision,
+        title: object.document.data.title, work_ready: object.work_ready, review_required: object.review_required,
+        process: object.process, work_summary: {active: 0, done: 0}})), next_cursor: null};
+    else if (name === 'joppa_tests') value = {items: args.ac.split(',').map(address => ({address, status: 'grey'}))};
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
         purpose: objects.get(address).document.data.purpose,
@@ -86,7 +92,11 @@ async function packageFixture(t, mode = 'success') {
         value = {results: args.operations.map(({command}, index) => {
           const object = objects.get(command.id);
           if (command.op === 'claim_task') object.process = {status: 'in_progress', assignee: 'lane-1'};
-          if (command.op === 'complete_task') object.process = {status: 'done', assignee: null, done: command.evidence};
+          if (command.op === 'complete_task') {
+            assert.match(command.commit, /^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
+            object.process = {status: 'done', assignee: null, done: command.evidence,
+              commit: mode === 'wrong-commit' ? '0'.repeat(40) : command.commit};
+          }
           if (command.op === 'release_task') object.process = {status: 'open', assignee: null, claim: null};
           if (command.op === 'block_task') object.process = {status: 'open', assignee: null,
             blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};
@@ -127,6 +137,25 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert.equal(selected.candidate.requirement, 'req:r');
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('Joppa planner attempt identity keeps the contract revision after a test-list-only save', async t => {
+  const f = await packageFixture(t), ac = f.objects.get('ac:a1');
+  f.queue.length = 0;
+  ac.contract_revision = ac.current_revision;
+  const config = {workspace: f.run.workspace, url: f.run.config.joppa.url};
+  const before = await readyCriteria(config, f.run.joppaWorker.tokenFile);
+  ac.current_revision++;
+  ac.document.data.tests = ['checks.test.js > required'];
+  const after = await readyCriteria(config, f.run.joppaWorker.tokenFile);
+  assert.equal(after.find(row => row.address === ac.address).revision, ac.current_revision);
+  assert.deepEqual(after.map(row => row.attemptKey), before.map(row => row.attemptKey));
+  const readObject = async (tool, args) => tool === 'joppa_tree' ?
+    {schema: {types: {req: {role: 'requirement'}}}} : structuredClone(f.objects.get(args.address));
+  assert.deepEqual(await groupRequirements(after, readObject), await groupRequirements(before, readObject));
+  ac.contract_revision = ac.current_revision;
+  assert.notDeepEqual((await readyCriteria(config, f.run.joppaWorker.tokenFile)).map(row => row.attemptKey),
+    before.map(row => row.attemptKey));
 });
 
 test('one logged-in user can select independent work while another lane reserves capacity', async t => {
@@ -565,7 +594,59 @@ test('Joppa package completes every Task atomically with the same checked landin
     assert.equal(command.id, `task:t${index + 1}`);
     assert.match(command.evidence, new RegExp(`Task: task:t${index + 1}`));
     assert.equal(command.evidence.startsWith(landing), true);
+    assert.equal(command.commit, landing.match(/^Landed SHA: ([0-9a-f]+)$/m)[1]);
   });
+});
+
+test('Joppa completion names the checked existing commit without Task verification fields', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f);
+  const evidence = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8');
+  const sha = evidence.match(/^Landed SHA: ([0-9a-f]+)$/m)[1];
+  f.run.repository.targetBranch = 'checked-package';
+  fs.unlinkSync(path.join(artifacts, 'landing.txt'));
+  fs.writeFileSync(path.join(artifacts, 'verification.txt'), evidence.replace('Landed SHA:', 'Verified existing SHA:'));
+  const result = {code: 0, status: 'exited'};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.completed, true);
+  assert(f.run.completionRequest.operations.every(({command}) => command.commit === sha));
+  assert(f.run.tasks.every(({address}) => !('verification' in f.objects.get(address).process)));
+});
+
+test('Joppa completion keeps a Task current after a parent test-list-only save', async t => {
+  const f = await packageFixture(t), parent = f.objects.get('ac:a2');
+  parent.contract_revision = parent.current_revision;
+  parent.document.data.tests = ['checks.test.js > first'];
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f);
+  parent.current_revision++;
+  parent.document.data.tests = ['checks.test.js > replacement'];
+  const result = {code: 0, status: 'exited'};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.completed, true);
+  parent.document.data.title += ' changed';
+  assert.notEqual(contractDigest(parent), f.run.claim.contexts.find(context => context.address === parent.address).digest);
+});
+
+test('Joppa completion refuses a different confirmed commit', async t => {
+  const f = await packageFixture(t, 'wrong-commit');
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
+  await assert.rejects(finishTask(f.run, f.stateFile, result, artifacts), /did not confirm.*checked SHA/);
+  assert.equal(result.completed, undefined);
+});
+
+test('Joppa completion preserves an older saved request without silently adding commit', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist);
+  const artifacts = packageLanding(f);
+  f.run.completionRequest = {workspace: f.run.workspace, request_id: 'saved-before-upgrade',
+    operations: [{command: {op: 'complete_task', id: 'task:t1', revision: 3, evidence: 'Earlier request'}}]};
+  const saved = structuredClone(f.run.completionRequest), calls = f.calls.length;
+  await assert.rejects(finishTask(f.run, f.stateFile, {code: 0, status: 'exited'}, artifacts), /Saved completion request/);
+  assert.deepEqual(f.run.completionRequest, saved);
+  assert(!f.calls.slice(calls).some(call => call.name === 'joppa_batch'));
 });
 
 for (const address of ['ac:a2', 'req:r']) test(`Joppa package refuses completion after ${address} context changes`, async t => {

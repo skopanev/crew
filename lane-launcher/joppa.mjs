@@ -16,11 +16,20 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 const text = value => typeof value === 'string' && value.trim();
 const inside = (file, root) => file === root || file.startsWith(root + path.sep);
 export const executionId = address => 'joppa-' + createHash('sha256').update(address).digest('hex').slice(0, 32);
-export const contractDigest = object => createHash('sha256').update(JSON.stringify({
-  parent: object.document.parent, data: object.document.data, links: object.document.links,
-  ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
-  ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
-})).digest('hex');
+export const contractDigest = object => {
+  const data = {...object.document.data};
+  if (object.contract_revision !== undefined) {
+    require(Number.isSafeInteger(object.current_revision) && Number.isSafeInteger(object.contract_revision) && object.contract_revision > 0 &&
+      object.contract_revision <= object.current_revision, 'Joppa contract revision is invalid');
+    // The server keeps the contract current when only its test list changes.
+    delete data.tests;
+  }
+  return createHash('sha256').update(JSON.stringify({
+    parent: object.document.parent, data, links: object.document.links,
+    ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
+    ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
+  })).digest('hex');
+};
 
 function verifyRemoteDependencies(object) {
   const link = remoteDependencyBlocker(object);
@@ -669,14 +678,17 @@ export async function finishTask(run, stateFile, result, artifacts) {
     await verifySavedContexts();
     const current = await currentTasks(true);
     run.completionRequest ||= batchRequest(run, current.map(object => ({
-      op: 'complete_task', id: object.address, revision: object.current_revision,
+      op: 'complete_task', id: object.address, revision: object.current_revision, commit: sha,
       evidence: `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${path.basename(path.dirname(stateFile))}${findings ? '\nNonblocking findings:\n' + findings : ''}`})));
+    require(run.completionRequest.operations.every(({command}) => command.commit === sha),
+      'Saved completion request does not name the checked SHA; inspect it before retrying');
     persist();
     await mutateTasks(run, run.completionRequest);
     result.tasks = [];
     for (const claim of claims) {
       const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-      require(confirmed.address === claim.address && confirmed.process?.status === 'done', 'Joppa did not confirm every Task completion');
+      require(confirmed.address === claim.address && confirmed.process?.status === 'done' && confirmed.process?.commit === sha,
+        'Joppa did not confirm every Task completion at the checked SHA');
       result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }
     result.completed = true;

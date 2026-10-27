@@ -67,6 +67,34 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_test_list_revision_keeps_only_current_contract_pins(self):
+        value = item("criterion:a")
+        value["contract_revision"] = 2
+        self.assertEqual(context.source(value)["contract_revision"], 2)
+        for pin, current, contract, expected in ((2, 3, 2, True), (1, 3, 2, False),
+                (4, 3, 2, False), (2, 3, 0, False), (True, 3, 1, False)):
+            self.assertEqual(context.current_pin(pin, current, contract), expected)
+            link = {"revision": pin, "status": {"access": True, "present": True,
+                "current_revision": current, "contract_revision": contract,
+                "review_required": False, "satisfied": True}}
+            self.assertEqual(context.remote_satisfied(link), expected)
+
+    def test_snapshots_keep_selected_lists_and_ignore_runtime_task_revisions(self):
+        types = {"criterion": {"role": "ac"}, "work": {"role": "task"}}
+        ac = item("criterion:a", data={"title": "Criterion", "tests": ["checks.rs > first"]})
+        ac["contract_revision"] = 3
+        selected = context.snapshot_source(ac, types, [ac["address"]])
+        sibling = context.snapshot_source(ac, types, [])
+        ac["current_revision"] = ac["document"]["revision"] = 4
+        ac["document"]["data"]["tests"] = ["checks.rs > replacement"]
+        self.assertNotEqual(selected, context.snapshot_source(ac, types, [ac["address"]]))
+        self.assertEqual(sibling, context.snapshot_source(ac, types, []))
+        task = item("work:one")
+        task["contract_revision"] = 3
+        before = context.snapshot_source(task, types)
+        task["contract_revision"] = task["current_revision"] = task["document"]["revision"] = 4
+        self.assertEqual(before, context.snapshot_source(task, types))
+
     def test_remote_reader_keeps_namespace_schema_and_freshness(self):
         local = item("criterion:a")
         local["workspace_key"] = "ws-local"
@@ -551,6 +579,21 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a"])
         self.assertEqual(snapshot["criteria"], ["criterion:a"])
         self.assertNotIn("criterion:archived", snapshot["objects"])
+        objects["criterion:outside"]["current_revision"] = 4
+        objects["criterion:outside"]["contract_revision"] = 3
+        original_server_call = Server.call
+        def green_outside(self, name, args):
+            if name == "joppa_tests" and args.get("ac") == "criterion:outside":
+                return {"address": "criterion:outside", "status": "green"}
+            return original_server_call(self, name, args)
+        with patch.object(Server, "call", green_outside):
+            ready, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
+            objects["criterion:outside"]["contract_revision"] = 4
+            stale, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertNotIn("criterion:b", [entry["id"] for entry in stale["joppa"]["criteria"]])
+        objects["criterion:outside"]["current_revision"] = 3
+        del objects["criterion:outside"]["contract_revision"]
         with self.assertRaisesRegex(ValueError, "object is absent"):
             context.load(Server(), config, "criterion:archived")
         config["ac_ids"] = ["criterion:c"]
@@ -905,6 +948,10 @@ class ProviderTests(unittest.TestCase):
             snap = {"service": fingerprint(data["repositories"][0])}
             api = Fake(result=data["joppa"]["test_status"])
             publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            data["joppa"]["test_status"]["tests"].append({"address": "checks/checks.rs > another", "status": "not_run"})
+            with self.assertRaisesRegex(ValueError, "existing criterion tests contain a failure or missing result"):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            data["joppa"]["test_status"]["tests"].pop()
             with self.assertRaisesRegex(ValueError, "snapshot is missing"):
                 publication.verify_bindings(api, {"workspace": "example"}, value, data, {})
             row["status"] = "not_run"

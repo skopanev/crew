@@ -100,6 +100,10 @@ Publication rechecks the recorded pass and its commit ancestry. Cited test and i
 An unbound test needs a recorded pass under another AC before this shortcut can use it.
 The binding preserves existing test addresses by union. A changed or draft list uses one atomic bind-and-finish batch.
 This path requires server support for `set_ac_tests.revision` and test-only `finish_planning`.
+The test list is `document.data.tests` on the criterion. Its `tests_revision` is the current document revision.
+Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
+Dependencies accept pins from `contract_revision` through `current_revision`, inclusive.
+A save that changes only the test list preserves that contract boundary.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.

@@ -168,7 +168,7 @@ export async function readyCriteria(config, tokenFile, signal) {
       const failures = (blocked.get(row.address) || []).sort();
       if (status !== 'green' && (await dependencies(row.address)).ready) {
         rows.push({...row, testStatus: status, failedTaskCount: failures.length,
-          attemptKey: JSON.stringify([row.address, row.revision, failures])});
+          attemptKey: JSON.stringify([row.address, row.contract_revision ?? row.revision, failures])});
       }
     }
   }
