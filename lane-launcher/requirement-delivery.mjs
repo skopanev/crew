@@ -1,6 +1,7 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
 import {remoteDependencyBlocker} from './dependencies.mjs';
+import {taskContract} from './task-contract.mjs';
 
 const require = (condition, message) => {
   if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
@@ -192,7 +193,7 @@ export async function requirementPlan(run, read) {
     const data = value.document.data;
     require(data && typeof data.contract === 'string' && data.contract.trim(), `Task contract is missing: ${value.address}`);
     require(data.purpose === undefined || data.purpose === 'implementation', `Task is not an implementation Task: ${value.address}`);
-    const declarations = [...data.contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].map(match => match[1].trim());
+    const declarations = [...taskContract(data).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].map(match => match[1].trim());
     require(declarations.length === 1 && Boolean(declarations[0]) && !/\s/.test(declarations[0]),
       `Task needs an unambiguous Repository line: ${value.address}`);
     return declarations[0];
@@ -279,6 +280,7 @@ export async function requirementPlan(run, read) {
       const status = taskStatus(current, item.status);
       const reviewRequired = current.review_required === true || current.process?.review_required === true || item.review_required === true;
       if (status === 'retired' && (!current.document.data?.contract ||
+          !Object.hasOwn(current.document.data, 'steps') &&
           [...String(current.document.data.contract).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].length !== 1)) {
         continue;
       }

@@ -70,6 +70,17 @@ test('final requirement delivery waits for unfinished work and planning claims',
   assert.equal(held.planningHeld, true);
 });
 
+test('requirement delivery groups mixed inline and structured Task contracts without rewriting them', async () => {
+  const f = fixture(), data = f.objects.get('work:two').document.data;
+  Object.assign(data, {contract: 'Goal: existing result', repository: 'repo', module: 'core',
+    steps: ['Preserve the required result.'], checks: ['Exercise the result => Required output']});
+  const before = JSON.stringify(data);
+  const plan = await requirementPlan(f.run, f.read);
+  assert.equal(plan.final, true);
+  assert.equal(plan.publications.length, 1);
+  assert.equal(JSON.stringify(data), before);
+});
+
 test('only current DONE publication evidence confirms a requirement head', async () => {
   const f = fixture(), head = 'a'.repeat(40);
   let plan = await requirementPlan(f.run, f.read);

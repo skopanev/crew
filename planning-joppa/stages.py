@@ -129,7 +129,7 @@ def retry_startup(api, config, target, assignment, ac, advertised):
     for task in tasks:
         publication.editable(task)
         data = task["document"]["data"]
-        contract = data.get("contract", "")
+        contract = context.task_contract(data)
         require(isinstance(contract, str) and contract.strip(), "Startup retry requires an implementation contract")
         def field(name):
             values = re.findall(r"^" + name + r":[ \t]*(\S[^\r\n]*)$", contract, re.M)
@@ -189,9 +189,11 @@ def prompt_assignment(assignment):
         terminal_task = item.get("kind") == assignment["joppa"]["task_type"] and (
             item["process"].get("done") or item["process"].get("retired"))
         return {key: value for key, value in item["document"]["data"].items()
-                if key != "contract" or not terminal_task}
+                if key not in ("contract", "steps", "checks") or not terminal_task}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
         "test_status": assignment["joppa"]["test_status"],
+        "task_value_limits": {"outcome": publication.MAX_DATA_VALUE - len("Goal: "),
+                              "step": publication.MAX_DATA_VALUE, "check_line": publication.MAX_DATA_VALUE},
         "unfinished_work": assignment["joppa"].get("unfinished_work", []),
         "siblings": assignment["joppa"].get("siblings", []),
         "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],

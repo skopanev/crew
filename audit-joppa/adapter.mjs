@@ -4,6 +4,13 @@ import {findingKey, hash, read, require, successfulCalls, write} from '../audit/
 
 const api = (config, tool, args) => callJoppa(config.url, config.token_file, tool,
   {workspace: config.workspace, ...args}, {mcpCommand: config.mcp_command});
+const maxValue = 1024;
+function checkValues(value, field = 'data') {
+  if (typeof value === 'string') require([...value].length <= maxValue, `${field} exceeds ${maxValue} characters`);
+  else if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) checkValues(child, `${field}.${key}`);
+  }
+}
 async function inventory(config, kind) {
   const items = [];
   let cursor;
@@ -126,17 +133,24 @@ export async function publish(config, findings, input, artifacts) {
       ...(finding.kind === 'uncovered' ? [`Specification queries: ${finding.spec_searches.join('; ')}`,
         `No matching requirement: ${finding.why_uncovered}`, `Specification snapshot: ${hash(input.specification)}`] : []),
       `Source commits: ${input.repositories.map(repo => `${repo.id}=${repo.head}`).join(', ')}`].join('\n\n');
+    const field = config.inbox.body_field || 'body';
+    const data = {...config.inbox.fields, title: finding.title, owner: config.inbox.owner,
+      [field]: `Kind: ${finding.kind}\n\n${finding.title}\n\nRead the evidence comment for the complete finding.`,
+      status: 'unprocessed', audit_key: key};
+    checkValues(data);
     operations.push({command: {op: 'save_object', kind: config.inbox.kind, id, revision: 0,
       parent: config.inbox.parent || null,
-      data: {...config.inbox.fields, title: finding.title, owner: config.inbox.owner,
-        [config.inbox.body_field || 'body']: body, status: 'unprocessed', audit_key: key},
+      data,
       links: [...new Map(finding.spec.map(item => [item.address,
         {target: item.address, revision: item.revision, relation: 'related', blocking: false}])).values()],
       reason: 'Record an independently verified code and specification discrepancy.',
       ...(input.schema.types[config.inbox.kind].question ? {question_checked: input.schema.types[config.inbox.kind].question} : {})}});
+    operations.push({command: {op: 'note', target: address, id: `evidence-${key.slice(0, 32)}`,
+      text: body, reply_to: null}});
     published.push(address);
   }
   if (!operations.length) return {published, reused};
+  require(operations.length <= 100, 'Audit publication exceeds the Joppa limit of 100 operations; narrow the audit scope');
   const file = path.join(artifacts, 'publication.json');
   const request = {workspace: config.workspace, request_id: `crew-audit-${hash(operations)}`, operations};
   let saved;

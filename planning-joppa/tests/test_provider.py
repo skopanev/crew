@@ -71,6 +71,101 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_new_contract_fields_keep_the_full_mechanism_within_each_value_limit(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task['steps'] = ['Preserve the required behavior. ' + '🙂' * 240] * 5
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertEqual(saved['contract'], 'Goal: ' + task['outcome'])
+        self.assertEqual(saved['steps'], task['steps'])
+        self.assertGreater(len(context.task_contract(saved)), 1024)
+        for key in ('contract', 'repository', 'module', 'steps', 'checks'):
+            for entry in saved[key] if isinstance(saved[key], list) else [saved[key]]:
+                self.assertLessEqual(len(entry), 1024)
+
+    def test_contract_value_limits_fail_before_publication_without_truncation(self):
+        for field, size in (('outcome', 1018), ('step', 1024), ('check', 1024)):
+            for extra in (0, 1):
+                with self.subTest(field=field, extra=extra):
+                    data, value = assignment(), plan()
+                    task = value['tasks'][0]
+                    if field == 'outcome':
+                        task['outcome'] = '🙂' * (size + extra)
+                    elif field == 'step':
+                        task['steps'] = ['🙂' * (size + extra)]
+                    else:
+                        task['checks'] = [{'scenario': 'x', 'expected': '🙂' * (size + extra - 5)}]
+                        value['acceptance_checks'] = [{'repository': 'service', **task['checks'][0]}]
+                    before = deepcopy(value)
+                    if extra:
+                        with self.assertRaisesRegex(ValueError, 'use at most 1024; no text was truncated'):
+                            publication.operations(value, data)
+                    else:
+                        publication.operations(value, data)
+                    self.assertEqual(value, before)
+
+    def test_unchanged_long_inline_contract_is_not_migrated_by_a_link_update(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task.update(action='update', target='work:old', revision=3, steps=['x' * 1024, 'y' * 1024],
+                    depends_on=['work:dependency'])
+        old = data['joppa']['tasks'][0]['document']['data']
+        old.update(title=task['title'], contract=publication.contract(task, value), projects=['other', 'p'])
+        before = deepcopy(old)
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertGreater(len(saved['contract']), 1024)
+        self.assertEqual(saved, before)
+        self.assertNotIn('steps', saved)
+        self.assertEqual(old, before)
+
+    def test_changed_structured_steps_update_a_blocked_task_with_the_same_goal(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task.update(action='update', target='work:old', revision=3)
+        old = data['joppa']['tasks'][0]
+        old['document']['data'].update(publication.contract_fields(task))
+        old['process']['blocked'] = {'reason': 'Failed', 'position': 19}
+        task['steps'].append('Handle the recorded failure in the same mechanism.')
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertEqual(saved['contract'], old['document']['data']['contract'])
+        self.assertNotEqual(saved['steps'], old['document']['data']['steps'])
+
+    def test_structured_recovery_step_zero_keeps_its_scope_and_order(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task.update(action='update', target='work:old', revision=3)
+        task['steps'].insert(0, '0. Resume from the confirmed checkpoint without reapplying it.')
+        old = data['joppa']['tasks'][0]['document']['data']
+        old.update(publication.contract_fields(task))
+        task['steps'].append('Handle the remaining failure within this module.')
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertEqual(saved['steps'][0], old['steps'][0])
+        self.assertEqual(context.task_contract(saved).count('\n0. Resume'), 1)
+        old['module'] = 'other'
+        with self.assertRaisesRegex(ValueError, 'recovery step 0 scope mismatch'):
+            publication.operations(value, data)
+
+    def test_pending_work_hydrates_structured_queue_rows_without_a_projection_change(self):
+        data, value = assignment(), plan()
+        fields = publication.contract_fields(value['tasks'][0])
+        obj = item('work:outside', 'criterion:outside', fields)
+        calls = []
+        class Server:
+            def call(self, name, args):
+                calls.append((name, args))
+                if name == 'joppa_tasks':
+                    return {'tasks': [{'address': obj['address'], 'revision': 3, 'title': 'Outside',
+                        'projects': ['p'], 'status': 'open', 'contract': fields['contract']}], 'next_cursor': None}
+                self_address = args['address']
+                if self_address != obj['address']:
+                    raise AssertionError(self_address)
+                return deepcopy(obj)
+        result = context.pending_work(Server(), {'workspace': 'example', 'repositories': data['repositories']}, data)
+        self.assertEqual(result[0]['repository'], 'service')
+        self.assertEqual(result[0]['module'], 'core')
+        self.assertIn('Use the existing mechanism', result[0]['how'])
+        self.assertEqual([name for name, args in calls], ['joppa_tasks', 'joppa_objects'])
+
     def test_test_list_revision_keeps_only_current_contract_pins(self):
         value = item("criterion:a")
         value["contract_revision"] = 2
@@ -185,7 +280,7 @@ class ProviderTests(unittest.TestCase):
             publication.operations(value, data)
         value["tasks"][0]["checks"].append({key: val for key, val in check.items() if key != "repository"})
         saved = publication.operations(value, data)[0]["command"]
-        self.assertIn("Exercise the complete criterion => Required result", saved["data"]["contract"])
+        self.assertIn("Exercise the complete criterion => Required result", context.task_contract(saved["data"]))
         value["acceptance_checks"][0]["repository"] = "client"
         data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "client", "project": "project:q"})
         with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
@@ -211,7 +306,7 @@ class ProviderTests(unittest.TestCase):
         data, value = assignment(), plan()
         for check in (value["acceptance_checks"][0], value["tasks"][0]["checks"][0]):
             check.update(command="bun test checks.test.ts", cwd="src")
-        saved = publication.operations(value, data)[0]["command"]["data"]["contract"]
+        saved = context.task_contract(publication.operations(value, data)[0]["command"]["data"])
         self.assertIn("Reject invalid input [bun test checks.test.ts (cwd: src)] => No mutation", saved)
 
     def test_direct_ac_filter_refuses_before_claim(self):
@@ -946,7 +1041,7 @@ runpy.run_path({str(script)!r}, run_name="__main__")
         self.assertIn({"target": {"$ref": "task1/address"}, "revision": {"$ref": "task1/saved_revision"},
                        "relation": "depends_on", "blocking": True}, saved["links"])
         self.assertIn({"target": "work:dependency", "revision": 3, "relation": "depends_on", "blocking": True}, saved["links"])
-        self.assertIn("1. Use the existing mechanism", saved["data"]["contract"])
+        self.assertIn("1. Use the existing mechanism", context.task_contract(saved["data"]))
         self.assertEqual(data, original)
 
     def test_refuses_occupied_and_human_work(self):
