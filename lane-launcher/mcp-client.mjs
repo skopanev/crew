@@ -21,6 +21,7 @@ const stopClients = () => {
 };
 const onInterrupt = () => stopOnSignal('SIGINT', onInterrupt);
 const onTerminate = () => stopOnSignal('SIGTERM', onTerminate);
+const onHangup = () => stopOnSignal('SIGHUP', onHangup);
 function stopOnSignal(signal, handler) {
   stopClients();
   if (process.listenerCount(signal) === 1) {
@@ -33,6 +34,7 @@ function track(child) {
     process.once('exit', stopClients);
     process.prependListener('SIGINT', onInterrupt);
     process.prependListener('SIGTERM', onTerminate);
+    process.prependListener('SIGHUP', onHangup);
   }
   children.add(child);
 }
@@ -42,6 +44,7 @@ function untrack(child) {
     process.off('exit', stopClients);
     process.off('SIGINT', onInterrupt);
     process.off('SIGTERM', onTerminate);
+    process.off('SIGHUP', onHangup);
   }
 }
 
