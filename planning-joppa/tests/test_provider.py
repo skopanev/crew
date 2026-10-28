@@ -428,6 +428,31 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(len(api.calls), previous_calls)
 
+    def test_requirement_title_budget_includes_actual_generated_prefix(self):
+        for limit, number in ((64, 1), (43, 105)):
+            with self.subTest(limit=limit, number=number):
+                data, value = assignment(), plan()
+                data["joppa"]["task_schema"]["title_preview_length"] = limit
+                data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],
+                    criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
+                        for key in ("task_type", "task_schema", "test_status")}})
+                old = data["joppa"]["tasks"][0]
+                old["document"]["data"].update(title=f"[{number:02d}] Existing",
+                    contract="Repository: service\nModule: core")
+                prefix = f"[{number:02d}] "
+                budget = limit - len(prefix)
+                task = value["tasks"][0]
+                task.update(action="update", target=old["address"], revision=3, title="x" * budget)
+                value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
+                value["acceptance_checks"][0]["ac"] = "criterion:a"
+                operations = publication.operations(value, data)
+                title = operations[0]["command"]["data"]["title"]
+                self.assertEqual(title, prefix + task["title"])
+                self.assertEqual(len(title), limit)
+                task["title"] += "x"
+                with self.assertRaisesRegex(ValueError, f"Task first:.*use at most {budget} characters"):
+                    publication.operations(value, data)
+
     def test_requirement_explicitly_orders_every_unfinished_selected_task(self):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],

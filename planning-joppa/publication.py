@@ -175,7 +175,11 @@ def validate(plan, assignment):
         if task.get("action") != "retire":
             title = task_title(task, assignment["joppa"]["objects"], counters)
             schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
-            require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
+            limit = schema.get("title_preview_length", 64)
+            prefix = re.match(r"^\[\d+\] ", title)[0]
+            require(len(title) <= limit,
+                    f"Task {task['id']}: ordered Task title exceeds its schema limit of {limit}; "
+                    f"use at most {max(0, limit - len(prefix))} characters before generated prefix {prefix!r}")
         for dependency in task.get("depends_on", []):
             require(dependency in local or dependency in assignment["joppa"]["objects"],
                     f"dependency was not read in the Requirement context: {dependency}")
