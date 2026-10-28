@@ -91,9 +91,52 @@ The table shows the full Task address, stage or reason code, run ID, start time 
 NTK Dolber keeps its existing config and commands.
 
 `coderTimeoutSeconds` requires Medulla support for `--node-timeout` in the host runtime and the selected image.
-An older engine rejects the flag before coding. The cap cannot extend the workflow's coder timeout.
+Medulla 4.98.1 rejects this flag. Omit the setting with that release.
+Dolber checks host support before reading or claiming a Task. The cap cannot extend the workflow's coder timeout.
 It does not limit expert review or landing. A resumed run keeps its saved cap.
 Config changes apply only to new claims. Existing runs keep their captured arguments.
+
+### Reconcile a manually released startup failure
+
+Use this command only for a finished branch-delivery run that failed before the native workflow started.
+Stop dispatch for this project first. Confirm the Task release in Joppa. Remove the unsupported timeout setting before another launch.
+Run this command from the Crew directory. Supply the old run's `launch.json` path.
+The handler checks the checkout, process group, containers, native run folder and current Task contracts.
+It preserves the failed result and existing requests. It does not start a lane.
+
+```sh
+node --input-type=module - /absolute/old/run/launch.json <<'JS'
+import fs from 'node:fs';
+import path from 'node:path';
+import {readRun, save, alive} from './lane-launcher/runtime.mjs';
+import {api, finishTask} from './lane-launcher/joppa.mjs';
+const file = path.resolve(process.argv[2]), run = readRun(file);
+if (run.config.source !== 'joppa' || run.config.delivery !== 'branch' || run.finalizeOnly ||
+    run.result?.status !== 'failed' || !run.result.finishedAt || alive(run.worker?.pid) ||
+    run.completionRequest || run.blockRequest || run.releaseRequest || run.recovery || run.recoveryNoteRequest) {
+  throw new Error('Inspect this run before recovery');
+}
+const lock = path.join(path.dirname(file), 'worker.lock');
+fs.mkdirSync(lock);
+try {
+  for (const claim of run.claim.tasks || [run.claim]) {
+    const task = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
+    if (task.address !== claim.address || task.process?.status !== 'open' || task.process.assignee !== null) {
+      throw new Error('Task release is not confirmed');
+    }
+  }
+  const result = {...run.result};
+  await finishTask(run, file, result, null);
+  if (!run.releaseConfirmed) throw new Error('Startup release is not confirmed');
+  run.result = {...result, released: true, held: false, blocked: false,
+    tasks: run.releaseResults, recoveredAt: new Date().toISOString()};
+  save(file, run);
+  console.log('Release confirmed. Failed result preserved.');
+} finally {
+  fs.rmdirSync(lock);
+}
+JS
+```
 
 Expert review uses the receipt for `reviewCommands`. Landing replaces
 `artifacts/gates/current.json` with the full gate receipt before push.

@@ -322,7 +322,7 @@ test('Joppa package unconfirmed worker outcome remains held', async t => {
   assert.match(saved.result.error, /JOPPA_OUTCOME_UNCONFIRMED/);
 });
 
-for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
+for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container-cli-rejected', 'released-startup', 'released-native-run', 'unlabelled-container', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
   test(`Joppa pre-Medulla startup handling (${scenario}) releases only when unused and confirmed`, async t => {
     const f = await packageFixture(t);
     const worktreeRoot = path.join(f.root, 'worktrees'), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'ran');
@@ -333,10 +333,13 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'checkout-
     const checkout = path.join(worktreeRoot, f.run.executionId);
     const synced = '[sync] app: shared CBM refused tools/call: index worker ended with exit_nonzero';
     const line = scenario === 'removed-worktree' ? `run.sh: removed unused worktree: ${checkout}` :
+      ['container-cli-rejected', 'released-startup', 'released-native-run', 'unlabelled-container'].includes(scenario) ? `[medulla] session container medulla-sess-test starting\nerror: unrecognized arguments: --node-timeout implement_code=1800\nrun.sh: removed unused worktree: ${checkout}` :
       scenario === 'mcp-bridge' ? 'MCP bridge: failed: no listener could be started' :
       scenario === 'medulla-started' ? `${synced}\n[medulla] session container medulla-sess-1` :
       scenario === 'unknown-exit' ? 'unexpected pre-launch crash' : synced;
-    fs.writeFileSync(path.join(bins, 'docker'), `#!/bin/sh\n${scenario === 'docker-present' ? 'echo medulla-sess-1\n' : ''}exit 0\n`, {mode: 0o755});
+    const dockerOutput = scenario === 'docker-present' ? 'echo medulla-sess-1\n' :
+      scenario === 'unlabelled-container' ? 'case "$4" in name=*) echo medulla-sess-test;; esac\n' : '';
+    fs.writeFileSync(path.join(bins, 'docker'), `#!/bin/sh\n${dockerOutput}exit 0\n`, {mode: 0o755});
     const survivorFile = path.join(f.root, 'survivor.pid');
     const survivor = scenario === 'surviving-child' ? `sleep 60 </dev/null >/dev/null 2>&1 &\necho $! > '${survivorFile}'\n` : '';
     t.after(() => {
@@ -348,7 +351,15 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'checkout-
     fs.writeFileSync(path.join(bins, 'bash'), `#!/bin/sh\ntouch '${marker}'\nprintf '%s\\r\\n' "${line}" >&2\n${survivor}exit 2\n`, {mode: 0o755});
     if (scenario === 'checkout-present') fs.mkdirSync(checkout);
     if (scenario === 'broken-symlink') fs.symlinkSync(path.join(f.root, 'missing-target'), checkout);
-    if (scenario === 'native-run') fs.mkdirSync(path.join(laneRunFolder(f.run.runFolder, f.run.config.id), 'run-1'), {recursive: true});
+    if (['native-run', 'released-native-run'].includes(scenario)) fs.mkdirSync(path.join(laneRunFolder(f.run.runFolder, f.run.config.id), 'run-1'), {recursive: true});
+    const manuallyReleased = scenario.startsWith('released-');
+    if (manuallyReleased) for (const object of [f.objects.get('task:t1'), f.objects.get('task:t2')]) {
+      let process = object.process;
+      Object.defineProperty(object, 'process', {enumerable: true,
+        get: () => fs.existsSync(marker) ? {status: 'open', assignee: null} : process,
+        set: value => { process = value; },
+      });
+    }
     if (scenario === 'contract-changed') {
       const data = f.objects.get('task:t1').document.data, original = data.contract;
       Object.defineProperty(data, 'contract', {
@@ -360,15 +371,17 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'checkout-
     const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`});
     assert.equal(result.code, 2, result.stderr);
     assert.equal(fs.existsSync(marker), true, scenario);
-    const saved = read(f.stateFile), released = ['cbm-sync', 'mcp-bridge', 'removed-worktree'].includes(scenario);
+    const saved = read(f.stateFile), released = ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container-cli-rejected', 'released-startup'].includes(scenario);
     assert.equal(saved.releaseConfirmed === true, released, scenario);
     assert.equal(saved.result.released === true, released, scenario);
     assert.equal(saved.result.held === true, !released, scenario);
     assert.equal(Boolean(saved.result.blocked), false, scenario);
     assert.equal(runHoldsTasks(saved), !released, scenario);
+    if (manuallyReleased) assert.equal(f.calls.filter(call => call.name === 'joppa_batch' &&
+      call.args.operations.some(item => item.command.op === 'release_task')).length, 0, scenario);
     for (const address of ['task:t1', 'task:t2']) {
-      assert.equal(f.objects.get(address).process.status, released ? 'open' : 'in_progress', scenario);
-      assert.equal(f.objects.get(address).process.assignee, released ? null : 'lane-1', scenario);
+      assert.equal(f.objects.get(address).process.status, released || manuallyReleased ? 'open' : 'in_progress', scenario);
+      assert.equal(f.objects.get(address).process.assignee, released || manuallyReleased ? null : 'lane-1', scenario);
     }
   });
 }
@@ -690,6 +703,15 @@ test('unsupported private Docker fails before reading or claiming a ticket', asy
   const result = await execute(launcher, [f.configFile, '--once'], f.env);
   assert.equal(result.code, 1);
   assert.match(result.stderr, /requires Medulla with --docker-engine support/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(fs.existsSync(f.events), false);
+});
+test('unsupported coder timeout fails before reading or claiming a ticket', async t => {
+  const f = await setup(t);
+  save(f.configFile, {...f.config, coderTimeoutSeconds: 1800});
+  const result = await execute(launcher, [f.configFile, '--once'], f.env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /requires Medulla with --node-timeout support/);
   assert.equal(f.calls.length, 0);
   assert.equal(fs.existsSync(f.events), false);
 });

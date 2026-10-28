@@ -143,8 +143,15 @@ function preflight(config) {
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
   }
-  if (config.launchLanes && config.dockerEngine && !command('medulla', ['--help']).includes('--docker-engine')) {
-    throw new Error('dockerEngine requires Medulla with --docker-engine support; no ticket was claimed');
+  const coderTimeout = config.coderTimeoutSeconds != null || config.repositories?.some(repo => repo.coderTimeoutSeconds != null);
+  if (config.launchLanes && (config.dockerEngine || coderTimeout)) {
+    const help = command('medulla', ['--help']);
+    if (config.dockerEngine && !help.includes('--docker-engine')) {
+      throw new Error('dockerEngine requires Medulla with --docker-engine support; no ticket was claimed');
+    }
+    if (coderTimeout && !help.includes('--node-timeout')) {
+      throw new Error('coderTimeoutSeconds requires Medulla with --node-timeout support; no ticket was claimed');
+    }
   }
 }
 
