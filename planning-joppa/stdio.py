@@ -3,7 +3,9 @@ import atexit
 import json
 import os
 import selectors
+import signal
 import subprocess
+import sys
 import time
 
 
@@ -14,14 +16,20 @@ def validate_command(command):
     return command
 
 
+def install_sigterm_exit():
+    """Let CLI shutdown run the registered MCP cleanup handlers."""
+    signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(128 + number))
+
+
 class StdioRPC:
     def __init__(self, command):
         self.process = subprocess.Popen(validate_command(command), stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE)
+                                        stdout=subprocess.PIPE, start_new_session=True)
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.buffer = b""
         self.sequence = 0
+        self.closed = False
         atexit.register(self.close)
 
     def request(self, method, params, notification=False):
@@ -73,13 +81,27 @@ class StdioRPC:
                 raise ValueError("Joppa response exceeds 8 MiB")
 
     def close(self):
-        if self.process.poll() is None:
-            self.process.terminate()
+        if self.closed:
+            return
+        self.closed = True
+        # Stop descendants even when the command launcher has already exited.
+        for action in (signal.SIGTERM, signal.SIGKILL):
             try:
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=2)
+                os.killpg(self.process.pid, action)
+            except ProcessLookupError:
+                break
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                self.process.poll()
+                try:
+                    os.killpg(self.process.pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)
+            else:
+                continue
+            break
+        self.process.wait(timeout=2)
         self.selector.close()
         try:
             self.process.stdin.close()
