@@ -105,37 +105,37 @@ The handler checks the checkout, process group, containers, native run folder an
 It preserves the failed result and existing requests. It does not start a lane.
 
 ```sh
-node --input-type=module - /absolute/old/run/launch.json <<'JS'
-import fs from 'node:fs';
-import path from 'node:path';
-import {readRun, save, alive} from './lane-launcher/runtime.mjs';
-import {api, finishTask} from './lane-launcher/joppa.mjs';
-const file = path.resolve(process.argv[2]), run = readRun(file);
-if (run.config.source !== 'joppa' || run.config.delivery !== 'branch' || run.finalizeOnly ||
-    run.result?.status !== 'failed' || !run.result.finishedAt || alive(run.worker?.pid) ||
+node --input-type=module --eval '
+import fs from "node:fs";
+import path from "node:path";
+import {readRun, save, alive} from "./lane-launcher/runtime.mjs";
+import {api, finishTask} from "./lane-launcher/joppa.mjs";
+const file = path.resolve(process.argv[1]), run = readRun(file);
+if (run.config.source !== "joppa" || run.config.delivery !== "branch" || run.finalizeOnly ||
+    run.result?.status !== "failed" || !run.result.finishedAt || alive(run.worker?.pid) ||
     run.completionRequest || run.blockRequest || run.releaseRequest || run.recovery || run.recoveryNoteRequest) {
-  throw new Error('Inspect this run before recovery');
+  throw new Error("Inspect this run before recovery");
 }
-const lock = path.join(path.dirname(file), 'worker.lock');
+const lock = path.join(path.dirname(file), "worker.lock");
 fs.mkdirSync(lock);
 try {
   for (const claim of run.claim.tasks || [run.claim]) {
-    const task = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-    if (task.address !== claim.address || task.process?.status !== 'open' || task.process.assignee !== null) {
-      throw new Error('Task release is not confirmed');
+    const task = await api(run.config, run.joppaWorker, "joppa_objects", {workspace: run.workspace, address: claim.address});
+    if (task.address !== claim.address || task.process?.status !== "open" || task.process.assignee !== null) {
+      throw new Error("Task release is not confirmed");
     }
   }
   const result = {...run.result};
   await finishTask(run, file, result, null);
-  if (!run.releaseConfirmed) throw new Error('Startup release is not confirmed');
+  if (!run.releaseConfirmed) throw new Error("Startup release is not confirmed");
   run.result = {...result, released: true, held: false, blocked: false,
     tasks: run.releaseResults, recoveredAt: new Date().toISOString()};
   save(file, run);
-  console.log('Release confirmed. Failed result preserved.');
+  console.log("Release confirmed. Failed result preserved.");
 } finally {
   fs.rmdirSync(lock);
 }
-JS
+' /absolute/old/run/launch.json
 ```
 
 Expert review uses the receipt for `reviewCommands`. Landing replaces
