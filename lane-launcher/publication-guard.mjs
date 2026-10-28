@@ -85,7 +85,10 @@ export async function guardPublications(run, read, ancestor) {
         if (target.process?.status !== 'done' || target.process?.retired || target.review_required || target.process?.review_required) {
           pending(`${target.address} is not completed and current`);
         }
-        const declarations = [...taskContract(target.document.data).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
+        let contract;
+        try { contract = taskContract(target.document.data); }
+        catch (error) { invalid(`Dependency Task contract is invalid: ${target.address}: ${error.message}`); }
+        const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
         const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
         if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
         let publication;
