@@ -206,6 +206,8 @@ def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
 
 if __name__ == "__main__":
     import argparse
+    from stdio import install_sigterm_exit
+    install_sigterm_exit()
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "planning"))
     parser = argparse.ArgumentParser(description="Read the configured Joppa workspace through MCP stdio.")
     parser.add_argument("--url", required=True)

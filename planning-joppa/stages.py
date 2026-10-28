@@ -391,6 +391,8 @@ def main():
 
 
 if __name__ == "__main__":
+    from stdio import install_sigterm_exit
     # Register before MCP clients so their shutdown output precedes the final error.
     atexit.register(report_failure)
+    install_sigterm_exit()
     sys.exit(main())

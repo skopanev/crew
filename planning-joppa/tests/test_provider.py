@@ -4,6 +4,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import select
+import shlex
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -446,27 +450,80 @@ class ProviderTests(unittest.TestCase):
                 task = {"id": str(number), "ac": "criterion:b", "repository": repository, "title": "x" * budget}
                 self.assertLessEqual(len(publication.checked_task_title(task, data, counters)), 43)
 
-    def test_cli_failure_remains_after_mcp_shutdown_stderr(self):
+    @unittest.skipUnless(shutil.which("npx"), "npx is required for the transport lifecycle check")
+    def test_cli_failure_remains_after_npx_descendant_shutdown(self):
+        for terminate_parent in (False, True):
+            with self.subTest(terminate_parent=terminate_parent):
+                self.check_npx_shutdown(terminate_parent)
+
+    def check_npx_shutdown(self, terminate_parent):
         with tempfile.TemporaryDirectory() as directory:
             script = ROOT / "planning-joppa/stages.py"
-            program = f'''import atexit, runpy, sys
+            child = Path(directory) / "mcp-child.mjs"
+            child_pid = Path(directory) / "child.pid"
+            group_pid = Path(directory) / "group.pid"
+            child.write_text('''import fs from "node:fs";
+fs.writeFileSync(process.argv[2], String(process.pid));
+process.on("SIGTERM", () => setTimeout(() => {
+  console.error("mcp-remote shutdown stack");
+  process.exit(0);
+}, 150));
+console.log("ready");
+setInterval(() => {}, 1000);
+''')
+            command = [shutil.which("npx"), "--offline", "--call",
+                       f"node {shlex.quote(str(child))} {shlex.quote(str(child_pid))} & exit 0"]
+            program = f'''import os, runpy, signal, sys
 from pathlib import Path
 sys.path.insert(0, {str(ROOT / "planning")!r})
 import stages
 sys.path.insert(0, {str(ROOT / "planning-joppa")!r})
+from stdio import StdioRPC
 stages.artifacts = lambda: Path({directory!r})
 def probe():
-    atexit.register(lambda: print("mcp-remote shutdown stack", file=sys.stderr))
+    transport = StdioRPC({command!r})
+    Path({str(group_pid)!r}).write_text(str(transport.process.pid))
+    assert os.getpgid(transport.process.pid) == transport.process.pid
+    assert transport.process.stdout.readline() == b"ready\\n"
+    assert os.getpgid(int(Path({str(child_pid)!r}).read_text())) == transport.process.pid
+    assert transport.process.wait(timeout=5) == 0
+    if {terminate_parent!r}:
+        print("probe-ready", flush=True)
+        signal.pause()
     raise ValueError("Task first: use at most 59 characters")
-stages.probe = probe
-sys.argv = [{str(script)!r}, "probe"]
+stages.body_result = probe
+sys.argv = [{str(script)!r}, "capture", "plan"]
 runpy.run_path({str(script)!r}, run_name="__main__")
 '''
-            result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
+            try:
+                if terminate_parent:
+                    process = subprocess.Popen([sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    try:
+                        ready, _, _ = select.select([process.stdout], [], [], 10)
+                        self.assertTrue(ready, "capture did not reach its MCP command")
+                        self.assertEqual(process.stdout.readline().strip(), "probe-ready")
+                        process.terminate()
+                        stdout, stderr = process.communicate(timeout=20)
+                        result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                            process.communicate(timeout=2)
+                else:
+                    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True, timeout=20)
+                state = subprocess.run(["ps", "-p", child_pid.read_text(), "-o", "stat="], capture_output=True, text=True).stdout.strip()
+            finally:
+                if group_pid.exists():
+                    try:
+                        os.killpg(int(group_pid.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            self.assertEqual(result.returncode, 143 if terminate_parent else 1, result.stderr)
             self.assertIn("mcp-remote shutdown stack", result.stderr)
-            self.assertEqual(result.stderr.splitlines()[-1],
-                             "planning-joppa/probe: Task first: use at most 59 characters")
+            if not terminate_parent:
+                self.assertEqual(result.stderr.splitlines()[-1],
+                                 "planning-joppa/capture: Task first: use at most 59 characters")
+            self.assertTrue(not state or state.startswith("Z"), f"MCP descendant remains active: {state}")
 
     def test_requirement_title_budget_includes_actual_generated_prefix(self):
         for limit, number in ((64, 1), (43, 105)):
