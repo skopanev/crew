@@ -1,4 +1,5 @@
 """Joppa process nodes around the shared planning graph."""
+import atexit
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,13 @@ from common import digest, fingerprint, read, require, run, signal, write
 import stages as shared
 import context
 import publication
+
+_failure_message = None
+
+
+def report_failure():
+    if _failure_message:
+        print(_failure_message, file=sys.stderr, flush=True)
 
 
 def settings():
@@ -217,6 +225,7 @@ def prompt_assignment(assignment):
             **{key: assignment["joppa"]["objects"][item["id"]]["document"].get(key) for key in ("data", "links")}}
             for item in criteria],
                               criterion_schemas=assignment["joppa"]["criterion_schemas"])
+        result["joppa"]["task_title_max_by_repository"] = publication.title_budgets(assignment)
     # The Requirement document already supplies its authored body and AC text.
     decisions = json.loads(assignment["decisions"][0])
     result["decisions"] = [json.dumps({key: decisions.get(key) for key in
@@ -357,6 +366,7 @@ def needs_human():
 
 
 def main():
+    global _failure_message
     command = sys.argv[1]
     try:
         if command == "capture":
@@ -368,7 +378,8 @@ def main():
     except shared.DriftReview as review:
         signal("DRIFT", review)
     except Exception as error:
-        print(f"planning-joppa/{command}: {error}", file=sys.stderr)
+        _failure_message = f"planning-joppa/{command}: {error}"
+        print(_failure_message, file=sys.stderr)
         if command in ("capture", "prepare_critic"):
             kind = sys.argv[2] if command == "capture" else "critic"
             branch = "design" if kind == "plan" else "necessity" if kind == "necessity" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
@@ -380,4 +391,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # Register before MCP clients so their shutdown output precedes the final error.
+    atexit.register(report_failure)
     sys.exit(main())

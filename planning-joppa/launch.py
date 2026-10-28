@@ -45,9 +45,8 @@ Include criteria: [{ac: full-address, disposition: implement or verify_existing}
 Every acceptance_check also needs its exact ac address. Keep complete mechanisms and observable checks.
 Each Task runs and lands independently. Keep each Task within one repository and module.
 Declare depends_on only when a Task requires another Task's delivered output, including within this Requirement.
-Crew adds a [NN] prefix and a space to Task titles. The schema title limit includes this prefix.
-Do not include the prefix in your title. Subtract the actual prefix length from the schema limit.
-Reserve more space when an existing Task index needs more than two digits.
+Use joppa.task_title_max_by_repository for the maximum unnumbered title length in each repository.
+This budget reserves Crew's generated label within the schema limit. Do not include a label in your title.
 Title order does not replace dependencies. Do not create a package object.
 Reuse existing Tasks and proven test bindings. Do not create verification Tasks for behavior that existing tests prove.
 """
