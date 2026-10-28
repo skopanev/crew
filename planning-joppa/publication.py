@@ -10,6 +10,8 @@ from mcp import Rejected
 import validation
 import context
 
+MAX_PUBLICATION_OPERATIONS = 100
+
 
 def unclaimed(task):
     process = task["process"]
@@ -125,6 +127,18 @@ def package_counters(plan, assignment):
     return counters
 
 
+def title_budgets(assignment):
+    """Reserve labels for every Task that can fit in one publication."""
+    schemas = assignment["joppa"].get("criterion_schemas", {})
+    limit = min(schemas.get(item["id"], assignment["joppa"])["task_schema"].get("title_preview_length", 64)
+                for item in context.selected_criteria(assignment))
+    counters = package_counters({}, assignment)
+    budgets = {repo["id"]: limit - len(f"[{counters.get(repo['id'], 0) + MAX_PUBLICATION_OPERATIONS:02d}] ")
+               for repo in assignment["repositories"]}
+    require(all(value > 0 for value in budgets.values()), "Task schema title limit cannot fit a generated label and title")
+    return budgets
+
+
 def task_title(task, objects, counters):
     """Preserve update labels. Dependencies determine execution order."""
     existing = objects.get(task.get("target"), {})
@@ -138,6 +152,17 @@ def task_title(task, objects, counters):
         counters[repository] = counters.get(repository, 0) + 1
         number = counters[repository]
     return f"[{number:02d}] " + re.sub(r"^\[\d+\]\s*", "", text(task.get("title"), "task.title"))
+
+
+def checked_task_title(task, assignment, counters):
+    title = task_title(task, assignment["joppa"]["objects"], counters)
+    schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
+    limit = schema.get("title_preview_length", 64)
+    prefix = re.match(r"^\[\d+\] ", title)[0]
+    require(len(title) <= limit,
+            f"Task {task['id']}: ordered Task title exceeds its schema limit of {limit}; "
+            f"use at most {max(0, limit - len(prefix))} characters before generated prefix {prefix!r}")
+    return title
 
 
 def validate(plan, assignment):
@@ -173,13 +198,7 @@ def validate(plan, assignment):
     counters = package_counters(plan, assignment)
     for task in ordered:
         if task.get("action") != "retire":
-            title = task_title(task, assignment["joppa"]["objects"], counters)
-            schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
-            limit = schema.get("title_preview_length", 64)
-            prefix = re.match(r"^\[\d+\] ", title)[0]
-            require(len(title) <= limit,
-                    f"Task {task['id']}: ordered Task title exceeds its schema limit of {limit}; "
-                    f"use at most {max(0, limit - len(prefix))} characters before generated prefix {prefix!r}")
+            checked_task_title(task, assignment, counters)
         for dependency in task.get("depends_on", []):
             require(dependency in local or dependency in assignment["joppa"]["objects"],
                     f"dependency was not read in the Requirement context: {dependency}")
@@ -388,8 +407,7 @@ def operations(plan, assignment):
         # Verification evidence remains a separate operation.
         title = task["title"]
         if grouped:
-            title = task_title(task, objects, counters)
-            require(len(title) <= schema.get("title_preview_length", 64), "ordered Task title exceeds its schema limit")
+            title = checked_task_title(task, assignment, counters)
         data.update(title=title, contract=contract(task, plan))
         project = repositories[task["repository"]]["project"]
         project_id = project.split(":", 1)[1]
@@ -455,7 +473,7 @@ def operations(plan, assignment):
             "reason": "Publish the reviewed Requirement plan." if grouped
                       else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
                       else "Publish reviewed Tasks. The criterion still requires verification."}})
-    require(len(result) <= 100, "one publication supports at most 100 operations")
+    require(len(result) <= MAX_PUBLICATION_OPERATIONS, f"one publication supports at most {MAX_PUBLICATION_OPERATIONS} operations")
     return result
 
 

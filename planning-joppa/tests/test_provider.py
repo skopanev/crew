@@ -428,6 +428,46 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(len(api.calls), previous_calls)
 
+    def test_requirement_prompt_title_budgets_fit_the_publication_bound(self):
+        data = assignment()
+        data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "other"})
+        schemas = {address: {key: deepcopy(data["joppa"][key])
+                    for key in ("task_type", "task_schema", "test_status")}
+                   for address in ("criterion:a", "criterion:b")}
+        schemas["criterion:b"]["task_schema"]["title_preview_length"] = 43
+        data["joppa"].update(scope="requirement", criteria=[{"id": key} for key in schemas], criterion_schemas=schemas)
+        data["joppa"]["objects"]["work:old"]["document"]["data"].update(
+            title="[999] Existing", contract="Repository: service\nModule: core")
+        budgets = publication.title_budgets(data)
+        self.assertEqual(budgets, {"service": 36, "other": 37})
+        counters = publication.package_counters({}, data)
+        for repository, budget in budgets.items():
+            for number in range(publication.MAX_PUBLICATION_OPERATIONS):
+                task = {"id": str(number), "ac": "criterion:b", "repository": repository, "title": "x" * budget}
+                self.assertLessEqual(len(publication.checked_task_title(task, data, counters)), 43)
+
+    def test_cli_failure_remains_after_mcp_shutdown_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = ROOT / "planning-joppa/stages.py"
+            program = f'''import atexit, runpy, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / "planning")!r})
+import stages
+sys.path.insert(0, {str(ROOT / "planning-joppa")!r})
+stages.artifacts = lambda: Path({directory!r})
+def probe():
+    atexit.register(lambda: print("mcp-remote shutdown stack", file=sys.stderr))
+    raise ValueError("Task first: use at most 59 characters")
+stages.probe = probe
+sys.argv = [{str(script)!r}, "probe"]
+runpy.run_path({str(script)!r}, run_name="__main__")
+'''
+            result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("mcp-remote shutdown stack", result.stderr)
+            self.assertEqual(result.stderr.splitlines()[-1],
+                             "planning-joppa/probe: Task first: use at most 59 characters")
+
     def test_requirement_title_budget_includes_actual_generated_prefix(self):
         for limit, number in ((64, 1), (43, 105)):
             with self.subTest(limit=limit, number=number):
