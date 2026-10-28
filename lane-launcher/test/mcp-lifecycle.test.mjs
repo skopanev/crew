@@ -20,7 +20,7 @@ const listening = port => new Promise(resolve => {
   socket.setTimeout(500, () => { socket.destroy(); resolve(true); });
 });
 
-for (const mode of ['natural', 'close-and-exit', 'SIGINT', 'SIGTERM', 'handled-SIGINT']) {
+for (const mode of ['natural', 'close-and-exit', 'SIGINT', 'SIGTERM', 'SIGHUP', 'handled-SIGINT']) {
   test(`MCP descendants and their listener stop after ${mode}`, {skip: process.platform === 'win32', timeout: 15_000}, async t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-mcp-lifecycle-'));
     const server = path.join(root, 'server.mjs'), runnerFile = path.join(root, 'runner.mjs');
