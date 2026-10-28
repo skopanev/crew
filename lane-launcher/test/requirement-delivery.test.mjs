@@ -177,6 +177,12 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_NOT_LANDED'});
   git(['push', '-q', 'origin', 'HEAD:develop']);
   await publicationReader(config, f.read)(run);
+  Object.assign(f.objects.get('work:two').document.data, {
+    contract: 'Goal: delivered dependency', repository: 'repo', module: 'core',
+    steps: ['Preserve the delivered mechanism.'], checks: ['Exercise the mechanism => Required output']});
+  await publicationReader(config, f.read)(run);
+  f.objects.get('work:two').document.data.repository = 'unknown';
+  await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
 });
 
 test('top-level remote_links enforce access, presence, pinned revision, and satisfaction while failing closed', async () => {
