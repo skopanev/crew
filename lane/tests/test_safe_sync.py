@@ -34,6 +34,7 @@ class SafeSyncTests(unittest.TestCase):
         self.connector = self.root / 'connector.py'
         self.connector.write_text('''import fcntl,json,os,pathlib,sys,time
 repo = pathlib.Path(os.environ['SYNC_REPO']).resolve()
+indexed_here = False
 for line in sys.stdin:
  r = json.loads(line)
  if 'id' not in r: continue
@@ -45,9 +46,13 @@ for line in sys.stdin:
    except BlockingIOError: pass
    else: raise RuntimeError('sync released its lock before CBM completed')
   if name == 'index_repository':
+   indexed_here = True
    with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('start\\n')
    time.sleep(0.1)
    result = {'status':os.environ.get('SYNC_INDEX_RESULT','indexed'), 'project':r['params']['arguments']['name']}
+  elif os.environ.get('SYNC_CBM_LOST') and not indexed_here:
+   result = {'error':'project not found or not indexed'}
+   with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('lost\\n')
   else:
    result = {'status':os.environ.get('SYNC_INDEX_STATUS','ready'),
              'root_path':str(repo), 'indexed_at':'2000-01-01T00:00:00Z'}
@@ -108,7 +113,43 @@ for line in sys.stdin:
         for child in (first, second):
             _, err = child.communicate(timeout=20)
             self.assertEqual(child.returncode, 0, err)
+        # The second launch waits for the first, then finds the index at this commit.
+        self.assertEqual(self.events.read_text(), 'start\ndone\ndone\n')
+
+    def run_sync(self):
+        child = self.launch()
+        out, err = child.communicate(timeout=15)
+        self.assertEqual(child.returncode, 0, err)
+        return out
+
+    def test_unchanged_head_reuses_the_shared_index(self):
+        self.run_sync()
+        out = self.run_sync()
+        self.assertEqual(self.events.read_text(), 'start\ndone\ndone\n')
+        self.assertIn('shared CBM already at this commit', out)
+
+    def test_new_commit_indexes_again(self):
+        self.run_sync()
+        (self.seed / 'file.txt').write_text('after\n')
+        self.commit(self.seed, 'remote change')
+        self.git('-C', str(self.seed), 'push', 'origin', 'main')
+        out = self.run_sync()
         self.assertEqual(self.events.read_text(), 'start\ndone\nstart\ndone\n')
+        self.assertIn('updating shared CBM', out)
+
+    def test_index_lost_by_cbm_is_built_again(self):
+        self.run_sync()
+        self.env['SYNC_CBM_LOST'] = '1'
+        out = self.run_sync()
+        self.assertEqual(self.events.read_text(), 'start\ndone\nlost\nstart\ndone\n')
+        self.assertIn('updating shared CBM', out)
+
+    def test_failed_index_leaves_no_marker(self):
+        self.env['SYNC_INDEX_RESULT'] = 'queued'
+        child = self.launch()
+        _, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 2, err)
+        self.assertFalse((self.repo / '.git/crew-cbm-indexed').exists())
 
     def test_detached_checkout_preserves_unrelated_divergent_local_target(self):
         base = self.git('-C', str(self.repo), 'rev-parse', 'HEAD')
