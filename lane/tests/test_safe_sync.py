@@ -55,7 +55,7 @@ for line in sys.stdin:
    with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('lost\\n')
   else:
    result = {'status':os.environ.get('SYNC_INDEX_STATUS','ready'),
-             'root_path':str(repo), 'indexed_at':'2000-01-01T00:00:00Z'}
+             'root_path':str(repo), 'indexed_at':os.environ.get('SYNC_INDEXED_AT','2000-01-01T00:00:00Z')}
    with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('done\\n')
   result = {'structuredContent':result}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
@@ -142,6 +142,15 @@ for line in sys.stdin:
         self.env['SYNC_CBM_LOST'] = '1'
         out = self.run_sync()
         self.assertEqual(self.events.read_text(), 'start\ndone\nlost\nstart\ndone\n')
+        self.assertIn('updating shared CBM', out)
+
+    def test_index_replaced_by_another_writer_is_built_again(self):
+        # Another session indexed this root at another commit; the checkout is back at
+        # the marked commit, and CBM reports ready at the same root with a new build time.
+        self.run_sync()
+        self.env['SYNC_INDEXED_AT'] = '2000-01-02T00:00:00Z'
+        out = self.run_sync()
+        self.assertEqual(self.events.read_text(), 'start\ndone\ndone\nstart\ndone\n')
         self.assertIn('updating shared CBM', out)
 
     def test_failed_index_leaves_no_marker(self):
