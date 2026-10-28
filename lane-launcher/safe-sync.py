@@ -60,19 +60,25 @@ def sync(repo, call, configuration=None):
             raise RuntimeError(f'{repo} is ahead of origin/{target}; startup refused')
         project = configuration['cbmProject'] if configuration else str(repo).lstrip('/').replace('/', '-')
         cbm_started = time.monotonic()
-        # The commit the shared index was last built at. Every lane start and planner
-        # pass runs this sync, and re-indexing an unchanged HEAD costs a full index.
+        # The index this sync last built: commit, project, root and the CBM build time.
+        # Every lane start and planner pass runs this sync, and re-indexing an unchanged
+        # HEAD costs a full index. CBM status names no commit, so indexed_at binds the
+        # marker to one build: any other writer of this project rebuilds and changes it.
         marker = repo / '.git' / 'crew-cbm-indexed'
-        indexed = marker.read_text().strip() if marker.is_file() else ''
+        try:
+            indexed = json.loads(marker.read_text()) if marker.is_file() else {}
+        except ValueError:
+            indexed = {}
         status = {}
-        if indexed == sha:
+        if (indexed.get('sha'), indexed.get('project'), indexed.get('root')) == (sha, project, str(repo)):
             # The marker can outlive the index: a restarted or new CBM daemon does not
             # know the project, and then the index is built again.
             try:
                 status = tool(call, 'index_status', project=project, format='json')
             except RuntimeError:
                 status = {}
-        if status.get('status') == 'ready' and status.get('root_path') == str(repo):
+        if (status.get('status') == 'ready' and status.get('root_path') == str(repo)
+                and status.get('indexed_at') and status.get('indexed_at') == indexed.get('indexed_at')):
             print(f'[sync] {repo.name} {target} {sha[:12]}; '
                   f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
                   'shared CBM already at this commit', flush=True)
@@ -91,7 +97,9 @@ def sync(repo, call, configuration=None):
         cbm_elapsed = time.monotonic() - cbm_started
         if git(repo, 'rev-parse', 'HEAD') != sha or git(repo, 'status', '--porcelain'):
             raise RuntimeError(f'{repo} changed during CBM refresh; startup refused')
-        marker.write_text(sha + '\n')
+        if status.get('indexed_at'):
+            marker.write_text(json.dumps({'sha': sha, 'project': project, 'root': str(repo),
+                                          'indexed_at': status['indexed_at']}) + '\n')
         print(f'[sync] {repo.name}: Git and shared CBM ready · '
               f'CBM {cbm_elapsed:.1f}s · total {time.monotonic() - started:.1f}s', flush=True)
 
