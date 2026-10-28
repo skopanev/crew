@@ -3,6 +3,47 @@ import {StringDecoder} from 'node:string_decoder';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const maxBytes = 8 * 1024 * 1024;
+const children = new Set();
+const signalChild = (child, signal) => {
+  if (!child?.pid) return;
+  try {
+    if (process.platform === 'win32') child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch {}
+};
+const groupAlive = child => {
+  if (process.platform === 'win32') return child.exitCode === null && child.signalCode === null;
+  try { process.kill(-child.pid, 0); return true; }
+  catch (error) { return error.code !== 'ESRCH'; }
+};
+const stopClients = () => {
+  for (const child of children) signalChild(child, 'SIGKILL');
+};
+const onInterrupt = () => stopOnSignal('SIGINT', onInterrupt);
+const onTerminate = () => stopOnSignal('SIGTERM', onTerminate);
+function stopOnSignal(signal, handler) {
+  stopClients();
+  if (process.listenerCount(signal) === 1) {
+    process.off(signal, handler);
+    process.kill(process.pid, signal);
+  }
+}
+function track(child) {
+  if (!children.size) {
+    process.once('exit', stopClients);
+    process.prependListener('SIGINT', onInterrupt);
+    process.prependListener('SIGTERM', onTerminate);
+  }
+  children.add(child);
+}
+function untrack(child) {
+  children.delete(child);
+  if (!children.size) {
+    process.off('exit', stopClients);
+    process.off('SIGINT', onInterrupt);
+    process.off('SIGTERM', onTerminate);
+  }
+}
 
 export function McpClient(argv, options = {}) {
   if (!(this instanceof McpClient)) return new McpClient(argv, options);
@@ -22,8 +63,6 @@ export function McpClient(argv, options = {}) {
   this.buffer = '';
   this.bufferBytes = 0;
   this.decoder = new StringDecoder('utf8');
-  this.onProcessExit = () => { try { this.child?.kill('SIGKILL'); } catch {} };
-  process.once('exit', this.onProcessExit);
 }
 
 McpClient.prototype._syncRef = function () {
@@ -51,11 +90,12 @@ McpClient.prototype._failAll = function (error) {
   this.decoder = new StringDecoder('utf8');
   if (child) {
     try { child.stdin?.end(); } catch {}
-    try { child.kill('SIGTERM'); } catch {}
-    if (child.exitCode === null && child.signalCode === null) {
-      const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 1000);
-      child.once('exit', () => clearTimeout(killer));
-    }
+    signalChild(child, 'SIGTERM');
+    const forget = () => untrack(child);
+    const killer = setTimeout(() => { signalChild(child, 'SIGKILL'); forget(); }, 1000);
+    child.once('close', () => {
+      if (!groupAlive(child)) { clearTimeout(killer); forget(); }
+    });
   }
   for (const entry of entries) {
     clearTimeout(entry.timer);
@@ -69,8 +109,10 @@ McpClient.prototype._spawn = function () {
   const child = spawn(this.argv[0], this.argv.slice(1), {
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
+    detached: process.platform !== 'win32',
   });
   this.child = child;
+  if (child.pid) track(child);
   this.buffer = '';
   this.bufferBytes = 0;
   this.decoder = new StringDecoder('utf8');
@@ -206,6 +248,5 @@ McpClient.prototype.request = async function (method, params = {}, options = {})
 
 McpClient.prototype.close = function () {
   this.closed = true;
-  process.off('exit', this.onProcessExit);
   this._failAll(new Error('Joppa MCP client is closed'));
 };
