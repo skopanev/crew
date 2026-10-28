@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {callJoppa} from './joppa-api.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from './dependencies.mjs';
+import {taskContract} from './task-contract.mjs';
 import {parsePublication, requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
@@ -161,7 +162,8 @@ async function occupancyReader(config, worker) {
     return current;
   };
   const group = async address => {
-    const current = await object(address), contract = current.document.data?.contract;
+    const current = await object(address);
+    const contract = current.document.data?.contract ? taskContract(current.document.data) : '';
     const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
     const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
     if (!configured.length) return null;
@@ -413,9 +415,10 @@ export function latestRecovery(config, object, digest = contractDigest(object), 
 export function taskInput(config, object, contexts = object.contexts) {
   require(object.document?.present === true && object.historical === false, 'Joppa Task is absent or historical');
   const data = object.document.data;
-  require(text(data?.contract) && data.purpose === 'implementation', 'Task needs an implementation contract');
+  require(data?.purpose === 'implementation', 'Task needs an implementation contract');
+  const contract = taskContract(data);
   const field = name => {
-    const matches = [...data.contract.matchAll(new RegExp(`^${name}:[ \\t]*(\\S[^\\r\\n]*)$`, 'gm'))];
+    const matches = [...contract.matchAll(new RegExp(`^${name}:[ \\t]*(\\S[^\\r\\n]*)$`, 'gm'))];
     require(matches.length === 1, `Task contract needs exactly one ${name}: line`);
     return matches[0][1].trim();
   };
@@ -428,9 +431,9 @@ export function taskInput(config, object, contexts = object.contexts) {
   const modulePaths = configuredModule.paths || [modulePath];
   const recovery = latestRecovery(config, object, contractDigest(object), contexts);
   return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,
-    body: data.contract, module: modulePath, moduleId: module, modulePaths,
+    body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
-    parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: data.contract,
+    parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,
       instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(modulePaths)}. Complete only the remaining work.`}} : {})}};

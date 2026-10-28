@@ -58,10 +58,23 @@ async function fixture(t) {
           return;
         }
         value = {results: args.operations.map(({command: op}) => {
+          if (op.op === 'note') {
+            const object = objects.get(op.target);
+            assert(object, 'Evidence comment needs its saved inbox object');
+            assert(!object.annotations?.comments?.[op.id], 'Evidence comment already exists');
+            object.annotations = {comments: {...object.annotations?.comments,
+              [op.id]: {text: op.text, withdrawn: false, actor: 'person'}}};
+            return {command: {op: 'note'}, position: 2};
+          }
           assert.equal(op.op, 'save_object'); assert.equal(op.kind, 'incoming');
           assert.equal(op.question_checked, schema.types.incoming.question);
           assert.ok([...op.data.title].length <= (schema.types.incoming.title_preview_length ?? 64));
           assert.equal(new Set(op.links.map(link => `${link.target}:${link.relation}`)).size, op.links.length);
+          const checkLimit = value => {
+            if (typeof value === 'string') assert([...value].length <= 1024);
+            else if (value && typeof value === 'object') Object.values(value).forEach(checkLimit);
+          };
+          checkLimit(op.data);
           const address = `${op.kind}:${op.id}`;
           objects.set(address, object(address, op.data, op.parent));
           return {command: {op: 'save_object'}, address, saved_revision: 1};
@@ -139,11 +152,12 @@ test('observable behavior without a requirement can enter the inbox as an owner 
   assert.equal(reportRoute('/legacy-export').body, 'report');
   validate({...f.report, findings: [finding]}, f.input);
   const result = await publish(f.config, [finding], f.input, path.join(f.root, 'run'));
-  const note = f.objects.get(result.published[0]).document.data;
-  assert.match(note.body, /Kind: uncovered/);
-  assert.match(note.body, /Owner decision: Should/);
-  assert.match(note.body, /Specification snapshot:/);
-  assert.doesNotMatch(note.body, /Required: undefined/);
+  const note = f.objects.get(result.published[0]);
+  const evidence = Object.values(note.annotations.comments)[0].text;
+  assert.match(note.document.data.body, /Kind: uncovered/);
+  assert.match(evidence, /Owner decision: Should/);
+  assert.match(evidence, /Specification snapshot:/);
+  assert.doesNotMatch(evidence, /Required: undefined/);
 });
 
 test('an incomplete specification cannot prove that a behavior has no requirement', async t => {
@@ -184,12 +198,31 @@ test('only configured inbox documents are created and a repeated audit reuses th
   const saved = f.objects.get(first.published[0]);
   assert.equal(saved.kind, 'incoming'); assert.equal(saved.document.data.owner, 'person');
   assert.equal(saved.document.data.status, 'unprocessed');
-  assert.match(saved.document.data.body, /Actual: Every caller/);
-  assert.match(saved.document.data.body, /Source commits: backend=/);
+  const evidence = Object.values(saved.annotations.comments)[0].text;
+  assert.match(evidence, /Actual: Every caller/);
+  assert.match(evidence, /Source commits: backend=/);
   const second = await publish(f.config, [{...f.finding, title: 'Another wording'}], f.input, path.join(f.root, 'another-run'));
   assert.deepEqual(second.reused, first.published);
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
   await recheck(f.config, f.input);
+});
+
+test('long audit evidence stays exact in an atomic comment instead of an oversized field', async t => {
+  const f = await fixture(t);
+  const finding = {...f.finding, actual: 'Observed 🙂\n'.repeat(300)};
+  const result = await publish(f.config, [finding], f.input, path.join(f.root, 'run'));
+  const batch = f.calls.find(call => call.name === 'joppa_batch').args;
+  assert.deepEqual(batch.operations.map(op => op.command.op), ['save_object', 'note']);
+  const saved = f.objects.get(result.published[0]);
+  const evidence = Object.values(saved.annotations.comments)[0].text;
+  assert(evidence.includes(finding.actual));
+  assert.match(evidence, /Source commits: backend=/);
+  assert([...evidence].length > 1024);
+  assert([...saved.document.data.body].length <= 1024);
+  assert.equal(saved.document.links[0]?.target ?? batch.operations[0].command.links[0].target, 'outcome:access');
+  const retry = await publish(f.config, [finding], f.input, path.join(f.root, 'retry'));
+  assert.deepEqual(retry.reused, result.published);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
 });
 
 test('two quotations from one specification object produce one link', async t => {

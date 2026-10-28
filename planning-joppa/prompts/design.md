@@ -10,6 +10,8 @@ Supply its target and current revision. Use outcome for the retirement reason. K
 Keep the usual Task fields and observable retirement checks. Never depend on a Task retired by this plan.
 Update each remaining dependent Task to remove its dependency before you retire the target.
 Give at most five mechanism steps and observable AC and module checks for each Task.
+Follow assignment.joppa.task_value_limits for the outcome, each step and each rendered check.
+A rendered check includes scenario, optional command and cwd, then expected result. Keep all its text within check_line.
 Lane chooses files, functions and test placement. Keep research citations outside Task outcomes, steps and checks.
 Do not implement code or call mutations. Never claim that checks passed without evidence.
 Use disposition implement, verify_existing or blocked. A blocked plan needs concrete blockers.
@@ -25,6 +27,7 @@ Include citations for the assertions and affected implementation. A name or a so
 Inspect the actual assertions. Cover every Then and Evidence item. Missing tests or behavior are implementation work.
 When critic findings are supplied, resolve each blocking finding or refute it with source evidence.
 Keep one Task in one repository and module. Add dependencies only when outputs require them.
+Put Task relationships in depends_on. Keep link lists out of outcomes, steps and checks.
 Each Task must run and land independently. Declare dependencies only for required outputs, including within one repository.
 Explicitly update or retire every unfinished Task under the selected ACs.
 Title order does not replace depends_on links. Keep independent Tasks independent.

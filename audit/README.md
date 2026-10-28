@@ -80,6 +80,8 @@ Changed evidence stops publication. Audit output identifies the inspected files 
 An empty report means no confirmed deviation in that inspection. It does not certify the entire product.
 
 The Joppa writer creates only new documents of the configured inbox type.
+Each document contains a short summary. Its evidence comment preserves the complete finding, quotations and source commits.
+One atomic batch saves the document, native links and comment. Each document value stays within 1024 characters.
 It preserves existing specification, code, Tasks, test results and readiness.
 Stable finding IDs prevent a repeated audit from creating another identical inbox entry.
 An archived matching entry stops publication for inspection.

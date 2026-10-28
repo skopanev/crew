@@ -5,8 +5,27 @@ import os
 import re
 from pathlib import Path
 
-from common import digest, read, require, text, validate_input
+from common import digest, read, require, strings, text, validate_input
 from mcp import Joppa, Rejected
+
+
+def task_contract(data):
+    """Render either stored format without changing the document or claim digest."""
+    contract = data.get("contract", "")
+    if "steps" not in data:
+        return contract if isinstance(contract, str) else ""
+    text(contract, "Structured Task contract")
+    for key in ("repository", "module"):
+        value = text(data.get(key), "Structured Task " + key)
+        require("\n" not in value and "\r" not in value, "Structured Task needs a single-line " + key)
+    steps = list(strings(data.get("steps"), "Structured Task steps"))
+    checks = strings(data.get("checks"), "Structured Task checks")
+    lines = [contract, "", f"Repository: {data['repository']}", f"Module: {data['module']}", "", "How:"]
+    if steps[0].startswith("0. "):
+        lines.append(steps.pop(0))
+    lines.extend(f"{number}. " + re.sub(r"^\s*\d+\.\s+", "", step)
+                 for number, step in enumerate(steps, 1))
+    return "\n".join([*lines, "", "Checks:", *checks])
 
 
 def configuration(path):
@@ -86,6 +105,9 @@ def pending_work_page(api, config, assignment):
             if not projects.intersection(task.get("projects", [])):
                 continue
             contract = task.get("contract", "")
+            if not re.search(r"^Repository:[ \t]*\S", contract, re.M):
+                document = object_read(api, config["workspace"], address)
+                contract = task_contract(document["document"]["data"])
             def field(name):
                 match = re.search(r"^" + name + r":[ \t]*([^\r\n]+)$", contract, re.M)
                 return match[1].strip() if match else None

@@ -139,6 +139,19 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
+test('Joppa selects structured Tasks and detects their remote repository holders', async t => {
+  const f = await packageFixture(t);
+  for (const index of [1, 2]) Object.assign(f.objects.get(`task:t${index}`).document.data, {
+    contract: `Goal: scoped change ${index}`, repository: 'app', module: `m${index}`,
+    steps: ['Implement the scoped change.'], checks: [`Exercise the change => exact check ${index}`]});
+  const before = contractDigest(f.objects.get('task:t1'));
+  assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
+  f.objects.get('task:t2').process = {status: 'in_progress', assignee: 'manual-worker'};
+  assert.equal((await nextTask(f.run.config)).candidate, null);
+  assert.equal(contractDigest(f.objects.get('task:t1')), before);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
 test('Joppa planner attempt identity keeps the contract revision after a test-list-only save', async t => {
   const f = await packageFixture(t), ac = f.objects.get('ac:a1');
   f.queue.length = 0;
@@ -1155,7 +1168,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   const folder = path.join(f.root, 'dolber folder');
   fs.mkdirSync(folder);
   for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs',
-    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'mcp-client.mjs', 'dependencies.mjs',
+    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'mcp-client.mjs', 'task-contract.mjs', 'dependencies.mjs',
     'requirement-delivery.mjs', 'publication-guard.mjs', 'requirement-finalizer.mjs']) {
     fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(folder, file));
   }

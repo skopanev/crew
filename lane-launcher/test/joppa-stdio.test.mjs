@@ -6,7 +6,42 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {callJoppa} from '../joppa-api.mjs';
-import {contractDigest} from '../joppa.mjs';
+import {contractDigest, taskInput} from '../joppa.mjs';
+import {taskContract} from '../task-contract.mjs';
+
+test('Python publication and Dolber preserve the full structured contract through the coder input', t => {
+  const f = fixture(t);
+  const folder = fileURLToPath(new URL('../../planning-joppa/tests/', import.meta.url));
+  const source = `import sys,json
+sys.path.insert(0,sys.argv[1])
+import test_provider as fixture
+value=fixture.plan()
+value['tasks'][0]['steps']=['Preserve the required behavior. '+('🙂'*220)]*5
+ops=fixture.publication.operations(value,fixture.assignment())
+data=ops[0]['command']['data']
+print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
+`;
+  const {data, body} = JSON.parse(execFileSync(process.env.PLANNING_PYTHON || 'python3', ['-c', source, folder], {encoding: 'utf8'}));
+  assert([...body].length > 1024);
+  assert.equal(taskContract(data), body);
+  const object = {address: 'work:one', historical: false, current_revision: 1,
+    document: {present: true, parent: 'criterion:a', links: [], data}};
+  const config = {repositories: [{id: 'service', modules: [{name: 'core', path: 'src'}]}]};
+  const before = contractDigest(object), ticket = taskInput(config, object).ticket;
+  assert.equal(ticket.body, body);
+  assert.equal(ticket.acceptance, body);
+  assert.equal(contractDigest(object), before);
+  const artifacts = path.join(f.root, 'artifacts'); fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(artifacts, 'claim.json'), JSON.stringify({source: 'joppa', workspace: 'sample', ticket}));
+  const helper = fileURLToPath(new URL('../../lane/bin/ticket-input.mjs', import.meta.url));
+  execFileSync(process.execPath, [helper], {env: {...process.env, MEDULLA_RUN_DIR: f.root,
+    ticket_id: ticket.id, project_name: 'sample'}});
+  assert.equal(JSON.parse(fs.readFileSync(path.join(artifacts, 'ticket.json'), 'utf8')).body, body);
+  assert.equal(taskContract({contract: body}), body);
+  for (const bad of [{...data, steps: null}, {...data, repository: undefined}, {...data, checks: []}]) {
+    assert.throws(() => taskContract(bad), /Structured Task/);
+  }
+});
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-mcp-check-'));

@@ -11,6 +11,7 @@ import validation
 import context
 
 MAX_PUBLICATION_OPERATIONS = 100
+MAX_DATA_VALUE = 1024
 
 
 def unclaimed(task):
@@ -118,7 +119,7 @@ def package_counters(plan, assignment):
         data = existing["document"]["data"]
         if data.get("purpose") != "implementation":
             continue
-        repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", data.get("contract", ""), re.M)
+        repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", context.task_contract(data), re.M)
         if len(repository) != 1:
             continue
         repository = repository[0]
@@ -145,7 +146,8 @@ def task_title(task, objects, counters):
     data = existing.get("document", {}).get("data", {})
     prefix = re.match(r"^\[(\d+)\]\s", data.get("title", ""))
     repository = task["repository"]
-    same_repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", data.get("contract", ""), re.M) == [repository]
+    same_repository = (bool(data.get("contract")) and
+        re.findall(r"^Repository:[ \t]*([^\r\n]+)$", context.task_contract(data), re.M) == [repository])
     if prefix and same_repository:
         number = int(prefix[1])
     else:
@@ -238,7 +240,7 @@ def validate_one(plan, assignment):
             require("target" not in task and "revision" not in task, "new Task cannot replace an existing Task")
         if task["action"] != "retire":
             steps = strings(task.get("steps"), "task.steps")
-            body = existing["document"]["data"].get("contract", "") if existing else ""
+            body = context.task_contract(existing["document"]["data"]) if existing else ""
             how = re.search(r"(?ms)^How:\s*\n(.*?)(?=^Checks:|\Z)", body)
             recovery = re.findall(r"(?m)^0\. [^\r\n]+$", how[1] if how else "")
             require(len(recovery) <= 1, "Task has multiple recovery steps")
@@ -278,7 +280,7 @@ def validate_one(plan, assignment):
                            and any({key: own[key] for key in fields if key in own} == specification
                                    for own in task["checks"]) for task in normalized["tasks"])
             for task in retained:
-                body = task["document"]["data"].get("contract", "")
+                body = context.task_contract(task["document"]["data"])
                 checks = body.partition("\nChecks:\n")[2].splitlines()
                 assigned |= (re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) == [check["repository"]]
                              and check_line(check) in checks)
@@ -288,6 +290,17 @@ def validate_one(plan, assignment):
     limit = schema.get("title_preview_length", 64)
     for task in plan.get("tasks", []):
         require(len(task["title"]) <= limit, f"Task title exceeds the configured {limit}-character limit")
+        if task["action"] != "retire":
+            existing = inventory.get(task.get("target"))
+            fields = contract_fields(task)
+            if not existing or context.task_contract(existing["document"]["data"]) != context.task_contract(fields):
+                for key, value in fields.items():
+                    entries = enumerate(value) if isinstance(value, list) else [(None, value)]
+                    for index, entry in entries:
+                        path = key if index is None else f"{key}[{index}]"
+                        require(len(entry) <= MAX_DATA_VALUE,
+                                f"Task {task['id']}: data.{path} has {len(entry)} characters; "
+                                f"use at most {MAX_DATA_VALUE}; no text was truncated")
 
 
 def binding_checks(plan, assignment):
@@ -359,19 +372,14 @@ def check_line(check):
     return method + " => " + check["expected"]
 
 
+def contract_fields(task):
+    return {"contract": "Goal: " + task["outcome"], "repository": task["repository"], "module": task["module"],
+            "steps": [step if step.startswith("0. ") else re.sub(r"^\s*\d+\.\s+", "", step)
+                      for step in task["steps"]], "checks": [check_line(check) for check in task["checks"]]}
+
+
 def contract(task, plan):
-    lines = ["Goal: " + task["outcome"], "",
-             f"Repository: {task['repository']}", f"Module: {task['module']}", "", "How:"]
-    steps = task["steps"]
-    if steps[0].startswith("0. "):
-        lines.append(steps[0])
-        steps = steps[1:]
-    lines.extend(f"{number}. " + re.sub(r"^\s*\d+\.\s+", "", step)
-                 for number, step in enumerate(steps, 1))
-    lines += ["", "Checks:"]
-    for check in task["checks"]:
-        lines.append(check_line(check))
-    return "\n".join(lines)
+    return context.task_contract(contract_fields(task))
 
 
 def operations(plan, assignment):
@@ -408,7 +416,10 @@ def operations(plan, assignment):
         title = task["title"]
         if grouped:
             title = checked_task_title(task, assignment, counters)
-        data.update(title=title, contract=contract(task, plan))
+        data["title"] = title
+        fields = contract_fields(task)
+        if not existing or context.task_contract(data) != context.task_contract(fields):
+            data.update(fields)
         project = repositories[task["repository"]]["project"]
         project_id = project.split(":", 1)[1]
         projects = list(data.get("projects") or [])
@@ -440,7 +451,7 @@ def operations(plan, assignment):
             document = existing["document"]
             if (isinstance(existing["process"].get("blocked"), dict)
                     and not existing["process"].get("done") and not existing["process"].get("retired")):
-                require(data["contract"] != document["data"].get("contract"),
+                require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
             if data == document["data"] and links == document["links"] and ac == document["parent"]:
                 continue
