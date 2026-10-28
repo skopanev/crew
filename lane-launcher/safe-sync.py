@@ -60,19 +60,38 @@ def sync(repo, call, configuration=None):
             raise RuntimeError(f'{repo} is ahead of origin/{target}; startup refused')
         project = configuration['cbmProject'] if configuration else str(repo).lstrip('/').replace('/', '-')
         cbm_started = time.monotonic()
-        print(f'[sync] {repo.name} {target} {sha[:12]}; '
-              f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
-              'updating shared CBM', flush=True)
-        result = tool(call, 'index_repository', repo_path=str(repo), name=project,
-                      mode='moderate', persistence=False)
-        if result.get('status') != 'indexed' or result.get('project') != project:
-            raise RuntimeError(f'CBM did not complete indexing {repo.name}: {result}')
-        status = tool(call, 'index_status', project=project, format='json')
+        # The commit the shared index was last built at. Every lane start and planner
+        # pass runs this sync, and re-indexing an unchanged HEAD costs a full index.
+        marker = repo / '.git' / 'crew-cbm-indexed'
+        indexed = marker.read_text().strip() if marker.is_file() else ''
+        status = {}
+        if indexed == sha:
+            # The marker can outlive the index: a restarted or new CBM daemon does not
+            # know the project, and then the index is built again.
+            try:
+                status = tool(call, 'index_status', project=project, format='json')
+            except RuntimeError:
+                status = {}
+        if status.get('status') == 'ready' and status.get('root_path') == str(repo):
+            print(f'[sync] {repo.name} {target} {sha[:12]}; '
+                  f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
+                  'shared CBM already at this commit', flush=True)
+        else:
+            print(f'[sync] {repo.name} {target} {sha[:12]}; '
+                  f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
+                  'updating shared CBM', flush=True)
+            marker.unlink(missing_ok=True)
+            result = tool(call, 'index_repository', repo_path=str(repo), name=project,
+                          mode='moderate', persistence=False)
+            if result.get('status') != 'indexed' or result.get('project') != project:
+                raise RuntimeError(f'CBM did not complete indexing {repo.name}: {result}')
+            status = tool(call, 'index_status', project=project, format='json')
         if status.get('status') != 'ready' or status.get('root_path') != str(repo):
             raise RuntimeError(f'CBM is not ready for {repo.name}: {status}')
         cbm_elapsed = time.monotonic() - cbm_started
         if git(repo, 'rev-parse', 'HEAD') != sha or git(repo, 'status', '--porcelain'):
             raise RuntimeError(f'{repo} changed during CBM refresh; startup refused')
+        marker.write_text(sha + '\n')
         print(f'[sync] {repo.name}: Git and shared CBM ready · '
               f'CBM {cbm_elapsed:.1f}s · total {time.monotonic() - started:.1f}s', flush=True)
 
