@@ -618,12 +618,17 @@ export async function finishTask(run, stateFile, result, artifacts) {
   if (!run.claim) return;
   const persist = () => save(stateFile, run);
   const claims = claimTasks(run);
-  const currentTasks = async (validate = false) => {
+  const unclaimed = object => object.historical === false && object.document?.present === true &&
+    Number.isSafeInteger(object.current_revision) && object.process?.status === 'open' &&
+    object.process.assignee === null && !object.process.claim && !object.process.blocked &&
+    !object.process.done && !object.process.retired;
+  const owned = object => object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress';
+  const currentTasks = async (validate = false, allowReleased = false) => {
     const objects = [];
     for (const claim of claims) {
       const object = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
       require(object.address === claim.address, 'Joppa returned a different Task for completion');
-      require(object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress',
+      require(owned(object) || allowReleased && !run.completionRequest && !run.blockRequest && unclaimed(object),
         'Task holder changed; package outcome not written');
       if (validate) {
         verifyRemoteDependencies(object);
@@ -654,7 +659,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
         'Package acceptance context changed during execution; completion refused');
     }
   };
-  const objects = await currentTasks(result.code === 0);
+  const objects = await currentTasks(result.code === 0, result.code !== 0);
   if (result.code === 0) {
     const report = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(file => fs.existsSync(file));
     require(report, 'Checked publication evidence is missing; Task remains held');
@@ -723,26 +728,33 @@ export async function finishTask(run, stateFile, result, artifacts) {
       try { process.kill(-run.launchPgid, 0); return false; }
       catch (error) { return error.code === 'ESRCH'; }
     };
+    const startingContainers = [...output.matchAll(/^\[medulla\] session container (medulla-sess-[\w.-]+) starting\r?$/gm)]
+      .map(match => match[1]);
     const preMedullaFailed = !preexisting &&
       (Boolean(startup) || output.includes(`run.sh: removed unused worktree: ${checkout}`)) &&
-      !/^\[medulla\] /m.test(output) &&
+      output.split(/\r?\n/).filter(line => line.startsWith('[medulla] '))
+        .every(line => /^\[medulla\] session container medulla-sess-[\w.-]+ starting$/.test(line)) &&
       !output.includes('run.sh: retained ') && !output.includes('run.sh: cannot remove ') &&
       launchGroupGone() &&
       runFolders.size > 0 &&
+      startingContainers.every(name => !command('docker', ['ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.Names}}'])) &&
       [...runFolders].every(folder => !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}']));
     const startupFailed = result.status === 'failed' && !artifacts && checkoutAbsent && nativeEmpty &&
       contractsUnchanged && (containerFailed || preMedullaFailed);
     const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged &&
       output.includes(`run.sh: removed unused worktree: ${checkout}`) && isPrepareFailure(artifacts);
     if (startupFailed || prepareFailed) {
-      run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
-        revision: object.current_revision, reason: prepareFailed
-          ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
-          : containerFailed
-            ? 'Session container never became ready. No native workflow ran; unused checkout removed.'
-            : 'Lane startup failed before workflow launch. No native workflow ran; unused checkout absent.'})));
-      persist();
-      await mutateTasks(run, run.releaseRequest);
+      if (!objects.every(unclaimed)) {
+        require(objects.every(owned), 'PACKAGE_RELEASE_UNCONFIRMED: Task ownership differs within the package');
+        run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
+          revision: object.current_revision, reason: prepareFailed
+            ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
+            : containerFailed
+              ? 'Session container never became ready. No native workflow ran; unused checkout removed.'
+              : 'Lane startup failed before workflow launch. No native workflow ran; unused checkout absent.'})));
+        persist();
+        await mutateTasks(run, run.releaseRequest);
+      }
       run.releaseResults = [];
       for (const claim of claims) {
         const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
@@ -755,11 +767,13 @@ export async function finishTask(run, stateFile, result, artifacts) {
       }
       run.releaseConfirmed = true;
       result.released = true;
+      result.held = false;
       result.blocked = false;
       result.tasks = run.releaseResults;
       persist();
       return;
     }
+    require(objects.every(owned), 'Task holder changed; package outcome not written');
     if (!preexisting && claims.length === 1 && isImplementTimeout(artifacts)) {
       result.held = true;
       result.blocked = false;
