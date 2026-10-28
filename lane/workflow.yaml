@@ -968,6 +968,7 @@ nodes:
   git_fix:
     timeout: 900
     env:
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       EQUILL_ROLE: crew-lane-coder
       EQUILL_RULES: none
