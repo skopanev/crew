@@ -183,6 +183,9 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   await publicationReader(config, f.read)(run);
   f.objects.get('work:two').document.data.repository = 'unknown';
   await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
+  f.objects.get('work:two').document.data.repository = 'repo';
+  f.objects.get('work:two').document.data.steps = null;
+  await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
 });
 
 test('top-level remote_links enforce access, presence, pinned revision, and satisfaction while failing closed', async () => {
