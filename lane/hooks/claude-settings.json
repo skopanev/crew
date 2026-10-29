@@ -134,6 +134,11 @@
             "type": "command",
             "command": "rtk hook claude",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/no-pattern-kill.sh",
+            "timeout": 10
           }
         ]
       }
