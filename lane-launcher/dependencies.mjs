@@ -93,7 +93,7 @@ export function dependencyCheck(read) {
     const result = [];
     let cursor;
     do {
-      const page = await read('joppa_objects', {parent: value.address, limit: 100, ...(cursor ? {cursor} : {})});
+      const page = await read('joppa_objects', {parent: value.address, limit: 25, fields: ['kind', 'present', 'parent', 'revision'], ...(cursor ? {cursor} : {})});
       for (const child of page.items) {
         if (child.present !== true) continue;
         if (!(await criterionBranches()).has(child.kind)) continue;

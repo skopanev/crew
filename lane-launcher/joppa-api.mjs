@@ -58,7 +58,31 @@ async function responseMessage(response, id) {
   }
 }
 
-export async function callJoppa(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
+// Compact Joppa detail reads omit values that repeat the address or the current revision.
+// Restore them, and rebuild the comment map from comment pages, so callers keep one shape.
+export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
+  const value = await callJoppaRaw(url, tokenFile, tool, arguments_, options);
+  const args = arguments_ || {};
+  if (tool !== 'joppa_objects' || typeof args.address !== 'string' || args.revision != null || args.history ||
+      args.comments_cursor || args.links_cursor || !object(value) || !object(value.document)) return value;
+  value.kind ??= args.address.split(':')[0];
+  value.historical ??= false;
+  if (Number.isSafeInteger(value.current_revision)) value.contract_revision ??= value.current_revision;
+  let page = value.comments;
+  if (object(page) && Array.isArray(page.items)) {
+    const comments = {};
+    for (;;) {
+      for (const item of page.items) comments[item.id] = item;
+      if (!page.next_cursor) break;
+      page = (await callJoppaRaw(url, tokenFile, tool, {...args, comments_cursor: page.next_cursor}, options)).comments;
+    }
+    delete value.comments;
+    value.annotations = {...(object(value.annotations) ? value.annotations : {}), comments};
+  }
+  return value;
+}
+
+async function callJoppaRaw(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
   const endpoint = new URL(url);
   const local = endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname);
   if (!(endpoint.protocol === 'https:' || local) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {

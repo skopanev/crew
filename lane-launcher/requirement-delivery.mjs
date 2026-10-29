@@ -157,7 +157,7 @@ export async function requirementPlan(run, read) {
     let cursor;
     const cursors = new Set();
     do {
-      const page = await read('joppa_objects', {parent: parentAddress, limit: 100, ...(cursor ? {cursor} : {})});
+      const page = await read('joppa_objects', {parent: parentAddress, limit: 25, fields: ['kind', 'present', 'parent', 'revision'], ...(cursor ? {cursor} : {})});
       require(page && Array.isArray(page.items), `Joppa child object page is invalid for ${parentAddress}`);
       for (const item of page.items) {
         require(item && validAddress(item.address) && Boolean(types[item.kind]), 'Joppa child object is invalid');
