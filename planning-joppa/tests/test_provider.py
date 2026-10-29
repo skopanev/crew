@@ -135,8 +135,8 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaisesRegex(MCPError, 'positive integer'):
                 reader.call('joppa_tasks', {'limit': limit})
 
-    def test_compact_detail_capture_refuses_a_changed_document_or_position(self):
-        for drift in ('document', 'position'):
+    def test_compact_detail_capture_refuses_a_changed_document_or_revision(self):
+        for drift in ('document', 'current_revision'):
             with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
                 compact = item('work:a')
                 compact.update(position=3, comments={'items': [], 'total': 0})
@@ -144,7 +144,7 @@ class ProviderTests(unittest.TestCase):
                 if drift == 'document':
                     full['document']['data']['title'] = 'Changed'
                 else:
-                    full['position'] = 4
+                    full['current_revision'] = 4
                 class Server(Fake):
                     def raw_call(self, name, args):
                         return deepcopy(compact)
@@ -165,6 +165,21 @@ class ProviderTests(unittest.TestCase):
         del data['joppa']['task_schema']['title_max_length']
         with self.assertRaisesRegex(ValueError, 'configured 64-character limit'):
             publication.operations(value, data)
+
+    def test_unrelated_workspace_write_does_not_invalidate_an_agent_read(self):
+        compact = item('work:a')
+        compact.update(position=3, comments={'items': [], 'total': 0})
+        full = deepcopy(compact)
+        full['position'] = 4
+        class Server(Fake):
+            def raw_call(self, name, args):
+                return deepcopy(compact)
+        reader = Reader(Server(result=full), 'example', Path('/unused'))
+        with patch.object(context, 'capture_object') as capture:
+            self.assertEqual(reader.call('joppa_objects', {'address': 'work:a'}), compact)
+            capture.assert_called_once()
+        historical = context.complete_object(lambda *args: None, {'revision': 2}, item('work:a'))
+        self.assertNotIn('contract_revision', historical)
 
     def test_new_contract_fields_keep_the_full_mechanism_within_each_value_limit(self):
         data, value = assignment(), plan()

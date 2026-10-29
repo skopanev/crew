@@ -81,6 +81,7 @@ for await(const line of createInterface({input:process.stdin})) {
     if(comments.length) value.comments={items:comments.slice(start,start+25),total:comments.length,
       ...(start+25<comments.length?{next_cursor:String(start+25)}:{})};
     if(start && state.commentDrift) value.position++;
+    if(start && state.commentObjectDrift) value.document.data.title='Changed';
    }
    result=value?{structuredContent:value}:{isError:true,structuredContent:{error:'Object unavailable'}};
   }
@@ -129,6 +130,9 @@ test('native reads keep checkpoints beyond 25 while agent reads stay compact and
   assert.deepEqual(result.document, object.document);
   assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tasks', {}, {mcpCommand: calls})).tasks, []);
   assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tests', {}, {mcpCommand: calls})).tests, []);
+  const movingState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  movingState.commentDrift = true;
+  fs.writeFileSync(stateFile, JSON.stringify(movingState));
   fs.writeFileSync(path.join(f.root, 'input.json'), JSON.stringify({workspace: 'sample', ac: {id: 'criterion:a'}, joppa: {}}));
   fs.writeFileSync(path.join(f.root, 'joppa-snapshot.json'), JSON.stringify({schema: {types: {work: {role: 'task'}}}, objects: {}}));
   const folder = fileURLToPath(new URL('../../planning-joppa/', import.meta.url));
@@ -163,6 +167,14 @@ api.stdio.close()
   assert(operations.every(call => !['joppa_command', 'joppa_batch'].includes(call.name)));
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.commentDrift = true;
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  const stable = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: object.address}, {mcpCommand: calls});
+  assert.equal(Object.keys(stable.annotations.comments).length, 31);
+  const historical = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: object.address, revision: 3}, {mcpCommand: calls});
+  assert.equal(historical.contract_revision, undefined);
+  state.commentObjectDrift = true;
   fs.writeFileSync(stateFile, JSON.stringify(state));
   await assert.rejects(callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls}), /changed during comment read/);

@@ -63,7 +63,7 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
   if (tool === 'joppa_objects' && arguments_.address && object(result.document)) {
     result.kind ??= result.address.split(':', 1)[0];
     result.historical ??= result.document.revision !== undefined && result.document.revision !== result.current_revision;
-    result.contract_revision ??= result.current_revision;
+    if (!arguments_.revision) result.contract_revision ??= result.current_revision;
     result.process ??= {};
     result.process.assignee ??= null;
     result.annotations ??= {};
@@ -71,8 +71,9 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
       const comments = {}, seen = new Set(), total = result.comments.total;
       let page = arguments_.comments_cursor
         ? await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: undefined}, options) : result;
+      const first = page;
       for (;;) {
-        if (page.address !== result.address || page.position !== result.position ||
+        if (page.address !== result.address ||
             page.current_revision !== result.current_revision || JSON.stringify(page.document) !== JSON.stringify(result.document)) {
           throw new Error('Joppa object changed during comment read');
         }
@@ -88,6 +89,11 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
         page = await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: cursor}, options);
       }
       if (Number.isInteger(total) && Object.keys(comments).length !== total) throw new Error('Joppa comment list is incomplete');
+      if (page.position !== first.position) {
+        const check = await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: undefined}, options);
+        if (check.address !== first.address || check.current_revision !== first.current_revision || JSON.stringify(check.document) !== JSON.stringify(first.document) ||
+            JSON.stringify(check.comments) !== JSON.stringify(first.comments)) throw new Error('Joppa comments changed during read');
+      }
       result.annotations.comments = comments;
       delete result.comments;
     }
