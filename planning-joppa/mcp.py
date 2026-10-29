@@ -111,6 +111,14 @@ class Joppa:
             raise Rejected(f"Joppa {name}: {detail}")
         if not isinstance(structured, dict):
             raise MCPError(f"Joppa {name} returned no object")
+        # Compact detail reads omit values that repeat the address or the current revision.
+        address = arguments.get("address") if name == "joppa_objects" else None
+        if (isinstance(address, str) and isinstance(structured.get("document"), dict)
+                and not any(arguments.get(key) for key in ("revision", "history", "comments_cursor", "links_cursor"))):
+            structured.setdefault("kind", address.split(":")[0])
+            structured.setdefault("historical", False)
+            if isinstance(structured.get("current_revision"), int):
+                structured.setdefault("contract_revision", structured["current_revision"])
         return structured
 
 
