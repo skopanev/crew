@@ -130,7 +130,8 @@ def complete_object(read_page, args, result):
     """Keep native checks complete while the agent reads compact pages."""
     result.setdefault("kind", result["address"].split(":", 1)[0])
     result.setdefault("historical", result["document"].get("revision", result["current_revision"]) != result["current_revision"])
-    result.setdefault("contract_revision", result["current_revision"])
+    if not args.get("revision"):
+        result.setdefault("contract_revision", result["current_revision"])
     result.setdefault("process", {})
     result["process"].setdefault("assignee", None)
     result.setdefault("annotations", {})
@@ -138,8 +139,9 @@ def complete_object(read_page, args, result):
         comments, seen, total = {}, set(), result["comments"].get("total")
         page = read_page("joppa_objects", {key: value for key, value in args.items() if key != "comments_cursor"}) \
             if args.get("comments_cursor") else result
+        first = page
         while True:
-            if any(page.get(key) != result.get(key) for key in ("address", "position", "current_revision", "document")):
+            if any(page.get(key) != result.get(key) for key in ("address", "current_revision", "document")):
                 raise MCPError("workspace changed during comment read")
             entries = page.get("comments", {}).get("items")
             if not isinstance(entries, list):
@@ -158,6 +160,10 @@ def complete_object(read_page, args, result):
             page = read_page("joppa_objects", {**args, "comments_cursor": cursor})
         if isinstance(total, int) and len(comments) != total:
             raise MCPError("Joppa comment list is incomplete")
+        if page.get("position") != first.get("position"):
+            check = read_page("joppa_objects", {key: value for key, value in args.items() if key != "comments_cursor"})
+            if any(check.get(key) != first.get(key) for key in ("address", "current_revision", "document", "comments")):
+                raise MCPError("workspace changed during comment read")
         result["annotations"]["comments"] = comments
         result.pop("comments")
     return result
@@ -210,8 +216,15 @@ class Reader:
         if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
             obj = context.object_read(self.api, args["workspace"], address)
-            if obj.get("document") != result.get("document") or obj.get("position") != result.get("position"):
+            if obj.get("document") != result.get("document") or obj.get("current_revision") != result.get("current_revision"):
                 raise MCPError("Joppa object changed before its planning snapshot")
+            if isinstance(result.get("comments"), dict):
+                comments = obj.get("annotations", {}).get("comments", {})
+                if (result["comments"].get("total", len(comments)) != len(comments)
+                        or any(comments.get(comment["id"]) != comment for comment in result["comments"].get("items", []))):
+                    raise MCPError("Joppa comments changed before their planning snapshot")
+            elif not result.get("annotations", {}).get("comments") and obj.get("annotations", {}).get("comments"):
+                raise MCPError("Joppa comments changed before their planning snapshot")
             context.capture_object(self.target, args["workspace"], obj, self.api)
         return result
 
