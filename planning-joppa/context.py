@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from common import digest, read, require, strings, text, validate_input
-from mcp import Joppa, Rejected
+from mcp import Joppa, Rejected, complete_object
 
 
 def task_contract(data):
@@ -128,10 +128,43 @@ def pending_work_page(api, config, assignment):
 
 def object_read(api, workspace, address, allow_archived=False):
     result = api.call("joppa_objects", {"workspace": workspace, "address": address})
+    result = complete_object(api.call, {"workspace": workspace, "address": address}, result)
     present = result.get("document", {}).get("present")
     require(present is True or allow_archived and present is False, f"object is absent: {address}")
     require(result.get("historical") is False, f"current object required: {address}")
     return result
+
+
+def requirement_meaning(api, workspace, req, types, get=None):
+    """Rebuild the current Requirement verification view without joppa_read."""
+    get = get or (lambda address: object_read(api, workspace, address))
+    data = req["document"]["data"]
+    acs, cursor, seen = [], None, set()
+    while True:
+        page = api.call("joppa_objects", {"workspace": workspace, "parent": req["address"], "limit": 25,
+                                          "fields": ["kind", "present"], **({"cursor": cursor} if cursor else {})})
+        acs.extend({"id": item["address"]} for item in page["items"]
+                   if item.get("present", True) and types[item["kind"]].get("role") == "ac")
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
+        require(cursor not in seen, "Requirement child pagination did not advance")
+        seen.add(cursor)
+    notes, cursor, seen = [], None, set()
+    while True:
+        page = api.call("joppa_objects", {"workspace": workspace, "related_to": req["address"],
+                                          "limit": 25, "fields": ["kind", "present"], **({"cursor": cursor} if cursor else {})})
+        notes.extend(source(get(item["address"])) for item in page["items"]
+                     if item.get("present", True) and types[item["kind"]].get("inbox") is True)
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
+        require(cursor not in seen, "Requirement note pagination did not advance")
+        seen.add(cursor)
+    return {"number": req["current_revision"], "title": data.get("title"), "body": data.get("body"),
+            "owner": data.get("owner"), "reason": req["document"].get("reason"), "acs": acs,
+            "summary": req.get("process", {}).get("summary"), "sources": {"notes": notes},
+            "comments": (req.get("annotations") or {}).get("comments") or {}}
 
 
 def current_criteria(api, workspace, revision):
@@ -298,11 +331,10 @@ def load_once(api, config, ac_id):
     require(project_ref and project_ref.get("multiple") is True, "Task type needs a projects reference list")
     tasks, cursor = [], None
     while True:
-        args = {"workspace": workspace, "parent": ac_id, "kind": task_kind, "limit": 100}
+        args = {"workspace": workspace, "parent": ac_id, "kind": task_kind, "limit": 25, "fields": ["address"]}
         if cursor:
             args["cursor"] = cursor
         page = api.call("joppa_objects", args)
-        require(page["position"] == tree["position"], "workspace changed during context read")
         tasks.extend(get(item["address"]) for item in page["items"])
         cursor = page.get("next_cursor")
         if not cursor:
@@ -318,16 +350,9 @@ def load_once(api, config, ac_id):
     for repo in config["repositories"]:
         project = get(repo["project"])
         require(project["kind"] == project_ref["target"], "repository project type differs from Task schema")
-    requirement = api.call("joppa_read", {"workspace": workspace, "req": req["address"]})
-    require(requirement["position"] == tree["position"], "workspace changed during requirement read")
-    req_detail = requirement["requirement"]
-    revisions = req_detail.get("revisions")
-    require(isinstance(revisions, list) and len(revisions) == 1, "current Requirement read must return exactly one revision")
-    revision = revisions[0]
-    require(revision.get("number") == req_detail["current_revision"], "Requirement read returned another revision")
     # Current verification decisions belong to the Requirement, not the AC document revision.
-    meaning = {key: value for key, value in revision.items() if key not in ("tasks", "runs")}
-    meaning["comments"] = req_detail.get("comments")
+    meaning = requirement_meaning(api, workspace, req, types, get)
+    revision = meaning
     siblings = []
     for sibling in current_criteria(api, workspace, revision):
         address = sibling["address"]
@@ -341,11 +366,10 @@ def load_once(api, config, ac_id):
                 continue
             cursor = None
             while True:
-                args = {"workspace": workspace, "parent": address, "kind": kind, "limit": 100}
+                args = {"workspace": workspace, "parent": address, "kind": kind, "limit": 25, "fields": ["address"]}
                 if cursor:
                     args["cursor"] = cursor
                 page = api.call("joppa_objects", args)
-                require(page["position"] == tree["position"], "workspace changed during sibling context read")
                 siblings.extend(get(item["address"]) for item in page["items"])
                 cursor = page.get("next_cursor")
                 if not cursor:
@@ -359,6 +383,8 @@ def load_once(api, config, ac_id):
                 get(reference["target"])
     require(all(item["position"] == tree["position"] for item in objects.values()), "workspace changed during object read")
     tests = api.call("joppa_tests", {"workspace": workspace, "ac": ac_id})
+    # Compact reads omit an empty test list.
+    tests.setdefault("tests", [])
     require(tests.get("address") == ac_id and isinstance(tests.get("tests"), list),
             "criterion test status is incomplete")
     require(api.call("joppa_tree", {"workspace": workspace})["position"] == tree["position"],
@@ -417,9 +443,7 @@ def load_requirement(api, config, req_id, selected=None):
         req_id = kinds[0] + ":" + req_id
     req = object_read(api, workspace, req_id)
     require(types[req["kind"]].get("role") == "requirement", "input must be a Requirement")
-    detail = api.call("joppa_read", {"workspace": workspace, "req": req_id})["requirement"]
-    revision = detail["revisions"][0]
-    require(revision["number"] == detail["current_revision"], "Requirement read returned another revision")
+    revision = requirement_meaning(api, workspace, req, types)
     addresses = [item["address"] for item in current_criteria(api, workspace, revision)]
     require(addresses, "Requirement has no current criteria")
     assignment, snapshot, _ = load(api, config, addresses[0])
@@ -433,7 +457,7 @@ def load_requirement(api, config, req_id, selected=None):
     tests = {}
     for offset in range(0, len(addresses), 100):
         response = api.call("joppa_tests", {"workspace": workspace, "ac": ",".join(addresses[offset:offset + 100])})
-        tests.update({item["address"]: item for item in response.get("items", [response])})
+        tests.update({item["address"]: {"tests": [], **item} for item in response.get("items", [response])})
     require(all(address in tests for address in addresses), "Requirement test status is incomplete")
     require(all(tests[address].get("status") in ("green", "red", "grey") for address in addresses),
             "Requirement test status is invalid")
@@ -468,8 +492,8 @@ def load_requirement(api, config, req_id, selected=None):
             return response.get("status") == "green"
         children, cursor = [], None
         while True:
-            response = api.call("joppa_objects", {"workspace": workspace, "parent": object["address"], "limit": 100,
-                                                **({"cursor": cursor} if cursor else {})})
+            response = api.call("joppa_objects", {"workspace": workspace, "parent": object["address"], "limit": 25,
+                                                "fields": ["kind", "present"], **({"cursor": cursor} if cursor else {})})
             children.extend(get(item["address"]) for item in response["items"] if item.get("present", True))
             cursor = response.get("next_cursor")
             if not cursor:

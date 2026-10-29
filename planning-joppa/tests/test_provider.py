@@ -71,6 +71,101 @@ class Fake:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_current_api_keeps_all_requirement_children_decisions_and_tasks(self):
+        types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"},
+                 "decision": {"role": "document", "inbox": True}, "project": {"role": "document"},
+                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+                          "references": {"projects": {"multiple": True, "target": "project"}}}}
+        objects = {"rule:r": item("rule:r"), "project:p": item("project:p")}
+        for number in range(27):
+            for kind, parent in (("criterion", "rule:r"), ("work", "criterion:c00"), ("decision", None)):
+                address = f"{kind}:c{number:02}"
+                objects[address] = item(address, parent)
+                if kind == "decision":
+                    objects[address]["document"]["data"]["body"] = "Approved decision. " * 40
+        calls = []
+        class Server:
+            def call(self, name, args):
+                calls.append((name, deepcopy(args)))
+                if name == "joppa_tree":
+                    return {"position": 20, "schema": {"types": types}}
+                if name == "joppa_tests":
+                    return {"address": args["ac"], "status": "grey", "tests_draft": False}
+                if name != "joppa_objects":
+                    raise AssertionError("Unsupported tool: " + name)
+                if args.get("address"):
+                    result = deepcopy(objects[args["address"]])
+                    for key in ("kind", "historical", "item_id"):
+                        result.pop(key, None)
+                    if not result.get("process"):
+                        result.pop("process", None)
+                    return result
+                rows = [obj for obj in objects.values() if
+                        (obj["kind"] == "decision" if args.get("related_to") else obj["document"]["parent"] == args["parent"])
+                        and (not args.get("kind") or obj["kind"] == args["kind"])]
+                rows.sort(key=lambda obj: obj["address"])
+                if args.get("cursor"):
+                    rows = [obj for obj in rows if obj["address"] > args["cursor"]]
+                page = rows[:25]
+                return {"items": [{"address": obj["address"], **{key: obj.get(key, True if key == "present" else None)
+                         for key in args["fields"]}} for obj in page],
+                        **({"next_cursor": page[-1]["address"]} if len(rows) > 25 else {})}
+        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        value, snapshot, _ = context.load(Server(), config, "criterion:c00")
+        self.assertEqual(len(value["joppa"]["tasks"]), 27)
+        self.assertEqual(len(snapshot["requirement"]["acs"]), 27)
+        self.assertEqual(len(snapshot["requirement"]["sources"]["notes"]), 27)
+        decision = snapshot["objects"]["decision:c26"]
+        self.assertEqual(decision["document"]["data"]["body"], objects["decision:c26"]["document"]["data"]["body"])
+        self.assertTrue(any(args.get("cursor") for name, args in calls))
+        objects["decision:c26"]["document"]["data"]["body"] = "Changed approval"
+        _, changed, _ = context.load(Server(), config, "criterion:c00")
+        with self.assertRaisesRegex(ValueError, "context changed"):
+            context.unchanged(snapshot, changed)
+
+    def test_agent_lists_are_bounded_and_do_not_enable_verbose_reads(self):
+        api = Fake(result={'items': []})
+        reader = Reader(api, 'example', None)
+        reader.call('joppa_objects', {'parent': '*', 'limit': 100, 'verbose': True})
+        args = api.calls[-1][1]
+        self.assertEqual(args['limit'], 25)
+        self.assertEqual(args['fields'], ['title', 'status'])
+        self.assertNotIn('verbose', args)
+        for limit in (0, -1, '25', True):
+            with self.assertRaisesRegex(MCPError, 'positive integer'):
+                reader.call('joppa_tasks', {'limit': limit})
+
+    def test_compact_detail_capture_refuses_a_changed_document_or_position(self):
+        for drift in ('document', 'position'):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                compact = item('work:a')
+                compact.update(position=3, comments={'items': [], 'total': 0})
+                full = deepcopy(compact)
+                if drift == 'document':
+                    full['document']['data']['title'] = 'Changed'
+                else:
+                    full['position'] = 4
+                class Server(Fake):
+                    def raw_call(self, name, args):
+                        return deepcopy(compact)
+                api = Server(result=full)
+                reader = Reader(api, 'example', Path(directory))
+                with self.assertRaisesRegex(MCPError, 'changed before its planning snapshot'):
+                    reader.call('joppa_objects', {'address': 'work:a'})
+                self.assertFalse((Path(directory) / 'joppa-snapshot.json').exists())
+
+    def test_title_limit_uses_the_current_schema_name_and_keeps_the_older_name(self):
+        data, value = assignment(), plan()
+        value['tasks'][0]['title'] = 'x' * 90
+        data['joppa']['task_schema'].update(title_max_length=128, title_preview_length=64)
+        publication.operations(value, data)
+        data['joppa']['task_schema']['title_max_length'] = 80
+        with self.assertRaisesRegex(ValueError, 'configured 80-character limit'):
+            publication.operations(value, data)
+        del data['joppa']['task_schema']['title_max_length']
+        with self.assertRaisesRegex(ValueError, 'configured 64-character limit'):
+            publication.operations(value, data)
+
     def test_new_contract_fields_keep_the_full_mechanism_within_each_value_limit(self):
         data, value = assignment(), plan()
         task = value['tasks'][0]
@@ -218,6 +313,7 @@ class ProviderTests(unittest.TestCase):
                     return deepcopy(foreign)
                 return deepcopy(local)
         api = Server()
+        local = context.object_read(api, "ws-local", local["address"])
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             data = assignment()
@@ -772,24 +868,23 @@ runpy.run_path({str(script)!r}, run_name="__main__")
             {"target": "criterion:outside", "revision": 3, "relation": "depends_on", "blocking": True}]
         objects["criterion:c"]["document"]["links"] = [
             {"target": "criterion:a", "revision": 3, "relation": "depends_on", "blocking": True}]
-        detail = {"position": 20, "requirement": {"current_revision": 3, "revisions": [{"number": 3,
-            "acs": [{"id": address} for address in ("criterion:a", "criterion:b", "criterion:c")]}]}}
+        roster = ["criterion:archived", "criterion:a", "criterion:b", "criterion:c"]
         objects["criterion:archived"] = item("criterion:archived", "rule:r")
         objects["criterion:archived"]["document"]["present"] = False
-        detail["requirement"]["revisions"][0]["acs"].insert(0, {"id": "criterion:archived"})
         class Server:
             def call(self, name, args):
                 if name == "joppa_tree":
                     return {"position": 20, "schema": {"types": deepcopy(types)}}
-                if name == "joppa_read":
-                    return deepcopy(detail)
                 if name == "joppa_tests":
-                    rows = [{"address": address, "status": "grey", "tests": [], "tests_draft": False,
+                    rows = [{"address": address, "status": "grey", "tests_draft": False,
                              "tests_revision": None} for address in args["ac"].split(",")]
                     return rows[0] if len(rows) == 1 else {"items": rows}
                 if "address" in args:
                     return deepcopy(objects[args["address"]])
-                return {"position": 20, "items": [], "next_cursor": None}
+                if args.get("parent") == "rule:r":
+                    return {"items": [{"address": address, "kind": "criterion",
+                                       "present": objects[address]["document"]["present"]} for address in roster]}
+                return {"items": []}
         config = {"workspace": "example", "repositories": assignment()["repositories"]}
         data, snapshot, requirement = context.load_requirement(Server(), config, "r")
         self.assertEqual(requirement["address"], "rule:r")
@@ -937,29 +1032,32 @@ runpy.run_path({str(script)!r}, run_name="__main__")
                  "project": {"role": "document"}, "work": {"role": "task", "parents": ["criterion"],
                     "question": "What work?", "references": {"projects": {"multiple": True, "target": "project"}}}}
         tree = {"position": 20, "schema": {"revision": 2, "types": types}}
-        detail = {"position": 20, "requirement": {"current_revision": 7,
-                   "revisions": [{"number": 7, "body": "Required behavior", "tasks": {"runtime": "summary"},
-                                  "runs": {}, "confirmed": True}], "comments": {"decision": "Approved"}}}
+        req["document"]["data"]["body"] = "Required behavior"
+        req.pop("annotations")
+        req["comments"] = {"items": [{"id": "decision", "text": "Approved"}]}
         calls = []
         class Reader:
             def call(self, tool, args):
                 calls.append(tool)
                 if tool == "joppa_tree":
                     return deepcopy(tree)
-                if tool == "joppa_read":
-                    return deepcopy(detail)
                 if tool == "joppa_tests":
                     return deepcopy(assignment()["joppa"]["test_status"])
                 if "address" in args:
                     return deepcopy(objects[args["address"]])
-                return {"position": 20, "items": [{"address": "work:one"}], "next_cursor": None}
+                if args.get("related_to"):
+                    return {"items": []}
+                if args.get("parent") == "rule:r":
+                    return {"items": [{"address": "criterion:a", "kind": "criterion", "present": True}]}
+                return {"items": [{"address": "work:one"}]}
         config = {"workspace": "example", "repositories": assignment()["repositories"]}
         value, snapshot, criterion = context.load(Reader(), config, "a")
         self.assertEqual(criterion["address"], "criterion:a")
         self.assertEqual(value["joppa"]["task_type"], "work")
         self.assertEqual(value["requirement"]["revision"], 3)
-        self.assertEqual(snapshot["requirement"]["number"], 7)
-        self.assertEqual(snapshot["requirement"]["comments"], {"decision": "Approved"})
+        self.assertEqual(snapshot["requirement"]["number"], 3)
+        self.assertEqual(snapshot["requirement"]["comments"], {"decision": {"id": "decision", "text": "Approved"}})
+        self.assertEqual(snapshot["requirement"]["body"], "Required behavior")
         self.assertNotIn("tasks", snapshot["requirement"])
         self.assertEqual(len(value["joppa"]["tasks"]), 1)
         self.assertEqual(json.loads(value["ac"]["text"])["item_id"], ac["item_id"])
@@ -982,10 +1080,7 @@ runpy.run_path({str(script)!r}, run_name="__main__")
             grouped = deepcopy(value)
             grouped["joppa"].update(scope="requirement", criteria=[value["ac"]], criterion_schemas={})
             self.assertEqual(stage.prompt_assignment(grouped)["joppa"]["criteria"][0]["item_id"], ac["item_id"])
-        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_read", "joppa_objects", "joppa_tests"}))
-        detail["requirement"]["current_revision"] = 8
-        with self.assertRaisesRegex(ValueError, "another revision"):
-            context.load(Reader(), config, "a")
+        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_objects", "joppa_tests"}))
 
     def test_update_dependencies_replace_old_edges_before_reference_resolution(self):
         data = assignment()

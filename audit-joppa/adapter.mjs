@@ -15,7 +15,8 @@ async function inventory(config, kind) {
   const items = [];
   let cursor;
   do {
-    const page = await api(config, 'joppa_objects', {parent: '*', limit: 100, ...(kind ? {kind} : {}), ...(cursor ? {cursor} : {})});
+    const page = await api(config, 'joppa_objects', {parent: '*', limit: 25,
+      fields: ['kind', 'parent', 'present', 'revision'], ...(kind ? {kind} : {}), ...(cursor ? {cursor} : {})});
     items.push(...page.items);
     require(!page.next_cursor || page.next_cursor !== cursor, 'Joppa pagination did not advance');
     cursor = page.next_cursor;
@@ -78,7 +79,7 @@ export async function prepare(config) {
   require(hash((await api(config, 'joppa_tree', {})).schema) === hash(tree.schema), 'Schema changed while preparing audit');
   return {workspace: config.workspace, project: config.project, specification, schema: tree.schema,
     scope: config.roots || [], specification_complete: !config.roots?.length,
-    inbox: config.inbox, title_limit: inbox.title_preview_length ?? 64};
+    inbox: config.inbox, title_limit: inbox.title_max_length ?? inbox.title_preview_length ?? 64};
 }
 export function verifySearches(events, harness, findings, input) {
   const uncovered = findings.filter(finding => finding.kind === 'uncovered');

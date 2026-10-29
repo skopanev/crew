@@ -132,7 +132,8 @@ export async function readyCriteria(config, tokenFile, signal) {
   } while (cursor);
   do {
     const page = await api(service, {tokenFile}, 'joppa_objects', {
-      workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 100,
+      workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 25,
+      fields: ['title', 'kind', 'revision', 'contract_revision', 'work_ready', 'review_required', 'process', 'work_summary'],
       ...(cursor ? {cursor} : {}),
     }, {signal});
     for (const row of page.items) {
@@ -158,7 +159,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   for (let offset = 0; offset < candidates.length; offset += 100) {
     const batch = candidates.slice(offset, offset + 100);
     const checks = await api(service, {tokenFile}, 'joppa_tests', {
-      workspace: config.workspace, ac: batch.map(row => row.address).join(','),
+      workspace: config.workspace, ac: batch.map(row => row.address).join(','), summary: true,
     }, {signal});
     const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
     for (const row of batch) {

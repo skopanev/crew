@@ -14,6 +14,10 @@ MAX_PUBLICATION_OPERATIONS = 100
 MAX_DATA_VALUE = 1024
 
 
+def title_limit(schema):
+    return schema.get("title_max_length") or schema.get("title_preview_length") or 64
+
+
 def unclaimed(task):
     process = task["process"]
     require(not process.get("done") and not process.get("retired"),
@@ -131,7 +135,7 @@ def package_counters(plan, assignment):
 def title_budgets(assignment):
     """Reserve labels for every Task that can fit in one publication."""
     schemas = assignment["joppa"].get("criterion_schemas", {})
-    limit = min(schemas.get(item["id"], assignment["joppa"])["task_schema"].get("title_preview_length", 64)
+    limit = min(title_limit(schemas.get(item["id"], assignment["joppa"])["task_schema"])
                 for item in context.selected_criteria(assignment))
     counters = package_counters({}, assignment)
     budgets = {repo["id"]: limit - len(f"[{counters.get(repo['id'], 0) + MAX_PUBLICATION_OPERATIONS:02d}] ")
@@ -159,7 +163,7 @@ def task_title(task, objects, counters):
 def checked_task_title(task, assignment, counters):
     title = task_title(task, assignment["joppa"]["objects"], counters)
     schema = context.criterion_assignment(assignment, task["ac"])["joppa"]["task_schema"]
-    limit = schema.get("title_preview_length", 64)
+    limit = title_limit(schema)
     prefix = re.match(r"^\[\d+\] ", title)[0]
     require(len(title) <= limit,
             f"Task {task['id']}: ordered Task title exceeds its schema limit of {limit}; "
@@ -287,7 +291,7 @@ def validate_one(plan, assignment):
             require(assigned,
                     "every AC acceptance check must be assigned to Task checks in its repository")
     schema = assignment["joppa"]["task_schema"]
-    limit = schema.get("title_preview_length", 64)
+    limit = title_limit(schema)
     for task in plan.get("tasks", []):
         require(len(task["title"]) <= limit, f"Task title exceeds the configured {limit}-character limit")
         if task["action"] != "retire":

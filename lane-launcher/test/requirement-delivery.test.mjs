@@ -81,6 +81,23 @@ test('requirement delivery groups mixed inline and structured Task contracts wit
   assert.equal(JSON.stringify(data), before);
 });
 
+test('compact traversal checks an archived container through its full detail', async () => {
+  const f = fixture();
+  f.add('group:hidden', 'spec:r').document.data.archived = true;
+  f.add('measure:hidden', 'group:hidden').process.planning_claim = {actor: 'other-planner'};
+  const read = async (tool, args) => {
+    const value = await f.read(tool, args);
+    if (tool !== 'joppa_tree') return value;
+    const copy = structuredClone(value);
+    copy.schema.types.group = {role: 'group', parents: ['spec']};
+    copy.schema.types.measure.parents.push('group');
+    return copy;
+  };
+  const plan = await requirementPlan(f.run, read);
+  assert.equal(plan.planningHeld, false);
+  assert.equal(plan.final, true);
+});
+
 test('only current DONE publication evidence confirms a requirement head', async () => {
   const f = fixture(), head = 'a'.repeat(40);
   let plan = await requirementPlan(f.run, f.read);
