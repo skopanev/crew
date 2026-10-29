@@ -15,7 +15,7 @@ async function inventory(config, kind) {
   const items = [];
   let cursor;
   do {
-    const page = await api(config, 'joppa_objects', {parent: '*', limit: 100, ...(kind ? {kind} : {}), ...(cursor ? {cursor} : {})});
+    const page = await api(config, 'joppa_objects', {parent: '*', limit: 100, fields: ['kind', 'parent', 'present', 'revision'], ...(kind ? {kind} : {}), ...(cursor ? {cursor} : {})});
     items.push(...page.items);
     require(!page.next_cursor || page.next_cursor !== cursor, 'Joppa pagination did not advance');
     cursor = page.next_cursor;
