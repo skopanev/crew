@@ -67,11 +67,18 @@ async function packageFixture(t, mode = 'success') {
     calls.push({name, args});
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
-    else if (name === 'joppa_objects') value = args.address ? objects.get(args.address) : {
-      items: [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
+    else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
+    else if (name === 'joppa_objects') {
+      const rows = [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
         address: object.address, revision: object.current_revision, contract_revision: object.contract_revision,
+        kind: object.kind,
         title: object.document.data.title, work_ready: object.work_ready, review_required: object.review_required,
-        process: object.process, work_summary: {active: 0, done: 0}})), next_cursor: null};
+        process: object.process, work_summary: {active: 0, done: 0}}));
+      const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
+      value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
+        .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
+        ...(end < rows.length ? {next_cursor: String(end)} : {})};
+    }
     else if (name === 'joppa_tests') value = {items: args.ac.split(',').map(address => ({address, status: 'grey'}))};
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
@@ -137,6 +144,21 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert.equal(selected.candidate.requirement, 'req:r');
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('Joppa planner reads all compact pages and requests only test status summaries', async t => {
+  const f = await packageFixture(t), sample = f.objects.get('ac:a1');
+  f.queue.length = 0;
+  for (let i = 0; i < 28; i++) f.objects.set(`ac:extra${i}`, {...structuredClone(sample), address: `ac:extra${i}`});
+  f.objects.get('ac:extra27').process.planning_claim = {actor: 'another-planner'};
+  const rows = await readyCriteria({workspace: f.run.workspace, url: f.run.config.joppa.url}, f.run.joppaWorker.tokenFile);
+  assert.equal(rows.length, 29);
+  assert(rows.some(row => row.address === 'ac:extra26'));
+  assert(!rows.some(row => row.address === 'ac:extra27'));
+  const lists = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
+  assert(lists.some(call => call.args.cursor === '25'));
+  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('process')));
+  assert(f.calls.filter(call => call.name === 'joppa_tests').every(call => call.args.summary === true));
 });
 
 test('Joppa selects structured Tasks and detects their remote repository holders', async t => {

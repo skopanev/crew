@@ -93,7 +93,8 @@ export function dependencyCheck(read) {
     const result = [];
     let cursor;
     do {
-      const page = await read('joppa_objects', {parent: value.address, limit: 100, ...(cursor ? {cursor} : {})});
+      const page = await read('joppa_objects', {parent: value.address, limit: 25,
+        fields: ['kind', 'present'], ...(cursor ? {cursor} : {})});
       for (const child of page.items) {
         if (child.present !== true) continue;
         if (!(await criterionBranches()).has(child.kind)) continue;
@@ -117,7 +118,7 @@ export function dependencyCheck(read) {
       result = Boolean(acs?.length);
       for (let index = 0; result && index < acs.length; index += 100) {
         const batch = acs.slice(index, index + 100);
-        const tests = await read('joppa_tests', {ac: batch.join(',')});
+        const tests = await read('joppa_tests', {ac: batch.join(','), summary: true});
         const statuses = new Map((tests.items || [tests]).map(item => [item.address, item.status]));
         result = batch.every(ac => statuses.get(ac) === 'green');
       }

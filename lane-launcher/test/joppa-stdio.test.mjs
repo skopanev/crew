@@ -6,7 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {callJoppa} from '../joppa-api.mjs';
-import {contractDigest, taskInput} from '../joppa.mjs';
+import {contractDigest, latestRecovery, taskInput} from '../joppa.mjs';
 import {taskContract} from '../task-contract.mjs';
 
 test('Python publication and Dolber preserve the full structured contract through the coder input', t => {
@@ -66,7 +66,22 @@ for await(const line of createInterface({input:process.stdin})) {
    {structuredContent:{workspace:r.params.arguments.workspace,schema:{types:{}},actor:'existing-user'}};
   if(process.argv[3]) {
    const state=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-   const value=r.params.name==='joppa_tree'?state.tree:state.objects[r.params.arguments.address];
+   let value=r.params.name==='joppa_tree'?state.tree:
+    state.responses?.[r.params.name] ?? state.objects[r.params.arguments.address];
+   if(state.compact && r.params.name==='joppa_objects' && value?.document) {
+    value=structuredClone(value);
+    const comments=Object.entries(value.annotations?.comments || {}).map(([id,c])=>({id,...c}));
+    if(value.annotations) delete value.annotations.comments;
+    for(const key of ['kind','id','item_id','historical','revision_count','metadata_scope']) delete value[key];
+    if(value.contract_revision===value.current_revision) delete value.contract_revision;
+    if(value.process?.assignee===null) delete value.process.assignee;
+    if(!Object.keys(value.process || {}).length) delete value.process;
+    if(!Object.keys(value.annotations || {}).length) delete value.annotations;
+    const start=Number(r.params.arguments.comments_cursor || 0);
+    if(comments.length) value.comments={items:comments.slice(start,start+25),total:comments.length,
+      ...(start+25<comments.length?{next_cursor:String(start+25)}:{})};
+    if(start && state.commentDrift) value.position++;
+   }
    result=value?{structuredContent:value}:{isError:true,structuredContent:{error:'Object unavailable'}};
   }
  }
@@ -85,6 +100,72 @@ test('host MCP reads need no bearer file and a lost write is never repeated', as
   await assert.rejects(callJoppa(url, undefined, 'lost_write', {}, options), error => error.rejected !== true);
   const calls = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(calls.filter(call => call.name === 'lost_write').length, 1);
+});
+
+test('native reads keep checkpoints beyond 25 while agent reads stay compact and snapshots stay complete', async t => {
+  const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
+  const object = {address: 'work:one', kind: 'work', historical: false, current_revision: 3, position: 4,
+    document: {revision: 3, present: true, parent: null, links: [{target: 'criterion:a', revision: null}],
+      data: {title: 'Fixture', purpose: 'implementation', contract: 'Goal: Fixture', note: null, projects: []}},
+    process: {}, annotations: {description: '', attachments: {}, comments: {}}, files: [], references: []};
+  const digest = contractDigest(object);
+  for (let i = 0; i < 31; i++) object.annotations.comments[`c${String(i).padStart(2, '0')}`] = {
+    text: `Owner context ${i}`, actor: 'owner', actor_type: 'person', at: `2026-10-28T00:00:${String(i).padStart(2, '0')}Z`,
+    reply_to: null, withdrawn: false};
+  Object.assign(object.annotations.comments.c26, {actor: 'worker', actor_type: 'agent', text: [
+    'CREW_RECOVERY_CHECKPOINT', 'Task: work:one', `Digest: ${digest}`, 'Ref: refs/heads/recovery/checkpoint',
+    `SHA: ${'a'.repeat(40)}`, `Tree: ${'b'.repeat(40)}`, `Base: ${'c'.repeat(40)}`, 'Node: implement_code'].join('\n')});
+  fs.writeFileSync(stateFile, JSON.stringify({compact: true, objects: {'work:one': object},
+    responses: {joppa_tasks: {total: 0}, joppa_tests: {address: 'criterion:a', status: 'grey'}}}));
+  const result = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: object.address}, {mcpCommand: calls});
+  assert.equal(Object.keys(result.annotations.comments).length, 31);
+  assert.equal(result.kind, 'work');
+  assert.equal(result.historical, false);
+  assert.equal(result.process.assignee, null);
+  assert.equal(result.contract_revision, 3);
+  assert.equal(latestRecovery({joppa: {workers: [{actor: 'worker'}]}}, result).noteId, 'c26');
+  assert.equal(contractDigest(result), digest);
+  assert.deepEqual(result.document, object.document);
+  assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tasks', {}, {mcpCommand: calls})).tasks, []);
+  assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tests', {}, {mcpCommand: calls})).tests, []);
+  fs.writeFileSync(path.join(f.root, 'input.json'), JSON.stringify({workspace: 'sample', ac: {id: 'criterion:a'}, joppa: {}}));
+  fs.writeFileSync(path.join(f.root, 'joppa-snapshot.json'), JSON.stringify({schema: {types: {work: {role: 'task'}}}, objects: {}}));
+  const folder = fileURLToPath(new URL('../../planning-joppa/', import.meta.url));
+  const code = `import sys,json
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+sys.path.insert(0,str(Path(sys.argv[1]).parent/'planning'))
+from mcp import Joppa,Reader
+api=Joppa('https://service.invalid/mcp',mcp_command=json.loads(sys.argv[2]))
+args={'workspace':'sample','address':'work:one'}
+assert len(api.call('joppa_objects',args)['annotations']['comments'])==31
+reader=Reader(api,'sample',Path(sys.argv[3]))
+page=reader.call('joppa_objects',{**args,'verbose':True})
+assert len(page['comments']['items'])==25
+assert page['comments']['next_cursor']=='25'
+assert not page['annotations'].get('comments')
+second=reader.call('joppa_objects',{**args,'comments_cursor':'25'})
+assert len(second['comments']['items'])==6
+saved=json.loads((Path(sys.argv[3])/'joppa-snapshot.json').read_text())['objects']['work:one']
+assert len(saved['annotations']['comments'])==30
+assert 'c30' in saved['annotations']['comments']
+assert api.call('joppa_tasks',{})['tasks']==[]
+assert api.call('joppa_tests',{})['tests']==[]
+api.stdio.close()
+`;
+  const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls), f.root],
+    {encoding: 'utf8', timeout: 10_000});
+  assert.equal(python.status, 0, python.stderr);
+  const operations = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse);
+  assert(operations.every(call => !Object.hasOwn(call.arguments, 'verbose')));
+  assert(operations.some(call => call.name === 'joppa_objects' && call.arguments.comments_cursor === '25' && !call.arguments.verbose));
+  assert(operations.every(call => !['joppa_command', 'joppa_batch'].includes(call.name)));
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  state.commentDrift = true;
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  await assert.rejects(callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: object.address}, {mcpCommand: calls}), /changed during comment read/);
 });
 
 test('normal landing rechecks native MCP dependencies before pushing', t => {

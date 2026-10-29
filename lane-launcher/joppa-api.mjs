@@ -58,7 +58,46 @@ async function responseMessage(response, id) {
   }
 }
 
-export async function callJoppa(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
+export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
+  const result = await rawCall(url, tokenFile, tool, arguments_, options);
+  if (tool === 'joppa_objects' && arguments_.address && object(result.document)) {
+    result.kind ??= result.address.split(':', 1)[0];
+    result.historical ??= result.document.revision !== undefined && result.document.revision !== result.current_revision;
+    result.contract_revision ??= result.current_revision;
+    result.process ??= {};
+    result.process.assignee ??= null;
+    result.annotations ??= {};
+    if (object(result.comments)) {
+      const comments = {}, seen = new Set(), total = result.comments.total;
+      let page = arguments_.comments_cursor
+        ? await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: undefined}, options) : result;
+      for (;;) {
+        if (page.address !== result.address || page.position !== result.position ||
+            page.current_revision !== result.current_revision || JSON.stringify(page.document) !== JSON.stringify(result.document)) {
+          throw new Error('Joppa object changed during comment read');
+        }
+        if (!Array.isArray(page.comments?.items)) throw new Error('Joppa comment page is incomplete');
+        for (const comment of page.comments.items) {
+          if (typeof comment.id !== 'string' || Object.hasOwn(comments, comment.id)) throw new Error('Joppa comment page overlaps');
+          comments[comment.id] = comment;
+        }
+        const cursor = page.comments.next_cursor;
+        if (!cursor) break;
+        if (seen.has(cursor)) throw new Error('Joppa comment pagination did not advance');
+        seen.add(cursor);
+        page = await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: cursor}, options);
+      }
+      if (Number.isInteger(total) && Object.keys(comments).length !== total) throw new Error('Joppa comment list is incomplete');
+      result.annotations.comments = comments;
+      delete result.comments;
+    }
+  }
+  if (tool === 'joppa_tasks') result.tasks ??= [];
+  if (tool === 'joppa_tests' && !arguments_.summary) for (const row of result.items || [result]) row.tests ??= [];
+  return result;
+}
+
+async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
   const endpoint = new URL(url);
   const local = endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname);
   if (!(endpoint.protocol === 'https:' || local) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {

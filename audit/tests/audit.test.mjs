@@ -47,9 +47,15 @@ async function fixture(t) {
       if (name === 'joppa_tree') value = {schema};
       else if (name === 'joppa_objects') {
         if (args.address) value = objects.get(args.address);
-        else value = {items: [...objects.values()].filter(item => !args.kind || item.kind === args.kind)
-          .map(item => ({address: item.address, kind: item.kind, parent: item.document.parent,
-            present: item.document.present, revision: item.current_revision})), next_cursor: null};
+        else {
+          const rows = [...objects.values()].filter(item => !args.kind || item.kind === args.kind)
+            .map(item => ({address: item.address, kind: item.kind, parent: item.document.parent,
+              present: item.document.present, revision: item.current_revision}));
+          const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
+          value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
+            .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
+            ...(end < rows.length ? {next_cursor: String(end)} : {})};
+        }
       } else if (name === 'joppa_batch') {
         if (rejectBatch) {
           response.setHeader('Content-Type', 'application/json');
@@ -77,6 +83,7 @@ async function fixture(t) {
           checkLimit(op.data);
           const address = `${op.kind}:${op.id}`;
           objects.set(address, object(address, op.data, op.parent));
+          objects.get(address).document.links = op.links;
           return {command: {op: 'save_object'}, address, saved_revision: 1};
         })};
         if (loseReply) { response.destroy(); return; }
@@ -110,6 +117,15 @@ test('missing implementation cannot become an inbox finding', async t => {
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0);
 });
 
+test('audit reads every compact list page with explicit inventory fields', async t => {
+  const f = await fixture(t), sample = f.objects.get('outcome:access');
+  for (let i = 0; i < 28; i++) f.objects.set(`outcome:extra${i}`, {...structuredClone(sample), address: `outcome:extra${i}`});
+  const input = await prepare(f.config);
+  assert.equal(input.specification.length, 30);
+  const lists = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
+  assert(lists.some(call => call.args.cursor === '25'));
+  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('kind') && call.args.fields.includes('revision')));
+});
 test('invented source, stale spec and unsupported finding kinds are rejected', async t => {
   const f = await fixture(t);
   for (const change of [
@@ -219,7 +235,7 @@ test('long audit evidence stays exact in an atomic comment instead of an oversiz
   assert.match(evidence, /Source commits: backend=/);
   assert([...evidence].length > 1024);
   assert([...saved.document.data.body].length <= 1024);
-  assert.equal(saved.document.links[0]?.target ?? batch.operations[0].command.links[0].target, 'outcome:access');
+  assert.equal(saved.document.links[0].target, 'outcome:access');
   const retry = await publish(f.config, [finding], f.input, path.join(f.root, 'retry'));
   assert.deepEqual(retry.reused, result.published);
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
@@ -242,6 +258,11 @@ test('inbox schema supplies the title limit in Unicode characters', async t => {
   assert.equal(input.title_limit, 2);
   validate({...f.report, findings: [{...f.finding, title: '🟢🟢'}]}, input);
   assert.throws(() => validate(f.report, input), /2 character limit/);
+  f.schema.types.incoming.title_max_length = 4;
+  const current = {...await prepare(f.config), repositories: f.input.repositories};
+  assert.equal(current.title_limit, 4);
+  validate({...f.report, findings: [{...f.finding, title: 'ABCD'}]}, current);
+  assert.throws(() => validate({...f.report, findings: [{...f.finding, title: 'ABCDE'}]}, current), /4 character limit/);
 });
 
 test('an archived finding is not reused or overwritten', async t => {

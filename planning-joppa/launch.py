@@ -36,7 +36,7 @@ Missing tests or behavior require implementation Tasks. Test binding alone is pu
 Never claim that acceptance passed. A later full report supplies acceptance results.
 The server publishes all Tasks and finishes the planning claim atomically.
 Agents do not call Joppa mutations. Do not create a planning placeholder Task.
-Title length must obey joppa.task_schema.title_preview_length.
+Title length must obey joppa.task_title_max_length.
 """
 
 REQUIREMENT_CONTRACT = """Plan all selected criteria in this Requirement as one coherent increment.
