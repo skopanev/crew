@@ -3,6 +3,8 @@
 Tool output and incomplete streaming deltas cannot supply a planning result.
 """
 import json
+import os
+from pathlib import Path
 import re
 
 from common import require
@@ -52,3 +54,19 @@ def final_response(events, harness):
             "agent response contains more than one JSON result")
     require(isinstance(result, dict), "agent response must be one JSON object")
     return result
+
+
+def body_result():
+    require(os.environ.get("MEDULLA_BODY_RC") == "0", "agent did not complete successfully")
+    events = []
+    for line in Path(os.environ["MEDULLA_ATTEMPT_LOG"]).read_text().splitlines():
+        if line.startswith("[out] "):
+            line = line[6:]
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    result = final_response(events, os.environ["MEDULLA_HARNESS"])
+    return result, events

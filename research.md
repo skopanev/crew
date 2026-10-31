@@ -336,7 +336,7 @@ to adopt Temporal.
 | [workflow.yaml](lane/workflow.yaml) has a 24-hour run timeout and a two-hour implementation-node timeout. Review rejection counting restarts after `git_fix`. | These are not a measured policy for minimal Tasks or a single total correction budget. |
 | [run.sh](lane/run.sh) validates the ticket's module, while [gates.py](lane/bin/gates.py) records its name without enforcing changed-file ownership. | Built-in checks do not mechanically enforce the module boundary. Repository-supplied gates may add checks, but that must be verified per project. |
 | Scout/QA contract loading can continue after failure; the coder's SessionStart hook treats a missing baseline as fatal. | Equill's mandatory status is inconsistent between stages and harnesses. |
-| The current dispatcher and lane use NTK HTTP and ticket-level landing. | Joppa Requirement planning, Task scheduling, increment assembly, and final reporting are not implemented by that path. |
+| At research time the dispatcher and lane used NTK HTTP and ticket-level landing. Update: Crew now uses Joppa only; NTK support was removed. | At research time Joppa Requirement planning, Task scheduling, increment assembly, and final reporting were not implemented by that path. |
 | Failure handling preserves useful artifacts, but the documented next operator action is manual; `to_test` ends the ticket path. | The complete Requirement delivery and recovery loop remains open. |
 
 Existing code worth preserving: confirmed claim receipts, isolated persistent
@@ -444,29 +444,27 @@ allowlist. Roles and process implementations in Equill were not changed here.
 
 ## 11. Where dolber fits
 
-`dolber.sh` (now [dolber-joppa.sh](lane-launcher/dolber-joppa.sh)) is a small shell entry point into the Node.js
+[dolber-joppa.sh](lane-launcher/dolber-joppa.sh) is a small shell entry point into the Node.js
 [launcher](lane-launcher/launcher.mjs). This is a suitable implementation for a
 deterministic dispatcher; the shell wrapper does not need to become a workflow
 engine.
 
 The current dispatcher already provides the useful operational shell: configured
 concurrency, polling, local slot reservations, Herdr tabs, persistent logs, and
-reconciliation of active or uncertain runs. It previews an NTK candidate, reserves
-a slot, and starts a worker; the lane claims the ticket before implementation.
+reconciliation of active or uncertain runs. It previews an available Joppa Task, reserves
+a slot, and starts a worker; the worker claims the Task before implementation.
 Stopping the dispatcher does not itself terminate existing lanes.
 
-The current queue integration is NTK HTTP (`lane-launcher/ntk.mjs`, removed after Joppa adoption). Its tags and
-preferred tags are not Joppa queue selectors. Joppa adoption requires adapting
-selection, claim, scope loading, and outcome reporting, with an unattended agent
-identity. It is not a URL substitution. Project-to-repository configuration and
-Crew's prerequisite checks must also agree with the selected Task.
+Update: the queue integration is Joppa only. Selection, claim, scope loading and
+outcome reporting use the Joppa adapter (`lane-launcher/joppa*.mjs`), with
+project-to-repository configuration in the dispatcher config. The earlier NTK
+HTTP integration and its tag filters were removed.
 
 Requirement decomposition and assembled-increment verification belong outside
 this dispatch loop. A worker exit code establishes a process outcome; it does
 not establish that a Requirement was delivered. Preserve the dispatcher and its
 operational behavior while changing the queue boundary and connecting it to
-Requirement coordination. The current NTK path remains the implementation until
-those changes exist and are verified.
+Requirement coordination.
 
 ## 12. Letta: durable knowledge and explicit context delivery
 
