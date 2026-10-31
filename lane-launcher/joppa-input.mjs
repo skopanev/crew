@@ -65,7 +65,6 @@ export function latestRecovery(config, object, digest = contractDigest(object), 
 export function taskInput(config, object, contexts = object.contexts) {
   require(object.document?.present === true && object.historical === false, 'Joppa Task is absent or historical');
   const data = object.document.data;
-  require(data?.purpose === 'implementation', 'Task needs an implementation contract');
   const contract = taskContract(data);
   const field = name => {
     const matches = [...contract.matchAll(new RegExp(`^${name}:[ \\t]*(\\S[^\\r\\n]*)$`, 'gm'))];

@@ -84,18 +84,13 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("1. Use the existing mechanism", context.task_contract(saved["data"]))
         self.assertEqual(data, original)
 
-    def test_refuses_occupied_and_human_work(self):
+    def test_refuses_occupied_work(self):
         value = plan()
         value["tasks"][0].update(action="update", target="work:old", revision=3)
         for field, setting in (("assignee", "worker"), ("claim", {"actor": "worker"}), ("status", "in_progress")):
             data = assignment()
             data["joppa"]["tasks"][0]["process"][field] = setting
             with self.assertRaisesRegex(ValueError, "claimed Tasks"):
-                publication.operations(value, data)
-        for purpose in ("decision", "manual", "custom"):
-            data = assignment()
-            data["joppa"]["tasks"][0]["document"]["data"]["purpose"] = purpose
-            with self.assertRaisesRegex(ValueError, "only implementation"):
                 publication.operations(value, data)
 
     def test_noop_prerequisite_keeps_fresh_reference_without_save(self):

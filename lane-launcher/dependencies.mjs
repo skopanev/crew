@@ -141,7 +141,7 @@ export function dependencyCheck(read) {
         const target = await object(link.target);
         if (!present(target)) continue;
         const task = await role(target) === 'task';
-        const pin = currentPin(link.revision, target.current_revision, task ? target.process?.origin_revision :
+        const pin = link.revision == null || currentPin(link.revision, target.current_revision, task ? target.process?.origin_revision :
           target.contract_revision === undefined ? target.current_revision : target.contract_revision);
         if (!pin || !await isSatisfied(target)) return target.address;
         const blocker = await blockedBy(target.address, next);

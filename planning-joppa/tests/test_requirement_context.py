@@ -77,6 +77,10 @@ class ProviderTests(unittest.TestCase):
             objects["criterion:outside"]["contract_revision"] = 4
             stale, _, _ = context.load_requirement(Server(), config, "r")
             self.assertNotIn("criterion:b", [entry["id"] for entry in stale["joppa"]["criteria"]])
+            objects["criterion:b"]["document"]["links"][0].pop("revision")
+            unpinned, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
+            objects["criterion:b"]["document"]["links"][0]["revision"] = 3
         objects["criterion:outside"]["current_revision"] = 3
         del objects["criterion:outside"]["contract_revision"]
         with self.assertRaisesRegex(ValueError, "object is absent"):

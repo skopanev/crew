@@ -39,10 +39,9 @@ class ProviderTests(unittest.TestCase):
                                                   "reason": value["tasks"][0]["outcome"]})
         self.assertEqual(data, original)
 
-    def test_retirement_accepts_a_blocked_verification_task(self):
+    def test_retirement_accepts_a_blocked_task_without_purpose(self):
         data, value = assignment(), plan()
         data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
-        data["joppa"]["tasks"][0]["document"]["data"]["purpose"] = "verification"
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "retire_task")
 

@@ -34,7 +34,7 @@ class ProviderTests(unittest.TestCase):
                 for key in ("task_type", "task_schema", "test_status")}})
         data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
         retained = context.source(item("work:retained", "criterion:b", {"title": "[07] Approved work", "owner": "owner",
-            "purpose": "implementation", "body": "Repository: service\nModule: core"}, {"status": "open"}))
+            "body": "Repository: service\nModule: core"}, {"status": "open"}))
         data["joppa"]["objects"][retained["address"]] = retained
         value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
         value["acceptance_checks"][0]["ac"] = "criterion:a"

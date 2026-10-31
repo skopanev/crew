@@ -21,7 +21,7 @@ test('dolber.sh reads adjacent dolber.json from another cwd and only previews wi
   const folder = path.join(f.root, 'dolber folder');
   fs.mkdirSync(folder);
   for (const file of ['dolber.sh', 'launcher.mjs', 'runtime.mjs', 'ntk.mjs', 'scope.mjs',
-    'dashboard.mjs', 'joppa.mjs', 'joppa-api.mjs', 'mcp-client.mjs', 'task-contract.mjs', 'dependencies.mjs',
+    'dashboard.mjs', 'launcher-config.mjs', 'joppa.mjs', 'joppa-api.mjs', 'mcp-client.mjs', 'task-contract.mjs', 'dependencies.mjs',
     'requirement-delivery.mjs', 'requirement-state.mjs', 'publication-guard.mjs', 'requirement-finalizer.mjs',
     'joppa-common.mjs', 'joppa-config.mjs', 'joppa-selection.mjs', 'joppa-input.mjs',
     'joppa-claims.mjs', 'joppa-outcome.mjs', 'joppa-failure.mjs', 'joppa-recovery.mjs']) {

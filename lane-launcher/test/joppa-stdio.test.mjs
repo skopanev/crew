@@ -59,7 +59,7 @@ for (const flat of [false, true]) test(`native checkpoints and compact agent sna
   const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
   const object = {address: 'work:one', kind: 'work', historical: false, current_revision: 3, position: 4,
     document: {revision: 3, present: true, parent: null, links: [{blocking: false, relation: 'related', revision: null, target: 'criterion:a'}],
-      data: {title: 'Fixture', purpose: 'implementation', contract: 'Goal: Fixture', note: null, projects: []}},
+      data: {title: 'Fixture', contract: 'Goal: Fixture', note: null, projects: []}},
     process: {}, annotations: {description: '', attachments: {}, comments: {}}, files: [], references: []};
   const digest = contractDigest(object);
   for (let i = 0; i < 31; i++) object.annotations.comments[`c${String(i).padStart(2, '0')}`] = {

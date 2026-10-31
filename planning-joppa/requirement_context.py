@@ -92,7 +92,7 @@ def load_requirement(api, config, req_id, selected=None):
                 origin = (dependency["process"].get("origin_revision")
                           if types[dependency["kind"]].get("role") == "task"
                           else dependency.get("contract_revision", dependency["current_revision"]))
-                pin = current_pin(revision, dependency["current_revision"], origin)
+                pin = revision is None or current_pin(revision, dependency["current_revision"], origin)
                 if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")
