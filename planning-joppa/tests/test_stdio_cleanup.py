@@ -46,5 +46,14 @@ class CleanupTests(unittest.TestCase):
             self.assertTrue(group_alive(1234))
             probe.assert_called_once_with(["ps", "-axo", "pgid=,stat="], text=True, timeout=2)
         with patch("stdio.subprocess.check_output", side_effect=PermissionError):
-            with self.assertRaises(PermissionError):
-                group_alive(1234)
+            self.assertTrue(group_alive(1234))
+
+    def test_probe_failure_still_escalates_before_reaping_the_leader(self):
+        rpc = self.rpc()
+        with patch("stdio.os.killpg") as send, \
+             patch("stdio.subprocess.check_output", side_effect=PermissionError), \
+             patch("stdio.time.monotonic", side_effect=[0, 0, 3, 3, 3, 6]), patch("stdio.time.sleep"):
+            rpc.close()
+        self.assertEqual(send.call_args_list, [call(1234, signal.SIGTERM), call(1234, signal.SIGKILL)])
+        rpc.process.poll.assert_not_called()
+        rpc.process.wait.assert_called_once_with(timeout=2)
