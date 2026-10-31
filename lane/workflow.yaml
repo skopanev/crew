@@ -86,7 +86,7 @@ nodes:
       # Generate Codex hooks and MCP configuration.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
-      # Full ticket body and acceptance criteria, read by shell over HTTP.
+      # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       # Publish only a complete, nonempty Equill contract.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
@@ -858,15 +858,15 @@ nodes:
         printf 'Ticket: %s\nLanded SHA: %s\nTarget: %s\n' "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/landing.txt"
       fi
       # The host removes the private checkout after the workflow succeeds.
-      # Код сел — это правда. Тикет, застрявший в работе, иначе никто не заметит.
+      # Confirm the Joppa claim receipt before reporting success; the host records the Task outcome.
       if ! node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" to-test; then
-        printf 'LANDED_TICKET_STUCK: %s checked at %s on %s; to_test failed after up to 3 attempts. See to-test-errors.txt. Do not rerun work.\n' \
+        printf 'LANDED_TICKET_STUCK: %s checked at %s on %s; the Joppa claim receipt did not validate. Do not rerun work.\n' \
           "$ticket_id" "$head_sha" "$target" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
         cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
         exit 1
       fi
       if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
-        echo "<signal:VERIFIED>Existing implementation verified at ${head_sha}; ticket is to_test.</signal:VERIFIED>"
+        echo "<signal:VERIFIED>Existing implementation verified at ${head_sha}; the host records the Task outcome.</signal:VERIFIED>"
         exit 0
       fi
       printf '<signal:LANDED>Landed %s on %s.</signal:LANDED>\n' "$head_sha" "$target"
@@ -944,7 +944,7 @@ nodes:
       case "${MEDULLA_LAST_SIGNAL:-}" in
         LANDED) msg="${ticket_id} landed: ${MEDULLA_LAST_MESSAGE:-}" ;;
         VERIFIED) msg="${ticket_id} verified: ${MEDULLA_LAST_MESSAGE:-}" ;;
-        *) echo 'Success requires LANDED or VERIFIED and confirmed to_test' >&2; exit 1 ;;
+        *) echo 'Success requires LANDED or VERIFIED and a validated claim receipt' >&2; exit 1 ;;
       esac
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       # Retain nonblocking findings in the run artifacts.
@@ -956,7 +956,7 @@ nodes:
         if finding="$(node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" findings 2>&1)"; then
           msg="${msg} ${finding}"
         else
-          printf '%s\nFindings publication failed: %s\nSource ticket remains to_test; retry reporting only.\n' \
+          printf '%s\nFindings publication failed: %s\nThe Task outcome is unchanged; retry reporting only.\n' \
             "$msg" "$finding" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt"
           cat "$MEDULLA_RUN_DIR/artifacts/outcome.txt" >&2
           exit 1
