@@ -7,12 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-class MCPError(ValueError):
-    pass
-
-
-class Rejected(MCPError):
-    """The server confirmed that the tool operation failed."""
+from joppa_reads import MCPError, Rejected, complete_object, normalize_detail, normalize_tests, normalize_tasks
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -90,13 +85,12 @@ class Joppa:
     def call(self, name, arguments):
         args = dict(arguments)
         result = self.raw_call(name, args)
-        if name == "joppa_objects" and args.get("address") and isinstance(result.get("document"), dict):
+        if name == "joppa_objects" and args.get("address") and not args.get("history"):
             result = complete_object(self.raw_call, args, result)
         if name == "joppa_tasks":
-            result.setdefault("tasks", [])
-        if name == "joppa_tests" and not args.get("summary"):
-            for row in result.get("items", [result]):
-                row.setdefault("tests", [])
+            normalize_tasks(result)
+        if name == "joppa_tests":
+            normalize_tests(args, result)
         return result
 
     def raw_call(self, name, arguments):
@@ -126,47 +120,6 @@ class Joppa:
         return structured
 
 
-def complete_object(read_page, args, result):
-    """Keep native checks complete while the agent reads compact pages."""
-    result.setdefault("kind", result["address"].split(":", 1)[0])
-    result.setdefault("historical", result["document"].get("revision", result["current_revision"]) != result["current_revision"])
-    if not args.get("revision"):
-        result.setdefault("contract_revision", result["current_revision"])
-    result.setdefault("process", {})
-    result["process"].setdefault("assignee", None)
-    result.setdefault("annotations", {})
-    if isinstance(result.get("comments"), dict):
-        comments, seen, total = {}, set(), result["comments"].get("total")
-        page = read_page("joppa_objects", {key: value for key, value in args.items() if key != "comments_cursor"}) \
-            if args.get("comments_cursor") else result
-        first = page
-        while True:
-            if any(page.get(key) != result.get(key) for key in ("address", "current_revision", "document")):
-                raise MCPError("workspace changed during comment read")
-            entries = page.get("comments", {}).get("items")
-            if not isinstance(entries, list):
-                raise MCPError("Joppa comment page is incomplete")
-            for comment in entries:
-                key = comment.get("id")
-                if not isinstance(key, str) or key in comments:
-                    raise MCPError("Joppa comment page overlaps")
-                comments[key] = comment
-            cursor = page["comments"].get("next_cursor")
-            if not cursor:
-                break
-            if cursor in seen:
-                raise MCPError("Joppa comment pagination did not advance")
-            seen.add(cursor)
-            page = read_page("joppa_objects", {**args, "comments_cursor": cursor})
-        if isinstance(total, int) and len(comments) != total:
-            raise MCPError("Joppa comment list is incomplete")
-        if page.get("position") != first.get("position"):
-            check = read_page("joppa_objects", {key: value for key, value in args.items() if key != "comments_cursor"})
-            if any(check.get(key) != first.get(key) for key in ("address", "current_revision", "document", "comments")):
-                raise MCPError("workspace changed during comment read")
-        result["annotations"]["comments"] = comments
-        result.pop("comments")
-    return result
 
 
 READ_TOOLS = frozenset(("joppa_search", "joppa_tests", "joppa_tree", "joppa_objects", "joppa_tasks", "joppa_help"))
@@ -216,7 +169,8 @@ class Reader:
         if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
             obj = context.object_read(self.api, args["workspace"], address)
-            if obj.get("document") != result.get("document") or obj.get("current_revision") != result.get("current_revision"):
+            observed = normalize_detail(args, result)
+            if obj.get("document") != observed.get("document") or obj.get("current_revision") != observed.get("current_revision"):
                 raise MCPError("Joppa object changed before its planning snapshot")
             if isinstance(result.get("comments"), dict):
                 comments = obj.get("annotations", {}).get("comments", {})

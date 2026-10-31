@@ -1,3 +1,4 @@
+import {fixture} from './fixtures/joppa-stdio.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,55 +44,6 @@ print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
   }
 });
 
-function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-mcp-check-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const script = path.join(root, 'connector.mjs'), calls = path.join(root, 'calls');
-  fs.writeFileSync(script, `
-import fs from 'node:fs';
-import {createInterface} from 'node:readline';
-let initialized=false;
-console.log('');
-for await(const line of createInterface({input:process.stdin})) {
- const r=JSON.parse(line);
- if(!('id' in r))continue;
- let result;
- if(r.method==='initialize'){initialized=true;result={protocolVersion:'2025-03-26',capabilities:{tools:{}}};}
- else if(!initialized){process.exit(3);}
- else if(r.method==='tools/list')result={tools:[{name:'joppa_tree',inputSchema:{type:'object',properties:{workspace:{type:'string'}}}},{name:'joppa_command',inputSchema:{type:'object'}}]};
- else {
-  fs.appendFileSync(process.argv[2],JSON.stringify(r.params)+'\\n');
-  if(r.params.name==='lost_write')process.exit(4);
-  result=r.params.name==='refused'?{isError:true,structuredContent:{error:'Confirmed refusal'}}:
-   {structuredContent:{workspace:r.params.arguments.workspace,schema:{types:{}},actor:'existing-user'}};
-  if(process.argv[3]) {
-   const state=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-   let value=r.params.name==='joppa_tree'?state.tree:
-    state.responses?.[r.params.name] ?? state.objects[r.params.arguments.address];
-   if(state.compact && r.params.name==='joppa_objects' && value?.document) {
-    value=structuredClone(value);
-    const comments=Object.entries(value.annotations?.comments || {}).map(([id,c])=>({id,...c}));
-    if(value.annotations) delete value.annotations.comments;
-    for(const key of ['kind','id','item_id','historical','revision_count','metadata_scope']) delete value[key];
-    if(value.contract_revision===value.current_revision) delete value.contract_revision;
-    if(value.process?.assignee===null) delete value.process.assignee;
-    if(!Object.keys(value.process || {}).length) delete value.process;
-    if(!Object.keys(value.annotations || {}).length) delete value.annotations;
-    const start=Number(r.params.arguments.comments_cursor || 0);
-    if(comments.length) value.comments={items:comments.slice(start,start+25),total:comments.length,
-      ...(start+25<comments.length?{next_cursor:String(start+25)}:{})};
-    if(start && state.commentDrift) value.position++;
-    if(start && state.commentObjectDrift) value.document.data.title='Changed';
-   }
-   result=value?{structuredContent:value}:{isError:true,structuredContent:{error:'Object unavailable'}};
-  }
- }
- console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/message',params:{}}));
- console.log(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
-}
-`);
-  return {root, calls, command: [process.execPath, script, calls]};
-}
 
 test('host MCP reads need no bearer file and a lost write is never repeated', async t => {
   const f = fixture(t), options = {mcpCommand: f.command}, url = 'https://service.invalid/mcp';
@@ -103,10 +55,10 @@ test('host MCP reads need no bearer file and a lost write is never repeated', as
   assert.equal(calls.filter(call => call.name === 'lost_write').length, 1);
 });
 
-test('native reads keep checkpoints beyond 25 while agent reads stay compact and snapshots stay complete', async t => {
+for (const flat of [false, true]) test(`native checkpoints and compact agent snapshots; flat=${flat}`, async t => {
   const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
   const object = {address: 'work:one', kind: 'work', historical: false, current_revision: 3, position: 4,
-    document: {revision: 3, present: true, parent: null, links: [{target: 'criterion:a', revision: null}],
+    document: {revision: 3, present: true, parent: null, links: [{blocking: false, relation: 'related', revision: null, target: 'criterion:a'}],
       data: {title: 'Fixture', purpose: 'implementation', contract: 'Goal: Fixture', note: null, projects: []}},
     process: {}, annotations: {description: '', attachments: {}, comments: {}}, files: [], references: []};
   const digest = contractDigest(object);
@@ -116,7 +68,7 @@ test('native reads keep checkpoints beyond 25 while agent reads stay compact and
   Object.assign(object.annotations.comments.c26, {actor: 'worker', actor_type: 'agent', text: [
     'CREW_RECOVERY_CHECKPOINT', 'Task: work:one', `Digest: ${digest}`, 'Ref: refs/heads/recovery/checkpoint',
     `SHA: ${'a'.repeat(40)}`, `Tree: ${'b'.repeat(40)}`, `Base: ${'c'.repeat(40)}`, 'Node: implement_code'].join('\n')});
-  fs.writeFileSync(stateFile, JSON.stringify({compact: true, objects: {'work:one': object},
+  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, objects: {'work:one': object},
     responses: {joppa_tasks: {total: 0}, joppa_tests: {address: 'criterion:a', status: 'grey'}}}));
   const result = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls});
@@ -148,7 +100,7 @@ reader=Reader(api,'sample',Path(sys.argv[3]))
 page=reader.call('joppa_objects',{**args,'verbose':True})
 assert len(page['comments']['items'])==25
 assert page['comments']['next_cursor']=='25'
-assert not page['annotations'].get('comments')
+assert not page.get('annotations',{}).get('comments')
 second=reader.call('joppa_objects',{**args,'comments_cursor':'25'})
 assert len(second['comments']['items'])==6
 saved=json.loads((Path(sys.argv[3])/'joppa-snapshot.json').read_text())['objects']['work:one']
