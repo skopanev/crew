@@ -297,4 +297,3 @@ def capture_error_file(kind):
     branch = "design" if kind == "plan" else "necessity" if kind == "necessity" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
     require(branch in (*validation.RESEARCH, *validation.DRIFT_CRITICS, "design"), "unknown capture branch")
     return artifacts() / f"error-{kind}-{branch}.json"
-
