@@ -13,7 +13,7 @@ import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDig
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
 
-import {launcher, worker, queueReads, countReads, queueQuery, runState, existingClaim, execute, notificationEnv, setup} from './launcher-ntk.fixture.mjs';
+import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
 
 test('Joppa selects one executable Task in plan order', async t => {

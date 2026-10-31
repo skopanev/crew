@@ -23,7 +23,6 @@ class SourceMountTests(unittest.TestCase):
             for folder in (repo, sibling / '.git', tooling / 'fixture', wt,
                            tooling / 'sources', tooling / 'lane/bin', runs):
                 folder.mkdir(parents=True, exist_ok=True)
-            (repo / '.ntkrc').write_text('{"target_branch":"develop"}\n')
             (repo / 'README.md').write_text('original\n')
             (repo / '.githooks').mkdir()
             hook = repo / '.githooks/pre-commit'
@@ -39,7 +38,7 @@ class SourceMountTests(unittest.TestCase):
             initial = git('rev-parse', 'HEAD')
             git('remote', 'add', 'origin', '/workspace/sources/repo')
             (tooling / 'lane/bin/ticket-outcome.mjs').write_text(
-                '// Local stand-in: this test never contacts NTK.\nconsole.log("fixture status");\n')
+                '// Local stand-in: the host worker records Joppa outcomes.\nconsole.log("fixture status");\n')
             (runs / 'create.sh').write_text(shell_body('create_worktree'))
             (runs / 'cleanup.sh').write_text(shell_body('cleanup'))
             (runs / 'artifacts').mkdir()
@@ -74,7 +73,7 @@ echo 'PASS: source writes denied; context readable; worktree commit and cleanup 
             env = dict(project_dir='/workspace/sources/repo',
                        source_root='/workspace/sources', ticket_id='fixture', project_name='fixture',
                        TOOLING_ROOT='/workspace', MEDULLA_RUN_DIR=str(runs),
-                       LANE_WORKTREE='/workspace/fixture')
+                       LANE_WORKTREE='/workspace/fixture', TARGET_BRANCH='develop')
             args = ['docker', 'run', '--rm', '--cpus', '1', '--memory', '512m',
                     '--network', 'none', '--entrypoint', 'bash']
             for source, target, mode in ((tooling, '/workspace', 'ro'),

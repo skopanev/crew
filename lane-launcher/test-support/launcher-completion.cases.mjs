@@ -13,7 +13,7 @@ import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDig
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
 
-import {launcher, worker, queueReads, countReads, queueQuery, runState, existingClaim, execute, notificationEnv, setup} from './launcher-ntk.fixture.mjs';
+import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
 
 test('Joppa package completes every Task atomically with the same checked landing', async t => {
@@ -145,22 +145,39 @@ test('launches require sourceRoot and pass no repository override', async t => {
   assert.ok(!args.includes('--repo') && !args.includes('--mount-rw'));
   const {sourceRoot, ...missing} = f.config;
   save(f.configFile, missing);
-  assert.throws(() => configFrom(f.configFile, f.env), /needs sourceRoot/);
-  save(f.configFile, {...f.config, repo: path.join(f.root, 'sources/repo')});
+  assert.throws(() => configFrom(f.configFile, f.env), /needs absolute sourceRoot/);
+  save(f.configFile, {...f.config, repo: path.join(f.root, 'sources/app')});
   assert.throws(() => configFrom(f.configFile, f.env), /repo was removed/);
 });
-test('worker records completion before notifying; Telegram failure preserves lane outcome', async t => {
-  const f = await setup(t);
-  fs.writeFileSync(path.join(f.bins, 'bash'), '#!/bin/sh\nexit 0\n', {mode: 0o755});
-  const dir = path.join(f.root, 'worker');
-  fs.mkdirSync(dir);
-  const file = path.join(dir, 'launch.json');
-  save(file, {config: {...f.config, notify: {chatId: 'fixture'}},
-    ticket: 'T1', workspace: 'test', args: [], pane: 'fixture', runFolder: path.join(dir, 'lane')});
-  const sent = path.join(dir, 'sent.json');
-  const result = await execute(worker, [file], notificationEnv(f, file, sent, true));
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(read(path.join(dir, 'launch.json')).result.code, 0);
-  assert.equal(read(sent).text, '🟢 READY\nTicket: T1');
-  assert.match(read(path.join(dir, 'notification-error.json')).error, /fixture delivery failure/);
+test('worker records the outcome before notifying; Telegram failure preserves it', async t => {
+  const f = await workerFixture(t, 'exit 2\n', {notify: {chatId: 'fixture'}});
+  const sent = path.join(f.root, 'sent.json');
+  const result = await execute(worker, [f.stateFile], notificationEnv(f, f.stateFile, sent, true));
+  assert.equal(result.code, 2, result.stderr);
+  const saved = read(f.stateFile).result;
+  assert.equal(saved.code, 2);
+  assert.equal(saved.held, true);
+  assert.equal(read(sent).text, '🔴 FAILED\nTicket: task:t1\nReason: EXIT_2');
+  assert.match(read(path.join(f.root, 'notification-error.json')).error, /fixture delivery failure/);
 });
+for (const closeTabOnExit of [false, true]) {
+  test(`worker saves the lane exit and failed checks; closeTabOnExit=${closeTabOnExit}`, async t => {
+    const f = await workerFixture(t, "printf 'lane-output\\n'\nexit 7\n", {closeTabOnExit});
+    const events = path.join(f.root, 'events.jsonl');
+    f.run.config.herdr = path.join(f.bins, 'herdr');
+    fs.writeFileSync(f.run.config.herdr, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${events}'\n`, {mode: 0o755});
+    f.persist();
+    const artifacts = path.join(laneRunFolder(f.run.runFolder, f.run.config.id), 'fixture/artifacts');
+    fs.mkdirSync(path.join(artifacts, 'gates/check'), {recursive: true});
+    fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'candidate checks failed');
+    save(path.join(artifacts, 'gates/check/receipt.json'), {checks: [
+      {command: 'bun run docs:links', exit_code: 1, log: '/fixture/gates/1.log'}]});
+    const result = await execute(worker, [f.stateFile], f.env);
+    assert.equal(read(f.stateFile).result.code, 7, result.stderr);
+    assert.match(fs.readFileSync(path.join(f.root, 'output.log'), 'utf8'), /lane-output/);
+    assert.match(result.stdout, /FAILED check: bun run docs:links · exit 1/);
+    const closed = fs.existsSync(events) ? fs.readFileSync(events, 'utf8').trim().split('\n') : [];
+    assert.deepEqual(closed, closeTabOnExit ? ['pane close owned-pane'] : []);
+    if (!closeTabOnExit) assert.match(result.stdout, /Tab kept open/);
+  });
+}

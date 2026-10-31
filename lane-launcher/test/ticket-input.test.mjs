@@ -3,54 +3,61 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import http from 'node:http';
-import {spawn} from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-const helper = fileURLToPath(new URL('../../lane/bin/ticket-input.mjs', import.meta.url));
-for (const readOnly of [false, true]) for (const outcome of ['success', 'unavailable', 'wrong-ticket']) {
-  test(`ticket input ${outcome}, readOnly=${readOnly}: one read, full body or failure, no writes`, async t => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-ticket-input-'));
-    t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-    const ticket = {id: outcome === 'wrong-ticket' ? 'OTHER' : 'T1',
-      body: 'Acceptance criteria\n' + 'full body '.repeat(1000), module: 'fixture/src'};
-    let calls = 0;
-    const server = http.createServer((req, res) => {
-      calls++;
-      assert.equal(req.method, 'GET');
-      assert.equal(req.url, '/v1/tickets/T1?workspace=fixture');
-      res.writeHead(outcome === 'unavailable' ? 503 : 200);
-      res.end(JSON.stringify(outcome === 'unavailable' ? {error: 'unavailable'} : {ticket}));
-    });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    t.after(() => new Promise(resolve => server.close(resolve)));
-    const env = {...process.env, ticket_id: 'T1', project_name: 'fixture', MEDULLA_RUN_DIR: root,
-      NTK_CONFIG: path.join(root, 'missing'), NTK_KEY: 'fixture-key',
-      NTK_URL: `http://127.0.0.1:${server.address().port}`};
-    const file = path.join(root, 'artifacts/ticket.json');
-    fs.mkdirSync(path.dirname(file));
-    fs.writeFileSync(path.join(root, 'artifacts/claim.json'), JSON.stringify({id: 'T1', workspace: 'fixture', claimed: true}));
-    if (readOnly) {
-      fs.writeFileSync(file, 'original ticket artifact');
-    }
-    const result = await new Promise((resolve, reject) => {
-      const args = readOnly ? ['--read', 'T1', '--workspace', 'fixture'] : [];
-      const child = spawn(process.execPath, [helper, ...args], {env});
-      let stderr = '', stdout = '';
-      child.stdout.on('data', data => stdout += data);
-      child.stderr.on('data', data => stderr += data);
-      child.on('error', reject);
-      child.on('close', code => resolve({code, stderr, stdout}));
-    });
-    assert.equal(calls, 1);
-    if (readOnly) assert.equal(fs.readFileSync(file, 'utf8'), 'original ticket artifact');
-    if (outcome === 'success') {
-      assert.equal(result.code, 0, result.stderr);
-      assert.deepEqual(JSON.parse(readOnly ? result.stdout : fs.readFileSync(file, 'utf8')), ticket);
+const input = fileURLToPath(new URL('../../lane/bin/ticket-input.mjs', import.meta.url));
+const outcome = fileURLToPath(new URL('../../lane/bin/ticket-outcome.mjs', import.meta.url));
+const ticket = {id: 'T1', source: 'joppa', address: 'task:t1',
+  body: 'Acceptance criteria\n' + 'full body '.repeat(1000), module: 'fixture/src'};
+
+function fixture(t, claim) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-ticket-input-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.mkdirSync(path.join(root, 'artifacts'));
+  if (claim) fs.writeFileSync(path.join(root, 'artifacts/claim.json'), JSON.stringify(claim));
+  return {root, file: path.join(root, 'artifacts/ticket.json'),
+    env: {...process.env, ticket_id: 'T1', project_name: 'fixture', MEDULLA_RUN_DIR: root}};
+}
+
+for (const readOnly of [false, true]) for (const scenario of ['success', 'wrong-ticket', 'wrong-workspace', 'not-joppa', 'no-claim']) {
+  test(`ticket input ${scenario}, readOnly=${readOnly}: claimed Joppa Task or failure, no writes`, t => {
+    const claim = scenario === 'no-claim' ? null : {id: 'T1', workspace: scenario === 'wrong-workspace' ? 'other' : 'fixture',
+      claimed: true, source: scenario === 'not-joppa' ? 'other' : 'joppa',
+      ticket: scenario === 'wrong-ticket' ? {...ticket, id: 'OTHER', address: 'task:other'} : ticket};
+    const f = fixture(t, claim);
+    if (readOnly) fs.writeFileSync(f.file, 'original ticket artifact');
+    const args = readOnly ? ['--read', 'T1', '--workspace', 'fixture'] : [];
+    const result = spawnSync(process.execPath, [input, ...args], {env: f.env, encoding: 'utf8'});
+    if (readOnly) assert.equal(fs.readFileSync(f.file, 'utf8'), 'original ticket artifact');
+    if (scenario === 'success') {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(readOnly ? result.stdout : fs.readFileSync(f.file, 'utf8')), ticket);
     } else {
-      assert.equal(result.code, 1);
-      if (!readOnly) assert.ok(!fs.existsSync(file));
+      assert.equal(result.status, 1);
+      if (!readOnly) assert.ok(!fs.existsSync(f.file));
       assert.match(result.stderr, /Ticket input:/);
     }
   });
 }
+
+test('ticket outcome leaves Joppa writes to the host worker and refuses an unconfirmed claim', t => {
+  const claim = {id: 'T1', workspace: 'fixture', claimed: true, status: 'in_progress', source: 'joppa', address: 'task:t1'};
+  const f = fixture(t, null);
+  const run = (mode, value) => {
+    fs.writeFileSync(path.join(f.root, 'artifacts/claim.json'), JSON.stringify({...value, run_dir: f.root}));
+    return spawnSync(process.execPath, [outcome, mode], {env: f.env, encoding: 'utf8'});
+  };
+  for (const mode of ['to-test', 'blocked']) {
+    const result = run(mode, claim);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `Joppa ${mode}: host worker records the outcome for task:t1\n`);
+  }
+  assert.match(run('findings', claim).stdout, /Joppa findings remain in followups.txt/);
+  assert.match(run('reopen', claim).stderr, /Expected to-test, blocked or findings/);
+  for (const value of [{...claim, claimed: false}, {...claim, workspace: 'other'}, {...claim, source: 'other'}]) {
+    const result = run('to-test', value);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /No confirmed claim|not a Joppa Task claim/);
+  }
+});

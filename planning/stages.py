@@ -1,16 +1,14 @@
-"""Deterministic Medulla nodes and post hooks for planning."""
+"""Shared Medulla nodes and post hooks for planning-joppa."""
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
-from common import digest, fingerprint, inside, read, require, run, signal, validate_input, write
+from common import digest, fingerprint, inside, read, require, run, signal, write
 from contracts import ROLES, load_contract
 import drift
 import validation
-from freshness import snapshot, hydrate, utc_now
 from responses import final_response
 
 
@@ -23,18 +21,6 @@ def emit_var(name, value):
     require(len(value.encode()) < 100000, f"{name}: context too large; narrow the AC")
     require("</signal:var>" not in value, "reserved signal delimiter in context")
     print(f"<signal:var key={name}>{value}</signal:var>")
-
-
-def prepare():
-    target = artifacts()
-    target.mkdir(parents=True, exist_ok=True)
-    original = validate_input(read(os.environ["PLANNING_INPUT"]))
-    write(target / "input-source.json", original)
-    chain = snapshot(original["workspace"], original["requirement"]["id"], original["ac"]["id"])
-    assignment = hydrate(original, chain)
-    write(target / "joppa-snapshot.json", chain)
-    write(target / "input.json", assignment)
-    prepare_context(assignment)
 
 
 def indexed_projects():
@@ -75,7 +61,7 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
             f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"], timeout=120))
     require(knowledge.get("ok") is True, "Equill knowledge retrieval failed")
     write(target / "knowledge.json", knowledge)
-    emit_var("assignment", prompt_assignment(assignment))
+    emit_var("assignment", assignment)
     emit_var("source_history", history)
     emit_var("knowledge", knowledge.get("content", ""))
     for role, contract in contracts.items():
@@ -86,28 +72,6 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
     prepare_opencode([r["path"] for r in assignment["repositories"]] +
                      list(read_paths) + [os.environ["MEDULLA_RUN_DIR"]], mcp_servers=mcp_servers)
     signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
-
-
-def prompt_assignment(assignment):
-    """Remove repeated NTK context without removing prerequisite evidence."""
-    if assignment.get("kind") != "ntk":
-        return assignment
-    result = {key: value for key, value in assignment.items() if key != "knowledge_query"}
-    result["ac"] = {key: value for key, value in assignment["ac"].items() if key != "text"}
-    result["repositories"] = [{key: value for key, value in repo.items() if key != "modules"}
-                              for repo in assignment["repositories"]]
-    result["ntk"] = dict(assignment["ntk"])
-    result["ntk"]["referenced"] = [
-        {"workspace": item["workspace"], "revision_count": item["revision_count"],
-         "ticket": {key: item["ticket"].get(key) for key in ("id", "title", "status", "project", "module")}}
-        if item.get("ticket") else item
-        for item in assignment["ntk"].get("referenced", [])]
-    result["ntk"]["source"] = {key: value for key, value in assignment["ntk"]["source"].items() if key != "ticket"}
-    names = {item["name"] for repo in assignment["repositories"] for item in repo["modules"]}
-    result["ntk"]["meta"] = {**assignment["ntk"]["meta"],
-        "modules": [item for item in assignment["ntk"]["meta"]["modules"] if item["name"] in names]}
-    result["details_file"] = str(artifacts() / "input.json")
-    return result
 
 
 def prepare_opencode(read_paths, mcp_servers=None):
@@ -292,13 +256,6 @@ def bind_necessity(plan):
     require_necessity(plan)
 
 
-def needs_human():
-    result = require_necessity(allow_owner_gaps=True)
-    require(result["owner_gaps"], "no required owner decision")
-    fail("Required owner decision: " + "; ".join(
-        f"{gap['owner']}: {gap['decision']}" for gap in result["owner_gaps"]))
-
-
 def review_input():
     plan = read(artifacts() / "plan.json")
     require(plan["disposition"] != "blocked", "plan blocked: " + "; ".join(plan["blockers"]))
@@ -329,19 +286,6 @@ def critique_join():
     write(rounds, done)
     emit_var("critique", {"previous_plan": plan, "blocking_findings": rejected})
     signal("REVISE", "Rejected by " + ", ".join(sorted(rejected)) + "; design revises once")
-
-
-def finish():
-    target = artifacts()
-    assignment = read(target / "input.json")
-    plan = read(target / "plan.json")
-    validation.plan(plan, assignment)
-    reviews, old, contracts = verify_context(assignment, plan)
-    require(digest(read(os.environ["PLANNING_INPUT"])) == digest(read(target / "input-source.json")), "input changed during planning")
-    chain = read(target / "joppa-snapshot.json")
-    require(chain == snapshot(chain["workspace"], chain["requirement"]["id"], chain["ac"]["id"]),
-            "Joppa Domain/Capability/Requirement/AC changed during planning; re-plan")
-    save_result(assignment, plan, reviews, old, contracts, chain)
 
 
 def verify_context(assignment, plan, review=True, *, mechanisms_only=False):
@@ -383,8 +327,7 @@ def verify_mechanism_context(assignment, plan):
     return current, contracts
 
 
-# The exact failure when the source moved while planning ran. planning-ntk marks
-# it so its dispatcher can re-plan once against current code.
+# The exact failure when the source moved while planning ran.
 CODE_DRIFT = "source changed during planning; re-plan against current code"
 
 
@@ -460,69 +403,8 @@ def request_review(review):
     raise DriftReview("Base advanced cleanly; critics review the landed diff before publication")
 
 
-def save_result(assignment, plan, reviews, old, contracts, chain):
-    target = artifacts()
-    # Admission is a local receipt, not a Joppa AC pass or owner acceptance.
-    outcome = {"status": "ready" if plan["disposition"] == "implement" else "verify_existing",
-               "scope": "local_plan", "joppa_currentness_verified": True,
-               "joppa_snapshot": chain,
-               "domain": assignment["domain"], "capability": assignment["capability"],
-               "requirement": assignment["requirement"], "ac": assignment["ac"],
-               "input_digest": digest(assignment), "plan_digest": digest(plan), "snapshots": old,
-               "contracts": {k: {n: v[n] for n in ("role", "record_ids", "bundle_digest")}
-                             for k, v in contracts.items()},
-               "plan": plan, "necessity": require_necessity(plan), "reviews": reviews, "joppa_updated": False}
-    if drift.cleared(target):
-        outcome["drift_review"] = drift.cleared(target)
-    lines = ["# Implementation plan", "", "Status: " + outcome["status"], "", plan["outcome"], "", "## Approach", "", plan["approach"], "", plan["rationale"]]
-    for task in plan["tasks"]:
-        lines += ["", "## " + task["id"] + ": " + task["title"], "", f"Repository: {task['repository']} · module: {task['module']}", "", task["outcome"], ""]
-        lines += ["Prerequisite Tasks: " + (", ".join(task["depends_on"]) or "none"),
-                  "Reuse: " + ("; ".join(task["reuse"]) or "none identified"), ""]
-        lines += [f"{i}. {step}" for i, step in enumerate(task["steps"], 1)]
-        lines += ["", "Checks:", ""]
-        for check in task["checks"]:
-            method = check.get("scenario") or f"`{check['command']}` in `{check['cwd']}`"
-            lines.append(f"- {method}: {check['expected']}")
-    (target / "plan.md").write_text("\n".join(lines) + "\n")
-    outcome["completed_at"] = utc_now().isoformat()
-    write(target / "result.json", outcome)
-    signal("READY", target / "result.json")
-
-
-def fail(reason=None):
-    reason = reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "workflow stopped without a valid result"
-    errors = [read(path) for path in sorted(artifacts().glob("error-*.json"))]
-    if errors:
-        reason += "; " + "; ".join(f"{e['stage']}/{e['branch']}: {e['reason']}" for e in errors)
-    write(artifacts() / "result.json", {"status": "blocked", "reason": reason,
-                                       "errors": errors, "scope": "local_plan",
-                                       "joppa_currentness_verified": False, "joppa_updated": False})
-    signal("BLOCKED", reason)
-
-
 def capture_error_file(kind):
     branch = "design" if kind == "plan" else "necessity" if kind == "necessity" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
     require(branch in (*validation.RESEARCH, *validation.DRIFT_CRITICS, "design"), "unknown capture branch")
     return artifacts() / f"error-{kind}-{branch}.json"
 
-
-if __name__ == "__main__":
-    command = sys.argv[1]
-    try:
-        if command == "capture":
-            capture(sys.argv[2])
-        else:
-            {"prepare": prepare, "prepare_critic": prepare_critic, "research_join": research_join, "needs_human": needs_human, "review_input": review_input,
-             "critique_join": critique_join, "finish": finish, "fail": fail}[command]()
-    except DriftReview as review:
-        signal("DRIFT", review)
-    except Exception as exc:
-        print(f"planning/{command}: {exc}", file=sys.stderr)
-        if command in ("capture", "prepare_critic"):
-            kind = sys.argv[2] if command == "capture" else "critic"
-            path = capture_error_file(kind)
-            write(path, {"stage": kind, "branch": path.stem.split("-")[-1], "reason": str(exc)})
-        else:
-            fail(str(exc))
-        sys.exit(1)

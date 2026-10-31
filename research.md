@@ -444,7 +444,7 @@ allowlist. Roles and process implementations in Equill were not changed here.
 
 ## 11. Where dolber fits
 
-[dolber.sh](lane-launcher/dolber.sh) is a small shell entry point into the Node.js
+`dolber.sh` (now [dolber-joppa.sh](lane-launcher/dolber-joppa.sh)) is a small shell entry point into the Node.js
 [launcher](lane-launcher/launcher.mjs). This is a suitable implementation for a
 deterministic dispatcher; the shell wrapper does not need to become a workflow
 engine.
@@ -455,7 +455,7 @@ reconciliation of active or uncertain runs. It previews an NTK candidate, reserv
 a slot, and starts a worker; the lane claims the ticket before implementation.
 Stopping the dispatcher does not itself terminate existing lanes.
 
-The current queue integration is [NTK HTTP](lane-launcher/ntk.mjs). Its tags and
+The current queue integration is NTK HTTP (`lane-launcher/ntk.mjs`, removed after Joppa adoption). Its tags and
 preferred tags are not Joppa queue selectors. Joppa adoption requires adapting
 selection, claim, scope loading, and outcome reporting, with an unattended agent
 identity. It is not a URL substitution. Project-to-repository configuration and

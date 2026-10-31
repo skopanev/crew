@@ -85,10 +85,9 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `delivery` | `branch`, `target`, or `requirement` |
 
 `sourceRoot` can contain several repositories or be the repository itself.
-Only configured repositories enter Git and CBM refresh. No `.ntkrc` is required for Joppa.
+Only configured repositories enter Git and CBM refresh.
 `worktreeRoot` sets the checkout directory inside `sourceRoot`. Each Task has a stable execution ID.
 The table shows the full Task address, stage or reason code, run ID, start time and duration.
-NTK Dolber keeps its existing config and commands.
 
 `coderTimeoutSeconds` requires Medulla support for `--node-timeout` in the host runtime and the selected image.
 Medulla 4.98.1 rejects this flag. Omit the setting with that release.

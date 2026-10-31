@@ -36,6 +36,7 @@ nodes:
     # timeout covers both attempts.
     timeout: 600
     max_attempts: 2
+    # Agents get no tracker credentials from the host, including the retired NTK's.
     env: &agent_environment
       JOPPA_TOKEN: ''
       JOPPA_TOKEN_FILE: ''
@@ -135,7 +136,7 @@ nodes:
     # (first live run: design was still working at 300 s).
     timeout: 1200
     # A vetoed report retries once; Medulla puts the veto reason in the prompt
-    # (first live design exceeded the NTK text limit and had no second chance).
+    # (an early live design exceeded a ticket text limit and had no second chance).
     max_attempts: 2
     env: *agent_environment
     agent:
@@ -178,7 +179,7 @@ nodes:
     # (first live run: design was still working at 300 s).
     timeout: 1200
     # A vetoed report retries once; Medulla puts the veto reason in the prompt
-    # (first live design exceeded the NTK text limit and had no second chance).
+    # (an early live design exceeded a ticket text limit and had no second chance).
     max_attempts: 3
     env:
       JOPPA_TOKEN: ''

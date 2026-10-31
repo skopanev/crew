@@ -8,8 +8,7 @@ Keep the plan within that scope, including after a revision.
 When the prompt supplies critic findings on your previous plan, revise that plan.
 Resolve each blocking finding, or refute it with source evidence in rationale.
 Use the supplied parent context to understand the purpose and constraints.
-Plan only the selected AC or source ticket. Follow the additional output contract
-when supplied. It defines the NTK fields and verdicts.
+Plan only the selected AC. Follow the additional output contract when supplied.
 When supplied, use details_file to read relevant attachments and the full input.
 
 Gate commands are written for the lane, where configured directories appear at
@@ -46,11 +45,8 @@ Tasks in prerequisite order; depends_on names earlier Task ids. Include tests
 in their owning module; another write module requires another Task. Describe
 observable checks. An existing check may include command and cwd. Do not invent
 test paths or build setup. Never claim you ran checks.
-If already implemented, or an NTK ticket only verifies declared prerequisite
-outputs, use disposition "verify_existing", no Tasks, and specific acceptance
-checks. NTK deps control when those checks can run. Do not claim that unfinished
-prerequisite outputs already exist. If any research report is blocked, READY is not allowed.
-For NTK, return NOT_READY with the missing fact or a newly discovered required owner decision.
+If already implemented, use disposition "verify_existing", no Tasks, and specific
+acceptance checks. Do not claim that unfinished prerequisite outputs already exist.
 If blocked, use disposition "blocked" and name the
 missing fact or owner decision; do not fabricate a viable implementation plan.
 Give the command or path:line behind each count and current-state claim.

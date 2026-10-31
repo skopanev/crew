@@ -17,8 +17,8 @@ class SuccessOutcomeTests(unittest.TestCase):
             commands.mkdir()
             node = commands / "node"
             node.write_text('#!/bin/sh\n[ "$2" = findings ] || exit 99\n'
-                            'if [ "$FINDINGS_FAIL" = 1 ]; then echo "NTK unavailable" >&2; exit 1; fi\n'
-                            'echo "NTK findings: fixture-finding (created blocked; depends on fixture-task)"\n')
+                            'if [ "$FINDINGS_FAIL" = 1 ]; then echo "findings unavailable" >&2; exit 1; fi\n'
+                            'echo "Joppa findings remain in followups.txt for the host completion evidence"\n')
             node.chmod(0o755)
             if bus_installed:
                 bus = commands / "agentbus"
@@ -51,7 +51,7 @@ class SuccessOutcomeTests(unittest.TestCase):
                 result, report = self.run_success("LANDED", bus_installed=installed)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("deadbeef on develop", report)
-                self.assertIn("NTK findings: fixture-finding", report)
+                self.assertIn("Joppa findings remain in followups.txt", report)
                 self.assertEqual(result.stdout, report)
 
     def test_landing_with_failed_state_write_cannot_report_success(self):
@@ -68,7 +68,7 @@ class SuccessOutcomeTests(unittest.TestCase):
         result, report = self.run_success("LANDED", findings_fail=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("deadbeef on develop", report)
-        self.assertIn("Findings publication failed: NTK unavailable", report)
+        self.assertIn("Findings publication failed: findings unavailable", report)
         self.assertIn("Source ticket remains to_test", report)
 
 
