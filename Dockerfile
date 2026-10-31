@@ -20,7 +20,7 @@ RUN git config --system --add safe.directory /workspace \
 RUN python3 -m venv /opt/medulla \
  && /opt/medulla/bin/pip install --no-cache-dir -q \
       "git+https://github.com/skopanev/medulla.git" \
- && ln -s /opt/medulla/bin/medulla /usr/local/bin/medulla
+ && ln -sf /opt/medulla/bin/medulla /usr/local/bin/medulla
 # Update Medulla by rebuilding the image.
 ENV MEDULLA_UPGRADE_ON_START=0
 
