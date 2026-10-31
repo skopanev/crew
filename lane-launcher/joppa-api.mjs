@@ -60,46 +60,11 @@ async function responseMessage(response, id) {
 
 export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
   const result = await rawCall(url, tokenFile, tool, arguments_, options);
-  if (tool === 'joppa_objects' && arguments_.address && object(result.document)) {
-    result.kind ??= result.address.split(':', 1)[0];
-    result.historical ??= result.document.revision !== undefined && result.document.revision !== result.current_revision;
-    if (!arguments_.revision) result.contract_revision ??= result.current_revision;
-    result.process ??= {};
-    result.process.assignee ??= null;
-    result.annotations ??= {};
-    if (object(result.comments)) {
-      const comments = {}, seen = new Set(), total = result.comments.total;
-      let page = arguments_.comments_cursor
-        ? await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: undefined}, options) : result;
-      const first = page;
-      for (;;) {
-        if (page.address !== result.address ||
-            page.current_revision !== result.current_revision || JSON.stringify(page.document) !== JSON.stringify(result.document)) {
-          throw new Error('Joppa object changed during comment read');
-        }
-        if (!Array.isArray(page.comments?.items)) throw new Error('Joppa comment page is incomplete');
-        for (const comment of page.comments.items) {
-          if (typeof comment.id !== 'string' || Object.hasOwn(comments, comment.id)) throw new Error('Joppa comment page overlaps');
-          comments[comment.id] = comment;
-        }
-        const cursor = page.comments.next_cursor;
-        if (!cursor) break;
-        if (seen.has(cursor)) throw new Error('Joppa comment pagination did not advance');
-        seen.add(cursor);
-        page = await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: cursor}, options);
-      }
-      if (Number.isInteger(total) && Object.keys(comments).length !== total) throw new Error('Joppa comment list is incomplete');
-      if (page.position !== first.position) {
-        const check = await rawCall(url, tokenFile, tool, {...arguments_, comments_cursor: undefined}, options);
-        if (check.address !== first.address || check.current_revision !== first.current_revision || JSON.stringify(check.document) !== JSON.stringify(first.document) ||
-            JSON.stringify(check.comments) !== JSON.stringify(first.comments)) throw new Error('Joppa comments changed during read');
-      }
-      result.annotations.comments = comments;
-      delete result.comments;
-    }
+  if (tool === 'joppa_objects' && arguments_.address && !arguments_.history) {
+    return completeDetail(arguments_, result, args => rawCall(url, tokenFile, tool, args, options));
   }
-  if (tool === 'joppa_tasks') result.tasks ??= [];
-  if (tool === 'joppa_tests' && !arguments_.summary) for (const row of result.items || [result]) row.tests ??= [];
+  if (tool === 'joppa_tasks') normalizeTasks(result);
+  if (tool === 'joppa_tests') normalizeTests(arguments_, result);
   return result;
 }
 
@@ -177,5 +142,89 @@ async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = 
         await response.body?.cancel();
       } catch {}
     }
+  }
+}
+
+const authoredLink = link => ({blocking: link.blocking ?? false, relation: link.relation ?? 'related',
+  revision: link.revision ?? null, target: link.target});
+
+function normalizeDetail(args, value) {
+  const result = {...value};
+  if (!object(result.document)) {
+    if (!object(result.data) || !Number.isSafeInteger(result.revision) || result.revision < 1) {
+      throw new Error('Joppa object detail is incomplete');
+    }
+    result.document = {revision: result.revision, parent: result.parent ?? null, present: result.present ?? true,
+      data: result.data, links: (result.links || []).map(authoredLink)};
+    result.current_revision ??= result.revision;
+    if (!args.revision) {
+      result.review_required ??= false;
+      result.work_ready ??= true;
+    }
+  }
+  result.address ??= args.address;
+  result.kind ??= result.address.split(':', 1)[0];
+  result.historical ??= result.document.revision !== undefined && result.document.revision !== result.current_revision;
+  if (!args.revision) result.contract_revision ??= result.current_revision;
+  result.process = {...result.process};
+  result.process.assignee ??= null;
+  result.annotations = {...result.annotations};
+  result.files ??= [];
+  result.references ??= [];
+  result.remote_links_revision ??= 0;
+  return result;
+}
+
+async function completeDetail(args, value, readPage) {
+  const result = normalizeDetail(args, value);
+  if (!object(result.comments)) return result;
+  const comments = {}, seen = new Set(), total = result.comments.total;
+  const {comments_cursor, ...firstArgs} = args;
+  const first = comments_cursor ? normalizeDetail(firstArgs, await readPage(firstArgs)) : result;
+  let page = first, paged = false;
+  const sameObject = other => other.address === result.address && other.current_revision === result.current_revision &&
+    JSON.stringify(other.document) === JSON.stringify(result.document);
+  for (;;) {
+    if (!sameObject(page)) throw new Error('Joppa object changed during comment read');
+    if (!Array.isArray(page.comments?.items)) throw new Error('Joppa comment page is incomplete');
+    for (const comment of page.comments.items) {
+      if (typeof comment.id !== 'string' || Object.hasOwn(comments, comment.id)) throw new Error('Joppa comment page overlaps');
+      comments[comment.id] = comment;
+    }
+    const cursor = page.comments.next_cursor;
+    if (!cursor) break;
+    if (seen.has(cursor)) throw new Error('Joppa comment pagination did not advance');
+    seen.add(cursor);
+    page = normalizeDetail(args, await readPage({...args, comments_cursor: cursor}));
+    paged = true;
+  }
+  if (Number.isInteger(total) && Object.keys(comments).length !== total) throw new Error('Joppa comment list is incomplete');
+  if (paged) {
+    const check = normalizeDetail(firstArgs, await readPage(firstArgs));
+    if (!sameObject(check) || JSON.stringify(check.comments) !== JSON.stringify(first.comments)) {
+      throw new Error('Joppa comments changed during read');
+    }
+  }
+  result.annotations.comments = comments;
+  delete result.comments;
+  return result;
+}
+
+function normalizeTests(args, result) {
+  const targets = (args.ac || '').split(',').filter(Boolean);
+  if (targets.length === 1 && !result.items) result.address ??= targets[0];
+  for (const row of result.items || [result]) {
+    row.tests_draft ??= false;
+    if (!args.summary) row.tests ??= [];
+  }
+}
+
+function normalizeTasks(result) {
+  const lean = !result.tasks && Array.isArray(result.items);
+  result.tasks ??= result.items || [];
+  if (lean) for (const row of result.tasks) {
+    row.ac ??= row.parent;
+    row.claimable ??= false;
+    row.review_required ??= false;
   }
 }
