@@ -23,6 +23,7 @@ class LaunchMountTests(unittest.TestCase):
                            sources / 'app/.git', sources / 'infra/.git', sources / 'locks', root / 'cache'):
                 folder.mkdir(parents=True)
             shutil.copy(CREW / 'lane/run.sh', tooling / 'lane/run.sh')
+            shutil.copytree(CREW / 'lane/startup', tooling / 'lane/startup')
             shutil.copy(CREW / 'lane-launcher/scope.mjs', tooling / 'lane-launcher/scope.mjs')
             shutil.copy(CREW / 'lane-launcher/runtime.mjs', tooling / 'lane-launcher/runtime.mjs')
             (tooling / 'lane/bridge/cbm-connect.py').write_text(

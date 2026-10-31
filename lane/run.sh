@@ -1,53 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-usage() {
-  cat >&2 <<'USAGE'
-usage: run.sh --ticket-id <id> --project <Joppa workspace> --source-root <workspace>
-              --dispatcher-id <dolber id>
-              --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
-              --gate-command <shell command> [...]
-              [--review-command <shell command>]...
-              --test-command '["runner", "args"]' [--gate-timeout <seconds>]
-              [--coder-timeout <seconds>]
-              [--module <module>]
-              [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
-              [--image <image>] [--docker-engine]
-              [extra medulla args...]
-
-  --source-root  entire source workspace, mounted read-only. It contains the
-                 configured repository of the Joppa Task.
-  --cbm-mcp-command  native host CBM executable; broker bridges it for this lane.
-              The lane uses that service; it never copies or indexes a database.
-  --cbm-cache-dir  existing shared CBM store, the same as the active daemon uses.
-  --module    Task module; read from the Joppa Task when omitted
-  --image     lane runtime image; defaults to medulla-crew:latest
-  --docker-engine  enable the broker box's private Docker engine for tests
-  --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.
-  --gate-command  required check, run from the candidate repo root. Repeatable.
-                  Supplied by the operator; no commands are inferred from code.
-  --review-command  optional check before review; defaults to the gate commands.
-  --test-command  required runner argument array for existing-code verification.
-  --gate-timeout  maximum seconds per check; defaults to 900.
-  --coder-timeout  cap each coder attempt; cannot extend the workflow timeout.
-  --mount-ro  another repository to mount READ-ONLY, for scope. Repeatable.
-  --mount-rw  an existing directory to mount writable at /workspace/<name>. Repeatable.
-  --shared-lock-dir  a shared lock directory directly under the source root, mounted writable.
-  --ssh-dir  directory holding ONLY the lane's git key, as id_ed25519, plus an
-             optional known_hosts. No default: landing needs a key and a
-             made-up path that nobody created is worse than none. The whole
-             directory is what the agent can read, so nothing else belongs in it.
-
-Anything after the known flags is passed to medulla unchanged, so --validate,
---dry-run, --resume and --node work as usual.
-USAGE
-  exit 2
-}
 
 WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Herdr panes need explicit CRLF for shell messages.
 say() { printf '%s\r\n' "$*" >&2; }
 RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
+source "$WORKFLOW_DIR/startup/usage.sh"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 image="${MEDULLA_IMAGE:-medulla-crew:latest}"
@@ -235,74 +194,7 @@ else
   say "        put the lane's deploy key there (and nothing else), or pass --ssh-dir"
 fi
 
-cleanup() {
-  local code=$? base head changes cleanup_target hook_rc retry land_base retain_worktree=false
-  if [[ "${worktree_created:-false}" == true && -d "$worktree" && ! -L "$worktree" ]]; then
-    if [[ -z "$(ls -A "$worktree")" ]]; then
-      rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
-    elif [[ "$code" -eq 0 ]]; then
-      cleanup_target="$target"
-      if [[ "${LANE_DELIVERY:-branch}" == branch ]] \
-        || [[ "${LANE_DELIVERY:-}" == requirement && "${LANE_REQUIREMENT_FINAL:-false}" != true ]]; then
-        cleanup_target="${LANE_DELIVERY_BRANCH:-ticket-$ticket}"
-        [[ ! -f "$worktree/.git/lane-verified" ]] || cleanup_target="$target"
-      fi
-      if [[ -n "$cleanup_target" ]] \
-        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
-        && [[ -z "$changes" ]] \
-        && git -C "$worktree" merge-base --is-ancestor HEAD "refs/remotes/origin/$cleanup_target"; then
-        if [[ -n "$after_land" && "$cleanup_target" == "$target" && ! -f "$worktree/.git/lane-verified" ]]; then
-          head="$(git -C "$worktree" rev-parse HEAD)"
-          land_base="$(cat "$worktree/.git/lane-base" 2>/dev/null || true)"
-          printf -v retry 'cd %q && timeout --kill-after=5s 120s %q %q %q %q %q' \
-            "$worktree" "$repo/$after_land" "$worktree" "$head" "$target" "$land_base"
-          hook_rc=2
-          if [[ "$land_base" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] \
-            && git -C "$worktree" merge-base --is-ancestor "$land_base" "$head"; then
-            hook_rc=0
-            (cd "$worktree" && timeout --kill-after=5s 120s "$repo/$after_land" "$worktree" "$head" "$target" "$land_base") || hook_rc=$?
-          else
-            say 'run.sh: pre-land target SHA is missing or invalid; afterLand was not run'
-          fi
-          if [[ "$hook_rc" -ne 0 ]] \
-            || [[ "$(git -C "$worktree" rev-parse HEAD 2>/dev/null)" != "$head" ]] \
-            || ! changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
-            || [[ -n "$changes" ]]; then
-            say "run.sh: POST_LAND_FAILED: retry: $retry"
-            say "run.sh: retained landed worktree: $worktree (afterLand exit $hook_rc)"
-            retain_worktree=true
-          fi
-        fi
-        if [[ "$retain_worktree" == false ]]; then
-          if rm -rf -- "$worktree"; then
-            printf 'run.sh: removed completed worktree: %s\r\n' "$worktree"
-          else
-            say "run.sh: cannot remove completed worktree: $worktree" >&2
-          fi
-        fi
-      else
-        say "run.sh: retained worktree: clean landed state not confirmed at $worktree" >&2
-      fi
-    elif [[ "${LANE_FINALIZE_ONLY:-false}" == true && -d "$worktree/.git" ]] \
-      && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
-      && [[ -z "$changes" ]]; then
-      # No agent writes in a finalizer. Its clean source comes from published inputs.
-      rm -rf -- "$worktree"
-    elif [[ -d "$worktree/.git" && -f "$worktree/.git/lane-base" ]]; then
-      if base="$(cat "$worktree/.git/lane-base" 2>/dev/null)" \
-        && head="$(git --no-optional-locks -C "$worktree" rev-parse HEAD 2>/dev/null)" \
-        && changes="$(git --no-optional-locks -C "$worktree" status --porcelain --untracked-files=all 2>/dev/null)" \
-        && [[ -n "$base" && "$head" == "$base" && -z "$changes" ]]; then
-        if rm -rf -- "$worktree"; then
-          printf 'run.sh: removed unchanged worktree: %s\r\n' "$worktree"
-        fi
-      fi
-    fi
-  fi
-  [[ -z "${cbm_connector_dir:-}" ]] || rm -rf "$cbm_connector_dir"
-  [[ -z "${joppa_connector_dir:-}" ]] || rm -rf "$joppa_connector_dir"
-  return "$code"
-}
+source "$WORKFLOW_DIR/startup/cleanup.sh"
 trap cleanup EXIT
 for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"} ${writable[@]+"${writable[@]}"}; do
   point="$TOOLING_ROOT/$(basename "$m")"
@@ -330,76 +222,8 @@ unset LANE_JOPPA_MCP_COMMAND_JSON
 cbm_connector="" cbm_project=""
 equill_vars=()
 if [[ "${LANE_FINALIZE_ONLY:-false}" != true ]]; then
-
-# Broker supplies a current bridge, scoped to this source root, as for --box.
-# Only its small per-run connector enters the container; the database stays shared.
-cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
-cbm_connector="$cbm_connector_dir/mcp.py"
-python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector"
-chmod 600 "$cbm_connector"
-cbm_project="$(jq -er '.cbmProject' <<<"$LANE_REPOSITORY_JSON")"
-# Read-only Medulla checks do not update canonical sources or CBM.
-sync_sources=true
-for arg in ${passthrough[@]+"${passthrough[@]}"}; do
-  case "$arg" in --dry-run|--validate|--graph) sync_sources=false ;; esac
-done
-# Stop before any sync or Docker work when this machine's Equill store lags the
-# committed role snapshots: export is one-way, so git pull alone never updates it.
-if $sync_sources && [[ -z "${CREW_SKIP_ROLE_CHECK:-}" && -f "$TOOLING_ROOT/roles/export.py" ]]; then
-  EQUILL_STORE="${EQUILL_STORE:-$HOME/.equill/dev}" \
-    python3 "$TOOLING_ROOT/roles/export.py" --check lane shared || exit 2
-fi
-if $sync_sources; then
-  python3 "$TOOLING_ROOT/lane-launcher/safe-sync.py" "$source_root" "$cbm_connector" "$MEDULLA_IMAGE"
-else
-  docker run --rm --entrypoint python3 \
-    --add-host=host.docker.internal:host-gateway \
-    -v "$cbm_connector_dir:$cbm_connector_dir:ro" \
-    -v "$WORKFLOW_DIR/bridge/cbm-probe.py:/tmp/cbm-probe.py:ro" \
-    "$MEDULLA_IMAGE" /tmp/cbm-probe.py "$cbm_connector" "$cbm_project"
-fi
-say "run.sh: shared codebase memory connected"
-
-bridge_dir="$MEDULLA_BRIDGE/equill"
-mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
-if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  nohup bash "$WORKFLOW_DIR/bridge/equill-bridge.sh" >>"$MEDULLA_BRIDGE/equill-bridge.log" 2>&1 &
-  disown || true
-fi
-
-for ((bridge_attempt=0; bridge_attempt<25; bridge_attempt++)); do
-  bridge_pid="$(cat "$bridge_dir/bridge.pid" 2>/dev/null || true)"
-  if [[ -n "$bridge_pid" ]] && kill -0 "$bridge_pid" 2>/dev/null \
-     && [[ "$(cat "$bridge_dir/bridge.identity" 2>/dev/null || true)" == "lane:$bridge_pid" ]]; then
-    break
-  fi
-  sleep 0.2
-done
-
-# An already-running old bridge may still inherit its owner's write identity.
-# Do not reuse it silently or stop it while another caller might be using it.
-bridge_pid="$(cat "$bridge_dir/bridge.pid" 2>/dev/null || true)"
-if [[ -z "$bridge_pid" ]] || ! kill -0 "$bridge_pid" 2>/dev/null \
-   || [[ "$(cat "$bridge_dir/bridge.identity" 2>/dev/null || true)" != "lane:$bridge_pid" ]]; then
-  say "run.sh: Equill bridge is unavailable or predates the fixed lane identity."
-  say "        Stop the old bridge when unused, then retry; startup refused."
-  exit 2
-fi
-
-equill_vars=(
-    --var "EQUILL_STORE=${EQUILL_STORE:-$HOME/.equill/dev}"
-    --var "EQUILL_ACTOR=lane"
-    --var "EQUILL_BRIDGE=$bridge_dir"
-    --var "EQUILL_MEMORY_ROLE=lane"
-    --var "EQUILL_RULES=${EQUILL_RULES:-none}"
-    --var "EQUILL_SESSION_PROFILE=${EQUILL_SESSION_PROFILE:-agent.context.target}"
-    --var "EQUILL_PROMPT_PROFILE=${EQUILL_PROMPT_PROFILE:-agent.memory.hybrid}"
-    --var "EQUILL_PROJECT=$project"
-    --var "EQUILL_TICKET=$ticket"
-    --var "EQUILL_MODULE=$module"
-    --var "EQUILL_PM=${LANE_PM_ALIAS:-${project}-pm}"
-)
-say "run.sh: memory on (equill bridge pid $bridge_pid)"
+  source "$WORKFLOW_DIR/startup/cbm.sh"
+  source "$WORKFLOW_DIR/startup/equill.sh"
 fi
 
 # Code and Git writes use this ticket directory. Clone happens after claim.

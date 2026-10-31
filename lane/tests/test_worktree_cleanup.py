@@ -9,7 +9,8 @@ import unittest
 
 RUN = Path(__file__).resolve().parents[1] / 'run.sh'
 TEXT = RUN.read_text()
-CLEANUP = TEXT[TEXT.index('cleanup() {'):TEXT.index('trap cleanup EXIT')]
+CLEANUP_TEXT = (RUN.parent / 'startup/cleanup.sh').read_text()
+CLEANUP = CLEANUP_TEXT[CLEANUP_TEXT.index('cleanup() {'):]
 
 
 class WorktreeCleanupTests(unittest.TestCase):
