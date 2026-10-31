@@ -128,7 +128,7 @@ def read_assignment(api, config, target):
 
 def task_contract(data):
     """Render either stored format without changing the document or claim digest."""
-    contract = data.get("contract", "")
+    contract = data.get("body", data.get("contract", ""))
     if "steps" not in data:
         return contract if isinstance(contract, str) else ""
     text(contract, "Structured Task contract")
@@ -168,10 +168,8 @@ def pending_work_page(api, config, assignment):
                 continue
             if not projects.intersection(task.get("projects", [])):
                 continue
-            contract = task.get("contract", "")
-            if not re.search(r"^Repository:[ \t]*\S", contract, re.M):
-                document = object_read(api, config["workspace"], address)
-                contract = task_contract(document["document"]["data"])
+            document = object_read(api, config["workspace"], address)
+            contract = task_contract(document["document"]["data"])
             def field(name):
                 match = re.search(r"^" + name + r":[ \t]*([^\r\n]+)$", contract, re.M)
                 return match[1].strip() if match else None

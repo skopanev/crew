@@ -102,6 +102,7 @@ class ProviderTests(unittest.TestCase):
 
     def test_context_reads_actual_revision_shape_and_custom_roles(self):
         ac = item("criterion:a", "rule:r")
+        ac["document"]["data"]["body"] = "Given the input, return the required output."
         req = item("rule:r", "area:capability")
         cap = item("area:capability", "area:domain")
         dom = item("area:domain")
@@ -136,6 +137,7 @@ class ProviderTests(unittest.TestCase):
         config = {"workspace": "example", "repositories": assignment()["repositories"]}
         value, snapshot, criterion = context.load(Reader(), config, "a")
         self.assertEqual(criterion["address"], "criterion:a")
+        self.assertEqual(value["knowledge_query"], ac["document"]["data"]["body"])
         self.assertEqual(value["joppa"]["task_type"], "work")
         self.assertEqual(value["requirement"]["revision"], 3)
         self.assertEqual(snapshot["requirement"]["number"], 3)

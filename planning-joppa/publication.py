@@ -81,6 +81,9 @@ def operations(plan, assignment):
         fields = contract_fields(task)
         if not existing or context.task_contract(data) != context.task_contract(fields):
             data.update(fields)
+        if "contract" in data:
+            data.setdefault("body", data["contract"])
+            del data["contract"]
         project = repositories[task["repository"]]["project"]
         project_id = project.split(":", 1)[1]
         projects = list(data.get("projects") or [])

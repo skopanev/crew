@@ -44,10 +44,11 @@ class ProviderTests(unittest.TestCase):
         task = value['tasks'][0]
         task['steps'] = ['Preserve the required behavior. ' + '🙂' * 240] * 5
         saved = publication.operations(value, data)[0]['command']['data']
-        self.assertEqual(saved['contract'], 'Goal: ' + task['outcome'])
+        self.assertEqual(saved['body'], 'Goal: ' + task['outcome'])
+        self.assertNotIn('contract', saved)
         self.assertEqual(saved['steps'], task['steps'])
         self.assertGreater(len(context.task_contract(saved)), 1024)
-        for key in ('contract', 'repository', 'module', 'steps', 'checks'):
+        for key in ('body', 'repository', 'module', 'steps', 'checks'):
             for entry in saved[key] if isinstance(saved[key], list) else [saved[key]]:
                 self.assertLessEqual(len(entry), 1024)
 
@@ -78,10 +79,10 @@ class ProviderTests(unittest.TestCase):
         task.update(action='update', target='work:old', revision=3, steps=['x' * 1024, 'y' * 1024],
                     depends_on=['work:dependency'])
         old = data['joppa']['tasks'][0]['document']['data']
-        old.update(title=task['title'], contract=publication.contract(task, value), projects=['other', 'p'])
+        old.update(title=task['title'], body=publication.contract(task, value), projects=['other', 'p'])
         before = deepcopy(old)
         saved = publication.operations(value, data)[0]['command']['data']
-        self.assertGreater(len(saved['contract']), 1024)
+        self.assertGreater(len(saved['body']), 1024)
         self.assertEqual(saved, before)
         self.assertNotIn('steps', saved)
         self.assertEqual(old, before)
@@ -95,7 +96,7 @@ class ProviderTests(unittest.TestCase):
         old['process']['blocked'] = {'reason': 'Failed', 'position': 19}
         task['steps'].append('Handle the recorded failure in the same mechanism.')
         saved = publication.operations(value, data)[0]['command']['data']
-        self.assertEqual(saved['contract'], old['document']['data']['contract'])
+        self.assertEqual(saved['body'], old['document']['data']['body'])
         self.assertNotEqual(saved['steps'], old['document']['data']['steps'])
 
     def test_structured_recovery_step_zero_keeps_its_scope_and_order(self):
@@ -123,7 +124,7 @@ class ProviderTests(unittest.TestCase):
                 calls.append((name, args))
                 if name == 'joppa_tasks':
                     return {'tasks': [{'address': obj['address'], 'revision': 3, 'title': 'Outside',
-                        'projects': ['p'], 'status': 'open', 'contract': fields['contract']}], 'next_cursor': None}
+                        'projects': ['p'], 'status': 'open', 'body': context.task_contract(fields)[:300]}], 'next_cursor': None}
                 self_address = args['address']
                 if self_address != obj['address']:
                     raise AssertionError(self_address)
@@ -133,3 +134,24 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result[0]['module'], 'core')
         self.assertIn('Use the existing mechanism', result[0]['how'])
         self.assertEqual([name for name, args in calls], ['joppa_tasks', 'joppa_objects'])
+
+    def test_legacy_inline_contract_is_written_as_body_without_changing_the_source(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task.update(action='update', target='work:old', revision=3, depends_on=['work:dependency'])
+        old = data['joppa']['tasks'][0]['document']['data']
+        old.pop('body')
+        old.update(title=task['title'], contract=publication.contract(task, value), projects=['other', 'p'])
+        before = deepcopy(old)
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertEqual(saved['body'], before['contract'])
+        self.assertNotIn('contract', saved)
+        self.assertEqual(old, before)
+
+    def test_body_is_authoritative_and_legacy_reads_do_not_rewrite_the_document(self):
+        body = 'Repository: service\nModule: core\nHow:\n1. Required mechanism.'
+        legacy = {'contract': body}
+        self.assertEqual(context.task_contract(legacy), body)
+        self.assertEqual(legacy, {'contract': body})
+        self.assertEqual(context.task_contract({'body': body, 'contract': 'Stale'}), body)
+        self.assertEqual(context.task_contract({'body': '', 'contract': body}), '')

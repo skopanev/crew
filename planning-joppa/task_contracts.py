@@ -111,7 +111,7 @@ def task_title(task, objects, counters):
     data = existing.get("document", {}).get("data", {})
     prefix = re.match(r"^\[(\d+)\]\s", data.get("title", ""))
     repository = task["repository"]
-    same_repository = (bool(data.get("contract")) and
+    same_repository = (bool(data.get("body", data.get("contract"))) and
         re.findall(r"^Repository:[ \t]*([^\r\n]+)$", context.task_contract(data), re.M) == [repository])
     if prefix and same_repository:
         number = int(prefix[1])
@@ -138,7 +138,7 @@ def check_line(check):
     return method + " => " + check["expected"]
 
 def contract_fields(task):
-    return {"contract": "Goal: " + task["outcome"], "repository": task["repository"], "module": task["module"],
+    return {"body": "Goal: " + task["outcome"], "repository": task["repository"], "module": task["module"],
             "steps": [step if step.startswith("0. ") else re.sub(r"^\s*\d+\.\s+", "", step)
                       for step in task["steps"]], "checks": [check_line(check) for check in task["checks"]]}
 

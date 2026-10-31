@@ -185,7 +185,7 @@ class ProviderTests(unittest.TestCase):
                 task = value["tasks"][0]
                 task.update(action="update", target="work:old", revision=3)
                 existing = data["joppa"]["tasks"][0]
-                existing["document"]["data"].update(title=task["title"], contract=publication.contract(task, value),
+                existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                                      projects=["other", "p"])
                 if blocked:
                     existing["process"]["blocked"] = {"reason": "Failed", "position": 19}

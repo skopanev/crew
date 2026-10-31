@@ -125,7 +125,7 @@ class ProviderTests(unittest.TestCase):
     def test_unchanged_task_can_retain_its_acceptance_check(self):
         data, value = assignment(), plan()
         old = data["joppa"]["tasks"][0]
-        old["document"]["data"]["contract"] = publication.contract(deepcopy(value["tasks"][0]), value)
+        old["document"]["data"]["body"] = publication.contract(deepcopy(value["tasks"][0]), value)
         value["tasks"][0]["checks"] = [{"scenario": "Another mechanism", "expected": "Another output"}]
         self.assertEqual(publication.operations(value, data)[0]["command"]["revision"], 0)
         for field in ("done", "retired"):
