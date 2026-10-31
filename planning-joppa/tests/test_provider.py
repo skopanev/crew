@@ -64,7 +64,7 @@ class ProviderTests(unittest.TestCase):
         schemas["criterion:b"]["task_schema"]["title_preview_length"] = 43
         data["joppa"].update(scope="requirement", criteria=[{"id": key} for key in schemas], criterion_schemas=schemas)
         data["joppa"]["objects"]["work:old"]["document"]["data"].update(
-            title="[999] Existing", contract="Repository: service\nModule: core")
+            title="[999] Existing", body="Repository: service\nModule: core")
         budgets = publication.title_budgets(data)
         self.assertEqual(budgets, {"service": 36, "other": 37})
         counters = publication.package_counters({}, data)
@@ -157,7 +157,7 @@ runpy.run_path({str(script)!r}, run_name="__main__")
                         for key in ("task_type", "task_schema", "test_status")}})
                 old = data["joppa"]["tasks"][0]
                 old["document"]["data"].update(title=f"[{number:02d}] Existing",
-                    contract="Repository: service\nModule: core")
+                    body="Repository: service\nModule: core")
                 prefix = f"[{number:02d}] "
                 budget = limit - len(prefix)
                 task = value["tasks"][0]

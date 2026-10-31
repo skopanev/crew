@@ -11,7 +11,7 @@ test('flat reads preserve authored pins, queue identity and recorded test eviden
   const object = {address: 'work:one', kind: 'work', current_revision: 3, contract_revision: 3,
     work_ready: true, review_required: false, remote_links_revision: 0,
     document: {revision: 3, parent: 'criterion:a', present: true,
-      data: {contract: 'Goal: Example', note: null, projects: [], title: 'Example'},
+      data: {body: 'Goal: Example', note: null, projects: [], title: 'Example'},
       links: [{blocking: true, relation: 'depends_on', revision: 2, target: 'work:before'}]},
     process: {status: 'open'}, annotations: {comments: {}}};
   const row = {status: 'green', tests_revision: 3,

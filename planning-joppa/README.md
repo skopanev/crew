@@ -91,7 +91,7 @@ Publication remains a separate workflow stage.
 Research checks reuse. Necessity checks the minimum scope. Design supplies mechanisms.
 Two independent critics review the plan. Publication saves Tasks and finishes the claim in one transaction.
 Each Task contract contains Goal, Repository, Module, How and Checks. How has at most five mechanism steps.
-New contracts store the goal in `data.contract`, scope in `repository` and `module`, and mechanisms in `steps` and `checks` arrays.
+New contracts store the goal in `data.body`, scope in `repository` and `module`, and mechanisms in `steps` and `checks` arrays.
 Each stored value has at most 1024 characters. Readers reconstruct the full contract and also accept the previous inline format.
 An unchanged existing contract keeps its stored format. Task links stay in native link arrays.
 Research citations stay outside Task contracts. Missing tests or behavior require implementation Tasks.

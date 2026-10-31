@@ -170,7 +170,7 @@ def load_once(api, config, ac_id):
                             "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
                             "task_schema": types[task_kind]},
-                  "knowledge_query": ac["document"]["data"].get("description") or ac["document"]["data"]["title"]}
+                  "knowledge_query": ac["document"]["data"].get("body", ac["document"]["data"].get("description")) or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
                 "requirement": meaning, "tests": test_list(tests)}
     if remote:

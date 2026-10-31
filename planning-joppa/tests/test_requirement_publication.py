@@ -34,7 +34,7 @@ class ProviderTests(unittest.TestCase):
                 for key in ("task_type", "task_schema", "test_status")}})
         data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
         retained = context.source(item("work:retained", "criterion:b", {"title": "[07] Approved work", "owner": "owner",
-            "purpose": "implementation", "contract": "Repository: service\nModule: core"}, {"status": "open"}))
+            "purpose": "implementation", "body": "Repository: service\nModule: core"}, {"status": "open"}))
         data["joppa"]["objects"][retained["address"]] = retained
         value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
         value["acceptance_checks"][0]["ac"] = "criterion:a"
@@ -48,7 +48,7 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
         old = data["joppa"]["objects"]["work:old"]
         old["process"]["blocked"] = {"reason": "Failed"}
-        old["document"]["data"].update(title="[03] Existing work", contract="Repository: service\nModule: core")
+        old["document"]["data"].update(title="[03] Existing work", body="Repository: service\nModule: core")
         retained["document"]["data"]["title"] = "[07] Approved work"
         data["joppa"]["tasks"] = [old]
         value["tasks"][0].update(action="update", target="work:old", revision=3, depends_on=[])
@@ -133,7 +133,7 @@ class ProviderTests(unittest.TestCase):
             publication.operations(value, data)
         provider = deepcopy(old)
         provider["address"] = "work:provider"
-        provider["document"]["data"]["contract"] = "Repository: service\nModule: core"
+        provider["document"]["data"]["body"] = "Repository: service\nModule: core"
         data["joppa"]["tasks"].append(provider)
         data["joppa"]["objects"][provider["address"]] = provider
         old["document"]["links"].append({"target": "work:provider", "revision": 3,

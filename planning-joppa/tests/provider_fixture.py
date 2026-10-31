@@ -33,7 +33,7 @@ def item(address, parent=None, data=None, process=None, role=None):
 
 def assignment():
     task = context.source(item("work:old", "criterion:a", {"title": "Existing", "owner": "document-owner",
-        "purpose": "implementation", "contract": "Existing contract", "projects": ["other"], "custom": "preserve"},
+        "purpose": "implementation", "body": "Existing contract", "projects": ["other"], "custom": "preserve"},
         {"assignee": None, "status": "open", "done": None, "retired": None}))
     task["document"]["links"] = [{"target": "record:note", "relation": "related", "revision": 3, "blocking": False}]
     ac = context.source(item("criterion:a", "rule:r"))

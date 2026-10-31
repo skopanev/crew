@@ -104,7 +104,7 @@ class ProviderTests(unittest.TestCase):
         first = value["tasks"][0]
         first.update(action="update", target="work:old", revision=3)
         original = data["joppa"]["tasks"][0]
-        original["document"]["data"].update(title=first["title"], contract=publication.contract(first, value),
+        original["document"]["data"].update(title=first["title"], body=publication.contract(first, value),
                                              projects=["other", "p"])
         second = deepcopy(first)
         second.update(id="consumer", action="create", title="Consume existing work", depends_on=["first"])
@@ -138,7 +138,7 @@ class ProviderTests(unittest.TestCase):
         task = value["tasks"][0]
         task.update(action="update", target="work:old", revision=3)
         existing = data["joppa"]["tasks"][0]
-        existing["document"]["data"].update(title=task["title"], contract=publication.contract(task, value),
+        existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                              projects=["other", "p"])
         existing["process"]["blocked"] = {"reason": "Failed", "position": 19}
         with self.assertRaisesRegex(ValueError, "blocked Task work:old needs a new contract or retirement"):
