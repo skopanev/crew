@@ -21,6 +21,12 @@ def install_sigterm_exit():
     signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(128 + number))
 
 
+def group_alive(pgid):
+    rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True, timeout=2)
+    return any(int(fields[0]) == pgid and not fields[1].startswith("Z")
+               for row in rows.splitlines() if len(fields := row.split()) == 2)
+
+
 class StdioRPC:
     def __init__(self, command):
         self.process = subprocess.Popen(validate_command(command), stdin=subprocess.PIPE,
@@ -84,7 +90,7 @@ class StdioRPC:
         if self.closed:
             return
         self.closed = True
-        # Stop descendants even when the command launcher has already exited.
+        # Keep the leader unreaped until all signals finish, so its PID cannot be reused.
         for action in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(self.process.pid, action)
@@ -92,10 +98,7 @@ class StdioRPC:
                 break
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline:
-                self.process.poll()
-                try:
-                    os.killpg(self.process.pid, 0)
-                except ProcessLookupError:
+                if not group_alive(self.process.pid):
                     break
                 time.sleep(0.02)
             else:
