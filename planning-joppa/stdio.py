@@ -22,7 +22,10 @@ def install_sigterm_exit():
 
 
 def group_alive(pgid):
-    rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True, timeout=2)
+    try:
+        rows = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return True
     return any(int(fields[0]) == pgid and not fields[1].startswith("Z")
                for row in rows.splitlines() if len(fields := row.split()) == 2)
 
@@ -100,7 +103,7 @@ class StdioRPC:
             while time.monotonic() < deadline:
                 if not group_alive(self.process.pid):
                     break
-                time.sleep(0.02)
+                time.sleep(0.1)
             else:
                 continue
             break
