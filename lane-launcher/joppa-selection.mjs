@@ -59,7 +59,7 @@ export async function heldTasks(config, worker, visit, inventory) {
   let cursor;
   do {
     const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace,
-      purpose: 'implementation', view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
+      view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
     for (const task of page.tasks) {
       inventory?.push(task);
       if (task.status === 'done' || task.status === 'retired' || task.status !== 'in_progress' && !task.assignee) continue;
@@ -132,7 +132,7 @@ export async function nextTask(config) {
     let cursor;
     do {
       const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
-        purpose: 'implementation', view: 'available', limit: 100, ...(cursor ? {cursor} : {}),
+        view: 'available', limit: 100, ...(cursor ? {cursor} : {}),
         ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
       for (const task of page.tasks) {
         try {

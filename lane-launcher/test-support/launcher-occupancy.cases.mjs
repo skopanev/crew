@@ -102,12 +102,12 @@ test('Joppa package legacy adopted claim runs the ownership guard before startup
   assert.equal(foreign.process.assignee, 'foreign-worker');
 });
 
-test('Joppa package ignores held Tasks for another purpose without an implementation contract', async t => {
+test('Joppa package ignores held Tasks without a repository contract', async t => {
   const f = await packageFixture(t), other = f.objects.get('task:t2');
-  other.document.data = {title: 'Research task', purpose: 'research'};
+  other.document.data = {title: 'Research task', body: 'Summarize the current decision.'};
   other.process = {status: 'in_progress', assignee: 'research-worker'};
   const selected = await nextTask(f.run.config);
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
-  assert.equal(f.calls.find(call => call.name === 'joppa_tasks' && call.args.view === 'all').args.purpose, 'implementation');
-  assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), false);
+  assert(f.calls.filter(call => call.name === 'joppa_tasks').every(call => !Object.hasOwn(call.args, 'purpose')));
+  assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), true);
 });

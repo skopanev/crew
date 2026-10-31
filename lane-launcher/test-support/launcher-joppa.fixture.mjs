@@ -26,7 +26,7 @@ async function packageFixture(t, mode = 'success') {
   for (let index = 1; index <= 2; index++) {
     objects.set(`ac:a${index}`, make(`ac:a${index}`, 'ac', 'req:r', {title: `AC ${index}`}));
     objects.set(`task:t${index}`, make(`task:t${index}`, 'task', `ac:a${index}`, {
-      title: `[0${index}] Task ${index}`, purpose: 'implementation',
+      title: `[0${index}] Task ${index}`,
       body: `Goal: scoped change ${index}\nRepository: app\nModule: m${index}\nChecks: exact check ${index}`}));
   }
   const server = http.createServer(async (req, res) => {
@@ -41,6 +41,7 @@ async function packageFixture(t, mode = 'success') {
     }
     const {name, arguments: args} = message.params;
     calls.push({name, args});
+    assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
@@ -58,10 +59,8 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_tests') value = {items: args.ac.split(',').map(address => ({address, status: 'grey'}))};
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
-        purpose: objects.get(address).document.data.purpose,
         projects: objects.get(address).document.data.projects || ['project:app'],
         status: objects.get(address).process.status, assignee: objects.get(address).process.assignee}))
-        .filter(task => !args.purpose || task.purpose === args.purpose)
         .filter(task => !args.project || task.projects.includes(args.project))
         .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
     else if (name === 'joppa_batch') {

@@ -141,7 +141,6 @@ export function taskRepository(value, types) {
   require(types[value.kind]?.role === 'task', `Object is not a Task: ${value.address}`);
   const data = value.document.data;
   require(data && typeof taskBody(data) === 'string' && taskBody(data).trim(), `Task contract is missing: ${value.address}`);
-  require(data.purpose === undefined || data.purpose === 'implementation', `Task is not an implementation Task: ${value.address}`);
   const declarations = [...taskContract(data).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].map(match => match[1].trim());
   require(declarations.length === 1 && Boolean(declarations[0]) && !/\s/.test(declarations[0]),
     `Task needs an unambiguous Repository line: ${value.address}`);

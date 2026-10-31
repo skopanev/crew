@@ -46,6 +46,7 @@ class ProviderTests(unittest.TestCase):
         saved = publication.operations(value, data)[0]['command']['data']
         self.assertEqual(saved['body'], 'Goal: ' + task['outcome'])
         self.assertNotIn('contract', saved)
+        self.assertNotIn('purpose', saved)
         self.assertEqual(saved['steps'], task['steps'])
         self.assertGreater(len(context.task_contract(saved)), 1024)
         for key in ('body', 'repository', 'module', 'steps', 'checks'):
@@ -155,3 +156,16 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(legacy, {'contract': body})
         self.assertEqual(context.task_contract({'body': body, 'contract': 'Stale'}), body)
         self.assertEqual(context.task_contract({'body': '', 'contract': body}), '')
+
+    def test_old_server_data_stays_intact_until_the_server_migrates_purpose(self):
+        data, value = assignment(), plan()
+        task = value['tasks'][0]
+        task.update(action='update', target='work:old', revision=3)
+        old = data['joppa']['tasks'][0]['document']['data']
+        old['purpose'] = 'Keep the approved constraint.'
+        saved = publication.operations(value, data)[0]['command']['data']
+        self.assertEqual(saved['purpose'], old['purpose'])
+        old.pop('purpose')
+        old['body'] += '\n\nKeep the approved constraint.'
+        migrated = publication.operations(value, data)[0]['command']['data']
+        self.assertNotIn('purpose', migrated)

@@ -170,7 +170,7 @@ export function createDashboard(config, paint) {
     const {counts} = state;
     const header = `DOLBER ${config.id} · Running lanes `;
     const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
-      clip(config.source === 'joppa' ? `workspace: ${config.workspace} · project: ${config.joppa.project} · purpose: implementation` :
+      clip(config.source === 'joppa' ? `workspace: ${config.workspace} · project: ${config.joppa.project}` :
         `workspace: ${config.workspace} · tags: ${config.tags.join(', ') || '(any)'} · strict: ${config.strict}`, width),
       counts ? clip(config.source === 'joppa' ? `Tasks: ${counts.ready} available · ${counts.held} held workers` :
         `Tickets: ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',

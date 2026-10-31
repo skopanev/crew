@@ -16,7 +16,7 @@ function fixture() {
   function add(address, parent, status) {
     const value = {address, kind: address.split(':')[0], historical: false, current_revision: 1,
       document: {present: true, parent, links: [], data: {title: address,
-        ...(status ? {purpose: 'implementation', body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
+        ...(status ? {body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
       process: status ? {status, revision: 1} : {}};
     objects.set(address, value);
     return value;

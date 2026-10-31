@@ -99,7 +99,7 @@ export async function requirementPlan(run, read) {
   let cursor;
   const cursors = new Set();
   do {
-    const page = await read('joppa_tasks', {purpose: 'implementation', view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
+    const page = await read('joppa_tasks', {view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
     require(page && Array.isArray(page.tasks), 'Joppa task page is invalid');
     for (const item of page.tasks) {
       require(item && validAddress(item.address) && Number.isSafeInteger(item.revision) && item.revision > 0,

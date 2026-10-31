@@ -20,8 +20,7 @@ def unclaimed(task):
 
 def editable(task):
     unclaimed(task)
-    require(task["document"]["data"].get("purpose") == "implementation",
-            "only implementation Tasks can be rewritten by Crew planning")
+
 
 def retirable(task):
     unclaimed(task)
@@ -84,8 +83,6 @@ def package_counters(plan, assignment):
                 or existing["process"].get("done") or existing["process"].get("retired")):
             continue
         data = existing["document"]["data"]
-        if data.get("purpose") != "implementation":
-            continue
         repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", context.task_contract(data), re.M)
         if len(repository) != 1:
             continue

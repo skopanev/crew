@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {nextTicket, countTickets, credentials} from './ntk.mjs';
-import {save, read, readRun, alive, quote, command, herdr, laneArgs, runDirectories, validateWritableDirs} from './runtime.mjs';
-import {scopeDirectory, runScope, validateId} from './scope.mjs';
+import {save, readRun, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
+import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
-import {validateJoppa, nextTask, executionId} from './joppa.mjs';
+import {nextTask, executionId} from './joppa.mjs';
+import {configFrom} from './launcher-config.mjs';
+export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
@@ -17,84 +18,6 @@ const tones = {red: 31, blue: '1;34', yellow: '1;33', description: 33, ready: '1
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
 export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run | --monitor]';
-export function configFrom(file, env = process.env, {dryRun = false, source = 'ntk'} = {}) {
-  const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
-    stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
-    herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
-    ...read(file)};
-  config.source = source;
-  if (source === 'joppa') {
-    config.delivery ??= 'branch';
-    validateJoppa(config);
-    config.gateCommands = config.repositories[0].gateCommands;
-    config.testCommand = config.repositories[0].testCommand;
-  }
-  if (dryRun) config.launchLanes = false;
-  config.id = validateId(config.id);
-  // The terminal running dolber owns the destination workspace.
-  config.herdrWorkspace = env.HERDR_WORKSPACE_ID || config.herdrWorkspace;
-  for (const field of config.launchLanes ? ['workspace', 'herdrWorkspace'] : ['workspace']) {
-    if (typeof config[field] !== 'string' || !config[field].trim()) throw new Error(`Config needs ${field}`);
-  }
-  for (const field of ['tags', 'preferTags']) {
-    if (!Array.isArray(config[field]) || config[field].some(tag =>
-      typeof tag !== 'string' || !tag.trim() || tag.includes(','))) {
-      throw new Error(`${field} must be an array of nonempty tags without commas`);
-    }
-    config[field] = config[field].map(tag => tag.trim());
-  }
-  if (typeof config.strict !== 'boolean') throw new Error('strict must be true or false');
-  if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');
-  if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
-  if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
-  if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
-    throw new Error('image must be a Docker image reference');
-  }
-  for (const field of ['module', 'assignee']) {
-    if (config[field] != null && (typeof config[field] !== 'string' || !config[field].trim())) {
-      throw new Error(`${field} must be a nonempty string or null`);
-    }
-  }
-  if ('tag' in config) throw new Error('Use tags: ["crew"] in dolber.json instead of tag');
-  if (config.repo) throw new Error('repo was removed; set sourceRoot to the source workspace');
-  if (typeof config.stateDir !== 'string' || !path.isAbsolute(config.stateDir)) throw new Error('stateDir must be absolute');
-  for (const field of ['limit', 'intervalSeconds', 'gateTimeoutSeconds']) {
-    if (!Number.isSafeInteger(config[field]) || config[field] < 1) throw new Error(`${field} must be a positive integer`);
-  }
-  if (config.coderTimeoutSeconds != null && (!Number.isSafeInteger(config.coderTimeoutSeconds) || config.coderTimeoutSeconds < 1)) {
-    throw new Error('coderTimeoutSeconds must be a positive integer');
-  }
-  // A stable dispatcher identity owns its lock, reservations and containers.
-  config.stateDir = scopeDirectory(config.stateDir, config.id);
-  if (!config.launchLanes) return config;
-  if (!Array.isArray(config.gateCommands) || !config.gateCommands.length ||
-      config.gateCommands.some(check => typeof check !== 'string' || !check.trim())) {
-    throw new Error('Config needs gateCommands: a nonempty array of repository checks');
-  }
-  if (config.reviewCommands != null && (!Array.isArray(config.reviewCommands) || !config.reviewCommands.length ||
-      config.reviewCommands.some(check => typeof check !== 'string' || !check.trim()))) {
-    throw new Error('reviewCommands must be a nonempty array of check commands');
-  }
-  if (!Array.isArray(config.readOnlyRepos)) throw new Error('readOnlyRepos must be an array');
-  if (!Array.isArray(config.readWriteDirs)) throw new Error('readWriteDirs must be an array');
-  if (!Array.isArray(config.testCommand) || !config.testCommand.length || config.testCommand.some(arg => typeof arg !== 'string' || !arg.trim())) {
-    throw new Error('Config needs testCommand: runner arguments, e.g. ["bun", "run", "test"]');
-  }
-  if (!config.sourceRoot) throw new Error('Config needs sourceRoot: the source workspace');
-  for (const dir of [config.sourceRoot, config.sshDir, config.cbmCacheDir, ...config.readOnlyRepos, ...config.readWriteDirs]) {
-    if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
-      throw new Error(`Directory must exist and be absolute: ${dir}`);
-    }
-  }
-  validateWritableDirs(config);
-  if (typeof config.cbmMcpCommand !== 'string' || !path.isAbsolute(config.cbmMcpCommand) ||
-      !fs.statSync(config.cbmMcpCommand).isFile()) {
-    throw new Error('Config needs cbmMcpCommand: absolute path to the native host CBM executable');
-  }
-  return config;
-}
-
 export function dockerLanes(output, config) {
   return output.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => {
     return row.workflow === 'lane' && runScope(row.runFolder) === config.id;
@@ -190,7 +113,7 @@ export async function tick(config, display = null) {
   }
   if (!display) {
     print('checking params:');
-    if (selected) print(`  project: ${config.joppa.project} · purpose: implementation`);
+    if (selected) print(`  project: ${config.joppa.project}`);
     else {
       print(`  tags: ${config.tags.join(', ') || '(any)'}`);
       print(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);

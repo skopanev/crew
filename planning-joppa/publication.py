@@ -71,7 +71,7 @@ def operations(plan, assignment):
                 "revision": existing["current_revision"], "reason": task["outcome"]}})
             changed.add(ac)
             continue
-        data = deepcopy(existing["document"]["data"]) if existing else {"owner": owner, "purpose": "implementation"}
+        data = deepcopy(existing["document"]["data"]) if existing else {"owner": owner}
         # Joppa execution uses implementation Tasks for both code and scoped verification.
         # Verification evidence remains a separate operation.
         title = task["title"]
