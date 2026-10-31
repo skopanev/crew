@@ -124,4 +124,3 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container
     }
   });
 }
-

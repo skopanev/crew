@@ -100,4 +100,3 @@ test('Joppa package refuses more than 100 Tasks before API calls', async t => {
   await assert.rejects(claimTask(f.run, f.persist), /100-operation/);
   assert.equal(f.calls.length, 0);
 });
-
