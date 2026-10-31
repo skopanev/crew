@@ -8,8 +8,8 @@ import {requirementBranch, requirementPlan, assertRequirementHead, parsePublicat
 import {publicationReader} from '../publication-guard.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../dependencies.mjs';
 
-import {fixture} from './requirement-delivery.fixture.mjs';
-import './requirement-dependencies.cases.mjs';
+import {fixture} from '../test-support/requirement-delivery.fixture.mjs';
+import '../test-support/requirement-dependencies.cases.mjs';
 
 test('requirement publication evidence needs one exact SHA and target', () => {
   const sha = 'a'.repeat(40);
