@@ -69,4 +69,3 @@ for await(const line of createInterface({input:process.stdin})) {
 `);
   return {root, calls, command: [process.execPath, script, calls]};
 }
-
