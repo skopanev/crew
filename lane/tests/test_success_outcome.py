@@ -69,7 +69,7 @@ class SuccessOutcomeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("deadbeef on develop", report)
         self.assertIn("Findings publication failed: findings unavailable", report)
-        self.assertIn("Source ticket remains to_test", report)
+        self.assertIn("The Task outcome is unchanged", report)
 
 
 if __name__ == "__main__":
