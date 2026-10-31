@@ -94,4 +94,3 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package cleanup r
   assert.throws(() => cleanupBlockedTasks(blocked.input), /Active, held or unconfirmed/);
   assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
 });
-

@@ -111,4 +111,3 @@ test('Joppa package ignores held Tasks for another purpose without an implementa
   assert.equal(f.calls.find(call => call.name === 'joppa_tasks' && call.args.view === 'all').args.purpose, 'implementation');
   assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), false);
 });
-

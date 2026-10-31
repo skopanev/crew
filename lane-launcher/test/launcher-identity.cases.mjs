@@ -36,4 +36,3 @@ test('claim digest tracks authored remote pins without tracking live target stat
   object.remote_links_revision++;
   assert.notEqual(contractDigest(object), cleared);
 });
-

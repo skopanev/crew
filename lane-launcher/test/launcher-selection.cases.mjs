@@ -94,4 +94,3 @@ for await(const line of createInterface({input:process.stdin})) {
   assert.equal(f.calls.some(call => call.name === 'joppa_tasks' && call.args.view === 'mine'), false);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
-
