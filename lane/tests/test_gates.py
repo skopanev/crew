@@ -24,12 +24,11 @@ class GateTests(unittest.TestCase):
         self.env = dict(os.environ, MEDULLA_RUN_DIR=str(self.root / "run"),
                         ticket_id="fixture-task", project_name="fixture", project_dir=str(self.repo),
                         module_name="fixture-module", gate_commands='["printf passed"]',
-                        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+                        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, TARGET_BRANCH="develop")
         self.git("init", "-q")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
         (self.repo / "code.txt").write_text("original\n")
-        (self.repo / ".ntkrc").write_text('{"target_branch":"develop"}\n')
         self.git("add", ".")
         self.git("commit", "-qm", "initial")
         (self.repo / "code.txt").write_text("candidate\n")

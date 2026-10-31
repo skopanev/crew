@@ -170,11 +170,9 @@ export function createDashboard(config, paint) {
     const {counts} = state;
     const header = `DOLBER ${config.id} · Running lanes `;
     const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
-      clip(config.source === 'joppa' ? `workspace: ${config.workspace} · project: ${config.joppa.project}` :
-        `workspace: ${config.workspace} · tags: ${config.tags.join(', ') || '(any)'} · strict: ${config.strict}`, width),
-      counts ? clip(config.source === 'joppa' ? `Tasks: ${counts.ready} available · ${counts.held} held workers` :
-        `Tickets: ${counts.open} open${counts.blocked ? ' (blocked)' : ''} · ready to work: ${counts.ready}`, width) : 'Tickets: —',
-      clip(config.source === 'joppa' ? `Source: Joppa · delivery: ${config.delivery}` : `prefer: ${config.preferTags.join(' → ') || '(none)'}`, width),
+      clip(`workspace: ${config.workspace} · project: ${config.joppa.project}`, width),
+      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held workers`, width) : 'Tickets: —',
+      clip(`Source: Joppa · delivery: ${config.delivery}`, width),
       '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     const rows = runs.slice(0, 30).map(run => {

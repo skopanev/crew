@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// The shell gives agents their ticket; they do not need an NTK MCP connection.
+// The shell gives agents their Joppa Task from the host claim; they need no tracker connection.
 import fs from 'node:fs';
 import path from 'node:path';
-import {getTicket} from '../../lane-launcher/ntk.mjs';
 
 try {
   const args = process.argv.slice(2);
@@ -13,14 +12,12 @@ try {
   const id = readOnly ? args[1] : process.env.ticket_id;
   const workspace = readOnly ? args[3] : process.env.project_name;
   const runDir = process.env.MEDULLA_RUN_DIR;
-  if (!id || !workspace || (!readOnly && !runDir)) throw new Error('Ticket, workspace and run directory are required');
-  const claim = (() => {
-    try { return JSON.parse(fs.readFileSync(path.join(runDir, 'artifacts/claim.json'), 'utf8')); }
-    catch (error) { if (readOnly) return null; throw error; }
-  })();
-  const ticket = claim?.source === 'joppa' ? claim.ticket : await getTicket(id, workspace);
+  if (!id || !workspace || !runDir) throw new Error('Ticket, workspace and run directory are required');
+  const claim = JSON.parse(fs.readFileSync(path.join(runDir, 'artifacts/claim.json'), 'utf8'));
+  if (claim?.source !== 'joppa' || !claim.ticket) throw new Error('This run has no Joppa Task claim');
+  const ticket = claim.ticket;
   if (ticket.id.toLowerCase() !== id.toLowerCase() && ticket.address !== id) throw new Error('Ticket source returned a different ticket');
-  if (claim?.source === 'joppa' && claim.workspace !== workspace) throw new Error('Joppa Task belongs to another workspace');
+  if (claim.workspace !== workspace) throw new Error('Joppa Task belongs to another workspace');
   const content = JSON.stringify(ticket, null, 2) + '\n';
   if (readOnly) {
     process.stdout.write(content);

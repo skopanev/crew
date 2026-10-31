@@ -1,28 +1,29 @@
 # Lane
 
-Implement one prepared NTK ticket, review it, land it, and set `to_test`.
+Implement one claimed Joppa Task, review it, and deliver it. The host worker records the Joppa outcome.
 
 ## Launch
 
 Dolber reads a local JSON config and starts the host lane worker.
-The worker claims the ticket, then passes the confirmed receipt and config
-settings to `run.sh`. A direct `run.sh` call without that receipt is refused.
+The worker claims the Task, then passes the confirmed receipt, the configured
+repository and its settings to `run.sh`. A direct `run.sh` call without that
+receipt is refused.
 
 Repeat `--gate-command` for additional checks and `--mount-ro` for additional
-read-only repositories. The repository comes from the first component of the
-ticket module. Its `.ntkrc.target_branch` is required; there is no branch default.
+read-only repositories. The repository, its `targetBranch` and its optional
+`preflight` come from the dispatcher config; there is no branch default.
 
 The whole source workspace and canonical `.git` directories are read-only.
-The writable checkout is `<source-workspace>/.worktrees/<ticket>`, mounted at
-`/workspace/<ticket>`, with its own `.git`. Fetch, commits, and landing write
+The writable checkout is `<worktreeRoot>/<execution-id>`, mounted at
+`/workspace/<execution-id>`, with its own `.git`. Fetch, commits, and landing write
 there. Artifacts are writable separately. Existing nonempty checkouts are
 retained and rejected on a new launch.
 
 After success, the host removes the private checkout. Reports and logs remain in the run directory.
 Failed runs retain code changes. Empty or unchanged checkouts are removed.
 
-Startup uses Crew's `lane-launcher/safe-sync.py` for canonical repositories under
-the source root that have `.ntkrc`. Up to four repositories refresh in parallel,
+Startup uses Crew's `lane-launcher/safe-sync.py` for the configured canonical
+repositories under the source root. Up to four repositories refresh in parallel,
 each with its own MCP connection. A per-repository `flock` covers fetch,
 fast-forward, and shared CBM refresh. Detached HEAD is switched to the configured
 branch only when its commit is already in that branch's remote history. Local
@@ -38,7 +39,8 @@ medulla -w lane --validate
 ```
 
 Prepare → locate code with CBM → create checkout → implement → check → review
-with three agents → synthesize verdicts → land → cleanup → update status.
+with three agents → synthesize verdicts → land → cleanup. The host worker then
+records the outcome in Joppa.
 Review blockers return to implementation for up to three rounds. Landing
 conflicts go through a fix and another check/review round.
 
@@ -47,17 +49,17 @@ The scout lists existing test-file paths in `artifacts/ticket-checks.json`.
 Gates execute test paths through the configured `testCommand` argument array.
 They also run the ticket's structured acceptance checks. Verification skips configured change gates because it has no change set.
 The panel maps all AC to existing code and executed checks.
-Passing checks and review set `to_test` without a new commit or push. Missing
+Passing checks and review complete the Task without a new commit or push. Missing
 tests, failed checks, review blockers or a moved target stop with details.
 This path never returns to implementation.
 
 The worker claims in the Herdr tab before preflight or Docker. The workflow adopts that receipt
 without a second claim. `run.sh` requires that confirmed host receipt before
-preflight or Docker; the container never claims. Startup failure
-returns a dispatcher claim to `open`. After adoption, workflow failure sets
-`blocked` and attaches the failure report. No confirmed claim means no status write.
+preflight or Docker; the container never claims. The host worker releases,
+blocks or holds the claimed Tasks after the lane ends; see
+[dolber-joppa.md](../lane-launcher/dolber-joppa.md). No confirmed claim means no Joppa write.
 An uncertain claim or dispatch requires inspection before retrying.
-If `.ntkrc` declares a preflight, that script must exist and pass before implementation.
+If the repository config declares a preflight, that script must exist and pass before implementation.
 A failed declared preflight stops the lane and includes its log in the failure report.
 
 Checks run from the candidate repository before each review. Their commands,
@@ -79,16 +81,10 @@ The lock wait is bounded to 3600 seconds. A writer outside this lock can still m
 Conflict resolution or a coder repair requires checks and expert review again.
 Force push is unavailable.
 
-After landing, `to_test` has three attempts with one-second pauses. Exhaustion
-fails the run and preserves `artifacts/landing.txt` and `to-test-errors.txt`.
-It does not reimplement or block an already landed ticket.
+After landing, `artifacts/landing.txt` records the landed SHA. The host worker
+completes the Task in Joppa with that evidence and never reruns landed work.
 
-Each nonblocking finding creates a `[FINIDING] <summary>` ticket in the same
-project/module, initially `blocked`, dependent on the source. It inherits all
-source tags plus `findings`; `finding-report.txt` carries the evidence. There
-is no count limit. Saved creation receipts prevent recreating a confirmed
-finding on an attachment retry. Finding publication failures leave the source
-in `to_test`.
+Nonblocking findings remain in `artifacts/followups.txt` for the host completion evidence.
 
 ## Agent context
 
@@ -108,9 +104,9 @@ indexing is created. Startup checks the per-run connector
 from the container. Equill is accessed through the host bridge under the fixed
 `lane` identity, allowing only `context` and `search`.
 
-NTK reads, claim, status updates, and attachments use HTTP. Shell nodes retain
-`artifacts/ticket.json` for deterministic checks; agent prompts use the ticket
-reader. Codex credentials remain managed by its broker.
+The lane reads the Task snapshot from the host claim; Joppa credentials stay on
+the host. Shell nodes retain `artifacts/ticket.json` for deterministic checks;
+agent prompts use the ticket reader. Codex credentials remain managed by its broker.
 
 The container is the filesystem boundary. The Git key is readable by agents;
 prompt restrictions on pushing are not a security boundary.
@@ -142,4 +138,4 @@ python3 -m unittest discover -s lane/tests -v
 ```
 
 Tests execute workflow shell nodes with local stubs; they do not select real
-queue tickets. The container isolation test is opt-in.
+Joppa Tasks. The container isolation test is opt-in.

@@ -24,9 +24,6 @@ def necessity(result, expected_digest, assignment):
         require(isinstance(gap, dict) and set(gap) == {"owner", "decision"}, "owner gap needs owner and decision")
         text(gap["owner"], "owner gap owner")
         text(gap["decision"], "owner gap decision")
-        if assignment.get("kind") == "ntk":
-            require(gap["owner"] in {p["id"] for p in assignment["ntk"]["meta"]["people"] if p.get("kind") == "human"},
-                    "Decision owner must be a registered person")
 
 
 def evidence(items, name, empty=False):
@@ -105,12 +102,7 @@ def code_coverage(report, calls, assignment):
                 f"CBM coverage missing, stale or uncertain for {repo['id']}:{path}; verify index and re-plan")
         seen.add(repo["id"])
         inspected_keys.add((repo["id"], path))
-    if assignment.get("kind") == "ntk":
-        module = assignment["ticket"].get("module")
-        owners = {r["id"] for r in repos.values() if any(m["name"] == module for m in r["modules"])} if module else set()
-        require(owners.issubset(seen), "code research must inspect the ticket module repository")
-    else:
-        require(seen == set(repos), "code research must inspect every repository in the AC scope")
+    require(seen == set(repos), "code research must inspect every repository in the AC scope")
     cited = set()
     for evidence in report["evidence"]:
         source = evidence["source"]

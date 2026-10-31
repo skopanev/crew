@@ -44,7 +44,7 @@ class WorktreeCleanupTests(unittest.TestCase):
                     'sys.exit(42 if os.environ["HOOK_CASE"] == "failed" else 0)\n')
                 hook.chmod(0o755)
                 env = dict(os.environ, worktree=str(wt), worktree_created='true', target='main',
-                    ticket_source='ntk', repo=str(repo), after_land='' if case == 'none' else 'after-land',
+                    LANE_DELIVERY='target', repo=str(repo), after_land='' if case == 'none' else 'after-land',
                     HOOK_ARGS=str(root / 'args.json'), HOOK_CASE=case)
                 script = 'say() { printf "%s\\n" "$*"; }\n' + CLEANUP + '\ntrap cleanup EXIT\nexit 0\n'
                 result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=10)

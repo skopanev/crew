@@ -11,13 +11,14 @@ from test_failure_outcome import shell_body
 
 class ClaimCleanupTests(unittest.TestCase):
     def test_claim_receipt_requires_a_confirmed_response(self):
+        task = {"source": "joppa", "ticket": {"id": "T1", "body": "fixture acceptance"}}
         cases = [
-            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", True),
-            ({"id":"t1", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", True),
-            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test"}, "", True),
-            ({"id":"T1", "status":"open", "claimed":False, "workspace":"test"}, "fixture contract", False),
-            ({"id":"OTHER", "status":"in_progress", "claimed":True, "workspace":"test"}, "fixture contract", False),
-            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"other"}, "fixture contract", False),
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test", **task}, "fixture contract", True),
+            ({"id":"t1", "status":"in_progress", "claimed":True, "workspace":"test", **task}, "fixture contract", True),
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"test", **task}, "", True),
+            ({"id":"T1", "status":"open", "claimed":False, "workspace":"test", **task}, "fixture contract", False),
+            ({"id":"OTHER", "status":"in_progress", "claimed":True, "workspace":"test", **task}, "fixture contract", False),
+            ({"id":"T1", "status":"in_progress", "claimed":True, "workspace":"other", **task}, "fixture contract", False),
             (None, "fixture contract", False),
         ]
         for response, contract, adopted in cases:
@@ -27,8 +28,6 @@ class ClaimCleanupTests(unittest.TestCase):
                     (root / folder).mkdir(parents=True, exist_ok=True)
                 (root / "lane/hooks/inject.sh").write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
                 (root / "lane/hooks/codex-home.sh").write_text("exit 0\n")
-                (root / "lane-launcher/ntk.mjs").write_text(
-                    'export async function getTicket(id) { return {id, body: "fixture acceptance"}; }\n')
                 helper = Path(__file__).resolve().parents[1] / "bin/ticket-input.mjs"
                 (root / "lane/bin/ticket-input.mjs").write_text(helper.read_text())
                 equill = root / "bin/equill"
@@ -78,7 +77,7 @@ class ClaimCleanupTests(unittest.TestCase):
                     file = bins / name
                     file.write_text(script)
                     file.chmod(0o755)
-                env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'],
+                env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'], TARGET_BRANCH='develop',
                            TOOLING_ROOT=d, project_dir=d, ticket_id='T1', project_name='test',
                            MEDULLA_RUN_DIR=str(root / 'run'), LANE_WORKTREE=str(root / 'wt'), RESULT_RC=str(rc))
                 result = subprocess.run(['bash', '-c', shell_body('cleanup')], env=env, capture_output=True, text=True)

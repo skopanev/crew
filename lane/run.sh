@@ -2,7 +2,7 @@
 set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
-usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspace>
+usage: run.sh --ticket-id <id> --project <Joppa workspace> --source-root <workspace>
               --dispatcher-id <dolber id>
               --cbm-mcp-command <file> --cbm-cache-dir <shared-store>
               --gate-command <shell command> [...]
@@ -12,21 +12,17 @@ usage: run.sh --ticket-id <id> --project <ntk workspace> --source-root <workspac
               [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
-              [--planning-result <result.json> --planning-task <task-id>]
               [extra medulla args...]
 
-  --source-root  entire source workspace, mounted read-only. The ticket module
-                 names the source repository within it.
+  --source-root  entire source workspace, mounted read-only. It contains the
+                 configured repository of the Joppa Task.
   --cbm-mcp-command  native host CBM executable; broker bridges it for this lane.
               The lane uses that service; it never copies or indexes a database.
   --cbm-cache-dir  existing shared CBM store, the same as the active daemon uses.
-  --module    ticket module; read from ntk when omitted
+  --module    Task module; read from the Joppa Task when omitted
   --image     lane runtime image; defaults to medulla-crew:latest
   --docker-engine  enable the broker box's private Docker engine for tests
   --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.
-  --planning-result  completed planning receipt; requires a fresh live Joppa
-                     chain and age below 24h before this lane may start.
-  --planning-task    local Task id in that plan; repository/module must match.
   --gate-command  required check, run from the candidate repo root. Repeatable.
                   Supplied by the operator; no commands are inferred from code.
   --review-command  optional check before review; defaults to the gate commands.
@@ -54,7 +50,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 
 ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
-planning_result="" planning_task="" image="${MEDULLA_IMAGE:-medulla-crew:latest}"
+image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 after_land=""
 test_command='[]'
 gate_timeout=900
@@ -73,8 +69,8 @@ while (( $# )); do
     --repo|--repo=*) say "run.sh: ${1%%=*} was removed; use --source-root"; exit 2 ;;
     --source-root) source_root="${2:-}"; shift 2 ;;
     --module) module="${2:-}"; shift 2 ;;
-    --planning-result) planning_result="${2:-}"; shift 2 ;;
-    --planning-task) planning_task="${2:-}"; shift 2 ;;
+    --planning-result|--planning-result=*|--planning-task|--planning-task=*)
+      say "run.sh: ${1%%=*} was removed with the legacy planner"; exit 2 ;;
     --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
     --mount-ro) also+=("${2:-}"); shift 2 ;;
     --mount-rw) writable+=("${2:-}"); shift 2 ;;
@@ -95,11 +91,6 @@ while (( $# )); do
     *) passthrough+=("$1"); shift ;;
   esac
 done
-if [[ -n "$planning_result" || -n "$planning_task" ]]; then
-  [[ -n "$planning_result" && -n "$planning_task" ]] || {
-    say "run.sh: --planning-result and --planning-task must be supplied together"; exit 2; }
-  planning_result="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$planning_result")"
-fi
 [[ -n "$ticket"  ]] || { say "run.sh: --ticket-id is required"; usage; }
 [[ -n "$project" ]] || { say "run.sh: --project is required"; usage; }
 [[ -n "$source_root" ]] || { say "run.sh: --source-root is required"; usage; }
@@ -155,19 +146,10 @@ check_mountpoint() {
     fi
   fi
 }
-ticket_source="${LANE_SOURCE:-ntk}"
-if [[ "$ticket_source" == joppa ]]; then
-  ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' "$claim_file")"
-elif ! ticket_json="$(node --input-type=module -e '
-  import {pathToFileURL} from "node:url";
-  const {getTicket} = await import(pathToFileURL(process.argv[1]));
-  try { console.log(JSON.stringify(await getTicket(process.argv[2], process.argv[3]))); }
-  catch (error) { console.error(error.message); process.exit(1); }
-' "$TOOLING_ROOT/lane-launcher/ntk.mjs" "$ticket" "$project" 2>&1)"; then
-  say "run.sh: ${ticket_json%%$'\n'*}"
-  say "run.sh: ticket $ticket does not exist in workspace $project - nothing to run"
-  exit 2
-fi
+# The host worker starts every lane from a Joppa Task claim.
+ticket_source=joppa
+[[ "${LANE_SOURCE:-}" == joppa ]] || { say "run.sh: start through the Joppa lane worker"; exit 2; }
+ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' "$claim_file")"
 # An explicit module asserts the ticket's module; it cannot replace it.
 stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
 [[ -n "$stored" ]] || { say "run.sh: ticket $ticket declares no module; set it on the ticket"; exit 2; }
@@ -175,33 +157,16 @@ stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
   say "run.sh: --module $module disagrees with ticket module $stored"; exit 2; }
 module="$stored"
 
-# The ticket declares its repository as the first component of its module.
-# No project filter, repository map or fallback to a different repository.
+# The configured repository of the claimed Task; no fallback to another repository.
 source_root="$(cd "$source_root" && pwd -P)"
-if [[ "$ticket_source" == joppa ]]; then
-  repo="$(jq -er '.path' <<<"$LANE_REPOSITORY_JSON")"
-  repo="$(cd "$repo" && pwd -P)"
-  target="$(jq -er '.targetBranch' <<<"$LANE_REPOSITORY_JSON")"
-  repository_preflight="$(jq -r '.preflight // empty' <<<"$LANE_REPOSITORY_JSON")"
-  after_land="$(jq -r '.afterLand // empty' <<<"$LANE_REPOSITORY_JSON")"
-  worktree_root="${LANE_WORKTREE_ROOT:?Joppa needs worktreeRoot}"
-  [[ "$repo" == "$source_root" || "$repo" == "$source_root/"* ]] || {
-    say 'run.sh: configured repository escapes sourceRoot'; exit 2; }
-else
-component="${module%%/*}"
-[[ -n "$component" && "$component" != . && "$component" != .. ]] || {
-  say "run.sh: module must name a repository or repository/path inside --source-root"; exit 2; }
-repo="$source_root/$component"
-[[ -d "$repo/.git" ]] || { say "run.sh: ticket module has no source checkout: $repo"; exit 2; }
+repo="$(jq -er '.path' <<<"$LANE_REPOSITORY_JSON")"
 repo="$(cd "$repo" && pwd -P)"
-[[ "$repo" == "$source_root/"* ]] || { say "run.sh: module escapes --source-root"; exit 2; }
-# Landing targets come only from the repository's .ntkrc; there is no default.
-target="$(jq -er '.target_branch | select(type == "string" and length > 0)' "$repo/.ntkrc" 2>/dev/null)" \
-  && [[ "$target" != -* && "$target" != HEAD ]] && git check-ref-format "refs/heads/$target" || {
-  say "run.sh: $repo/.ntkrc must set target_branch to a legal branch name"; exit 2; }
-  repository_preflight="__ntkrc__"
-  worktree_root="$source_root/.worktrees"
-fi
+target="$(jq -er '.targetBranch' <<<"$LANE_REPOSITORY_JSON")"
+repository_preflight="$(jq -r '.preflight // empty' <<<"$LANE_REPOSITORY_JSON")"
+after_land="$(jq -r '.afterLand // empty' <<<"$LANE_REPOSITORY_JSON")"
+worktree_root="${LANE_WORKTREE_ROOT:?Joppa needs worktreeRoot}"
+[[ "$repo" == "$source_root" || "$repo" == "$source_root/"* ]] || {
+  say 'run.sh: configured repository escapes sourceRoot'; exit 2; }
 source_root_in="/workspace/$(basename "$source_root")"
 if [[ "$repo" == "$source_root" ]]; then project_dir="$source_root_in";
 else project_dir="$source_root_in/${repo#"$source_root/"}"; fi
@@ -213,15 +178,6 @@ if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73
 fi
 LANE_WORKTREE="/workspace/$ticket"
-
-planning_admission() {
-  [[ -n "$planning_result" ]] || return 0
-  python3 "$TOOLING_ROOT/planning/admit.py" --result "$planning_result" \
-    --task "$planning_task" --repository "$repo" --module "$module"
-}
-# Reject stale plans before container/index preparation. Check again immediately
-# before Medulla, since setup itself can cross the expiry boundary.
-planning_admission
 
 # Docker's medulla.runs_under label carries the stable dispatcher identity,
 # including manual launches with --dispatcher-id.
@@ -286,8 +242,8 @@ cleanup() {
       rmdir "$worktree" && printf 'run.sh: removed unused worktree: %s\r\n' "$worktree"
     elif [[ "$code" -eq 0 ]]; then
       cleanup_target="$target"
-      if [[ "$ticket_source" == joppa ]] && { [[ "${LANE_DELIVERY:-branch}" == branch ]] \
-        || [[ "${LANE_DELIVERY:-}" == requirement && "${LANE_REQUIREMENT_FINAL:-false}" != true ]]; }; then
+      if [[ "${LANE_DELIVERY:-branch}" == branch ]] \
+        || [[ "${LANE_DELIVERY:-}" == requirement && "${LANE_REQUIREMENT_FINAL:-false}" != true ]]; then
         cleanup_target="${LANE_DELIVERY_BRANCH:-ticket-$ticket}"
         [[ ! -f "$worktree/.git/lane-verified" ]] || cleanup_target="$target"
       fi
@@ -364,7 +320,7 @@ fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
 joppa_reader_command=""
-if [[ "$ticket_source" == joppa && -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
+if [[ -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
   joppa_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/joppa-connector.XXXXXX")"
   joppa_connector="$joppa_connector_dir/mcp.cjs"
   python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" --joppa "$joppa_connector"
@@ -381,8 +337,7 @@ cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
 cbm_connector="$cbm_connector_dir/mcp.py"
 python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector"
 chmod 600 "$cbm_connector"
-if [[ "$ticket_source" == joppa ]]; then cbm_project="$(jq -er '.cbmProject' <<<"$LANE_REPOSITORY_JSON")";
-else cbm_project="$(printf %s "$repo" | sed 's|^/||; s|/|-|g')"; fi
+cbm_project="$(jq -er '.cbmProject' <<<"$LANE_REPOSITORY_JSON")"
 # Read-only Medulla checks do not update canonical sources or CBM.
 sync_sources=true
 for arg in ${passthrough[@]+"${passthrough[@]}"}; do
@@ -459,8 +414,7 @@ else
 fi
 mounts+=(--mount-rw "$worktree")
 cd "$TOOLING_ROOT"
-planning_admission
-# Admission's service identity belongs to the host check, not lane agents.
+# Joppa service credentials belong to the host worker, not lane agents.
 unset JOPPA_TOKEN JOPPA_TOKEN_FILE
 # Keep Crew's workflow, hooks and verification scripts read-only.
 medulla \

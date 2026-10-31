@@ -183,7 +183,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   const git = args => run('git', args);
   git(['init', '-q', '-b', 'develop']);
   git(['config', 'user.name', 'Test']); git(['config', 'user.email', 'test@example.invalid']);
-  fs.writeFileSync(path.join(repo, '.ntkrc'), '{"target_branch":"develop"}\n');
+  fs.writeFileSync(path.join(repo, 'README'), 'base\n');
   git(['add', '.']); git(['commit', '-qm', 'base']);
   git(['init', '--bare', '-q', remote]); git(['remote', 'add', 'origin', remote]);
   git(['push', '-q', 'origin', 'HEAD:develop']);

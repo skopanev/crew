@@ -7,7 +7,4 @@ import '../test-support/launcher-cleanup.cases.mjs';
 import '../test-support/launcher-claims.cases.mjs';
 import '../test-support/launcher-completion.cases.mjs';
 import '../test-support/launcher-colors.cases.mjs';
-import '../test-support/launcher-ntk-claims.cases.mjs';
-import '../test-support/launcher-ntk-outcomes.cases.mjs';
-import '../test-support/launcher-ntk-preview.cases.mjs';
-import '../test-support/launcher-ntk-worker.cases.mjs';
+import '../test-support/launcher-dispatch.cases.mjs';

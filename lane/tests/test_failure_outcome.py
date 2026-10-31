@@ -126,7 +126,7 @@ class FailureOutcomeTests(unittest.TestCase):
         updates, report = self.run_failure("GATE_FAIL", update_fails=True)
         self.assertEqual(len(updates), 1)
         self.assertIn("status service unavailable", report)
-        self.assertIn("NTK outcome incomplete", report)
+        self.assertIn("Outcome check incomplete", report)
 
     def test_failure_before_claim_never_writes_ticket(self):
         updates, report = self.run_failure('__failed__', claimed=False)

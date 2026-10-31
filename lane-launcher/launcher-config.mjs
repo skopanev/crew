@@ -6,19 +6,18 @@ import {read, validateWritableDirs} from './runtime.mjs';
 import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
 
-export function configFrom(file, env = process.env, {dryRun = false, source = 'ntk'} = {}) {
-  const config = {limit: 1, intervalSeconds: 60, tags: [], strict: false, launchLanes: false, closeTabOnExit: false,
-    preferTags: [], readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
+export function configFrom(file, env = process.env, {dryRun = false} = {}) {
+  const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
+    readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
     ...read(file)};
-  config.source = source;
-  if (source === 'joppa') {
-    config.delivery ??= 'branch';
-    validateJoppa(config);
-    config.gateCommands = config.repositories[0].gateCommands;
-    config.testCommand = config.repositories[0].testCommand;
-  }
+  // Saved run state records the source; operator recovery checks it.
+  config.source = 'joppa';
+  config.delivery ??= 'branch';
+  validateJoppa(config);
+  config.gateCommands = config.repositories[0].gateCommands;
+  config.testCommand = config.repositories[0].testCommand;
   if (dryRun) config.launchLanes = false;
   config.id = validateId(config.id);
   // The terminal running dolber owns the destination workspace.
@@ -26,26 +25,12 @@ export function configFrom(file, env = process.env, {dryRun = false, source = 'n
   for (const field of config.launchLanes ? ['workspace', 'herdrWorkspace'] : ['workspace']) {
     if (typeof config[field] !== 'string' || !config[field].trim()) throw new Error(`Config needs ${field}`);
   }
-  for (const field of ['tags', 'preferTags']) {
-    if (!Array.isArray(config[field]) || config[field].some(tag =>
-      typeof tag !== 'string' || !tag.trim() || tag.includes(','))) {
-      throw new Error(`${field} must be an array of nonempty tags without commas`);
-    }
-    config[field] = config[field].map(tag => tag.trim());
-  }
-  if (typeof config.strict !== 'boolean') throw new Error('strict must be true or false');
   if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');
   if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
   if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
   if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
     throw new Error('image must be a Docker image reference');
   }
-  for (const field of ['module', 'assignee']) {
-    if (config[field] != null && (typeof config[field] !== 'string' || !config[field].trim())) {
-      throw new Error(`${field} must be a nonempty string or null`);
-    }
-  }
-  if ('tag' in config) throw new Error('Use tags: ["crew"] in dolber.json instead of tag');
   if (config.repo) throw new Error('repo was removed; set sourceRoot to the source workspace');
   if (typeof config.stateDir !== 'string' || !path.isAbsolute(config.stateDir)) throw new Error('stateDir must be absolute');
   for (const field of ['limit', 'intervalSeconds', 'gateTimeoutSeconds']) {

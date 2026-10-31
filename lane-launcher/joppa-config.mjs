@@ -36,7 +36,7 @@ export function validateJoppa(config) {
       'Joppa token files must stay outside source, Crew, run, key and extra mount directories');
     actors.add(worker.actor); tokens.add(token);
   }
-  require(!config.tags?.length && !config.preferTags?.length, 'Joppa uses a project filter, not NTK tags');
+  require(!config.tags?.length && !config.preferTags?.length, 'Joppa uses a project filter, not tags');
   require(Array.isArray(config.repositories) && config.repositories.length, 'Config needs repositories');
   require(text(config.sourceRoot) && path.isAbsolute(config.sourceRoot), 'Config needs absolute sourceRoot');
   const root = fs.realpathSync(config.sourceRoot), ids = new Set(), paths = new Set();

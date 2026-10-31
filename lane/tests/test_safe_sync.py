@@ -1,4 +1,5 @@
 """Real Git fixtures verify canonical sync and the CBM completion lock."""
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -25,7 +26,6 @@ class SafeSyncTests(unittest.TestCase):
         for key, value in [('user.email', 'fixture@example.test'), ('user.name', 'Fixture')]:
             self.git('-C', str(self.seed), 'config', key, value)
         self.git('-C', str(self.seed), 'checkout', '-b', 'main')
-        (self.seed / '.ntkrc').write_text('{"target_branch":"main"}')
         (self.seed / 'file.txt').write_text('before\n')
         self.commit(self.seed, 'initial')
         self.git('-C', str(self.seed), 'push', 'origin', 'main')
@@ -55,7 +55,9 @@ for line in sys.stdin:
   result = {'structuredContent':result}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 ''')
-        self.env = dict(os.environ, SYNC_REPO=str(self.repo), SYNC_EVENTS=str(self.events))
+        self.configured = [{'id': 'app', 'path': str(self.repo), 'targetBranch': 'main', 'cbmProject': 'app'}]
+        self.env = dict(os.environ, SYNC_REPO=str(self.repo), SYNC_EVENTS=str(self.events),
+                        LANE_REPOSITORIES_JSON=json.dumps(self.configured))
 
     def git(self, *args):
         return subprocess.run(['git', *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -85,11 +87,12 @@ for line in sys.stdin:
         self.assertIn('Git and shared CBM ready', out)
 
     def test_dirty_missing_target_and_local_commits_are_preserved_and_refused(self):
-        original = (self.repo / '.ntkrc').read_text()
+        original = self.env['LANE_REPOSITORIES_JSON']
         for change in ['dirty', 'missing-target', 'ahead']:
             with self.subTest(change=change):
                 if change == 'dirty': (self.repo / 'file.txt').write_text('local edit\n')
-                elif change == 'missing-target': (self.repo / '.ntkrc').write_text('{}')
+                elif change == 'missing-target':
+                    self.env['LANE_REPOSITORIES_JSON'] = json.dumps([{**self.configured[0], 'targetBranch': ''}])
                 else:
                     (self.repo / 'file.txt').write_text('local commit\n')
                     self.commit(self.repo, 'local')
@@ -100,7 +103,15 @@ for line in sys.stdin:
                 self.assertEqual(self.git('-C', str(self.repo), 'rev-parse', 'HEAD'), before)
                 self.assertFalse(self.events.exists())
                 if change == 'dirty': (self.repo / 'file.txt').write_text('before\n')
-                elif change == 'missing-target': (self.repo / '.ntkrc').write_text(original)
+                elif change == 'missing-target': self.env['LANE_REPOSITORIES_JSON'] = original
+
+    def test_unconfigured_repositories_are_refused(self):
+        del self.env['LANE_REPOSITORIES_JSON']
+        child = self.launch()
+        _, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 2, err)
+        self.assertIn('no configured repositories', err)
+        self.assertFalse(self.events.exists())
 
     def test_two_launches_queue_until_git_and_cbm_are_done(self):
         first = self.launch()

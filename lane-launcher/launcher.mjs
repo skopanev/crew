@@ -3,8 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {nextTicket, countTickets, credentials} from './ntk.mjs';
-import {save, readRun, alive, quote, command, herdr, laneArgs, runDirectories} from './runtime.mjs';
+import {save, readRun, alive, quote, command, herdr, runDirectories} from './runtime.mjs';
 import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
@@ -17,7 +16,7 @@ const useColor = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !
 const tones = {red: 31, blue: '1;34', yellow: '1;33', description: 33, ready: '1;38;2;70;230;90', available: '1;32', accent: '1;36', line: 36, finished: 37};
 const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
-export const usage = 'dolber.sh [config.json | --config <file>] [--once | --dry-run | --monitor]';
+export const usage = 'dolber-joppa.sh [config.json | --config <file>] [--once | --dry-run | --monitor]';
 export function dockerLanes(output, config) {
   return output.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => {
     return row.workflow === 'lane' && runScope(row.runFolder) === config.id;
@@ -47,7 +46,7 @@ export function activeCount(config, containers, panes) {
 }
 
 function snapshots(config) {
-  if (config.source === 'joppa' && !config.launchLanes) return {containers: [], panes: null};
+  if (!config.launchLanes) return {containers: [], panes: null};
   // Read labels individually: Docker's comma-joined .Labels corrupts paths
   // containing commas. JSON quoting also preserves spaces and escapes.
   const format = '{"workflow":{{json (.Label "medulla.workflow")}},"runFolder":{{json (.Label "medulla.runs_under")}}}';
@@ -62,7 +61,6 @@ function preflight(config) {
   if (config.launchLanes && config.delivery !== 'branch' && !config.sharedLockDir) {
     throw new Error('Target delivery requires sharedLockDir; no ticket was claimed');
   }
-  if (config.source !== 'joppa') credentials();
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
   }
@@ -87,40 +85,21 @@ export async function tick(config, display = null) {
   else divider();
   print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   if (active >= config.limit) { if (display) display.message = ''; return; }
-  const countFilter = `workspace=${config.workspace}, tags=${config.tags.join(',') || '(any)'}, strict=${config.strict}`;
-  const query = {workspace: config.workspace,
-    tag: config.tags.length ? config.tags.join(',') : undefined,
-    prefer: config.preferTags.length ? config.preferTags.join(',') : undefined,
-    module: config.module ?? undefined, assignee: config.assignee ?? undefined,
-    strict: config.strict, has_module: true, dry_run: true};
-  const selected = config.source === 'joppa' ? await nextTask(config) : null;
-  const candidate = selected ? selected.candidate : await nextTicket(query);
-  if (selected && candidate && !candidate.finalizeOnly &&
+  const selected = await nextTask(config);
+  const candidate = selected.candidate;
+  if (candidate && !candidate.finalizeOnly &&
       (candidate.tasks?.length !== 1 || candidate.tasks[0].address !== candidate.id)) {
     throw new Error('A new Joppa lane must contain exactly its selected Task');
   }
-  try {
-    const filter = {workspace: config.workspace, tag: config.tags.length ? config.tags.join(',') : undefined, strict: config.strict};
-    const open = selected ? selected.available : await countTickets({...filter, status: 'open'});
-    const ready = selected ? String(selected.available) : candidate ? '≥1' : '0';
-    if (display) display.counts = {open, ready, held: selected?.held, blocked: candidate === null && open > 0};
-    else print(selected ? `Joppa Tasks [workspace=${config.workspace}, project=${config.joppa.project}]: ${ready} available · ${selected.held} held workers` :
-      `Tickets with tags [${countFilter}]: ${paint('accent', open)} open${candidate === null && open > 0 ? ' (blocked)' : ''} · ready to work: ${ready}`);
-  } catch (error) {
-    const message = `Tickets with tags [${countFilter}]: unavailable (${error.message})`;
-    if (display) { display.counts = null; display.fail(message); }
-    else console.error(paint('red', message));
-  }
-  if (!display) {
+  if (display) display.counts = {open: selected.available, ready: String(selected.available), held: selected.held,
+    blocked: candidate === null && selected.available > 0};
+  else {
+    print(`Joppa Tasks [workspace=${config.workspace}, project=${config.joppa.project}]: ${selected.available} available · ${selected.held} held workers`);
     print('checking params:');
-    if (selected) print(`  project: ${config.joppa.project}`);
-    else {
-      print(`  tags: ${config.tags.join(', ') || '(any)'}`);
-      print(`  prefer: ${config.preferTags.join(' → ') || '(none)'}`);
-    }
+    print(`  project: ${config.joppa.project}`);
   }
   if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
-  if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('NTK returned a ticket without an id');
+  if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');
   print(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
   if (!display && candidate.title) print(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
   if (!config.launchLanes) return;
@@ -129,14 +108,14 @@ export async function tick(config, display = null) {
   const runFolder = path.join(fs.realpathSync(dir), 'lane');
   fs.mkdirSync(runFolder);
   const run = {ticket: candidate.id, workspace: config.workspace, config,
-    runFolder, args: selected ? null : laneArgs(config, candidate.id), createdAt: new Date().toISOString(),
-    ...(selected ? {task: candidate.id, taskRevision: candidate.revision, tasks: candidate.tasks, requirement: candidate.requirement,
-      repositoryId: candidate.repository,
-      executionId: executionId(candidate.finalizeOnly ? `${candidate.requirement}\n${candidate.repository}\n${path.basename(dir)}` :
-        candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
-      ...(candidate.finalizeOnly ? {finalizeOnly: true} : {}),
-      deliveryBranch: `ticket-${executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id)}-${path.basename(dir)}`,
-      joppaWorker: selected.worker} : {})};
+    runFolder, args: null, createdAt: new Date().toISOString(),
+    task: candidate.id, taskRevision: candidate.revision, tasks: candidate.tasks, requirement: candidate.requirement,
+    repositoryId: candidate.repository,
+    executionId: executionId(candidate.finalizeOnly ? `${candidate.requirement}\n${candidate.repository}\n${path.basename(dir)}` :
+      candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id),
+    ...(candidate.finalizeOnly ? {finalizeOnly: true} : {}),
+    deliveryBranch: `ticket-${executionId(candidate.tasks?.length > 1 ? `${candidate.requirement}\n${candidate.repository}` : candidate.id)}-${path.basename(dir)}`,
+    joppaWorker: selected.worker};
   const stateFile = path.join(dir, 'launch.json');
   save(stateFile, run);
   // Reserve capacity before opening the tab; its worker claims before startup.
@@ -162,9 +141,10 @@ export async function tick(config, display = null) {
 }
 
 export async function main(argv) {
-  let file = path.join(here, 'dolber.json'), mode = 'loop', selectedConfig = false, source = 'ntk';
+  let file = path.join(here, 'dolber-joppa.json'), mode = 'loop', selectedConfig = false;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--source' && argv[i + 1] === 'joppa') { source = argv[++i]; file = path.join(here, 'dolber-joppa.json'); }
+    // Joppa is the only ticket source; the flag remains for existing launch scripts.
+    if (argv[i] === '--source' && argv[i + 1] === 'joppa') i++;
     else if (argv[i] === '--config' && argv[i + 1] && !argv[i + 1].startsWith('-') && !selectedConfig) {
       file = path.resolve(argv[++i]); selectedConfig = true;
     }
@@ -175,8 +155,8 @@ export async function main(argv) {
     else if (['--help', '-h'].includes(argv[i])) { console.log(usage); return; }
     else throw new Error(`usage: ${usage}`);
   }
-  if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, source === 'joppa' ? 'dolber-joppa.example.json' : 'dolber.example.json')} to this path and fill in workspace.`);
-  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run', source});
+  if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber-joppa.example.json')} to this path and fill in workspace.`);
+  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
   if (mode === 'monitor') {
     if (!process.stdout.isTTY) throw new Error('--monitor needs a terminal');
     const dashboard = createDashboard({...config, monitorOnly: true}, paint);

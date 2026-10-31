@@ -1,9 +1,9 @@
 # planning
 
-Отдельный исполняемый Medulla workflow. Берёт один AC вместе с контекстом
-Domain → Capability → Requirement и возвращает проверенный план реализации
-и атомарные Tasks. Domain и Capability обязательны: `id` и `text` с их смыслом
-и ограничениями. Родительский контекст не расширяет работу за пределы одного AC.
+Общий Medulla граф, промпты и Python-модули планировщика. Своего пусковика
+здесь нет: [planning-joppa](../planning-joppa/README.md) запускает этот граф
+(`planning-joppa/workflow.yaml` ссылается на `planning/workflow.yaml`) и
+импортирует `common`, `stages` и `validation` через `sys.path`.
 
 ```text
 prepare → research [code | knowledge | external, параллельно]
@@ -12,33 +12,11 @@ prepare → research [code | knowledge | external, параллельно]
         → result.json + plan.md
 ```
 
-## Запуск
-
-Проверить граф без обращений к Equill, CBM и LLM:
-
-```sh
-sh ./planning/run.sh --input ./planning/input.example.json --dry-run
-```
-
-Для настоящего прогона скопируйте `input.example.json` в `input.local.json` и
-укажите текущую цепочку Domain/Capability/Requirement/AC из Joppa, решения, абсолютные пути репозиториев,
-точные имена проектов из CBM `list_projects` и границы модулей. Локальные
-`*.local.*` уже исключены из Git. ID выбирают цепочку; перед разведкой workflow
-читает актуальную Joppa и подставляет её формулировки вместо локальных копий.
-Перед успешным завершением цепочка проверяется повторно.
-
-```sh
-sh ./planning/run.sh \
-  --input ./planning/input.local.json \
-  --cbm-store /absolute/path/to/cbm/store \
-  --cbm-root /absolute/path/allowed/by/cbm \
-  --equill-store /absolute/path/to/equill/store
-```
+## Исполнители
 
 Нужны `medulla`, Python 3.10+, `codex`, `claude`, `agy`, `opencode`, `git`,
 `equill` и `codebase-memory-mcp`. Используется штатная авторизация каждого CLI.
 Для запуска AGY на хосте рабочий каталог должен быть доверенным в его настройках.
-При нестандартном размещении доступны `MEDULLA_BIN`, `EQUILL_BIN`, `CBM_BIN`.
 
 | Участник | Исполнитель | Модель |
 | --- | --- | --- |
@@ -48,25 +26,10 @@ sh ./planning/run.sh \
 | Критик простоты | AGY | `gemini-4-argon-high` |
 | Критик корректности | OpenCode | `zai-coding-plan/glm-5.3` |
 
-Разведка и проектировщик настраиваются отдельно через `--research-model` и
-`--design-model`. Состав критиков задаётся по местам в `workflow.yaml`, как
-в lane. Общего `--model` нет. Три критика используют разные семейства моделей;
+Модели разведки, проектировщика и критиков задаются по местам в
+`workflow.yaml`, как в lane. Общего `--model` нет. Три критика используют разные семейства моделей;
 при недоступности участника его не заменяет ещё один запуск оставшейся модели.
 Везде `effort: high`; у AGY уровень также указан в имени модели.
-
-Для детерминированных чтений Joppa используется штатный HTTPS MCP и отдельная
-сервисная учётная запись агента, имеющая доступ к workspace:
-
-```sh
-export JOPPA_MCP_URL=https://joppa.otion.us/mcp
-export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
-```
-
-Путь указывает на уже выданный сервисный credential. Интерактивный OAuth вход
-редактора не настраивает это окружение автоматически. Клиент вызывает только
-`joppa_read`; токен не записывается в артефакты/аргументы, переменные
-`JOPPA_TOKEN` и `JOPPA_TOKEN_FILE` очищаются в агентных узлах и перед Medulla lane.
-При отсутствии доступа workflow отказывает до начала разведки.
 
 Контракты `crew-planning-researcher`, `crew-planning-designer` и
 `crew-planning-critic` должны существовать в живом Equill. Снимок для установки
@@ -76,7 +39,7 @@ export JOPPA_TOKEN_FILE=/private/path/to/crew-agent-token
 
 ## Что выполняется
 
-1. Пусковик проверяет вход. `prepare` читает живую цепочку Joppa, фиксирует состояния Git, проверяет наличие
+1. `prepare` в planning-joppa читает контекст Joppa, фиксирует состояния Git, проверяет наличие
    проектов в CBM, получает три обязательных контракта и применимые знания из
    Equill. Общие правила без нужного процесса и шагов не считаются контрактом.
 2. Три исследователя работают параллельно. Кодовая ветка обязана действительно
@@ -141,66 +104,6 @@ Research has a 600-second limit. Necessity, design, and plan critics each have a
 The complete workflow has a 7800-second limit, including retries and the optional drift review.
 See [workflow.yaml](workflow.yaml) for the stage limits and models.
 
-## Результат и граница с lane
-
-Прогоны лежат в `~/.medulla/planning-runs` либо в `--runs-folder`; этот каталог
-должен находиться вне исследуемых репозиториев.
-
-| `artifacts/result.json`: status | Значение |
-| --- | --- |
-| `ready` | План структурно корректен, все критики вернули `clear`, исходный снимок и обязательные контракты сохранились. |
-| `verify_existing` | Изменение кода не требуется; подготовлены проверки существующего поведения. Это ещё не прошедшая проверка AC. |
-| `blocked` | Есть отказ, недостающие данные, некорректный ответ или изменившиеся предпосылки. Причина и отчёты сохранены. |
-
-Это локальный результат planning. Workflow не изменяет `ready` в Joppa, не
-создаёт и не захватывает Tasks, не запускает lane и не публикует код.
-Квитанция содержит `scope: local_plan`, `joppa_currentness_verified: true`,
-снимок `joppa_snapshot` и время успешного завершения `completed_at` в UTC.
-Проверка живой цепочки не означает, что AC выполнен или принят владельцем.
-
-## Срок годности и допуск lane
-
-```sh
-python3 planning/admit.py --result /path/to/run/artifacts/result.json
-```
-
-| Исход | Условие | Код выхода |
-| --- | --- | --- |
-| `allowed` | Цепочка совпадает и возраст строго меньше 24 часов. | 0 |
-| `stale` | Изменилась цепочка, возраст ≥24 часов либо у старого результата нет проверенного снимка. Нужен новый planning. | 3 |
-| `error` | Текущее состояние не прочитано, ответ некорректен, часы противоречивы или результат не допускает реализацию. Запуск запрещён. | 2 |
-
-The reader resolves the current Requirement through its public ID and reads its parents with `joppa_objects`.
-It follows `document.parent` without fixed parent type names or a full index scan.
-The snapshot includes authored fields, links, references, the Requirement confirmation, and all current ACs.
-Parent objects do not require a confirmation field. Removed or archived context prevents admission.
-All scoped reads must have the same journal position. The reader permits three attempts.
-The position does not enter the snapshot. Unrelated writes, comments, task activity, and check results do not invalidate it.
-
-TTL фиксирован: 24 часа после успешного завершения planning. Проверка не
-перезаписывает результат и не продлевает время; возраст проверяется также после
-сетевых обращений. Старые результаты без времени/снимка требуют нового planning.
-
-The lane launcher accepts these optional admission arguments with its required launch options:
-
-```sh
---planning-result /path/to/run/artifacts/result.json --planning-task task-1
-```
-
-Both flags are required together. Admission checks the Task, repository, ticket
-module, live Joppa chain, and plan age. It runs before container preparation and
-again before Medulla. A `stale` or `error` result stops the launch.
-
-These flags check admission only. They do not deliver the plan or Task steps to
-scout or coder. Dolber does not link an NTK ticket to a planning result. Both
-agents read the NTK ticket. The ticket must contain the chosen approach, edit
-steps, scope, and acceptance checks before dispatch.
-
-Создание Joppa Tasks, перенос плана в их контракты и автоматическая передача
-в очередь остаются отдельной интеграцией. Адаптеру нужны сопоставление
-репозиториев с Joppa projects и соблюдение зависимостей до захвата:
-локальное `depends_on` Joppa не исполняет.
-
 ## Проверка реализации
 
 ### Writing standard
@@ -211,22 +114,10 @@ The workflow does not measure compliance.
 ### Проверки
 
 ```sh
-python3 -m unittest discover -s planning/tests -v
+python3 -m pytest -q planning/tests
+python3 -m pytest -q planning-joppa/tests
 ```
 
-Нужен установленный Medulla с его Python-зависимостями (включая PyYAML).
-Если `medulla` отсутствует в PATH, задайте `MEDULLA_BIN` абсолютным путём к его
-исполняемому файлу. Временные зависимости из окружения другого разработчика
-не предполагаются доступными; без Medulla тесты движка будут помечены skipped.
-
-Тесты запускают настоящий движок Medulla с подставными ответами Codex, Claude,
-AGY, OpenCode, Equill и CBM в отдельных временных репозиториях. Они проверяют
-фактический выбор разных CLI/моделей, параллельность, успешный
-выход, маршрут существующего поведения, отказы и отсутствие вызовов при dry-run.
-Также проверяются прохождение контекста Domain/Capability, пагинация CBM,
-устаревшие сведения о путях, ошибки JSON в обеих параллельных группах,
-изоляция вложенных сигналов и изменение содержимого больших локальных файлов.
-HTTP MCP тесты проверяют TTL на границе 24 часов, изменения всех уровней,
-отказ при недоступности и гонке чтений, а также повторный допуск в настоящем
-`lane/run.sh` с тестовыми NTK, Docker и Medulla без реального запуска полосы.
-Это проверка оркестрации, не замер качества LLM или проверка живой авторизации.
+`planning/tests` проверяют общие модули: проверку входа и отпечаток исходников,
+разбор финальных ответов и проверку drift review на настоящем Git-репозитории.
+Сквозные проверки графа с Joppa находятся в `planning-joppa/tests`.

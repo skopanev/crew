@@ -3,10 +3,9 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
-import {tail} from '../planning-ntk/dashboard.mjs';
+import {tail, lock as dispatcherLock} from './run-files.mjs';
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
-import {lock as dispatcherLock} from '../planning-ntk/dispatch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tones = {blue: '1;34', yellow: '1;33', red: '1;31', ready: '1;38;2;70;230;90', finished: '37'};

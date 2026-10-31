@@ -28,16 +28,16 @@ def tool(call, tool_name, **arguments):
     return result
 
 
-def sync(repo, call, configuration=None):
+def sync(repo, call, configuration):
     started = time.monotonic()
     print(f'[sync] waiting for {repo.name}', flush=True)
     with (repo / '.git/sync.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         git_started = time.monotonic()
         waited = git_started - started
-        target = (configuration or json.loads((repo / '.ntkrc').read_text())).get('targetBranch' if configuration else 'target_branch')
+        target = configuration.get('targetBranch')
         if not isinstance(target, str) or not target or target.startswith('-') or target == 'HEAD':
-            raise RuntimeError(f'{repo}/.ntkrc must set target_branch')
+            raise RuntimeError(f'{repo}: configuration must set targetBranch')
         git(repo, 'check-ref-format', f'refs/heads/{target}')
         if git(repo, 'status', '--porcelain'):
             raise RuntimeError(f'{repo} has local changes; startup refused')
@@ -58,7 +58,7 @@ def sync(repo, call, configuration=None):
         sha = git(repo, 'rev-parse', 'HEAD')
         if sha != git(repo, 'rev-parse', f'origin/{target}'):
             raise RuntimeError(f'{repo} is ahead of origin/{target}; startup refused')
-        project = configuration['cbmProject'] if configuration else str(repo).lstrip('/').replace('/', '-')
+        project = configuration['cbmProject']
         cbm_started = time.monotonic()
         print(f'[sync] {repo.name} {target} {sha[:12]}; '
               f'wait {waited:.1f}s · Git {cbm_started - git_started:.1f}s; '
@@ -81,16 +81,15 @@ def main(root, connector, image=None):
     root = Path(root).resolve(strict=True)
     configured = json.loads(os.environ.get('LANE_REPOSITORIES_JSON', '[]'))
     settings = {Path(item['path']).resolve(strict=True): item for item in configured}
-    if settings and any(not p.is_relative_to(root) or not (p / '.git').is_dir() for p in settings):
+    if not settings:
+        raise RuntimeError('LANE_REPOSITORIES_JSON names no configured repositories')
+    if any(not p.is_relative_to(root) or not (p / '.git').is_dir() for p in settings):
         raise RuntimeError('Configured repositories must be Git directories inside sourceRoot')
-    repos = sorted(settings) if settings else sorted(p for p in root.iterdir() if not p.is_symlink()
-                   and (p / '.git').is_dir() and (p / '.ntkrc').is_file())
-    if not repos:
-        raise RuntimeError(f'No canonical repositories with .ntkrc under {root}')
+    repos = sorted(settings)
     def refresh(repo):
         # Each worker owns its MCP stream and repository lock.
         with session(connector, image=image) as call:
-            sync(repo, call, settings.get(repo))
+            sync(repo, call, settings[repo])
     with ThreadPoolExecutor(max_workers=min(4, len(repos))) as pool:
         futures = [(repo, pool.submit(refresh, repo)) for repo in repos]
         failures = []

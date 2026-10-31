@@ -76,7 +76,6 @@ This list locates possible overlap. A full current object read still verifies re
 Shared modules do not require dependencies unless one Task needs another Task's output.
 It reuses related Tasks through dependencies. It edits only Tasks under the selected ACs.
 The planner publishes complete implementation mechanisms under their original criteria.
-NTK supports shallow ticket splitting before design in its separate workflow.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
 All planning agents can query Joppa for relevant context in the configured workspace and accessible linked workspaces.
 The reader exposes eight read tools and rejects writes. Joppa enforces workspace access.
@@ -127,7 +126,7 @@ The deployed server keeps Task dependency pins current through claim and complet
 Contract changes and retirement still invalidate those pins.
 Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.
-The dashboard starts the next Requirement after each run. NTK uses its separate, unchanged planner.
+The dashboard starts the next Requirement after each run.
 
 Crew planning updates only unclaimed implementation Tasks.
 It can retire a blocked, unclaimed Task under the held AC.

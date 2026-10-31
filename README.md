@@ -1,43 +1,42 @@
 # Crew
 
-Medulla workflows for preparing tickets, implementing them and auditing code against the specification.
+Medulla workflows for planning Joppa Tasks, implementing them and auditing code against the specification.
 
 ## Workflows
 
-- [Planning](planning/README.md): prepare one acceptance criterion, resolve questions,
-  and produce scoped tasks with implementation instructions and checks.
-- [NTK planning](planning-ntk/README.md): prepare one ticket or re-plan a blocked Lane failure.
-- [Lane](lane/README.md): implement one prepared NTK ticket, check it, review it,
-  land it, and set `to_test`. A workflow failure sets `blocked` with a report.
-- [Dolber](lane-launcher/README.md): select open tickets and launch lanes within
-  the configured dispatcher limit.
+- [Joppa planning](planning-joppa/README.md): plan one acceptance criterion or Requirement
+  and publish scoped Joppa Tasks. [planning](planning/README.md) holds its shared graph.
+- [Lane](lane/README.md): implement one claimed Joppa Task, check it, review it and
+  deliver it. The host worker records the outcome in Joppa.
+- [Dolber](lane-launcher/README.md): select available Joppa Tasks and launch lanes
+  within the configured dispatcher limit.
 - [Auditor](audit/README.md): send confirmed code and specification deviations to an inbox.
   Missing implementation does not produce findings.
 
 ## Configuration
 
 Pass a local JSON file to Dolber. Start from
-[lane-launcher/dolber.example.json](lane-launcher/dolber.example.json).
+[lane-launcher/dolber-joppa.example.json](lane-launcher/dolber-joppa.example.json).
 Local configuration files are ignored by Git.
 
 ```sh
-sh lane-launcher/dolber.sh /path/to/config.json --dry-run
-sh lane-launcher/dolber.sh /path/to/config.json --once
+sh lane-launcher/dolber-joppa.sh /path/to/config.json --dry-run
+sh lane-launcher/dolber-joppa.sh /path/to/config.json --once
 ```
 
 `--dry-run` previews one selection without claiming or opening a tab.
 `--once` starts at most one lane when `launchLanes` is true. Without either flag,
 Dolber repeats at the configured interval until Ctrl+C.
 
-The config supplies the NTK workspace, tags, preferred tags, source root,
-shared CBM connector, Git key directory, checks, dispatcher ID, and lane limit.
-The ticket module identifies its repository under the source root.
-Each repository must explicitly set `target_branch` in `.ntkrc`.
+The config supplies the Joppa workspace and project, workers, source root,
+repositories with their target branches and checks, shared CBM connector,
+Git key directory, dispatcher ID, and lane limit.
+See [lane-launcher/dolber-joppa.md](lane-launcher/dolber-joppa.md).
 
 ## Runtime
 
-The entire source root is read-only. Each ticket has a writable private checkout
-at `<source-root>/.worktrees/<ticket>` with its own `.git`. Run artifacts are
+The entire source root is read-only. Each Task run has a writable private checkout
+at `<worktreeRoot>/<execution-id>` with its own `.git`. Run artifacts are
 stored separately. Retained work is never reset by a new launch.
 
 All lanes access shared host CBM storage through the configured connector. Crew
@@ -63,19 +62,17 @@ planning and audit runs therefore start with `python3 roles/export.py --check`, 
 when the live store differs from the committed snapshots. Bring the older side
 up to date, then start again.
 
-The worker atomically claims a ticket in its Herdr tab before preflight or Docker. Startup failure
-returns the confirmed claim to `open`. Once the workflow adopts the claim,
-failure sets `blocked` and attaches details. An unconfirmed claim changes no
-status. An uncertain dispatch keeps its reservation for inspection.
+The worker claims the Task in Joppa from its Herdr tab before preflight or Docker.
+After the lane ends, the worker completes, blocks, releases or holds the claimed
+Tasks with the run evidence. An unconfirmed claim changes nothing. An uncertain
+dispatch or outcome keeps its reservation for inspection.
 
 Landing uses native repository hooks and a normal push. It refuses dirty work,
-failed checks, an unreviewed tree, or a target ahead of the candidate. Setting
-`to_test` is retried up to three times. A status failure after landing preserves
-its SHA and does not rerun implementation or set the landed ticket to `blocked`.
+failed checks, an unreviewed tree, or a target ahead of the candidate. A lost
+completion response after landing preserves the SHA and does not rerun implementation.
 
-Each nonblocking review finding creates a `[FINIDING] <summary>` ticket:
-`blocked`, dependent on the source, with all source tags plus `findings` and
-an attached report. It does not trigger another implementation round.
+Nonblocking review findings stay in the run's `followups.txt`. They do not trigger
+another implementation round.
 
 ## Build and checks
 
@@ -102,8 +99,8 @@ The default runtime user is `501:501`. Browser downloads remain part of the proj
 Each lane uses the broker's on-demand private Docker engine for integration tests.
 Its Docker storage is removed with the lane container. No host Docker socket is mounted.
 Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
-must be available. Startup runs `lane-launcher/safe-sync.py`: each immediate
-canonical repository with `.ntkrc` is locked, fetched, fast-forwarded to its
+must be available. Startup runs `lane-launcher/safe-sync.py`: each configured
+canonical repository is locked, fetched, fast-forwarded to its
 configured branch, and reindexed through the shared CBM connector. Up to four
 repositories refresh in parallel with separate MCP connections. Each repository
 lock is held until CBM reports ready for that canonical root.

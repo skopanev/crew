@@ -10,9 +10,9 @@ vars:
   review_commands: ''
   gate_timeout_seconds: '900'
   LAUNCH_CLAIM_FILE: ''
-  TICKET_SOURCE: ntk
+  TICKET_SOURCE: joppa
   TARGET_BRANCH: ''
-  REPOSITORY_PREFLIGHT: __ntkrc__
+  REPOSITORY_PREFLIGHT: ''
   DELIVERY: target
   DELIVERY_BRANCH: ''
   REQUIREMENT_BRANCH: ''
@@ -331,10 +331,9 @@ nodes:
       fi
       # Repository setup and Git hooks need Bun on PATH.
       export PATH="/home/medulla/.bun/bin:${PATH}"
-      # A repository may own dependency setup through .ntkrc preflight.
+      # A repository may own dependency setup through its configured preflight.
       deps=""
-      pf="${REPOSITORY_PREFLIGHT-__ntkrc__}"
-      if [ "$pf" = __ntkrc__ ]; then pf="$(jq -r '.preflight // empty' "${project_dir}/.ntkrc" 2>/dev/null || true)"; fi
+      pf="${REPOSITORY_PREFLIGHT:-}"
       if [ -n "$pf" ]; then
         if [ -x "${LANE_WORKTREE}/$pf" ]; then
           if (cd "${LANE_WORKTREE}" && timeout 600 "./$pf" \
@@ -899,7 +898,7 @@ nodes:
         '.claimed == true and .status == "in_progress" and
          (.id | ascii_downcase) == ($id | ascii_downcase) and .workspace == $ws and .run_dir == $run' \
         "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null 2>&1; then
-        printf '%s\nNo confirmed claim; NTK was not modified.\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+        printf '%s\nNo confirmed claim; Joppa was not modified.\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
         cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
         exit 1
       fi
@@ -924,7 +923,7 @@ nodes:
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
       # Attach the full failure report: ticket bodies have a size limit.
       if ! upd="$(node "${TOOLING_ROOT}/lane/bin/ticket-outcome.mjs" blocked 2>&1)"; then
-        msg="${msg} NTK outcome incomplete: ${upd}"
+        msg="${msg} Outcome check incomplete: ${upd}"
       fi
       # Ошибка записи статуса тоже остаётся в отчёте прогона.
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt" || exit 1
