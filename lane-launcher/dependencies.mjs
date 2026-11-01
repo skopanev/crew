@@ -141,9 +141,12 @@ export function dependencyCheck(read) {
         const target = await object(link.target);
         if (!present(target)) continue;
         const task = await role(target) === 'task';
-        const pin = link.revision == null || currentPin(link.revision, target.current_revision, task ? target.process?.origin_revision :
-          target.contract_revision === undefined ? target.current_revision : target.contract_revision);
-        if (!pin || !await isSatisfied(target)) return target.address;
+        const contractRevision = task ? target.process?.origin_revision :
+          target.contract_revision === undefined ? target.current_revision : target.contract_revision;
+        const pin = link.revision == null || currentPin(link.revision, target.current_revision, contractRevision);
+        if (!pin) return {code: 'DEPENDENCY_STALE_PIN', consumer: node.address, blocker: target.address,
+          pin: link.revision, contractRevision, currentRevision: target.current_revision};
+        if (!await isSatisfied(target)) return target.address;
         const blocker = await blockedBy(target.address, next);
         if (blocker) return blocker;
       }
@@ -156,6 +159,10 @@ export function dependencyCheck(read) {
   }
   return async address => {
     const blocker = await blockedBy(address);
+    if (blocker && typeof blocker === 'object') return {ready: false, ...blocker};
     return {ready: blocker === null, blocker};
   };
 }
+
+export const formatDependencyIssue = issue => `${issue.code} · ${issue.task || issue.consumer} → ${issue.blocker}` +
+  ` · pin=${issue.pin} · contract=${issue.contractRevision ?? '?'} · current=${issue.currentRevision}`;
