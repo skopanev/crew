@@ -84,6 +84,7 @@ export async function nextTask(config) {
   });
   const busy = new Set(reservations.map(run => run.joppaWorker?.actor));
   const terminalRetained = new Map();
+  const dependencyIssues = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     if (!config.joppa.mcpCommand) {
@@ -136,7 +137,12 @@ export async function nextTask(config) {
         ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
       for (const task of page.tasks) {
         try {
-          if (!(await dependencies(task.address)).ready) continue;
+          const dependency = await dependencies(task.address);
+          if (!dependency.ready) {
+            if (dependency.code) dependencyIssues.set(`${task.address}\n${dependency.consumer}\n${dependency.blocker}`,
+              {task: task.address, ...dependency});
+            continue;
+          }
           const current = await object(task.address);
           if (!text(task.address) || !Number.isSafeInteger(task.revision) ||
               current.current_revision !== task.revision) continue;
@@ -164,7 +170,7 @@ export async function nextTask(config) {
       const candidate = await finalizationCandidate({config, worker,
         read: (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}),
         object, group, rows: inventory, occupied, runs});
-      if (candidate) return {candidate, worker, available: available + 1, held};
+      if (candidate) return {candidate, worker, available: available + 1, held, dependencyIssues: [...dependencyIssues.values()]};
     }
     while (eligible.length) {
       const first = eligible[0];
@@ -193,10 +199,11 @@ export async function nextTask(config) {
         }
       }
       return {candidate: {id: task.address, title: task.title, revision: task.revision,
-        tasks, requirement: task.requirement, repository: task.repository}, worker, available, held};
+        tasks, requirement: task.requirement, repository: task.repository}, worker, available, held,
+        dependencyIssues: [...dependencyIssues.values()]};
     }
   }
-  return {candidate: null, available, held};
+  return {candidate: null, available, held, dependencyIssues: [...dependencyIssues.values()]};
 }
 
 const taskOrder = task => Number(/^\[(\d+)\]\s/.exec(task.title || '')?.[1] || Number.MAX_SAFE_INTEGER);

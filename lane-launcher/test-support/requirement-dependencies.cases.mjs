@@ -95,7 +95,8 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
   criterion.contract_revision = 1;
   assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
   criterion.contract_revision = 2;
-  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: 'measure:b'});
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: 'measure:b',
+    code: 'DEPENDENCY_STALE_PIN', consumer: 'work:one', pin: 1, contractRevision: 2, currentRevision: 3});
   criterion.current_revision = 1;
   delete criterion.contract_revision;
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {formatDependencyIssue} from './dependencies.mjs';
 import path from 'node:path';
 import {readRun, alive, runDirectories} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
@@ -168,13 +169,17 @@ export function createDashboard(config, paint) {
     const active = runs.filter(run => !run.result).length +
       state.containers.filter(container => !folders.has(container.runFolder)).length;
     const {counts} = state;
+    const issues = counts?.dependencyIssues || [];
     const header = `DOLBER ${config.id} · Running lanes `;
     const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
       clip(`workspace: ${config.workspace} · project: ${config.joppa.project}`, width),
-      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held workers`, width) : 'Tickets: —',
+      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held workers` +
+        (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tickets: —',
       clip(`Source: Joppa · delivery: ${config.delivery}`, width),
       '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
+    footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)
+      .map(line => paint('yellow', line))));
     const rows = runs.slice(0, 30).map(run => {
       const {result, worker} = run;
       const status = statusFor(run);

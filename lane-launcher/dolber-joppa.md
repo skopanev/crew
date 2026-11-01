@@ -20,6 +20,11 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
+The queue reports `DEPENDENCY_STALE_PIN` when a pinned dependency no longer matches its current contract.
+The detail shows the Task, dependency, saved pin, contract revision and current revision.
+The dashboard keeps the first detail visible. The queue count includes all detected stale pins.
+Review the consumer contract before changing its dependency pin.
+
 The Task contract must declare exactly one `Repository:` line and one `Module:` line.
 These names select entries in the config. Module paths remain inside the selected repository.
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
