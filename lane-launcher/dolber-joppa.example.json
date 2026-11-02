@@ -35,7 +35,8 @@
       "preflight": null,
       "gateCommands": ["bun run typecheck", "bun run test"],
       "reviewCommands": ["bun run lint", "bun run test:changed"],
-      "testCommand": ["bun", "run", "test"]
+      "testCommand": ["bun", "run", "test"],
+      "testReport": {"path": "junit/report.xml", "format": "junit", "identity": "{file} > {name}"}
     }
   ],
   "notify": null

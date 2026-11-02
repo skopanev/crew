@@ -9,6 +9,7 @@ import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
 import {formatDependencyIssue} from './dependencies.mjs';
 import {configFrom} from './launcher-config.mjs';
+import {testResultsInspection} from './test-results-publish.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,8 @@ export function activeCount(config, containers, panes) {
     if (panes && run.config?.herdrWorkspace === config.herdrWorkspace &&
         run.pane && !panes.has(run.pane) && (!worker || !alive(worker.pid))) {
       save(stateFile, {...run, result: {status: 'interrupted', finishedAt: new Date().toISOString(),
-        error: 'Herdr pane and worker disappeared; inspect lane artifacts before reopening the ticket'}});
+        error: ['Herdr pane and worker disappeared; inspect lane artifacts before reopening the ticket',
+          testResultsInspection(run)].filter(Boolean).join('; ')}});
       continue;
     }
     // Reserve capacity even before the worker/container has appeared.

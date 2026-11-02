@@ -9,6 +9,7 @@ vars:
   gate_commands: '[]'
   review_commands: ''
   gate_timeout_seconds: '900'
+  test_report: ''
   LAUNCH_CLAIM_FILE: ''
   TICKET_SOURCE: joppa
   TARGET_BRANCH: ''
@@ -441,6 +442,7 @@ nodes:
       gate_commands: '{{var:gate_commands}}'
       review_commands: '{{var:review_commands}}'
       gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
+      test_report: '{{var:test_report}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
@@ -691,6 +693,7 @@ nodes:
       gate_commands: '{{var:gate_commands}}'
       review_commands: '{{var:review_commands}}'
       gate_timeout_seconds: '{{var:gate_timeout_seconds}}'
+      test_report: '{{var:test_report}}'
       LANE_SHARED_LOCK_DIR: '{{var:LANE_SHARED_LOCK_DIR}}'
       module_name: '{{var:module_name}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {command} from './runtime.mjs';
+import {validateTestReport} from './test-results.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,7 @@ export function validateJoppa(config) {
       require(inside(hook, folder) && fs.statSync(hook).isFile(), 'afterLand must stay inside its repository');
       fs.accessSync(hook, fs.constants.X_OK);
     }
+    if (repo.testReport != null) validateTestReport(repo.testReport);
     ids.add(repo.id); paths.add(folder);
   }
   require(['branch', 'target', 'requirement'].includes(config.delivery), 'delivery must be branch, target or requirement');
