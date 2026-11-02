@@ -238,7 +238,8 @@ class GateTests(unittest.TestCase):
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
-                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch')
+                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch',
+                        ticket_title='Show the complete Task title in history and preserve its full text beyond seventy-two characters')
         self.git('update-ref', 'refs/remotes/origin/develop', 'HEAD')
         for content, rc in (("", 0), (" \n", 0), ("fixture QA contract", 1),
                             ("fixture QA contract", 0)):
@@ -252,6 +253,9 @@ class GateTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(contract.read_text().strip(), content)
                     self.assertIn("<signal:SNAPSHOT>", result.stdout)
+                    self.assertEqual(self.git('log', '-1', '--format=%s'), self.env['ticket_title'][:72])
+                    self.assertEqual(self.git('log', '-1', '--format=%b'),
+                                     self.env['ticket_title'] + '\n\nJoppa-Task: fixture-task')
                 else:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("QA contract unavailable", result.stderr)

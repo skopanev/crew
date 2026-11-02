@@ -481,8 +481,9 @@ nodes:
       export PATH="/home/medulla/.bun/bin:${PATH}"
       # Native check receipts can bind to the commit reviewed and pushed.
       if [ "${VERIFY_ONLY}" != "true" ] && ! git diff --cached --quiet; then
+        subject="${ticket_title:0:72}"
         if ! git -c user.name=lane -c user.email=lane@local \
-            commit -m "${ticket_id}: implement ticket" -m "$ticket_title" > "$MEDULLA_RUN_DIR/artifacts/commit.txt" 2>&1; then
+            commit -m "$subject" -m "$ticket_title" -m "Joppa-Task: ${ticket_id}" > "$MEDULLA_RUN_DIR/artifacts/commit.txt" 2>&1; then
           cat "$MEDULLA_RUN_DIR/artifacts/commit.txt" >&2
           echo '<signal:GATE_FAIL>commit rejected; see artifacts/commit.txt</signal:GATE_FAIL>'
           exit 0
