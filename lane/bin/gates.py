@@ -19,6 +19,8 @@ import tempfile
 import time
 import uuid
 
+import test_report
+
 
 def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
@@ -143,6 +145,8 @@ def run(root):
                              "bash": subprocess.check_output(
                                  ["bash", "--version"], text=True).splitlines()[0]},
                "checks": [], "passed": False}
+    # Opt-in: commands write the configured JUnit report into a fresh folder.
+    report_state, run_started = test_report.begin(folder), time.time()
     for index, command in enumerate(commands):
         log = folder / f"{index + 1}.log"
         started = time.time()
@@ -175,6 +179,9 @@ def run(root):
         print(f"gate {index + 1}: rc={rc} stdout_matches={stdout_matches} log={log}", file=sys.stderr)
         if rc != 0 or not stdout_matches:
             break
+    report = test_report.finish(report_state, run_started)
+    if report is not None:
+        receipt["test_report"] = report
     receipt["passed"] = (len(receipt["checks"]) == len(commands)
                          and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"])
                          and unchanged(tree) and git("rev-parse", "HEAD") == base)

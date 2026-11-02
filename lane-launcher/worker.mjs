@@ -13,6 +13,7 @@ import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead} from './worker-outcome.mjs';
+import {publishLandedResults} from './test-results-publish.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -203,6 +204,8 @@ try {
       run.requirementDelivery?.final === false && typeof run.requirementDelivery.head === 'string') {
     await checkRequirementHead({run, stateFile, result, announce});
   }
+  // Opt-in test evidence after a confirmed landing. It never changes the landed result.
+  if (result.completed) await publishLandedResults({run, stateFile, result, artifacts, announce});
   // Record completion first: closing this pane can terminate this process immediately.
   run.result = {...result, finishedAt: new Date().toISOString()};
   process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);

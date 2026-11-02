@@ -88,6 +88,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | `branch`, `target`, or `requirement` |
+| `testReport` | Optional per repository. Record the JUnit results of the final gate run in Joppa. See below |
 
 `sourceRoot` can contain several repositories or be the repository itself.
 Only configured repositories enter Git and CBM refresh.
@@ -164,3 +165,37 @@ Crew checks HEAD and Git status afterward. A failed hook retains the checkout an
 in the run result, table and notification. The log and result include the retry command.
 Confirmed Task completion remains valid. A completed Task's retained checkout does not occupy its Requirement group.
 Branch delivery and verification without a push do not run this hook.
+
+### Landed test results
+
+`testReport` is optional for each repository. Without it, Crew records no test results.
+
+```json
+"testReport": {"path": "junit/report.xml", "format": "junit", "identity": "{file} > {name}"}
+```
+
+- Each gate run creates a new, empty folder and exports it as `CREW_TEST_REPORT_DIR`.
+- A gate command must write the JUnit XML file to `$CREW_TEST_REPORT_DIR/<path>`. Crew runs no extra tests.
+- `identity` builds each test name from attributes of the `testcase` element, for example `{file} > {classname}.{name}`.
+  `{suite.file}` reads the nearest `testsuite` element. Crew does not infer a file path from `classname`.
+- The gate receipt keeps the report SHA-256 and the parsed results. A report problem does not change the gate verdict.
+
+Crew records nothing and writes a `TEST_RESULTS_NOT_RECORDED` diagnostic in the log and run state when:
+
+- the report is missing, empty, not valid XML, or older than the gate run,
+- two test cases have the same name, or a name fails the workspace `test_results.name` rule,
+- the landed SHA tree differs from the tree in the gate receipt (`TEST_RESULTS_TREE_MISMATCH`),
+- the receipt is not the full `gateCommands` run.
+
+Crew records results only after a confirmed landing on `targetBranch`.
+Branch delivery, intermediate Requirement Tasks and verification without a push record nothing.
+The host sends `joppa_record_results` once for the landed SHA, in batches of `test_results.max_results`.
+`failure` and `error` give the fail status with the message in `failure_field`. `skipped` gives the skip status.
+Other cases give the pass status. `time` gives `duration_ms` when the schema has that number field.
+Crew records only cases in the report. Crew does not change test lists or criteria.
+Recorded results are test evidence. They do not accept a criterion or a Requirement.
+
+The run state `testResults` keeps each exact request before Crew sends it.
+A lost response marks the request `uncertain` and Crew never sends it again.
+Inspect `joppa_tests` for that commit before a manual retry.
+A failed publication does not change the landed lane result and does not run the lane again.
