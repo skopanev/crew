@@ -190,8 +190,9 @@ Crew records nothing and writes a `TEST_RESULTS_NOT_RECORDED` diagnostic in the 
 Crew records results only after a confirmed landing on `targetBranch`.
 Branch delivery, intermediate Requirement Tasks and verification without a push record nothing.
 The host sends `joppa_record_results` once for the landed SHA, in batches of `test_results.max_results`.
-`failure` and `error` give the fail status with the message in `failure_field`. `skipped` gives the skip status.
-Other cases give the pass status. `time` gives `duration_ms` when the schema has that number field.
+`failure` and `error` give the fail status with the message in `failure_field`.
+`skipped`, `status="notrun"`, `result="skipped"` and `result="suppressed"` give the skip status.
+An unknown `status` or `result` value refuses the report. Only other executed cases give the pass status. `time` gives `duration_ms` when the schema has that number field.
 Crew records only cases in the report. Crew does not change test lists or criteria.
 Recorded results are test evidence. They do not accept a criterion or a Requirement.
 

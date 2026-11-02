@@ -204,12 +204,16 @@ try {
       run.requirementDelivery?.final === false && typeof run.requirementDelivery.head === 'string') {
     await checkRequirementHead({run, stateFile, result, announce});
   }
-  // Opt-in test evidence after a confirmed landing. It never changes the landed result.
-  if (result.completed) await publishLandedResults({run, stateFile, result, artifacts, announce});
   // Record completion first: closing this pane can terminate this process immediately.
   run.result = {...result, finishedAt: new Date().toISOString()};
   process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);
   save(stateFile, run);
+  // Opt-in test evidence after the completed result is durable. It never changes that result.
+  if (result.completed) {
+    await publishLandedResults({run, stateFile, result, artifacts, announce});
+    run.result.testResults = result.testResults;
+    try { save(stateFile, run); } catch (error) { announce(`[lane] TEST_RESULTS summary not saved: ${error.message}`); }
+  }
   try {
     if (await notifyCompletion(run, result, artifacts)) {
       announce('[lane] Notification sent to channel');

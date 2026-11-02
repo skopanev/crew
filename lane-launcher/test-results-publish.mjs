@@ -59,7 +59,8 @@ async function send(run, persist, call, announce) {
   for (const entry of state.requests) {
     if (entry.state !== 'pending') continue;
     entry.state = 'sending';
-    persist();
+    // No call without a durable intent: an unsaved 'sending' state was never sent.
+    try { persist(); } catch (error) { entry.state = 'pending'; throw error; }
     try {
       await call('joppa_record_results', entry.request);
       entry.state = 'recorded';
@@ -78,17 +79,25 @@ async function send(run, persist, call, announce) {
   announce(`[lane] TEST_RESULTS recorded ${state.requests.reduce((sum, entry) => sum + entry.request.results.length, 0)} results for ${state.commit}`);
 }
 
-export async function publishLandedResults({run, stateFile, result, artifacts, announce}, deps = {}) {
+// Contained: no error, including a state-write failure, leaves this function.
+export async function publishLandedResults(context, deps = {}) {
+  try { await publish(context, deps); }
+  catch (error) {
+    try { context.announce(`[lane] TEST_RESULTS_NOT_RECORDED: ${error.message}`); } catch {}
+  }
+}
+
+async function publish({run, stateFile, result, artifacts, announce}, deps) {
   if (!run.repository?.testReport || run.testResults) return;
   const call = deps.call || ((tool, args) => api(run.config, run.joppaWorker, tool, args));
   const git = deps.git || (args => repositoryGit(run.config, run.repository, args));
-  const persist = () => save(stateFile, run);
+  const persist = () => (deps.save || save)(stateFile, run);
   try {
     const eligible = ineligible(run, result, artifacts);
     if (typeof eligible === 'string') {
       run.testResults = {status: 'skipped', diagnostic: eligible};
-      persist();
       announce(`[lane] TEST_RESULTS skipped: ${eligible}`);
+      persist();
       return;
     }
     const {sha} = eligible;
@@ -104,15 +113,20 @@ export async function publishLandedResults({run, stateFile, result, artifacts, a
     require(tree === receipt.tree, `TEST_RESULTS_TREE_MISMATCH: ${sha} has tree ${tree}; the gate checked ${receipt.tree}`);
     const rules = resultRules(await call('joppa_tree', {workspace: run.workspace}));
     const requests = buildRequests({workspace: run.workspace, commit: sha, cases: report.results, rules});
-    // Persist the exact intended requests before the first call.
+    // Persist the exact intended requests before the first call. A failed write stops here.
     run.testResults = {status: 'pending', commit: sha, tree, receipt: file, reportSha256: report.sha256,
       requests: requests.map(request => ({state: 'pending', request}))};
     persist();
     await send(run, persist, call, announce);
   } catch (error) {
-    run.testResults ||= {status: 'not_recorded', diagnostic: error.message};
-    persist();
+    const state = run.testResults ||= {status: 'not_recorded'};
+    state.diagnostic = error.message;
+    // A call whose state write failed has an unknown outcome. Unsent intent records nothing.
+    if (state.requests?.some(entry => ['sending', 'uncertain'].includes(entry.state))) state.status = 'uncertain';
+    else if (state.requests?.some(entry => entry.state === 'recorded')) state.status = 'partial';
+    else if (state.status === 'pending') state.status = 'not_recorded';
     announce(`[lane] TEST_RESULTS_NOT_RECORDED: ${error.message}`);
+    try { persist(); } catch (writeError) { announce(`[lane] TEST_RESULTS state not saved: ${writeError.message}`); }
   } finally {
     if (run.testResults) {
       result.testResults = {status: run.testResults.status,

@@ -22,8 +22,9 @@ const results = [
 ];
 const digest = text => createHash('sha256').update(text).digest('hex');
 
-function fixture({report = {}, delivery = 'target', final, landingTarget = 'develop', treeAt = tree} = {}) {
+function fixture(t, {report = {}, delivery = 'target', final, landingTarget = 'develop', treeAt = tree, save} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-test-results-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const artifacts = path.join(root, 'run', 'artifacts'), folder = path.join(artifacts, 'gates', 'f1');
   fs.mkdirSync(path.join(folder, 'test-report', 'junit'), {recursive: true});
   const raw = '<testsuites/>';
@@ -46,14 +47,14 @@ function fixture({report = {}, delivery = 'target', final, landingTarget = 'deve
     return record(args);
   };
   const publish = (result = {completed: true}) => publishLandedResults(
-    {run, stateFile, result, artifacts, announce: line => lines.push(line)}, {git, call});
-  return {run, stateFile, calls, lines, publish, setRecord: value => { record = value; },
+    {run, stateFile, result, artifacts, announce: line => lines.push(line)}, {git, call, save});
+  return {run, root, stateFile, calls, lines, publish, setRecord: value => { record = value; },
     saved: () => JSON.parse(fs.readFileSync(stateFile, 'utf8'))};
 }
 const records = calls => calls.filter(item => item.tool === 'joppa_record_results');
 
-test('happy path maps statuses and fields in max_results batches', async () => {
-  const f = fixture(), result = {completed: true};
+test('happy path maps statuses and fields in max_results batches', async t => {
+  const f = fixture(t), result = {completed: true};
   await f.publish(result);
   const sent = records(f.calls).map(item => item.args);
   assert.deepEqual(sent, [
@@ -76,8 +77,8 @@ for (const [name, report, fragment] of [
   ['ambiguous', {results: [results[0], results[0]]}, 'Ambiguous report'],
   ['badly named', {results: [{test: 'adds', outcome: 'pass'}]}, 'fails the workspace name rule'],
 ]) {
-  test(`${name} report records nothing with a diagnostic`, async () => {
-    const f = fixture({report});
+  test(`${name} report records nothing with a diagnostic`, async t => {
+    const f = fixture(t, {report});
     await f.publish();
     assert.equal(records(f.calls).length, 0);
     assert.equal(f.saved().testResults.status, 'not_recorded');
@@ -86,28 +87,28 @@ for (const [name, report, fragment] of [
   });
 }
 
-test('a tree mismatch records nothing', async () => {
-  const f = fixture({treeAt: 'e'.repeat(40)});
+test('a tree mismatch records nothing', async t => {
+  const f = fixture(t, {treeAt: 'e'.repeat(40)});
   await f.publish();
   assert.equal(records(f.calls).length, 0);
   assert.match(f.saved().testResults.diagnostic, /TEST_RESULTS_TREE_MISMATCH/);
 });
 
-test('intermediate Requirement and branch deliveries publish nothing', async () => {
+test('intermediate Requirement and branch deliveries publish nothing', async t => {
   for (const options of [{delivery: 'requirement', final: false, landingTarget: 'req/x'},
     {delivery: 'branch', landingTarget: 'ticket-x'}, {delivery: 'target', landingTarget: 'other'}]) {
-    const f = fixture(options);
+    const f = fixture(t, options);
     await f.publish();
     assert.equal(f.calls.length, 0);
     assert.equal(f.saved().testResults.status, 'skipped');
   }
-  const final = fixture({delivery: 'requirement', final: true});
+  const final = fixture(t, {delivery: 'requirement', final: true});
   await final.publish();
   assert.equal(records(final.calls).length, 2);
 });
 
-test('an incomplete lane or an unconfigured repository does nothing', async () => {
-  const f = fixture();
+test('an incomplete lane or an unconfigured repository does nothing', async t => {
+  const f = fixture(t);
   await f.publish({completed: false});
   assert.equal(f.calls.length, 0);
   delete f.run.testResults;
@@ -117,8 +118,8 @@ test('an incomplete lane or an unconfigured repository does nothing', async () =
   assert.equal(f.run.testResults, undefined);
 });
 
-test('an uncertain call is persisted, reported and never resent', async () => {
-  const f = fixture();
+test('an uncertain call is persisted, reported and never resent', async t => {
+  const f = fixture(t);
   f.setRecord(async () => { throw new Error('Joppa MCP transport failed'); });
   const result = {completed: true, code: 0};
   await f.publish(result);
@@ -138,8 +139,8 @@ test('a call in flight at a crash is reported for inspection', () => {
   assert.equal(testResultsInspection({testResults: {commit: sha, requests: [{state: 'recorded'}]}}), null);
 });
 
-test('a refused call stops the remaining requests', async () => {
-  const f = fixture();
+test('a refused call stops the remaining requests', async t => {
+  const f = fixture(t);
   f.setRecord(async () => { throw Object.assign(new Error('Joppa joppa_record_results: unknown status'), {rejected: true}); });
   await f.publish();
   assert.deepEqual(f.saved().testResults.requests.map(entry => entry.state), ['refused', 'pending']);
@@ -159,4 +160,27 @@ test('config and name rules are explicit', () => {
     rules: {...rules, statuses: {ok: 'pass', bad: 'fail'}}}), /no name for skip/);
   assert.throws(() => buildRequests({workspace: 'ws', commit: sha, cases: [results[0]],
     rules: {...rules, fields: [...rules.fields, {name: 'app', type: 'enum', required: true}]}}), /Required result field app/);
+});
+
+test('state-write failures stay contained and no request is sent without durable intent', async t => {
+  const f = fixture(t);
+  fs.rmSync(f.stateFile, {force: true});
+  fs.mkdirSync(f.stateFile);
+  const result = {completed: true, code: 0};
+  await f.publish(result);
+  assert.equal(records(f.calls).length, 0);
+  assert.equal(result.code, 0);
+  assert.equal(result.testResults.status, 'not_recorded');
+  assert.match(f.lines.join('\n'), /EISDIR/);
+  let writes = 0;
+  const later = fixture(t, {save: () => { if (++writes === 2) throw new Error('disk full'); }});
+  await later.publish();
+  assert.equal(records(later.calls).length, 0);
+  assert.deepEqual(later.run.testResults.requests.map(entry => entry.state), ['pending', 'pending']);
+  let after = 0;
+  const lost = fixture(t, {save: () => { if (++after === 3) throw new Error('disk full'); }});
+  await lost.publish();
+  assert.equal(records(lost.calls).length, 1);
+  assert.equal(lost.run.testResults.status, 'partial');
+  assert.deepEqual(lost.run.testResults.requests.map(entry => entry.state), ['recorded', 'pending']);
 });

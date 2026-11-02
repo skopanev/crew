@@ -3,6 +3,7 @@ import {formatDependencyIssue} from './dependencies.mjs';
 import path from 'node:path';
 import {readRun, alive, runDirectories} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
+import {testResultsInspection} from './test-results-publish.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -183,7 +184,9 @@ export function createDashboard(config, paint) {
     const rows = runs.slice(0, 30).map(run => {
       const {result, worker} = run;
       const status = statusFor(run);
-      const stage = result ? (status === 'READY' && !result.postLandWarning ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
+      // A worker lost during test publication leaves an uncertain request after its saved result.
+      const uncertain = result && testResultsInspection(run) ? 'TEST_RESULTS_UNCERTAIN' : '';
+      const stage = result ? uncertain || (status === 'READY' && !result.postLandWarning ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
