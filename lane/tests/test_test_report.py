@@ -9,8 +9,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 LANE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(LANE / "bin"))
+import test_report  # noqa: E402
 CONFIG = {"path": "junit/report.xml", "format": "junit", "identity": "{file} > {name}"}
 REPORT = """<testsuites><testsuite name="unit" file="tests/b.test.ts">
 <testcase name="adds" file="tests/a.test.ts" time="0.25"/>
@@ -112,6 +115,31 @@ class TestReportTests(unittest.TestCase):
         del self.env["test_report"]
         receipt = self.gate('test -z "${CREW_TEST_REPORT_DIR:-}"')
         self.assertNotIn("test_report", receipt)
+
+    def test_explicitly_unexecuted_cases_are_skips_never_passes(self):
+        report = """<testsuites><testsuite>
+<testcase file="tests/example.cc" name="DISABLED_example" status="notrun" result="suppressed"/>
+<testcase file="tests/example.cc" name="filtered" status="run" result="skipped"/>
+<testcase file="tests/example.cc" name="runs" status="run" result="completed"/>
+</testsuite></testsuites>"""
+        results = self.gate(self.write(report))["test_report"]["results"]
+        self.assertEqual([r["outcome"] for r in results], ["skip", "skip", "pass"])
+
+    def test_unknown_status_or_result_is_refused(self):
+        for attribute in ('status="pending"', 'result="interrupted"'):
+            report = f'<testsuites><testcase file="tests/a.cc" name="x" {attribute}/></testsuites>'
+            self.assert_refused(self.write(report), "unsupported")
+
+    def test_parser_reads_the_hashed_bytes_not_the_path_again(self):
+        directory = self.root / "report"
+        directory.mkdir()
+        (directory / "junit").mkdir()
+        (directory / "junit/report.xml").write_text(REPORT)
+        with mock.patch.object(test_report.ElementTree, "parse", side_effect=AssertionError("reopened")):
+            entry = test_report.collect(CONFIG, directory, 0)
+        self.assertNotIn("error", entry)
+        self.assertEqual(entry["sha256"], hashlib.sha256(REPORT.encode()).hexdigest())
+        self.assertEqual(len(entry["results"]), 4)
 
     def test_invalid_config_is_recorded_without_changing_the_gate(self):
         self.env["test_report"] = json.dumps({**CONFIG, "path": "../escape.xml"})

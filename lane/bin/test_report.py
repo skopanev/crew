@@ -83,20 +83,37 @@ def mapped_name(identity, case, suite):
     return PLACEHOLDER.sub(value, identity)
 
 
-def outcome(case):
+# Executed-state attributes (GoogleTest dialect). Any other value is refused.
+EXECUTED = {"status": {"run": False, "notrun": True}, "result": {"completed": False, "skipped": True, "suppressed": True}}
+
+
+def not_executed(case, name):
+    """Return True for an explicit non-executed case; refuse an unknown value."""
+    skipped = False
+    for attribute, values in EXECUTED.items():
+        value = case.get(attribute)
+        if value is None:
+            continue
+        if value not in values:
+            raise ValueError(f"testcase {name!r} has unsupported {attribute}={value!r}")
+        skipped = skipped or values[value]
+    return skipped
+
+
+def outcome(case, name):
     failure = next((child for child in case if child.tag in ("failure", "error")), None)
     if failure is not None:
         message = "\n".join(part.strip() for part in (failure.get("message") or "", failure.text or "")
                             if part and part.strip())
         return {"outcome": "fail", "message": message or failure.tag}
-    if any(child.tag == "skipped" for child in case):
+    if not_executed(case, name) or any(child.tag == "skipped" for child in case):
         return {"outcome": "skip"}
     return {"outcome": "pass"}
 
 
-def parse(report, identity):
+def parse(data, identity):
     try:
-        root = ElementTree.parse(report).getroot()
+        root = ElementTree.fromstring(data)
     except ElementTree.ParseError as error:
         raise ValueError(f"report is not valid XML: {error}") from error
     if root.tag not in ("testsuites", "testsuite"):
@@ -110,7 +127,7 @@ def parse(report, identity):
         if name in seen:
             raise ValueError(f"ambiguous report: two testcases map to {name!r}")
         seen[name] = True
-        result = {"test": name, **outcome(case)}
+        result = {"test": name, **outcome(case, name)}
         time_text = case.get("time")
         if time_text is not None:
             try:
@@ -138,7 +155,8 @@ def collect(settings, directory, started_at):
         if report.stat().st_mtime < int(started_at):
             raise ValueError("report is stale: it is older than this gate run")
         entry["sha256"] = hashlib.sha256(data).hexdigest()
-        entry["results"] = parse(report, settings["identity"])
+        # Parse exactly the bytes that were hashed.
+        entry["results"] = parse(data, settings["identity"])
     except (OSError, ValueError, RecursionError) as error:
         entry.pop("results", None)
         entry["error"] = str(error)
