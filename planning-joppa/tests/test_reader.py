@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader, Joppa
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, CHECK_TYPE
 
 
 class ProviderTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class ProviderTests(unittest.TestCase):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"},
                  "decision": {"role": "document", "inbox": True}, "project": {"role": "document"},
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
-                          "references": {"projects": {"multiple": True, "target": "project"}}}}
+                          "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {"rule:r": item("rule:r"), "project:p": item("project:p")}
         for number in range(27):
             for kind, parent in (("criterion", "rule:r"), ("work", "criterion:c00"), ("decision", None)):
@@ -48,8 +48,6 @@ class ProviderTests(unittest.TestCase):
                 calls.append((name, deepcopy(args)))
                 if name == "joppa_tree":
                     return {"schema": {"types": types}}
-                if name == "joppa_tests":
-                    return {"status": "grey", "values": {"asset": {"server": {"status": "grey"}}}}
                 if name != "joppa_objects":
                     raise AssertionError("Unsupported tool: " + name)
                 if args.get("address"):

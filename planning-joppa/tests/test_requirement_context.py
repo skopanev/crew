@@ -23,14 +23,14 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, CHECK_TYPE
 
 
 class ProviderTests(unittest.TestCase):
     def test_requirement_selection_excludes_unmet_external_dependencies(self):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
-                          "references": {"projects": {"multiple": True, "target": "project"}}}}
+                          "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
         for object in objects.values():
             object["process"]["assessment"] = {"state": "ready"}
@@ -48,10 +48,8 @@ class ProviderTests(unittest.TestCase):
             def call(self, name, args):
                 if name == "joppa_tree":
                     return {"position": 20, "schema": {"types": deepcopy(types)}}
-                if name == "joppa_tests":
-                    rows = [{"address": address, "status": "grey", "tests_draft": False,
-                             "tests_revision": None} for address in args["ac"].split(",")]
-                    return rows[0] if len(rows) == 1 else {"items": rows}
+                if args.get("kind") == "check":
+                    return {"items": []}
                 if "address" in args:
                     return deepcopy(objects[args["address"]])
                 if args.get("parent") == "rule:r":
@@ -66,12 +64,8 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("criterion:archived", snapshot["objects"])
         objects["criterion:outside"]["current_revision"] = 4
         objects["criterion:outside"]["contract_revision"] = 3
-        original_server_call = Server.call
-        def green_outside(self, name, args):
-            if name == "joppa_tests" and args.get("ac") == "criterion:outside":
-                return {"address": "criterion:outside", "status": "green"}
-            return original_server_call(self, name, args)
-        with patch.object(Server, "call", green_outside):
+        objects["criterion:outside"]["status"] = {"tone": "green", "label": "Children checks passed"}
+        if True:
             ready, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
             objects["criterion:outside"]["contract_revision"] = 4
@@ -81,6 +75,7 @@ class ProviderTests(unittest.TestCase):
             unpinned, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
             objects["criterion:b"]["document"]["links"][0]["revision"] = 3
+        objects["criterion:outside"]["status"] = {"tone": "orange", "label": "No tests"}
         objects["criterion:outside"]["current_revision"] = 3
         del objects["criterion:outside"]["contract_revision"]
         with self.assertRaisesRegex(ValueError, "object is absent"):
@@ -118,7 +113,8 @@ class ProviderTests(unittest.TestCase):
         objects = {obj["address"]: obj for obj in (ac, req, cap, dom, project, existing)}
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "area": {"role": "group"},
                  "project": {"role": "document"}, "work": {"role": "task", "parents": ["criterion"],
-                    "question": "What work?", "references": {"projects": {"multiple": True, "target": "project"}}}}
+                    "question": "What work?", "references": {"projects": {"multiple": True, "target": "project"}}},
+                 "check": CHECK_TYPE}
         tree = {"position": 20, "schema": {"revision": 2, "types": types}}
         req["document"]["data"]["body"] = "Required behavior"
         req.pop("annotations")
@@ -129,8 +125,8 @@ class ProviderTests(unittest.TestCase):
                 calls.append(tool)
                 if tool == "joppa_tree":
                     return deepcopy(tree)
-                if tool == "joppa_tests":
-                    return deepcopy(assignment()["joppa"]["test_status"])
+                if args.get("kind") == "check":
+                    return {"items": []}
                 if "address" in args:
                     return deepcopy(objects[args["address"]])
                 if args.get("related_to"):
@@ -169,7 +165,7 @@ class ProviderTests(unittest.TestCase):
             grouped = deepcopy(value)
             grouped["joppa"].update(scope="requirement", criteria=[value["ac"]], criterion_schemas={})
             self.assertEqual(stage.prompt_assignment(grouped)["joppa"]["criteria"][0]["item_id"], ac["item_id"])
-        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_objects", "joppa_tests"}))
+        self.assertTrue(set(calls).issubset({"joppa_tree", "joppa_objects"}))
 
     def test_requirement_claim_guard_checks_siblings_and_exact_own_receipt(self):
         data = assignment()

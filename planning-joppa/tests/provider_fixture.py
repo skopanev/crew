@@ -29,7 +29,10 @@ def item(address, parent=None, data=None, process=None, role=None):
             "current_revision": 3, "document": {"present": True, "data": data or {"title": address, "owner": "owner"},
              "parent": parent, "links": [], "revision": 3, "actor": "document-owner", "position": 10},
             "process": process or {}, "annotations": {"comments": []}, "files": [], "references": [],
-            "position": 20, "historical": False, "review_required": False, "work_ready": True}
+            "position": 20, "historical": False, "review_required": False, "work_ready": True,
+            "status": {"tone": "orange", "label": "No tests"}}
+
+CHECK_TYPE = {"role": "test", "parents": ["criterion"], "title_max_length": 400}
 
 def assignment():
     task = context.source(item("work:old", "criterion:a", {"title": "Existing", "owner": "document-owner",
@@ -43,8 +46,10 @@ def assignment():
                               "cbm_project": "service", "modules": [{"name": "core", "path": "src"}]}],
             "joppa": {"task_type": "work", "task_schema": {"question": "What work?", "title_preview_length": 64},
                       "tasks": [task], "objects": {"criterion:a": ac, "work:old": task, "work:dependency": dependency},
-                      "test_status": {"address": "criterion:a", "tests": [], "tests_draft": False,
-                                      "tests_revision": None}}}
+                      "test_nodes": [], "test_type": "check",
+                      "test_schema": {"role": "test", "parents": ["criterion"], "title_max_length": 400},
+                      "test_rules": {"max_tests": 200, "name": {"separator": " > ", "min_parts": 2,
+                                                                "max_length": 400, "file_extension": True}}}}
 
 def plan():
     task = {"id": "first", "action": "create", "ac": "criterion:a", "title": "Create a mechanism",
@@ -66,3 +71,27 @@ class Fake:
         if self.error:
             raise self.error
         return self.result
+
+class NodeServer:
+    """Serve test node list pages of 25 and single-node details."""
+    def __init__(self, nodes=None):
+        self.nodes, self.calls = dict(nodes or {}), []
+
+    def add(self, address, parent, title, status="green", result=None, revision=1, ancestor="rule:r"):
+        self.nodes[address] = {"parent": parent, "title": title, "status": status, "result": result,
+                               "revision": revision, "ancestor": ancestor}
+
+    def call(self, name, args):
+        self.calls.append((name, deepcopy(args)))
+        assert name == "joppa_objects", name
+        if args.get("address"):
+            node = self.nodes[args["address"]]
+            return {"data": {"title": node["title"]}, "parent": node["parent"], "revision": node["revision"],
+                    "status": {"tone": node["status"], "label": node["status"]},
+                    **({"result": deepcopy(node["result"])} if node["result"] else {})}
+        rows = sorted((address, node) for address, node in self.nodes.items()
+                      if args["parent"] in ("*", node["parent"], node["ancestor"]) and args.get("kind") == "check")
+        rows = [row for row in rows if not args.get("cursor") or row[0] > args["cursor"]]
+        page = rows[:min(args.get("limit", 25), 25)]
+        return {"items": [{"address": address, **{key: node[key] for key in args["fields"]}} for address, node in page],
+                **({"next_cursor": page[-1][0]} if len(rows) > len(page) else {})}

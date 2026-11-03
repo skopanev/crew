@@ -8,13 +8,14 @@ from pathlib import Path
 from common import digest, read, require, strings, text, validate_input
 from mcp import Joppa, Rejected, complete_object
 from context_snapshot import (
-    source, current_pin, remote_satisfied, test_list, snapshot_source, selected_criteria, unchanged,
+    source, current_pin, remote_satisfied, snapshot_source, selected_criteria, unchanged,
 )
 from context_reads import (
     task_contract, pending_work, pending_work_page, object_read, read_remote_links, remote_key,
     remote_object, remote_snapshot, verify_remote, capture_object, refresh_reads, read_assignment,
 )
 from requirement_context import load_requirement
+from test_nodes import identities, read_nodes, test_type
 
 
 def requirement_meaning(api, workspace, req, types, get=None):
@@ -148,12 +149,8 @@ def load_once(api, config, ac_id):
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
                 get(reference["target"])
-    tests = api.call("joppa_tests", {"workspace": workspace, "ac": ac_id})
-    # Compact reads omit an empty test list.
-    tests.setdefault("tests", [])
-    tests.setdefault("tests_draft", False)
-    require(tests.get("address") == ac_id and isinstance(tests.get("tests"), list),
-            "criterion test status is incomplete")
+    test_kind = test_type(types)
+    tests = read_nodes(api, workspace, test_kind, ac_id, [ac_id])[ac_id]
     require(api.call("joppa_tree", {"workspace": workspace})["schema"] == tree["schema"],
             "workspace changed during schema read")
     groups = [item for item in parents if types[item["kind"]].get("role") == "group"]
@@ -166,13 +163,14 @@ def load_once(api, config, ac_id):
                   "decisions": [json.dumps(meaning, ensure_ascii=False)],
                   "repositories": config["repositories"],
                   "joppa": {"parents": [source(item) for item in parents], "tasks": [source(item) for item in tasks],
-                            "test_status": tests,
+                            "test_nodes": tests, "test_type": test_kind, "test_schema": types[test_kind],
+                            "test_rules": tree["schema"].get("test_results") or {},
                             "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
                             "task_schema": types[task_kind]},
                   "knowledge_query": ac["document"]["data"].get("body", ac["document"]["data"].get("description")) or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
-                "requirement": meaning, "tests": test_list(tests)}
+                "requirement": meaning, "tests": {ac_id: identities(tests)}}
     if remote:
         assignment["joppa"]["remote"] = remote
         snapshot["remote"] = remote_snapshot(remote)
