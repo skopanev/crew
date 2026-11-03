@@ -53,10 +53,6 @@ for await(const line of createInterface({input:process.stdin})) {
     if(value.remote_links_revision===0) delete value.remote_links_revision;
     if(value.annotations) delete value.annotations;
    }
-   if(state.flat && r.params.name==='joppa_tests' && value) {
-    value=structuredClone(value);
-    if(r.params.arguments.ac && !r.params.arguments.ac.includes(',')) delete value.address;
-   }
    if(state.flat && r.params.name==='joppa_tasks' && value?.tasks) {
     value={...value,items:value.tasks};delete value.tasks;
    }

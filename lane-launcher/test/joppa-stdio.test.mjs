@@ -69,7 +69,7 @@ for (const flat of [false, true]) test(`native checkpoints and compact agent sna
     'CREW_RECOVERY_CHECKPOINT', 'Task: work:one', `Digest: ${digest}`, 'Ref: refs/heads/recovery/checkpoint',
     `SHA: ${'a'.repeat(40)}`, `Tree: ${'b'.repeat(40)}`, `Base: ${'c'.repeat(40)}`, 'Node: implement_code'].join('\n')});
   fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, objects: {'work:one': object},
-    responses: {joppa_tasks: {total: 0}, joppa_tests: {address: 'criterion:a', status: 'grey'}}}));
+    responses: {joppa_tasks: {total: 0}}}));
   const result = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls});
   assert.equal(Object.keys(result.annotations.comments).length, 31);
@@ -81,7 +81,6 @@ for (const flat of [false, true]) test(`native checkpoints and compact agent sna
   assert.equal(contractDigest(result), digest);
   assert.deepEqual(result.document, object.document);
   assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tasks', {}, {mcpCommand: calls})).tasks, []);
-  assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tests', {}, {mcpCommand: calls})).tests, []);
   const movingState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   movingState.commentDrift = true;
   fs.writeFileSync(stateFile, JSON.stringify(movingState));
@@ -107,7 +106,6 @@ saved=json.loads((Path(sys.argv[3])/'joppa-snapshot.json').read_text())['objects
 assert len(saved['annotations']['comments'])==30
 assert 'c30' in saved['annotations']['comments']
 assert api.call('joppa_tasks',{})['tasks']==[]
-assert api.call('joppa_tests',{})['tests']==[]
 api.stdio.close()
 `;
   const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls), f.root],

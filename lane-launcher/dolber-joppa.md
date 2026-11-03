@@ -198,5 +198,5 @@ Recorded results are test evidence. They do not accept a criterion or a Requirem
 
 The run state `testResults` keeps each exact request before Crew sends it.
 A lost response marks the request `uncertain` and Crew never sends it again.
-Inspect `joppa_tests` for that commit before a manual retry.
+Inspect the test nodes with `joppa_objects` before a manual retry.
 A failed publication does not change the landed lane result and does not run the lane again.

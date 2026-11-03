@@ -38,7 +38,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   do {
     const page = await api(service, {tokenFile}, 'joppa_objects', {
       workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 25,
-      fields: ['title', 'kind', 'revision', 'contract_revision', 'work_ready', 'review_required', 'process', 'work_summary'],
+      fields: ['title', 'kind', 'revision', 'contract_revision', 'status', 'work_ready', 'review_required', 'process', 'work_summary'],
       ...(cursor ? {cursor} : {}),
     }, {signal});
     for (const row of page.items) {
@@ -57,29 +57,20 @@ export async function readyCriteria(config, tokenFile, signal) {
     if (object.document?.present === true && object.historical === false &&
         object.work_ready === true && !object.review_required && !object.process?.planning_claim &&
         object.process?.assessment?.state === 'ready' && !object.process?.readiness_blocker) {
-      pending.set(ac, {...object, revision: object.current_revision, title: object.document.data.title});
+      pending.set(ac, {...object, revision: object.current_revision, title: object.document.data.title,
+        status: object.status?.tone});
     }
   }
-  const candidates = [...pending.values()];
-  for (let offset = 0; offset < candidates.length; offset += 100) {
-    const batch = candidates.slice(offset, offset + 100);
-    const checks = await api(service, {tokenFile}, 'joppa_tests', {
-      workspace: config.workspace, ac: batch.map(row => row.address).join(','), summary: true,
-    }, {signal});
-    const statuses = new Map((checks.items || [checks]).map(row => [row.address, row.status]));
-    for (const row of batch) {
-      if (!statuses.has(row.address)) throw new Error(`Test status missing for ${row.address}`);
-      const status = statuses.get(row.address);
-      if (!['green', 'red', 'grey'].includes(status)) throw new Error(`Invalid test status for ${row.address}`);
-      const failures = (blocked.get(row.address) || []).sort();
-      if (status !== 'green' && (await dependencies(row.address)).ready) {
-        rows.push({...row, testStatus: status, failedTaskCount: failures.length,
-          attemptKey: JSON.stringify([row.address, row.contract_revision ?? row.revision, failures])});
-      }
+  for (const row of pending.values()) {
+    if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
+    const failures = (blocked.get(row.address) || []).sort();
+    if (row.status !== 'green' && row.status !== 'purple' && (await dependencies(row.address)).ready) {
+      rows.push({...row, failedTaskCount: failures.length,
+        attemptKey: JSON.stringify([row.address, row.contract_revision ?? row.revision, failures])});
     }
   }
   return rows.sort((a, b) => Number(b.failedTaskCount > 0) - Number(a.failedTaskCount > 0) ||
-    Number(b.testStatus === 'red') - Number(a.testStatus === 'red') ||
+    Number(b.status === 'red') - Number(a.status === 'red') ||
     (ids ? ids.indexOf(a.address) - ids.indexOf(b.address) : 0));
 }
 

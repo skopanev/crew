@@ -20,7 +20,7 @@ async function packageFixture(t, mode = 'success') {
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
-    work_ready: true, review_required: false, document: {present: true, parent, data, links: []},
+    work_ready: true, review_required: false, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
     process: {status: 'open', assignee: null}});
   objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
   for (let index = 1; index <= 2; index++) {
@@ -48,7 +48,7 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_objects') {
       const rows = [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
         address: object.address, revision: object.current_revision, contract_revision: object.contract_revision,
-        kind: object.kind,
+        kind: object.kind, status: object.status.tone,
         title: object.document.data.title, work_ready: object.work_ready, review_required: object.review_required,
         process: object.process, work_summary: {active: 0, done: 0}}));
       const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
@@ -56,7 +56,6 @@ async function packageFixture(t, mode = 'success') {
         .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
         ...(end < rows.length ? {next_cursor: String(end)} : {})};
     }
-    else if (name === 'joppa_tests') value = {items: args.ac.split(',').map(address => ({address, status: 'grey'}))};
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
         projects: objects.get(address).document.data.projects || ['project:app'],

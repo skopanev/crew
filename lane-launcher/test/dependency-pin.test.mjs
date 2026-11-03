@@ -7,6 +7,21 @@ import {createDashboard} from '../dashboard.mjs';
 import {fixture} from '../test-support/requirement-delivery.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 
+test('non-Task dependencies use the native tree tone without separate test reads', async () => {
+  const f = fixture(), target = f.add('spec:before', null);
+  f.objects.get('work:one').document.links = [{relation: 'depends_on', blocking: true, target: target.address}];
+  const calls = [];
+  const read = (tool, args) => {
+    calls.push({tool, args});
+    return f.read(tool, args);
+  };
+  for (const tone of ['green', 'orange', 'yellow', 'grey', 'red', undefined]) {
+    target.status = {tone};
+    assert.equal((await dependencyCheck(read)('work:one')).ready, tone === 'green');
+  }
+  assert(calls.every(({tool, args}) => tool === 'joppa_tree' || tool === 'joppa_objects' && args.address));
+});
+
 test('a delivered prerequisite with a changed contract reports its stale pin without changing documents', async () => {
   const f = fixture(), target = f.objects.get('work:two');
   Object.assign(target, {current_revision: 11, review_required: false});

@@ -64,7 +64,6 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
     return completeDetail(arguments_, result, args => rawCall(url, tokenFile, tool, args, options));
   }
   if (tool === 'joppa_tasks') normalizeTasks(result);
-  if (tool === 'joppa_tests') normalizeTests(arguments_, result);
   return result;
 }
 
@@ -208,15 +207,6 @@ async function completeDetail(args, value, readPage) {
   result.annotations.comments = comments;
   delete result.comments;
   return result;
-}
-
-function normalizeTests(args, result) {
-  const targets = (args.ac || '').split(',').filter(Boolean);
-  if (targets.length === 1 && !result.items) result.address ??= targets[0];
-  for (const row of result.items || [result]) {
-    row.tests_draft ??= false;
-    if (!args.summary) row.tests ??= [];
-  }
 }
 
 function normalizeTasks(result) {
