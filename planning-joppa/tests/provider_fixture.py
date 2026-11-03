@@ -85,10 +85,13 @@ class NodeServer:
         self.calls.append((name, deepcopy(args)))
         assert name == "joppa_objects", name
         if args.get("address"):
-            node = self.nodes[args["address"]]
-            return {"data": {"title": node["title"]}, "parent": node["parent"], "revision": node["revision"],
-                    "status": {"tone": node["status"], "label": node["status"]},
-                    **({"result": deepcopy(node["result"])} if node["result"] else {})}
+            addresses = args["address"].split(",")
+            assert len(addresses) <= 25, "more than 25 addresses are refused"
+            items = [{"address": address, "data": {"title": node["title"]}, "parent": node["parent"],
+                      "revision": node["revision"], "status": {"tone": node["status"], "label": node["status"]},
+                      **({"result": deepcopy(node["result"])} if node["result"] else {})}
+                     for address in addresses for node in [self.nodes[address]]]
+            return items[0] if len(items) == 1 else {"items": items}
         rows = sorted((address, node) for address, node in self.nodes.items()
                       if args["parent"] in ("*", node["parent"], node["ancestor"]) and args.get("kind") == "check")
         rows = [row for row in rows if not args.get("cursor") or row[0] > args["cursor"]]

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 import context
-from test_nodes import NODE_FIELDS, read_nodes
+from test_nodes import NODE_FIELDS, node_results, read_nodes
 
 from provider_fixture import item, assignment, NodeServer, CHECK_TYPE
 
@@ -27,6 +27,7 @@ class Workspace(NodeServer):
         self.objects.update({"rule:r": item("rule:r"), "project:p": item("project:p")})
 
     def call(self, name, args):
+        self.calls.append((name, deepcopy(args)))
         if name == "joppa_tree":
             return {"schema": {"types": deepcopy(TYPES), "test_results": {"max_tests": 200}}}
         if args.get("kind") == "check" or args.get("address") in self.nodes:
@@ -110,6 +111,56 @@ class TestNodeTests(unittest.TestCase):
         api.objects["criterion:b"].pop("status")
         with self.assertRaisesRegex(ValueError, "criterion status is missing"):
             context.load_requirement(api, config, "rule:r")
+
+    def test_result_details_use_batched_reads_and_exact_identity(self):
+        api = NodeServer()
+        for number in range(26):
+            api.add(f"check:n{number:02}", "criterion:a", f"a.rs > case {number:02}",
+                    result={"address": f"a.rs > case {number:02}", "status": "pass", "commit": "0" * 40})
+        nodes = read_nodes(api, "example", "check", "criterion:a", ["criterion:a"])["criterion:a"]
+        api.calls.clear()
+        results = node_results(api, "example", nodes, "criterion:a")
+        self.assertEqual(len(results), 26)
+        self.assertEqual([len(args["address"].split(",")) for _, args in api.calls], [25, 1])
+        self.assertEqual(node_results(api, "example", [], "criterion:a"), {})
+        del api.nodes["check:n25"]["result"]["address"]
+        with self.assertRaisesRegex(ValueError, "does not name the bound test"):
+            node_results(api, "example", nodes, "criterion:a")
+        api.nodes["check:n25"]["result"]["address"] = "a.rs > another"
+        with self.assertRaisesRegex(ValueError, "does not name the bound test"):
+            node_results(api, "example", nodes, "criterion:a")
+        api.nodes["check:n25"]["result"]["address"] = "a.rs > case 25"
+        api.nodes["check:n00"]["title"] = "a.rs > renamed"
+        with self.assertRaisesRegex(ValueError, "title differs"):
+            node_results(api, "example", nodes, "criterion:a")
+        with self.assertRaisesRegex(ValueError, "another criterion"):
+            node_results(api, "example", nodes[1:], "criterion:b")
+
+    def test_dependency_targets_use_their_own_status_tone(self):
+        api = Workspace()
+        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        api.add("check:proof", "criterion:outside", "o.rs > proof", revision=1, ancestor="rule:outside")
+        api.objects["rule:outside"] = item("rule:outside")
+        api.objects["criterion:outside"] = item("criterion:outside", "rule:outside")
+        selected = lambda: [entry["id"] for entry in context.load_requirement(api, config, "rule:r")[0]["joppa"]["criteria"]]
+        for target in ("check:proof", "rule:outside"):
+            with self.subTest(target=target):
+                api.objects["criterion:b"]["document"]["links"] = [
+                    {"target": target, "revision": 1 if target.startswith("check") else 3,
+                     "relation": "depends_on", "blocking": True}]
+                api.nodes["check:proof"]["status"] = "green"
+                api.objects["rule:outside"]["status"] = {"tone": "green", "label": "Passed"}
+                api.objects["criterion:outside"]["status"] = {"tone": "green", "label": "Passed"}
+                api.calls.clear()
+                self.assertEqual(selected(), ["criterion:a", "criterion:b"])
+                self.assertFalse(any(args.get("parent") in ("rule:outside", "check:proof") and not args.get("kind")
+                                     for _, args in api.calls))
+                if target.startswith("check"):
+                    api.nodes["check:proof"]["status"] = "orange"
+                else:
+                    # A container with green children still follows its own tone.
+                    api.objects["rule:outside"]["status"] = {"tone": "orange", "label": "Unset"}
+                self.assertEqual(selected(), ["criterion:a"])
 
 
 if __name__ == "__main__":
