@@ -31,7 +31,7 @@ class ProviderTests(unittest.TestCase):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}],
             criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
-                for key in ("task_type", "task_schema", "test_status")}})
+                for key in ("task_type", "task_schema", "test_nodes")}})
         data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
         retained = context.source(item("work:retained", "criterion:b", {"title": "[07] Approved work", "owner": "owner",
             "body": "Repository: service\nModule: core"}, {"status": "open"}))
@@ -66,7 +66,7 @@ class ProviderTests(unittest.TestCase):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
             criterion_schemas={address: {key: deepcopy(data["joppa"][key])
-                for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+                for key in ("task_type", "task_schema", "test_nodes")} for address in ("criterion:a", "criterion:b")})
         data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
         data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed"}
         consumer = deepcopy(data["joppa"]["tasks"][0])
@@ -96,7 +96,7 @@ class ProviderTests(unittest.TestCase):
             data["joppa"]["criteria"].append({"id": address, "revision": 3})
             data["joppa"]["objects"][address] = context.source(item(address, "rule:r"))
             data["joppa"]["criterion_schemas"][address] = {key: deepcopy(data["joppa"][key])
-                for key in ("task_type", "task_schema", "test_status")}
+                for key in ("task_type", "task_schema", "test_nodes")}
             task = deepcopy(plan()["tasks"][0])
             task.update(id=f"step{index}", ac=address, repository="client" if index == 2 else "service",
                         depends_on=[f"step{index - 1}"] if index else ["work:dependency"])
@@ -124,7 +124,7 @@ class ProviderTests(unittest.TestCase):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],
             criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
-                for key in ("task_type", "task_schema", "test_status")}})
+                for key in ("task_type", "task_schema", "test_nodes")}})
         value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
         value["acceptance_checks"][0]["ac"] = "criterion:a"
         old = data["joppa"]["tasks"][0]
@@ -161,7 +161,7 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "claimed Tasks"):
             publication.operations(value, data)
 
-    def test_requirement_uses_each_criteria_test_list_revision(self):
+    def test_requirement_binds_only_missing_nodes_for_each_criterion(self):
         with tempfile.TemporaryDirectory() as directory:
             data, value = assignment(), plan()
             data["repositories"][0]["path"] = directory
@@ -169,20 +169,22 @@ class ProviderTests(unittest.TestCase):
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
             data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})
             value.update(disposition="verify_existing", tasks=[], criteria=[], acceptance_checks=[])
-            for address, revision in (("criterion:a", 4), ("criterion:b", 9)):
+            bound = {"address": "check:a1", "title": "checks.rs > required_behavior", "revision": 2, "status": "green"}
+            for address, nodes in (("criterion:a", [bound]), ("criterion:b", [])):
                 data["joppa"]["criteria"].append({"id": address})
                 data["joppa"]["objects"][address] = context.source(item(address, "rule:r"))
-                detail = {key: deepcopy(data["joppa"][key]) for key in ("task_type", "task_schema", "test_status")}
-                detail["test_status"].update(address=address, tests_revision=revision)
+                detail = {key: deepcopy(data["joppa"][key]) for key in ("task_type", "task_schema", "test_nodes")}
+                detail["test_nodes"] = nodes
                 data["joppa"]["criterion_schemas"][address] = detail
                 value["criteria"].append({"ac": address, "disposition": "verify_existing"})
                 value["acceptance_checks"].append({"ac": address, "repository": "service", "scenario": "Existing behavior",
                     "expected": "Required result", "test": "checks.rs > required_behavior",
                     "evidence": "service:checks.rs:1; service:implementation.rs:1"})
-            bindings = [operation["command"] for operation in publication.operations(value, data)
-                        if operation["command"]["op"] == "set_ac_tests"]
-            self.assertEqual([(command["target"], command["revision"]) for command in bindings],
-                             [("criterion:a", 4), ("criterion:b", 9)])
+            ops = publication.operations(value, data)
+            bindings = [operation["command"] for operation in ops if operation["command"]["op"] == "save_object"]
+            self.assertEqual([(command["kind"], command["parent"], command["revision"], command["data"]["title"])
+                              for command in bindings], [("check", "criterion:b", 0, "checks.rs > required_behavior")])
+            self.assertEqual([op["command"]["op"] for op in ops[-2:]], ["release_planning", "finish_planning"])
 
     def test_requirement_mixes_implementation_and_existing_test_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,7 +194,7 @@ class ProviderTests(unittest.TestCase):
             (Path(directory) / "implementation.rs").write_text("required_behavior\n")
             data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
                 criterion_schemas={address: {key: deepcopy(data["joppa"][key])
-                    for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+                    for key in ("task_type", "task_schema", "test_nodes")} for address in ("criterion:a", "criterion:b")})
             data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
             value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"},
                                  {"ac": "criterion:b", "disposition": "verify_existing"}]
@@ -202,6 +204,6 @@ class ProviderTests(unittest.TestCase):
                 "evidence": "service:checks.rs:1; service:implementation.rs:1"})
             ops = publication.operations(value, data)
             self.assertEqual([op["command"]["op"] for op in ops],
-                             ["save_object", "set_ac_tests", "finish_planning", "finish_planning"])
-            self.assertEqual(ops[1]["command"]["target"], "criterion:b")
+                             ["save_object", "save_object", "finish_planning", "finish_planning"])
+            self.assertEqual((ops[1]["command"]["kind"], ops[1]["command"]["parent"]), ("check", "criterion:b"))
             self.assertEqual(ops[0]["command"]["parent"], "criterion:a")

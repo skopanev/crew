@@ -16,6 +16,7 @@ from task_contracts import (
     contract_fields, contract,
 )
 from plan_validation import validate, validate_one, binding_checks, verify_bindings
+from test_nodes import bind_missing
 
 
 def ensure_recovered(root, current, server, workspace, ac):
@@ -131,14 +132,12 @@ def operations(plan, assignment):
         value = criterion_plan(plan, assignment, ac)
         if value["disposition"] != "verify_existing":
             continue
-        status = scope["joppa"]["test_status"]
-        tests = list(dict.fromkeys([*[item["address"] for item in status["tests"]],
-                                   *[check["test"] for check in value["acceptance_checks"]]]))
-        require(len(tests) <= 200, "criterion supports at most 200 tests")
-        if tests != [item["address"] for item in status["tests"]] or status["tests_draft"]:
-            result.append({"command": {"op": "set_ac_tests", "target": ac, "tests": tests,
-                "revision": status.get("tests_revision") or 0,
-                "reason": "Bind existing tests after review of every criterion assertion."}})
+        # Create only the missing (criterion, test) nodes. Existing nodes keep their results.
+        bindings = bind_missing(ac, [check["test"] for check in value["acceptance_checks"]],
+                                scope["joppa"]["test_nodes"], scope["joppa"],
+                                objects[ac]["document"]["data"].get("owner"))
+        result.extend(bindings)
+        if bindings:
             changed.add(ac)
     for criterion in context.selected_criteria(assignment):
         ac = criterion["id"]
