@@ -85,7 +85,7 @@ class Joppa:
     def call(self, name, arguments):
         args = dict(arguments)
         result = self.raw_call(name, args)
-        if name == "joppa_objects" and args.get("address") and not args.get("history"):
+        if name == "joppa_objects" and args.get("address") and "," not in args["address"] and not args.get("history"):
             result = complete_object(self.raw_call, args, result)
         if name == "joppa_tasks":
             normalize_tasks(result)
