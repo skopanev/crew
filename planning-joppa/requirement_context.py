@@ -2,7 +2,8 @@
 import json
 from common import require
 from context_reads import object_read, read_remote_links, remote_snapshot
-from context_snapshot import source, current_pin, remote_satisfied, snapshot_source, test_list
+from context_snapshot import source, current_pin, remote_satisfied, snapshot_source
+from test_nodes import identities, read_nodes, tone
 
 
 def load_requirement(api, config, req_id, selected=None):
@@ -28,13 +29,15 @@ def load_requirement(api, config, req_id, selected=None):
         if address not in objects:
             objects[address] = source(object_read(api, workspace, address))
         return objects[address]
-    tests = {}
-    for offset in range(0, len(addresses), 100):
-        response = api.call("joppa_tests", {"workspace": workspace, "ac": ",".join(addresses[offset:offset + 100])})
-        tests.update({item["address"]: {"tests": [], "tests_draft": False, **item} for item in response.get("items", [response])})
-    require(all(address in tests for address in addresses), "Requirement test status is incomplete")
-    require(all(tests[address].get("status") in ("green", "red", "grey") for address in addresses),
-            "Requirement test status is invalid")
+    # One paginated read below the Requirement gives every criterion's test nodes.
+    tests = read_nodes(api, workspace, assignment["joppa"]["test_type"], req_id, addresses)
+    statuses = {}
+    def status(address):
+        """A criterion status follows its children. No tests gives a non-green tone."""
+        if address not in statuses:
+            statuses[address] = tone(object_read(api, workspace, address).get("status"))
+            require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
+        return statuses[address]
     tasks = [item for item in objects.values() if types[item["kind"]].get("role") == "task"
              and item["document"].get("parent") in addresses]
     candidates = []
@@ -42,6 +45,8 @@ def load_requirement(api, config, req_id, selected=None):
         # Admission needs live ownership. Authored snapshots exclude planning claims.
         ac = object_read(api, workspace, address)
         objects[address] = source(ac)
+        statuses[address] = tone(ac.get("status"))
+        require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
         read_remote_links(api, remote, ac)
         work = [item for item in tasks if item["document"]["parent"] == address
                 and not item["process"].get("done") and not item["process"].get("retired")]
@@ -49,7 +54,7 @@ def load_requirement(api, config, req_id, selected=None):
                 and ac.get("work_ready") is True and ac.get("review_required") is False
                 and ac["process"].get("assessment", {}).get("state") == "ready"
                 and not ac["process"].get("readiness_blocker")
-                and (selected is not None or not ac["process"].get("planning_claim")) and tests[address].get("status") != "green"
+                and (selected is not None or not ac["process"].get("planning_claim")) and statuses[address] != "green"
                 and all(not item["process"].get("assignee") and not item["process"].get("claim")
                         and isinstance(item["process"].get("blocked"), dict) for item in work)):
             candidates.append(address)
@@ -62,8 +67,7 @@ def load_requirement(api, config, req_id, selected=None):
         if role == "task":
             return bool(process.get("done")) and not process.get("retired") and not object.get("review_required")
         if role == "ac":
-            response = tests.get(object["address"]) or api.call("joppa_tests", {"workspace": workspace, "ac": object["address"]})
-            return response.get("status") == "green"
+            return status(object["address"]) == "green"
         children, cursor = [], None
         while True:
             response = api.call("joppa_objects", {"workspace": workspace, "parent": object["address"], "limit": 25,
@@ -116,12 +120,12 @@ def load_requirement(api, config, req_id, selected=None):
         require(reference and reference.get("multiple") is True, "Task type needs a projects reference list")
         require(all(get(repo["project"])["kind"] == reference["target"] for repo in config["repositories"]),
                 "repository project type differs from Task schema")
-        schemas[address] = {"task_type": kind, "task_schema": types[kind], "test_status": tests[address]}
+        schemas[address] = {"task_type": kind, "task_schema": types[kind], "test_nodes": tests[address]}
     assignment["ac"] = criteria[0]
     assignment["joppa"].update(scope="requirement", criteria=criteria, criterion_schemas=schemas,
         tasks=[item for item in tasks if item["document"]["parent"] in candidates])
     snapshot["objects"] = {address: snapshot_source(item, types, candidates) for address, item in objects.items()}
-    snapshot["tests"] = {address: test_list(tests[address]) for address in candidates}
+    snapshot["tests"] = {address: identities(tests[address]) for address in candidates}
     snapshot["criteria"] = candidates
     if remote:
         assignment["joppa"]["remote"] = remote

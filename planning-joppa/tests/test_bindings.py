@@ -23,7 +23,8 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, NodeServer
+from test_nodes import bind_missing
 
 
 class ProviderTests(unittest.TestCase):
@@ -36,7 +37,7 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "acceptance_check.test"):
             publication.operations(value, assignment())
 
-    def test_binding_preserves_the_list_and_skips_an_unchanged_revision(self):
+    def test_binding_creates_only_missing_nodes_and_keeps_existing(self):
         with tempfile.TemporaryDirectory() as directory:
             data, value = assignment(), plan()
             data["repositories"][0]["path"] = directory
@@ -47,22 +48,61 @@ class ProviderTests(unittest.TestCase):
             value.update(disposition="verify_existing", tasks=[])
             value["acceptance_checks"][0].update(test="checks/checks.rs > required_behavior",
                 evidence="service:checks/checks.rs:1; service:implementation.rs:1")
-            status = data["joppa"]["test_status"]
-            status.update(tests=[{"address": "checks/checks.rs > other"}], tests_revision=4)
+            nodes = data["joppa"]["test_nodes"]
+            nodes.append({"address": "check:other", "title": "checks/checks.rs > other", "revision": 4, "status": "green"})
+            data["joppa"]["test_schema"]["question"] = "Which test proves the criterion?"
             ops = publication.operations(value, data)
-            self.assertEqual([op["command"]["op"] for op in ops], ["set_ac_tests", "finish_planning"])
-            self.assertEqual(ops[0]["command"]["tests"], ["checks/checks.rs > other", "checks/checks.rs > required_behavior"])
-            self.assertEqual(ops[0]["command"]["revision"], 4)
-            status["tests"].append({"address": "checks/checks.rs > required_behavior"})
+            self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "finish_planning"])
+            self.assertEqual(ops[0]["command"], {"op": "save_object", "kind": "check", "revision": 0,
+                "parent": "criterion:a", "data": {"title": "checks/checks.rs > required_behavior", "owner": "owner"},
+                "reason": "Bind an existing test after review of every criterion assertion.",
+                "question_checked": "Which test proves the criterion?"})
+            self.assertFalse(any(op["command"].get("id") or op["command"]["op"] not in ("save_object", "finish_planning")
+                                 for op in ops))
+            nodes.append({"address": "check:bound", "title": "checks/checks.rs > required_behavior",
+                          "revision": 1, "status": "red"})
             self.assertEqual(len(publication.operations(value, data)), 1)
-            status["tests_draft"] = True
-            self.assertEqual(len(publication.operations(value, data)), 2)
             retire = deepcopy(plan()["tasks"][0])
             retire.update(action="retire", target="work:old", revision=3)
             data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
             value["tasks"] = [retire]
+            nodes.pop()
             self.assertEqual([op["command"]["op"] for op in publication.operations(value, data)],
-                             ["retire_task", "set_ac_tests", "finish_planning"])
+                             ["retire_task", "save_object", "finish_planning"])
+
+    def test_binding_honours_schema_limits_and_owner(self):
+        data, value = assignment(), plan()
+        value.update(disposition="verify_existing", tasks=[])
+        joppa = data["joppa"]
+        with self.assertRaisesRegex(ValueError, "at most 2 tests"):
+            bind_missing("criterion:a", ["a.rs > one", "a.rs > two"], [{"title": "a.rs > zero"}],
+                         {**joppa, "test_rules": {**joppa["test_rules"], "max_tests": 2}}, "owner")
+        self.assertEqual(bind_missing("criterion:a", ["a.rs > one", "a.rs > one"], [{"title": "a.rs > zero"}],
+                         {**joppa, "test_rules": {**joppa["test_rules"], "max_tests": 2}}, "owner")[0]["command"]["data"],
+                         {"title": "a.rs > one", "owner": "owner"})
+        for name, error in (("a.rs", "name rule"), ("noext > one", "extension"), ("a.rs > " + "x" * 30, "20-character")):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
+                bind_missing("criterion:a", [name], [], {**joppa, "test_schema": {"title_max_length": 20}}, "owner")
+        required = {**joppa, "test_schema": {"required_fields": {"owner": "a test needs an owner"}}}
+        with self.assertRaisesRegex(ValueError, "owner is required"):
+            bind_missing("criterion:a", ["a.rs > one"], [], required, None)
+        self.assertNotIn("question_checked", bind_missing("criterion:a", ["a.rs > one"], [], joppa, None)[0]["command"])
+
+    def test_batch_limit_counts_test_bindings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data, value = assignment(), plan()
+            data["repositories"][0]["path"] = directory
+            lines = [f"assert!(case_{number}());" for number in range(100)]
+            (Path(directory) / "checks.rs").write_text("\n".join(lines) + "\n")
+            (Path(directory) / "implementation.rs").write_text("required_behavior\n")
+            check = value["acceptance_checks"][0]
+            value.update(disposition="verify_existing", tasks=[], acceptance_checks=[
+                {**check, "test": f"checks.rs > case_{number}",
+                 "evidence": f"service:checks.rs:{number + 1}; service:implementation.rs:1"} for number in range(100)])
+            with self.assertRaisesRegex(ValueError, "at most 100 operations"):
+                publication.operations(value, data)
+            value["acceptance_checks"].pop()
+            self.assertEqual(len(publication.operations(value, data)), 100)
 
     def test_binding_requires_execution_evidence_and_unchanged_cited_source(self):
         from common import fingerprint
@@ -81,21 +121,33 @@ class ProviderTests(unittest.TestCase):
             value.update(disposition="verify_existing", tasks=[])
             value["acceptance_checks"][0].update(test="checks/checks.rs > required_behavior",
                 evidence="service:checks/checks.rs:1; service:implementation.rs:1")
-            row = {"address": "checks/checks.rs > required_behavior", "status": "pass", "commit": commit}
-            data["joppa"]["test_status"]["tests"] = [row]
+            name = "checks/checks.rs > required_behavior"
+            row = {"address": name, "status": "pass", "status_name": "pass", "commit": commit}
+            api = NodeServer()
             snap = {"service": fingerprint(data["repositories"][0])}
-            api = Fake(result=data["joppa"]["test_status"])
+            with self.assertRaisesRegex(ValueError, "passing result missing"):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            api.add("check:bound", "criterion:a", name, result=row)
+            data["joppa"]["test_nodes"] = [{"address": "check:bound", "title": name, "revision": 1, "status": "green"}]
             publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
-            data["joppa"]["test_status"]["tests"].append({"address": "checks/checks.rs > another", "status": "not_run"})
+            api.add("check:another", "criterion:a", "checks/checks.rs > another", status="orange")
+            data["joppa"]["test_nodes"].append({"address": "check:another", "title": "checks/checks.rs > another",
+                                                "revision": 1, "status": "orange"})
             with self.assertRaisesRegex(ValueError, "existing criterion tests contain a failure or missing result"):
                 publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
-            data["joppa"]["test_status"]["tests"].pop()
+            data["joppa"]["test_nodes"].pop()
             with self.assertRaisesRegex(ValueError, "snapshot is missing"):
                 publication.verify_bindings(api, {"workspace": "example"}, value, data, {})
-            row["status"] = "not_run"
+            row["status"] = "todo"
             with self.assertRaisesRegex(ValueError, "passing result missing"):
                 publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
             row["status"] = "pass"
+            api.nodes["check:bound"]["parent"] = "criterion:b"
+            api.nodes["check:bound"]["ancestor"] = "criterion:a"
+            # A node under another criterion is not evidence for this source criterion.
+            with self.assertRaisesRegex(ValueError, "passing result missing"):
+                publication.verify_bindings(api, {"workspace": "example"}, value, data, snap)
+            api.nodes["check:bound"]["parent"] = "criterion:a"
             (Path(directory) / "unrelated.txt").write_text("unrelated\n")
             git("add", ".")
             git("-c", "user.name=proof", "-c", "user.email=proof@local", "commit", "-qm", "unrelated")

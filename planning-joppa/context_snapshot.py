@@ -28,10 +28,6 @@ def remote_satisfied(link):
             and status.get("present") is True and status.get("review_required") is False
             and status.get("satisfied") is True)
 
-def test_list(status):
-    return {"tests": [item["address"] for item in status["tests"]],
-            "tests_revision": status.get("tests_revision"), "tests_draft": status["tests_draft"]}
-
 def snapshot_source(object, types, selected_ac=None):
     current = source(object)
     current.pop("item_id", None)

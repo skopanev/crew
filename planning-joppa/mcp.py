@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import MCPError, Rejected, complete_object, normalize_detail, normalize_tests, normalize_tasks
+from joppa_reads import MCPError, Rejected, complete_object, normalize_detail, normalize_tasks
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -89,8 +89,6 @@ class Joppa:
             result = complete_object(self.raw_call, args, result)
         if name == "joppa_tasks":
             normalize_tasks(result)
-        if name == "joppa_tests":
-            normalize_tests(args, result)
         return result
 
     def raw_call(self, name, arguments):
@@ -122,7 +120,7 @@ class Joppa:
 
 
 
-READ_TOOLS = frozenset(("joppa_search", "joppa_tests", "joppa_tree", "joppa_objects", "joppa_tasks", "joppa_help"))
+READ_TOOLS = frozenset(("joppa_search", "joppa_tree", "joppa_objects", "joppa_tasks", "joppa_help"))
 
 
 class Reader:

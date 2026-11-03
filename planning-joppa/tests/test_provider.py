@@ -27,7 +27,7 @@ from provider_fixture import item, assignment, plan, Fake
 
 
 class ProviderTests(unittest.TestCase):
-    def test_test_list_revision_keeps_only_current_contract_pins(self):
+    def test_contract_revision_keeps_only_current_pins(self):
         value = item("criterion:a")
         value["contract_revision"] = 2
         self.assertEqual(context.source(value)["contract_revision"], 2)
@@ -59,7 +59,7 @@ class ProviderTests(unittest.TestCase):
         data = assignment()
         data["repositories"].append({**deepcopy(data["repositories"][0]), "id": "other"})
         schemas = {address: {key: deepcopy(data["joppa"][key])
-                    for key in ("task_type", "task_schema", "test_status")}
+                    for key in ("task_type", "task_schema", "test_nodes")}
                    for address in ("criterion:a", "criterion:b")}
         schemas["criterion:b"]["task_schema"]["title_preview_length"] = 43
         data["joppa"].update(scope="requirement", criteria=[{"id": key} for key in schemas], criterion_schemas=schemas)
@@ -154,7 +154,7 @@ runpy.run_path({str(script)!r}, run_name="__main__")
                 data["joppa"]["task_schema"]["title_preview_length"] = limit
                 data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],
                     criterion_schemas={"criterion:a": {key: deepcopy(data["joppa"][key])
-                        for key in ("task_type", "task_schema", "test_status")}})
+                        for key in ("task_type", "task_schema", "test_nodes")}})
                 old = data["joppa"]["tasks"][0]
                 old["document"]["data"].update(title=f"[{number:02d}] Existing",
                     body="Repository: service\nModule: core")
@@ -179,7 +179,7 @@ runpy.run_path({str(script)!r}, run_name="__main__")
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", tasks=[], criteria=[{"id": "criterion:a"}, {"id": "criterion:b"}],
             criterion_schemas={address: {key: deepcopy(data["joppa"][key])
-                for key in ("task_type", "task_schema", "test_status")} for address in ("criterion:a", "criterion:b")})
+                for key in ("task_type", "task_schema", "test_nodes")} for address in ("criterion:a", "criterion:b")})
         data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
         value["criteria"] = [{"ac": address, "disposition": "implement"} for address in ("criterion:a", "criterion:b")]
         value["acceptance_checks"] = [{**deepcopy(value["acceptance_checks"][0]), "ac": address}
