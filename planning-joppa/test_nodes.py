@@ -5,6 +5,7 @@ import re
 from common import require
 
 NODE_FIELDS = ["title", "parent", "status", "revision"]
+DETAIL_BATCH = 25
 
 
 def tone(status):
@@ -50,13 +51,26 @@ def identities(nodes):
     return [{key: node[key] for key in ("address", "title", "revision")} for node in nodes]
 
 
-def node_result(api, workspace, address, parent):
-    """Read one node's recorded result. Return None when no result exists."""
-    detail = api.call("joppa_objects", {"workspace": workspace, "address": address})
-    require(detail.get("parent", detail.get("document", {}).get("parent")) == parent,
-            "test evidence belongs to another criterion")
-    result = detail.get("result")
-    return result if isinstance(result, dict) and result.get("status") else None
+def node_results(api, workspace, nodes, parent):
+    """Read node details 25 at a time. Return {address: recorded result or None}."""
+    results = {}
+    for offset in range(0, len(nodes), DETAIL_BATCH):
+        batch = {node["address"]: node for node in nodes[offset:offset + DETAIL_BATCH]}
+        reply = api.call("joppa_objects", {"workspace": workspace, "address": ",".join(batch)})
+        items = reply.get("items") if len(batch) > 1 else [{"address": next(iter(batch)), **reply}]
+        require(isinstance(items, list) and sorted(item.get("address") for item in items) == sorted(batch),
+                "test node detail read is incomplete")
+        for detail in items:
+            node = batch[detail["address"]]
+            require(detail.get("parent") == parent, "test evidence belongs to another criterion")
+            require((detail.get("data") or {}).get("title") == node["title"],
+                    f"test node title differs from its list read: {node['address']}")
+            result = detail.get("result")
+            result = result if isinstance(result, dict) and result.get("status") else None
+            require(result is None or result.get("address") == node["title"],
+                    f"test result does not name the bound test: {node['title']}")
+            results[node["address"]] = result
+    return results
 
 
 def check_name(name, rules, definition):

@@ -33,10 +33,9 @@ def load_requirement(api, config, req_id, selected=None):
     tests = read_nodes(api, workspace, assignment["joppa"]["test_type"], req_id, addresses)
     statuses = {}
     def status(address):
-        """A criterion status follows its children. No tests gives a non-green tone."""
+        """Joppa applies the configured own, children or links status rule. Read the current tone."""
         if address not in statuses:
             statuses[address] = tone(object_read(api, workspace, address).get("status"))
-            require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
         return statuses[address]
     tasks = [item for item in objects.values() if types[item["kind"]].get("role") == "task"
              and item["document"].get("parent") in addresses]
@@ -58,25 +57,12 @@ def load_requirement(api, config, req_id, selected=None):
                 and all(not item["process"].get("assignee") and not item["process"].get("claim")
                         and isinstance(item["process"].get("blocked"), dict) for item in work)):
             candidates.append(address)
-    def satisfied(object, seen=None):
-        seen = set(seen or [])
-        require(object["address"] not in seen, "dependency cycle in Requirement context")
-        seen.add(object["address"])
+    def satisfied(object):
         process = object["process"]
-        role = types[object["kind"]].get("role")
-        if role == "task":
+        if types[object["kind"]].get("role") == "task":
             return bool(process.get("done")) and not process.get("retired") and not object.get("review_required")
-        if role == "ac":
-            return status(object["address"]) == "green"
-        children, cursor = [], None
-        while True:
-            response = api.call("joppa_objects", {"workspace": workspace, "parent": object["address"], "limit": 25,
-                                                "fields": ["kind", "present"], **({"cursor": cursor} if cursor else {})})
-            children.extend(get(item["address"]) for item in response["items"] if item.get("present", True))
-            cursor = response.get("next_cursor")
-            if not cursor:
-                break
-        return bool(children) and all(satisfied(item, seen) for item in children)
+        # Every other target is satisfied only by its own current green status.
+        return status(object["address"]) == "green"
     def ready(address, trail=None):
         trail = set(trail or [])
         require(address not in trail, "dependency cycle in Requirement context")

@@ -49,9 +49,6 @@ def snapshot_source(object, types, selected_ac=None):
                                if key in ("data", "parent", "links", "present", "schema_revision")}
         if role == "task":
             current.pop("contract_revision", None)
-        elif "contract_revision" in current:
-            current["document"]["data"] = {key: value for key, value in current["document"]["data"].items()
-                                           if key != "tests"}
     if role == "task":
         annotations = dict(current.get("annotations") or {})
         comments = annotations.get("comments")
