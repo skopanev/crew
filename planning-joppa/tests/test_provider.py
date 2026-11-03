@@ -41,14 +41,16 @@ class ProviderTests(unittest.TestCase):
 
     def test_snapshots_keep_selected_lists_and_ignore_runtime_task_revisions(self):
         types = {"criterion": {"role": "ac"}, "work": {"role": "task"}}
-        ac = item("criterion:a", data={"title": "Criterion", "tests": ["checks.rs > first"]})
+        ac = item("criterion:a", data={"title": "Criterion"})
         ac["contract_revision"] = 3
         selected = context.snapshot_source(ac, types, [ac["address"]])
-        sibling = context.snapshot_source(ac, types, [])
+        sibling = deepcopy(context.snapshot_source(ac, types, []))
         ac["current_revision"] = ac["document"]["revision"] = 4
-        ac["document"]["data"]["tests"] = ["checks.rs > replacement"]
+        ac["process"]["assessment"] = {"state": "ready"}
         self.assertNotEqual(selected, context.snapshot_source(ac, types, [ac["address"]]))
         self.assertEqual(sibling, context.snapshot_source(ac, types, []))
+        ac["document"]["data"]["title"] = "Changed criterion"
+        self.assertNotEqual(sibling, context.snapshot_source(ac, types, []))
         task = item("work:one")
         task["contract_revision"] = 3
         before = context.snapshot_source(task, types)
