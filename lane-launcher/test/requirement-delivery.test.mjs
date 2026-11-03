@@ -92,13 +92,14 @@ test('requirement fingerprint changes with current contracts and blocks retired 
   await assert.rejects(requirementPlan(f.run, f.read), /already retired/);
 });
 
-test('requirement fingerprint keeps a criterion current after a test-list-only save', async () => {
+test('requirement fingerprint keeps a criterion current after a test child changes', async () => {
   const f = fixture(), ac = f.objects.get('measure:a');
   ac.contract_revision = ac.current_revision;
   const before = (await requirementPlan(f.run, f.read)).fingerprint;
-  ac.current_revision++;
-  ac.document.data.tests = ['checks.test.js > required'];
+  f.objects.set('check:required', {address: 'check:required', kind: 'check',
+    document: {parent: ac.address, data: {title: 'checks.test.js > required'}}});
   assert.equal((await requirementPlan(f.run, f.read)).fingerprint, before);
+  ac.current_revision++;
   ac.contract_revision = ac.current_revision;
   assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before);
 });

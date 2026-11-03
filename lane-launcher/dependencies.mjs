@@ -42,7 +42,7 @@ export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace
 
 export function dependencyCheck(read) {
   const objects = new Map(), satisfied = new Map(), checked = new Map();
-  let schema, branches, workspaceKey;
+  let schema, workspaceKey;
   const checkWorkspaceKey = value => {
     if (value === undefined || value === null) return;
     if (!validWorkspaceId(value)) throw invalid('Dependency workspace_key is invalid');
@@ -69,43 +69,6 @@ export function dependencyCheck(read) {
     if (!configured) throw invalid('Dependency object type is absent from the schema');
     return configured.role;
   };
-  async function criterionBranches() {
-    if (branches) return branches;
-    const definitions = await types();
-    branches = new Set(Object.keys(definitions).filter(kind => definitions[kind].role === 'ac'));
-    let before;
-    do {
-      before = branches.size;
-      for (const kind of [...branches]) for (const parent of definitions[kind]?.parents || []) {
-        if (parent === '*') for (const name of Object.keys(definitions)) branches.add(name);
-        else branches.add(parent);
-      }
-    } while (branches.size !== before);
-    return branches;
-  }
-  async function criteria(address, seen = new Set()) {
-    const value = await object(address);
-    if (seen.has(value.address)) return null;
-    seen.add(value.address);
-    if (!present(value)) return [];
-    if (await role(value) === 'ac') return [value.address];
-    if (!(await criterionBranches()).has(value.kind)) return [];
-    const result = [];
-    let cursor;
-    do {
-      const page = await read('joppa_objects', {parent: value.address, limit: 25,
-        fields: ['kind', 'present'], ...(cursor ? {cursor} : {})});
-      for (const child of page.items) {
-        if (child.present !== true) continue;
-        if (!(await criterionBranches()).has(child.kind)) continue;
-        const nested = await criteria(child.address, seen);
-        if (!nested) return null;
-        result.push(...nested);
-      }
-      cursor = page.next_cursor;
-    } while (cursor);
-    return result;
-  }
   async function isSatisfied(value) {
     if (!present(value)) return false;
     if (satisfied.has(value.address)) return satisfied.get(value.address);
@@ -114,14 +77,8 @@ export function dependencyCheck(read) {
       result = Boolean(value.process?.done) && !value.process?.retired &&
         value.review_required === false && value.process?.review_required !== true;
     } else {
-      const acs = await role(value) === 'ac' ? [value.address] : await criteria(value.address);
-      result = Boolean(acs?.length);
-      for (let index = 0; result && index < acs.length; index += 100) {
-        const batch = acs.slice(index, index + 100);
-        const tests = await read('joppa_tests', {ac: batch.join(','), summary: true});
-        const statuses = new Map((tests.items || [tests]).map(item => [item.address, item.status]));
-        result = batch.every(ac => statuses.get(ac) === 'green');
-      }
+      // Joppa applies the configured own/children/links status rule.
+      result = value.status?.tone === 'green';
     }
     satisfied.set(value.address, result);
     return result;

@@ -14,12 +14,11 @@ test('flat reads preserve authored pins, queue identity and recorded test eviden
       data: {body: 'Goal: Example', note: null, projects: [], title: 'Example'},
       links: [{blocking: true, relation: 'depends_on', revision: 2, target: 'work:before'}]},
     process: {status: 'open'}, annotations: {comments: {}}};
-  const row = {status: 'green', tests_revision: 3,
-    values: {asset: {server: {status: 'green'}}},
-    tests: [{address: 'example.test.js > passes', status: 'pass', commit: 'a'.repeat(40)}]};
-  const state = {flat: true, compact: true, objects: {[object.address]: object}, responses: {
-    joppa_tasks: {items: [{address: object.address, parent: 'criterion:a', revision: 3, status: 'open'}], total: 1},
-    joppa_tests: row}};
+  const testNode = {...structuredClone(object), address: 'check:bound', kind: 'check',
+    status: {tone: 'green'}, result: {address: 'example.test.js > passes', status: 'pass', commit: 'a'.repeat(40)}};
+  testNode.document.data = {title: testNode.result.address};
+  const state = {flat: true, compact: true, objects: {[object.address]: object, [testNode.address]: testNode}, responses: {
+    joppa_tasks: {items: [{address: object.address, parent: 'criterion:a', revision: 3, status: 'open'}], total: 1}}};
   const save = () => fs.writeFileSync(stateFile, JSON.stringify(state));
   save();
   const call = (tool, args) => callJoppa('https://service.invalid/mcp', undefined, tool,
@@ -33,16 +32,11 @@ test('flat reads preserve authored pins, queue identity and recorded test eviden
   const queue = await call('joppa_tasks', {view: 'all'});
   assert.equal(queue.tasks[0].ac, 'criterion:a');
   assert.equal(queue.tasks[0].claimable, false);
-  const tests = await call('joppa_tests', {ac: 'criterion:a'});
-  assert.equal(tests.address, 'criterion:a');
-  assert.equal(tests.tests_draft, false);
-  assert.deepEqual(tests.tests, row.tests);
-  state.responses.joppa_tests = {items: [{...row, address: 'criterion:a'}, {address: 'criterion:b', status: 'grey'}]};
-  save();
-  const batch = await call('joppa_tests', {ac: 'criterion:a,criterion:b'});
-  assert.deepEqual(batch.items.map(item => item.address), ['criterion:a', 'criterion:b']);
-  assert.deepEqual(batch.items[0].tests, row.tests);
-  assert.deepEqual(batch.items[1].tests, []);
+  const testDetail = await call('joppa_objects', {address: testNode.address});
+  assert.equal(testDetail.document.parent, 'criterion:a');
+  assert.equal(testDetail.document.data.title, 'example.test.js > passes');
+  assert.deepEqual(testDetail.result, testNode.result);
+  assert.equal(testDetail.status.tone, 'green');
   object.document.present = false;
   object.document.links[0].revision = 3;
   save();

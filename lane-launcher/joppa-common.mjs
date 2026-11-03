@@ -9,8 +9,6 @@ export const contractDigest = object => {
   if (object.contract_revision !== undefined) {
     require(Number.isSafeInteger(object.current_revision) && Number.isSafeInteger(object.contract_revision) && object.contract_revision > 0 &&
       object.contract_revision <= object.current_revision, 'Joppa contract revision is invalid');
-    // The server keeps the contract current when only its test list changes.
-    delete data.tests;
   }
   return createHash('sha256').update(JSON.stringify({
     parent: object.document.parent, data, links: object.document.links,

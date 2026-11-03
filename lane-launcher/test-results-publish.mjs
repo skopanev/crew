@@ -51,7 +51,7 @@ function ineligible(run, result, artifacts) {
 export function testResultsInspection(run) {
   const open = run.testResults?.requests?.filter(entry => ['sending', 'uncertain'].includes(entry.state)) || [];
   return open.length ? `TEST_RESULTS_UNCERTAIN: ${open.length} joppa_record_results request(s) for ${run.testResults.commit} ` +
-    'have an unknown outcome. Crew does not resend them. Inspect joppa_tests before any manual retry.' : null;
+    'have an unknown outcome. Crew does not resend them. Inspect test nodes with joppa_objects before any manual retry.' : null;
 }
 
 async function send(run, persist, call, announce) {

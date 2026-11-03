@@ -54,12 +54,8 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
   f.add('measure:b', 'spec:other');
   const localArchived = f.add('work:archived', 'measure:a', 'in_progress');
   localArchived.document.data.archived = true;
-  const read = async (tool, args) => {
-    if (tool === 'joppa_tests') {
-      return {items: args.ac.split(',').map(address => ({address, status: address === 'measure:b' ? 'green' : 'red'}))};
-    }
-    return f.read(tool, args);
-  };
+  f.objects.get('measure:b').status = {tone: 'green'};
+  const read = f.read;
   const remoteLink = (overrides = {}, statusOverrides = {}) => ({
     workspace: 'ws-remote',
     target: 'requirement:api',

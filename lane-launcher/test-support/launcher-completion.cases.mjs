@@ -50,14 +50,14 @@ test('Joppa completion names the checked existing commit without Task verificati
   assert(f.run.tasks.every(({address}) => !('verification' in f.objects.get(address).process)));
 });
 
-test('Joppa completion keeps a Task current after a parent test-list-only save', async t => {
+test('Joppa completion keeps a Task current after a test child changes', async t => {
   const f = await packageFixture(t), parent = f.objects.get('ac:a2');
   parent.contract_revision = parent.current_revision;
-  parent.document.data.tests = ['checks.test.js > first'];
+  const child = {document: {parent: parent.address, data: {title: 'checks.test.js > first'}}};
+  f.objects.set('check:existing', child);
   await claimTask(f.run, f.persist);
   const artifacts = packageLanding(f);
-  parent.current_revision++;
-  parent.document.data.tests = ['checks.test.js > replacement'];
+  child.document.data.title = 'checks.test.js > replacement';
   const result = {code: 0, status: 'exited'};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.completed, true);

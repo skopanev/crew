@@ -25,19 +25,26 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
-test('Joppa planner reads all compact pages and requests only test status summaries', async t => {
+test('Joppa planner reads all compact pages and uses native criterion tones', async t => {
   const f = await packageFixture(t), sample = f.objects.get('ac:a1');
   f.queue.length = 0;
   for (let i = 0; i < 28; i++) f.objects.set(`ac:extra${i}`, {...structuredClone(sample), address: `ac:extra${i}`});
   f.objects.get('ac:extra27').process.planning_claim = {actor: 'another-planner'};
+  f.objects.get('ac:extra1').status.tone = 'green';
+  f.objects.get('ac:extra2').status.tone = 'orange';
+  f.objects.get('ac:extra3').status.tone = 'red';
   const rows = await readyCriteria({workspace: f.run.workspace, url: f.run.config.joppa.url}, f.run.joppaWorker.tokenFile);
-  assert.equal(rows.length, 29);
+  assert.equal(rows.length, 28);
   assert(rows.some(row => row.address === 'ac:extra26'));
   assert(!rows.some(row => row.address === 'ac:extra27'));
+  assert(!rows.some(row => row.address === 'ac:extra1'));
+  assert(rows.some(row => row.address === 'ac:extra2'));
+  assert.equal(rows[0].address, 'ac:extra3');
   const lists = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
   assert(lists.some(call => call.args.cursor === '25'));
   assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('process')));
-  assert(f.calls.filter(call => call.name === 'joppa_tests').every(call => call.args.summary === true));
+  assert(lists.every(call => call.args.fields.includes('status')));
+  assert(f.calls.every(call => ['joppa_objects', 'joppa_tree', 'joppa_tasks'].includes(call.name)));
 });
 
 test('Joppa selects structured Tasks and detects their remote repository holders', async t => {
@@ -53,20 +60,21 @@ test('Joppa selects structured Tasks and detects their remote repository holders
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
-test('Joppa planner attempt identity keeps the contract revision after a test-list-only save', async t => {
+test('Joppa planner attempt identity stays current when a test child is added', async t => {
   const f = await packageFixture(t), ac = f.objects.get('ac:a1');
   f.queue.length = 0;
   ac.contract_revision = ac.current_revision;
   const config = {workspace: f.run.workspace, url: f.run.config.joppa.url};
   const before = await readyCriteria(config, f.run.joppaWorker.tokenFile);
-  ac.current_revision++;
-  ac.document.data.tests = ['checks.test.js > required'];
+  f.objects.set('check:required', {address: 'check:required', kind: 'check',
+    document: {parent: ac.address, data: {title: 'checks.test.js > required'}}});
   const after = await readyCriteria(config, f.run.joppaWorker.tokenFile);
   assert.equal(after.find(row => row.address === ac.address).revision, ac.current_revision);
   assert.deepEqual(after.map(row => row.attemptKey), before.map(row => row.attemptKey));
   const readObject = async (tool, args) => tool === 'joppa_tree' ?
     {schema: {types: {req: {role: 'requirement'}}}} : structuredClone(f.objects.get(args.address));
   assert.deepEqual(await groupRequirements(after, readObject), await groupRequirements(before, readObject));
+  ac.current_revision++;
   ac.contract_revision = ac.current_revision;
   assert.notDeepEqual((await readyCriteria(config, f.run.joppaWorker.tokenFile)).map(row => row.attemptKey),
     before.map(row => row.attemptKey));
