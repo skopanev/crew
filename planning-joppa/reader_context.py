@@ -77,7 +77,7 @@ def prompt_assignment(assignment):
         return {key: value for key, value in item["document"]["data"].items()
                 if key not in ("contract", "steps", "checks") or not terminal_task}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
-        "test_status": assignment["joppa"]["test_status"],
+        "test_nodes": assignment["joppa"]["test_nodes"],
         "task_title_max_length": publication.title_limit(assignment["joppa"]["task_schema"]),
         "task_value_limits": {"outcome": publication.MAX_DATA_VALUE - len("Goal: "),
                               "step": publication.MAX_DATA_VALUE, "check_line": publication.MAX_DATA_VALUE},

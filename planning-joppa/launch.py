@@ -31,6 +31,7 @@ Add dependencies only when one output is required for another Task.
 For verify_existing, create no Task. Each acceptance_check needs test (file > test name),
 evidence (repository:path:line), and optional source_ac for an existing passing result under another fully read AC.
 Include citations for the test assertions and affected implementation. Confirm a recorded passing result through Joppa.
+joppa.test_nodes lists the tests bound to the AC. Read one test node to see its recorded result.
 Critics must confirm that the actual assertions cover every Then and Evidence item.
 Missing tests or behavior require implementation Tasks. Test binding alone is publication work.
 Never claim that acceptance passed. A later full report supplies acceptance results.

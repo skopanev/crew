@@ -5,6 +5,7 @@ import re
 from common import fingerprint, inside, require, run, strings, text
 import validation
 import context
+from test_nodes import node_result, read_nodes
 from task_contracts import MAX_DATA_VALUE, title_limit, unclaimed, editable, retirable, ordered_tasks, criterion_plan, package_counters, checked_task_title, check_line, contract_fields
 
 
@@ -176,17 +177,18 @@ def binding_checks(plan, assignment):
 
 def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
     """Read execution evidence and verify its cited source before a binding write."""
-    statuses = {}
+    workspace, kind, nodes = config["workspace"], assignment["joppa"]["test_type"], {}
     for repo, address, source, paths in binding_checks(plan, assignment):
         snapshot = snapshots.get(repo["id"], {})
         baseline = (prepared or snapshots).get(repo["id"], {})
         require(snapshot.get("head") and baseline.get("head"), "test evidence repository snapshot is missing")
-        if source not in statuses:
-            statuses[source] = api.call("joppa_tests", {"workspace": config["workspace"], "ac": source})
-        status = statuses[source]
-        require(status.get("address") == source, "test evidence belongs to another criterion")
-        row = next((item for item in status.get("tests", []) if item["address"] == address), None)
-        require(row is not None and row.get("status") == "pass", f"recorded passing result missing for {address}")
+        if source not in nodes:
+            nodes[source] = read_nodes(api, workspace, kind, source, [source])[source]
+        # A pass exists only on a bound node. An absent node never counts as a pass.
+        node = next((item for item in nodes[source] if item["title"] == address), None)
+        row = node and node_result(api, workspace, node["address"], source)
+        require(row is not None and row.get("address", address) == address and row.get("status") == "pass",
+                f"recorded passing result missing for {address}")
         commit = row.get("commit")
         require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit),
                 "test execution evidence needs a commit")
@@ -195,8 +197,10 @@ def verify_bindings(api, config, plan, assignment, snapshots, prepared=None):
         run(["git", "-C", repo["path"], "diff", "--quiet", commit, head, "--", *paths])
         if prepared:
             run(["git", "-C", repo["path"], "diff", "--quiet", baseline["head"], head, "--", *paths])
-    require(not any(item.get("status") in ("fail", "missing", "not_run")
-                    for item in assignment["joppa"]["test_status"]["tests"]),
-            "existing criterion tests contain a failure or missing result")
+    for node in assignment["joppa"]["test_nodes"]:
+        if node["status"] == "green":
+            continue
+        row = node["status"] != "red" and node_result(api, workspace, node["address"], assignment["ac"]["id"])
+        require(row and row["status"] != "fail", "existing criterion tests contain a failure or missing result")
     require(all(fingerprint(repo) == snapshots.get(repo["id"]) for repo in assignment["repositories"]),
             "source changed while checking existing test evidence")

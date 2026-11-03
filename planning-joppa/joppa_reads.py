@@ -41,16 +41,6 @@ def normalize_detail(args, value):
     return result
 
 
-def normalize_tests(args, result):
-    targets = [target for target in args.get("ac", "").split(",") if target]
-    if len(targets) == 1 and "items" not in result:
-        result.setdefault("address", targets[0])
-    for row in result.get("items", [result]):
-        row.setdefault("tests_draft", False)
-        if not args.get("summary"):
-            row.setdefault("tests", [])
-
-
 def normalize_tasks(result):
     lean = "tasks" not in result and "items" in result
     result.setdefault("tasks", result.get("items", []))

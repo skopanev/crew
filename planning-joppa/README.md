@@ -59,6 +59,7 @@ Unresolved planning receipts prevent another automatic claim. Recover these rece
 
 Requirement planning selects all current ready ACs under one schema Requirement.
 It obeys `ac_ids` and excludes green ACs, active worker claims and all unmet blocking dependencies.
+The AC status follows its test nodes. An AC without tests is orange and remains a candidate.
 This includes dependencies on sibling ACs. A later package plans them after their prerequisites finish.
 It reads the Requirement, selected ACs, parents, decisions and existing related Tasks in one native run.
 Each planned Task keeps its AC parent and runs and lands independently.
@@ -99,13 +100,21 @@ The planner binds these tests without creating a verification Task. Each accepta
 `test` (`file > test name`), `evidence` (`repository:path:line` for assertions and implementation),
 and optional `source_ac` when another fully read AC supplies the passing result.
 Publication rechecks the recorded pass and its commit ancestry. Cited test and implementation files must remain unchanged.
-An unbound test needs a recorded pass under another AC before this shortcut can use it.
-The binding preserves existing test addresses by union. A changed or draft list uses one atomic bind-and-finish batch.
-This path requires server support for `set_ac_tests.revision` and test-only `finish_planning`.
-The test list is `document.data.tests` on the criterion. Its `tests_revision` is the current document revision.
+An unbound test needs a recorded pass on a test node under another AC before this shortcut can use it.
+An absent test node never counts as a pass.
+An existing node of the AC with a failed or absent result prevents this shortcut.
+Each bound test is a child node of the criterion. The node title is the test name.
+The workspace schema names the test type with role `test`. Its question, title limit and required fields apply.
+The schema `test_results` rules supply the name rule and `max_tests`.
+The planner reads all test nodes in pages of 25 and groups them by criterion.
+Publication creates only the missing (AC, test name) nodes with `save_object` and revision 0.
+It never edits, deletes or recreates an existing node, so recorded results stay.
+New nodes and test-only `finish_planning` go in the same atomic batch.
+The planning snapshot keeps each node address, title and revision.
+A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
+A new result alone does not invalidate the plan.
 Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
 Dependencies accept pins from `contract_revision` through `current_revision`, inclusive.
-A save that changes only the test list preserves that contract boundary.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
