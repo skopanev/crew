@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {testAcceptance} from './joppa-input.mjs';
+import {coversSpec, taskCovers} from './joppa-covers.mjs';
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const fail = (code, message) => { throw Object.assign(new Error(`${code}: ${message}`), {code}); };
 const text = value => typeof value === 'string' && value.trim();
 const key = (...parts) => JSON.stringify(parts);
 export const MAX_BATCH = 100;
+// Joppa limits each changed scalar data value, also inside lists and objects. The default is 1024 characters.
+export const MAX_VALUE = 1024;
 // A failure writes release, assess and note per Task. A completion writes save and archive per Task and one save per node.
 export const FAILURE_OPERATIONS = 3, COMPLETION_OPERATIONS = 2;
 export const RECORD = 'test-bindings-receipt.json', BINDINGS = 'test-bindings.json';
@@ -24,18 +27,15 @@ export function packageBudget(tasks, nodes) {
   return MAX_BATCH - tasks * COMPLETION_OPERATIONS;
 }
 
-export const estimatedNodes = objects => new Set(objects.flatMap(object =>
-  (testAcceptance(object) || []).map(row => key(row.ac, row.check)))).size;
+// Return object => covered criteria of that Task under the configured covers reference.
+export const coveredBy = (config, types) => object =>
+  taskCovers(coversSpec(config, types, object.address.slice(0, object.address.indexOf(':'))), object);
 
-// Required evidence must be possible before a coder runs: a review command must write $CREW_TEST_REPORT_DIR.
-export function reportProblem(repository, reviewCommands) {
-  if (!repository?.testReport) return null;
-  return (reviewCommands || []).some(command => String(command).includes('CREW_TEST_REPORT_DIR')) ? null :
-    `repository ${repository.id} has testReport, but no review command writes $CREW_TEST_REPORT_DIR`;
-}
+export const estimatedNodes = (objects, coversOf = () => []) => new Set(objects.flatMap(object =>
+  (testAcceptance(object, coversOf(object)) || []).map(row => key(row.ac, row.check)))).size;
 
-export function requiredRows(objects) {
-  return objects.flatMap(object => (testAcceptance(object) || [])
+export function requiredRows(objects, coversOf = () => []) {
+  return objects.flatMap(object => (testAcceptance(object, coversOf(object)) || [])
     .map(row => ({task: object.address, ac: row.ac, check: row.check})));
 }
 
@@ -45,8 +45,8 @@ export function parseBindings(value) {
   const rows = [], seen = new Set();
   for (const row of value) {
     if (!row || typeof row !== 'object' || Object.keys(row).sort().join() !== 'ac,check,task,test' ||
-        !['task', 'ac', 'check', 'test'].every(name => text(row[name]))) {
-      fail('BINDING_INVALID', 'each binding needs exactly task, ac, check and test');
+        !['task', 'ac', 'check', 'test'].every(name => text(row[name]) && Array.from(row[name]).length <= MAX_VALUE)) {
+      fail('BINDING_INVALID', `each binding needs exactly task, ac, check and test of at most ${MAX_VALUE} characters`);
     }
     const id = key(row.task, row.ac, row.check, row.test);
     if (!seen.has(id)) rows.push({task: row.task, ac: row.ac, check: row.check, test: row.test});
@@ -75,10 +75,10 @@ export function checkBindings(rows, required, report) {
 }
 
 // Recompute the frozen lane evidence. Return {status, rows, gaps}. A required mismatch refuses completion.
-export function frozenBindings(run, artifacts, objects) {
-  const gaps = objects.filter(object => !testAcceptance(object))
+export function frozenBindings(run, artifacts, objects, coversOf = () => []) {
+  const gaps = objects.filter(object => !testAcceptance(object, coversOf(object)))
     .map(object => `BINDING_MISSING: ${object.address} has no data.acceptance; no test can be bound`);
-  const required = requiredRows(objects);
+  const required = requiredRows(objects, coversOf);
   if (!required.length) return {status: 'legacy', rows: [], gaps};
   if (!run.repository?.testReport) {
     return {status: 'no_report', rows: [], gaps: [...gaps,
@@ -87,10 +87,17 @@ export function frozenBindings(run, artifacts, objects) {
   const recordFile = path.join(artifacts || '', RECORD);
   if (!artifacts || !fs.existsSync(recordFile)) fail('BINDING_MISSING', `${RECORD} is missing; the lane bound no tests`);
   const record = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
+  // Each passing gate run binds again. The record must name the current receipt that the landing verified.
   // The lane wrote container paths. Resolve the same receipt folder on the host.
-  const receiptFile = path.join(artifacts, 'gates', path.basename(path.dirname(String(record.receipt))), 'receipt.json');
+  const folder = value => path.basename(path.dirname(String(value)));
+  const pointerFile = path.join(artifacts, 'gates', 'current.json');
+  const pointer = fs.existsSync(pointerFile) ? JSON.parse(fs.readFileSync(pointerFile, 'utf8')) : {};
+  if (folder(record.receipt) !== folder(pointer.receipt) || record.receipt_sha256 !== pointer.sha256) {
+    fail('BINDING_FROZEN_MISMATCH', 'the binding record does not name the current gate receipt');
+  }
+  const receiptFile = path.join(artifacts, 'gates', folder(record.receipt), 'receipt.json');
   if (!fs.existsSync(receiptFile) || sha256(receiptFile) !== record.receipt_sha256) {
-    fail('BINDING_FROZEN_MISMATCH', 'the reviewed gate receipt changed after binding');
+    fail('BINDING_FROZEN_MISMATCH', 'the current gate receipt changed after binding');
   }
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   if (receipt.passed !== true || receipt.tree !== record.tree || receipt.candidate_sha !== record.candidate_sha) {

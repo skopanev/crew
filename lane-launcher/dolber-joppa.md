@@ -217,14 +217,20 @@ Identical rows are removed. The bound pairs must equal the union of `data.accept
   `N` is the Task count. `B` is the count of distinct required (AC, test) node saves.
   Before names exist, `B` is the count of distinct (AC, check) rows in `data.acceptance`: one new node for each row.
   A larger package claims nothing: `PACKAGE_BUDGET`. The lane gets the remaining node limit as `bindingNodeLimit`.
-- With `testReport` and `data.acceptance`, a review command must write `$CREW_TEST_REPORT_DIR`.
-  Dolber checks this text before the claim and reports `BINDING_NO_REPORT`. No coder runs.
-- `prepare_review` runs `gates.py bindings` after `gates.py run`. It reads the test report of that receipt and runs no check again.
-  Each name must be in the report with outcome pass. The record `artifacts/test-bindings-receipt.json` binds the file
-  SHA-256 to the exact receipt SHA-256, tree and candidate. A refusal returns the work to the coder.
-- At completion, the host recomputes every check. A changed file, receipt or row refuses completion.
+- Before the claim, each `data.acceptance` row must name the Task parent or a covered criterion, and one of the
+  Task checks. Otherwise Dolber claims nothing: `BINDING_INVALID`. Completion checks this again.
+- Dolber validates only the explicit `testReport` config. The gate receipt proves that a report exists.
+- Each passing `gates.py run` binds its own receipt before it becomes current, and each run drops an earlier record.
+  This includes the full gates of a landing. `prepare_review` also runs `gates.py bindings` for the current receipt.
+  No check runs again. Each name must be in that report with outcome pass. The record
+  `artifacts/test-bindings-receipt.json` binds the file SHA-256 to the receipt SHA-256, tree and candidate.
+  A refusal returns the work to the coder.
+- At completion, the host recomputes every check. The record must name the receipt in `artifacts/gates/current.json`.
+  A changed file, receipt or row refuses completion with `BINDING_FROZEN_MISMATCH`.
   The completion batch saves `data.test_bindings` next to `data.commit` and creates each missing test node
-  under its exact AC, after the saved contexts check. An existing node is never changed.
+  under its exact AC, after the saved contexts check. A saved request must contain exactly the recomputed node saves
+  (type, parent, title, owner) and Task bindings. Dolber reads each created node again. An existing node is never changed.
+- Joppa limits each changed scalar value, also inside lists. Each binding value has at most 1024 characters.
 - At the final target landing, Dolber reads the done Tasks of the Requirement and repository with `data.test_bindings`.
   Each name must be in the full `gateCommands` report, and its node must be under its exact AC. Then Dolber records
   the results and reads each bound node again. Each needs a result at the landed SHA.
@@ -234,11 +240,11 @@ Identical rows are removed. The bound pairs must equal the union of `data.accept
 | Code | Meaning |
 |---|---|
 | `BINDING_MISSING` | No binding file or record, or a Task without `data.acceptance` |
-| `BINDING_INVALID` | The rows have a wrong shape, differ from `data.acceptance`, or break the test node rules |
+| `BINDING_INVALID` | An acceptance row names an AC outside the parent and covers or a check outside the Task checks, or the bindings have a wrong shape, differ from `data.acceptance`, or break the test node rules |
 | `BINDING_NOT_IN_REPORT` | A bound name is not in the reviewed or the full gate report |
 | `BINDING_NOT_PASSED` | A bound name does not pass in the reviewed report |
 | `BINDING_FROZEN_MISMATCH` | The file, receipt, tree or rows changed after the bindings step |
-| `BINDING_NO_REPORT` | The repository or the receipt gives no usable test report |
+| `BINDING_NO_REPORT` | The receipt gives no usable test report, or the repository has no `testReport` (a gap only) |
 | `BINDING_NODE_MISSING` | The final landing finds no node with the name under its AC |
 | `PACKAGE_BUDGET` | The failure or completion batch would exceed 100 operations |
 | `COVERED_CONTEXT_NOT_READY` | A covered criterion is not live, unheld and ready |

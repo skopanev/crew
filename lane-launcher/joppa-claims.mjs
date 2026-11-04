@@ -3,7 +3,7 @@ import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, ve
 import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
 import {occupancyReader, heldTasks} from './joppa-selection.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
-import {packageBudget, estimatedNodes, reportProblem} from './test-bindings.mjs';
+import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -88,13 +88,11 @@ export async function claimTask(run, persist, runId) {
         require(!problem, `COVERED_CONTEXT_NOT_READY: ${problem}; no Tasks claimed`);
       }
     }
-    // Bound both outcome batches before the claim. Required report evidence must be possible before a coder runs.
-    packageBudget(selected.length, estimatedNodes(selected));
-    if (selected.some(object => testAcceptance(object)?.length)) {
-      const repository = taskInput(run.config, selected[0], []).repo;
-      const problem = reportProblem(repository, repository.reviewCommands ?? run.config.reviewCommands ?? repository.gateCommands);
-      require(!problem, `BINDING_NO_REPORT: ${problem}; no Tasks claimed`);
-    }
+    // Each acceptance row must name the parent or a covered criterion and a Task check. Bound both outcome
+    // batches before the claim. The gate receipt proves the report; Crew does not guess it from command text.
+    const coversOf = coveredBy(run.config, types);
+    for (const object of selected) testAcceptance(object, coversOf(object));
+    packageBudget(selected.length, estimatedNodes(selected, coversOf));
     run.claimRequest = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.', question(object))));
   }
@@ -161,7 +159,7 @@ export async function claimTask(run, persist, runId) {
         address, item_id: criterion.item_id, revision: criterion.current_revision, data: criterion.document.data});
     }
     if (covered.length) run.claim.tasks[index].covers = covered;
-    const input = taskInput(run.config, object, taskContexts);
+    const input = taskInput(run.config, object, taskContexts, covered);
     if (coveredContexts.length) input.ticket.coveredContexts = coveredContexts;
     if (parentContext) input.ticket.parentContext = parentContext;
     if (requirementContext) input.ticket.requirementContext = requirementContext;
