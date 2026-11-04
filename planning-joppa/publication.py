@@ -50,9 +50,9 @@ def ensure_recovered(root, current, server, workspace, ac):
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
-def dependency_targets(plan, assignment, types):
-    """Explicit local Task targets of the dependency links in saved Tasks. Skip Tasks saved in this batch."""
-    inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
+def dependency_targets(plan, types):
+    """Explicit local Task targets of plan.depends_on. Skip Tasks saved in this batch.
+    An inherited link that the batch keeps exactly needs no read: Joppa accepts it with an absent target."""
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
     own = set(aliases) | set(aliases.values()) | {task["id"] for task in plan["tasks"]}
     candidates = set()
@@ -60,9 +60,6 @@ def dependency_targets(plan, assignment, types):
         if task["action"] == "retire":
             continue
         candidates.update(aliases.get(dependency, dependency) for dependency in task["depends_on"])
-        existing = inventory.get(task.get("target"))
-        candidates.update(link["target"] for link in (existing["document"].get("links", []) if existing else [])
-                          if link.get("relation") == "depends_on")
     result = []
     for address in sorted(item for item in candidates if isinstance(item, str) and ":" in item and item not in own):
         kind = address.split(":", 1)[0]
@@ -72,11 +69,11 @@ def dependency_targets(plan, assignment, types):
     return result
 
 
-def completed_dependencies(api, workspace, plan, assignment, types):
+def completed_dependencies(api, workspace, plan, types):
     """Read each dependency target once before the batch. Return the done Tasks: archived with a valid data.commit.
     Refuse an unreadable, missing or retired target before any write."""
     completed = set()
-    for address in dependency_targets(plan, assignment, types):
+    for address in dependency_targets(plan, types):
         try:
             object = object_read(api, workspace, address, allow_archived=True)
         except Exception as error:
