@@ -69,20 +69,22 @@ class ProviderTests(unittest.TestCase):
         if True:
             ready, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
-            # Joppa has no contract pins. A pin below the current revision stays valid.
             objects["criterion:outside"]["contract_revision"] = 4
-            earlier, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertIn("criterion:b", [entry["id"] for entry in earlier["joppa"]["criteria"]])
-            objects["criterion:b"]["document"]["links"][0]["revision"] = 5
-            future, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertNotIn("criterion:b", [entry["id"] for entry in future["joppa"]["criteria"]])
+            stale, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertNotIn("criterion:b", [entry["id"] for entry in stale["joppa"]["criteria"]])
+            # Live reads give no contract_revision. A pin below the current revision stays a stale pin.
+            del objects["criterion:outside"]["contract_revision"]
+            gone, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertNotIn("criterion:b", [entry["id"] for entry in gone["joppa"]["criteria"]])
+            objects["criterion:b"]["document"]["links"][0]["revision"] = 4
+            exact, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in exact["joppa"]["criteria"]])
             objects["criterion:b"]["document"]["links"][0].pop("revision")
             unpinned, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
             objects["criterion:b"]["document"]["links"][0]["revision"] = 3
         objects["criterion:outside"]["status"] = {"tone": "orange", "label": "No tests"}
         objects["criterion:outside"]["current_revision"] = 3
-        del objects["criterion:outside"]["contract_revision"]
         with self.assertRaisesRegex(ValueError, "object is absent"):
             context.load(Server(), config, "criterion:archived")
         config["ac_ids"] = ["criterion:c"]

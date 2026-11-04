@@ -15,9 +15,7 @@ def source(object):
         value["remote_review_required"] = object.get("remote_review_required", False)
     return value
 
-def current_pin(pin, current, contract=None):
-    """Joppa has no contract pins. Without a contract floor, any saved revision up to current is valid."""
-    contract = 1 if contract is None else contract
+def current_pin(pin, current, contract):
     return (type(pin) is int and type(current) is int and type(contract) is int
             and 1 <= contract <= pin <= current)
 

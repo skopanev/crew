@@ -53,6 +53,9 @@ def prepare():
         holders = claims.current_assignees(api, config["workspace"], [item["id"] for item in criteria])
         raise ValueError(f"planning claim refused: {error}; current assignees: {json.dumps(holders)}") from None
     claim = read(target / "claim.json")
+    # Record the revision of each AC that this run wrote. Any later edit or reassignment stops the run.
+    claim = {**claim, "revisions": claims.claimed_revisions(claim)}
+    write(target / "claim.json", claim)
     holders = claims.owned(api, config["workspace"], claim)
     # Claiming changes only data.assignee. Check that no other writer changed authored context.
     fresh, current, current_ac = (context.load_requirement(api, config, requirement, [item["id"] for item in criteria])

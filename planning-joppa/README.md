@@ -114,7 +114,8 @@ The planning snapshot keeps each node address, title and revision.
 A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
 A new result alone does not invalidate the plan.
 Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
-Joppa has no contract pins. A dependency pin is valid from revision 1 through `current_revision`, inclusive.
+Reads give no `contract_revision`. A pinned dependency is valid only at the target's `current_revision`.
+Any other pinned revision is a stale pin. An unpinned `depends_on` link keeps the normal order.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
@@ -132,21 +133,24 @@ Joppa has no Task workflow commands. The planner uses generic node fields:
 - Claim: one `joppa_batch` saves each selected AC with its full document and
   `data.assignee` `crew-planning:<host>:<run_id>` at the revision read for the plan.
   A stale revision refuses the whole batch. The planner reads the holders again and stops.
-- Ownership: before publication or release, the planner reads each AC again.
-  It requires exactly its own `data.assignee` value.
+- Ownership: the claim receipt records the revision that this run wrote for each AC.
+  Before publication or release, the planner reads each AC again. It requires its own
+  `data.assignee` value and that exact revision. A later edit or reassignment stops the run.
+- Every `assess` follows a revision-checked save of the same object in the same batch.
+- Lists exclude archived nodes. Ended Tasks are read only by a known address, such as a link target.
 - Release: save the AC without `data.assignee` at its current revision.
 - Finish: the publication batch saves Tasks, saves each AC without `data.assignee`
   and sends `assess` with `ready: true` for each changed AC.
 - A revised blocked Task gets `assess` with `ready: true` in the same batch.
 - Retirement archives the Task with `archive_object` and no `data.commit`.
-- Task state: `data.assignee` on a live Task is active work. `process.assessment` with
-  ready false is a block. An archived Task with `data.commit` is done; without it, retired.
+- Task state: `data.assignee` on a live Task is active work. `process.assessment.state`
+  `waiting` is a block. Its reason is a short code, such as `WORKTREE_PREEXISTED`; the Task note keeps details. An archived Task with `data.commit` is done; without it, retired.
 - The contract digest excludes `data.assignee` and `data.commit`. Every other authored field stays.
 
 The planner refuses before claiming if `save_object`, `archive_object` or `assess` is absent.
 Refresh the canonical source and its shared CBM index before launch.
 Verify indexed paths in the inspected source. Do not index an isolated checkout.
-Lifecycle saves raise a revision above earlier dependency pins. These pins stay valid.
+Lifecycle saves raise a revision above earlier dependency pins. Such pins become stale pins.
 Retirement removes blocking links to the retired Task from remaining Tasks.
 Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.

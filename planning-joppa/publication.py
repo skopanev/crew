@@ -17,7 +17,7 @@ from task_contracts import (
 )
 from plan_validation import validate, validate_one, binding_checks, verify_bindings
 from test_nodes import bind_missing
-from planning_claims import address_of, closing_operations, release, owned
+from planning_claims import address_of, closing_operations, release, owned, require_fenced
 
 
 def ensure_recovered(root, current, server, workspace, ac):
@@ -157,7 +157,7 @@ def operations(plan, assignment):
             else "Publish reviewed Tasks. The criterion still requires verification.",
             assignment["joppa"].get("questions", {}).get(objects[ac]["kind"])))
     require(len(result) <= MAX_PUBLICATION_OPERATIONS, f"one publication supports at most {MAX_PUBLICATION_OPERATIONS} operations")
-    return result
+    return require_fenced(result)
 
 
 def mutate(api, target, name, arguments, *, retain_claim=False):

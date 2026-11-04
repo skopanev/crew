@@ -8,6 +8,7 @@ import context_reads
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
+KEEP = object()
 
 
 def marker(target):
@@ -24,11 +25,13 @@ def assignee_of(object):
 
 
 def save_command(object, assignee, reason, question=None):
-    """Save the full current document. Change only data.assignee."""
+    """Save the full current document at its read revision. Change only data.assignee, or nothing with KEEP."""
     document = object["document"]
-    data = {key: value for key, value in document["data"].items() if key != "assignee"}
-    if assignee:
-        data["assignee"] = assignee
+    data = deepcopy(document["data"])
+    if assignee is not KEEP:
+        data.pop("assignee", None)
+        if assignee:
+            data["assignee"] = assignee
     command = {"op": "save_object", "kind": object["kind"], "id": object["address"].split(":", 1)[1],
                "revision": object["current_revision"], "parent": document.get("parent"), "data": data,
                "links": deepcopy(document.get("links", [])), "reason": reason}
@@ -55,6 +58,28 @@ def claim_operations(assignment, criteria, assignee):
     return operations
 
 
+def require_fenced(operations):
+    """Each assess needs an earlier revision-checked save of the same target in the same batch."""
+    saved = set()
+    for operation in operations:
+        command = operation["command"]
+        if command["op"] == "save_object" and command.get("revision") and command.get("id"):
+            saved.add(command["kind"] + ":" + command["id"])
+        elif command["op"] == "assess":
+            require(command["target"] in saved, f"assess {command['target']} needs an earlier save in its batch")
+    return operations
+
+
+def claimed_revisions(receipt):
+    """The revision this run wrote: the saved object revision, or the read revision plus one."""
+    results = receipt["result"].get("results", [receipt["result"]])
+    revisions = {}
+    for (address, (_, command)), result in zip(claimed(receipt).items(), results):
+        saved = (result.get("object") or {}).get("revision") if isinstance(result, dict) else None
+        revisions[address] = saved if type(saved) is int else command["revision"] + 1
+    return revisions
+
+
 def claimed(receipt):
     """Return {address: (assignee, claim command)} for a confirmed claim receipt."""
     require(receipt["status"] == "confirmed", "planning claim was not confirmed")
@@ -72,11 +97,16 @@ def claimed(receipt):
 
 
 def owned(api, workspace, receipt):
-    """Read each AC again. This run owns it only while data.assignee is exactly its value."""
+    """Read each AC again. Require this run's exact assignee and the exact revision it wrote last."""
+    revisions = {**claimed_revisions(receipt), **receipt.get("revisions", {})}
     result = {}
     for address, (assignee, _) in claimed(receipt).items():
-        require(assignee_of(api.call("joppa_objects", {"workspace": workspace, "address": address})) == assignee,
-                f"this run does not hold the planning claim {address}")
+        value = api.call("joppa_objects", {"workspace": workspace, "address": address})
+        require(assignee_of(value) == assignee, f"this run does not hold the planning claim {address}")
+        revision = value.get("current_revision", value.get("revision"))
+        require(revision == revisions[address],
+                f"criterion {address} changed after this run claimed it: revision {revision}, "
+                f"expected {revisions[address]}")
         result[address] = assignee
     return result
 
@@ -159,7 +189,7 @@ def closing_operations(object, finished, reason, question=None):
     operations = [{"command": save_command(object, None, reason, question)}]
     if finished:
         operations.append({"command": assess(object["address"], reason)})
-    return operations
+    return require_fenced(operations)
 
 
 def is_closing(operation, criteria):
