@@ -1,7 +1,10 @@
 // The planner dispatcher reloads its config only between passes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import {configReloader} from '../config-reload.mjs';
 import {pause, plannerFixture} from '../test-support/config-reload.fixture.mjs';
 
 const count = (text, pattern) => (text.match(pattern) || []).length;
@@ -80,5 +83,35 @@ test('a planner pass keeps its config; the dispatcher reloads only after the pas
   assert.doesNotMatch(f.passes()[0], /"ac:a2"/);
   await run.until(() => f.passes().length === 3);
   assert.match(f.passes()[2], /"ac:a2"/);
+  assert.equal(await run.stop(), 130);
+});
+
+test('an edit between the initial load and the reloader start is a change, not a cached baseline', t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-reload-'));
+  t.after(() => fs.rmSync(folder, {recursive: true, force: true}));
+  const file = path.join(folder, 'config.json'), parse = raw => JSON.parse(raw.toString('utf8'));
+  fs.writeFileSync(file, '{"workspace": "w", "ac_ids": ["ac:a1"]}');
+  const bytes = fs.readFileSync(file), initial = parse(bytes);
+  fs.writeFileSync(file, '{"workspace": "w", "ac_ids": ["ac:a1", "ac:a2"]}');
+  const reload = configReloader(file, parse, config => config.workspace, initial, bytes);
+  const first = reload();
+  assert.equal(first.reloaded, true);
+  assert.deepEqual(first.config.ac_ids, ['ac:a1', 'ac:a2']);
+  assert.equal(reload().reloaded, false);
+});
+
+test('a config edited between selection and spawn makes no claim and starts no Medulla', async t => {
+  // The pass replaces the selected file before the real run.sh and launch.py read it.
+  const pass = '#!/bin/sh\nprintf \'%s\' "$TEST_REPLACEMENT" > "$3"\nexec /bin/sh "$@"\n';
+  const f = await plannerFixture(t, {ac_ids: ['ac:a1']}, 0, pass);
+  const medulla = path.join(f.root, 'medulla'), started = path.join(f.root, 'medulla-started');
+  fs.writeFileSync(medulla, `#!/bin/sh\ntouch '${started}'\n`, {mode: 0o755});
+  Object.assign(f.env, {MEDULLA_BIN: medulla,
+    TEST_REPLACEMENT: JSON.stringify({...f.config, ac_ids: ['ac:a1'], workspace: 'other'})});
+  const run = f.start();
+  await run.until(output => /planner config changed after the dispatcher selected this pass/.test(output));
+  await run.until(output => /CONFIG_RESTART_REQUIRED/.test(output));
+  assert.ok(!fs.existsSync(started), 'Medulla must not start for the replacement config');
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0, 'No claim was made');
   assert.equal(await run.stop(), 130);
 });

@@ -6,12 +6,12 @@ import {read, validateWritableDirs} from './runtime.mjs';
 import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
 
-export function configFrom(file, env = process.env, {dryRun = false} = {}) {
+export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
     readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
-    ...read(file)};
+    ...(bytes ? JSON.parse(bytes.toString('utf8')) : read(file))};
   // Saved run state records the source; operator recovery checks it.
   config.source = 'joppa';
   config.delivery ??= 'branch';

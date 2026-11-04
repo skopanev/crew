@@ -1,5 +1,6 @@
 """Launch the separate Joppa planner for one criterion."""
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -62,7 +63,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="validate the config and show the command without MCP, agents or writes")
     args = parser.parse_args()
     path = Path(args.config).expanduser().resolve()
-    config = context.configuration(path)
+    raw = path.read_bytes()
+    # The dispatcher validated these exact bytes. A file edited after its selection is refused before any claim.
+    handoff = os.environ.get("PLANNING_JOPPA_HANDOFF_DIGEST")
+    require(handoff is None or hashlib.sha256(raw).hexdigest() == handoff,
+            "planner config changed after the dispatcher selected this pass; no claim was made, the next check reloads it")
+    config = context.configuration(path, raw)
     workflow = Path(__file__).resolve().parent
     variables = {"PLANNING_JOPPA_CONFIG": str(path), "PLANNING_JOPPA_CONFIG_DIGEST": digest(config),
                  "PLANNING_JOPPA_AC": args.ac_id or "", "PLANNING_JOPPA_REQ": args.req_id or "", "PLANNING_PYTHON": sys.executable,

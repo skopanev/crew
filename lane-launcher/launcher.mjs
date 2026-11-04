@@ -163,7 +163,8 @@ export async function main(argv) {
     else throw new Error(`usage: ${usage}`);
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber-joppa.example.json')} to this path and fill in workspace.`);
-  let config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
+  const bytes = fs.readFileSync(file);
+  let config = configFrom(file, process.env, {dryRun: mode === 'dry-run', bytes});
   if (mode === 'monitor') {
     if (!process.stdout.isTTY) throw new Error('--monitor needs a terminal');
     const dashboard = createDashboard({...config, monitorOnly: true}, paint);
@@ -199,8 +200,8 @@ export async function main(argv) {
   }
   save(path.join(lock, 'owner.json'), {pid: process.pid, startedAt: new Date().toISOString()});
   // Running lanes keep the config saved in their launch.json; only new selections use a reload.
-  const reload = configReloader(file, () => { const next = configFrom(file, process.env); preflight(next); return next; },
-    dolberIdentity, config);
+  const reload = configReloader(file, raw => { const next = configFrom(file, process.env, {bytes: raw}); preflight(next); return next; },
+    dolberIdentity, config, bytes);
   let stopped = false, wake;
   const stop = () => { stopped = true; wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
