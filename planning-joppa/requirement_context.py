@@ -37,11 +37,6 @@ def load_requirement(api, config, req_id, selected=None):
     # One paginated read below the Requirement gives every criterion's test nodes.
     tests = read_nodes(api, workspace, assignment["joppa"]["test_type"], req_id, addresses)
     statuses = {}
-    def status(address):
-        """Joppa applies the configured own, children or links status rule. Read the current tone."""
-        if address not in statuses:
-            statuses[address] = tone(object_read(api, workspace, address).get("status"))
-        return statuses[address]
     tasks = [item for item in objects.values() if types[item["kind"]].get("role") == "task"
              and item["document"].get("parent") in addresses]
     candidates = []
@@ -52,23 +47,19 @@ def load_requirement(api, config, req_id, selected=None):
         statuses[address] = tone(ac.get("status"))
         require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
         read_remote_links(api, remote, ac)
-        work = [item for item in tasks if item["document"]["parent"] == address
-                and not ended(item)]
+        own = [item for item in tasks if item["document"]["parent"] == address]
+        work = [item for item in own if not ended(item)]
+        failures = [item for item in work if blocked(item) and not assignee(item)]
+        # Landed work without a live failure waits for acceptance. Planning again would repeat it.
+        completed = any(done(item) for item in own) and not failures
         if ((not config.get("ac_ids") or address in config["ac_ids"])
-                and ac.get("work_ready") is True
+                and ac.get("work_ready") is True and not completed
                 and (ac["process"].get("assessment") or {}).get("state") != "waiting"
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
-                and all(blocked(item) and not assignee(item) for item in work)):
+                and len(failures) == len(work)):
             candidates.append(address)
-    def satisfied(object):
-        if types[object["kind"]].get("role") == "task":
-            return done(object)
-        # Every other target is satisfied only by its own current green status.
-        return status(object["address"]) == "green"
-    def ready(address, trail=None):
-        trail = set(trail or [])
-        require(address not in trail, "dependency cycle in Requirement context")
-        trail.add(address)
+    def ready(address):
+        """Joppa work_ready decides local ordering. Check only remote blockers and authored link input."""
         object, seen = get(address), set()
         while object:
             require(object["address"] not in seen, "parent cycle in Requirement context")
@@ -77,14 +68,9 @@ def load_requirement(api, config, req_id, selected=None):
                    for link in object.get("remote_links", [])):
                 return False
             for link in object["document"].get("links", []):
-                if link.get("relation") != "depends_on" or link.get("blocking") is not True:
-                    continue
-                dependency = get(link["target"])
                 revision = link.get("revision")
-                # Joppa readiness uses the current target state. A pin is valid anywhere from 1 through current.
-                pin = revision is None or current_pin(revision, dependency["current_revision"], 1)
-                if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
-                    return False
+                require(link.get("relation") != "depends_on" or link.get("blocking") is not True or revision is None
+                        or current_pin(revision, revision, 1), f"invalid linked revision on {object['address']}")
             parent = object["document"].get("parent")
             object = get(parent) if parent else None
         return True
