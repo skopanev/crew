@@ -199,6 +199,7 @@ export function createDashboard(config, paint) {
   refresh();
   return {
     state, refresh,
+    use(next) { config = next; },
     ...createScreen(state, paint, lines),
   };
 }
