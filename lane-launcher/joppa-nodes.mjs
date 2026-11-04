@@ -1,0 +1,45 @@
+// Generic Joppa node reads and revision-checked document saves.
+const require = (condition, message) => { if (!condition) throw new Error(message); };
+
+export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
+export const nodeWaiting = node => (node.process?.assessment ?? node['process.assessment'])?.state === 'waiting';
+
+export function saveNode(node, changes, reason, question) {
+  require(node.historical === false && node.document?.present === true &&
+    Number.isSafeInteger(node.current_revision) && node.current_revision > 0,
+  'A node save requires a current, present document');
+  const separator = node.address?.indexOf(':');
+  require(separator > 0, 'A node save requires its full address');
+  const data = structuredClone(node.document.data);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) delete data[key];
+    else data[key] = value;
+  }
+  return {op: 'save_object', kind: node.address.slice(0, separator), id: node.address.slice(separator + 1),
+    revision: node.current_revision, parent: node.document.parent, data,
+    links: structuredClone(node.document.links || []), reason,
+    ...(question ? {question_checked: question} : {})};
+}
+
+export async function roleKinds(read, role) {
+  const types = (await read('joppa_tree', {}))?.schema?.types;
+  require(types && typeof types === 'object', 'Joppa tree schema is missing');
+  const kinds = Object.keys(types).filter(kind => types[kind].role === role);
+  require(kinds.length > 0, `Joppa tree has no ${role} type`);
+  return kinds;
+}
+
+export async function* nodePages(read, filters) {
+  let cursor;
+  const seen = new Set();
+  do {
+    const page = await read('joppa_objects', {parent: '*', ...filters, limit: 25, ...(cursor ? {cursor} : {})});
+    require(Array.isArray(page?.items), 'Joppa node page is incomplete');
+    yield page;
+    cursor = page.next_cursor;
+    if (cursor) {
+      require(typeof cursor === 'string' && !seen.has(cursor), 'Joppa node pagination did not advance');
+      seen.add(cursor);
+    }
+  } while (cursor);
+}
