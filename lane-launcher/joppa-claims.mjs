@@ -27,11 +27,11 @@ const read = (run, address) => api(run.config, run.joppaWorker, 'joppa_objects',
 export async function taskQuestions(run) {
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   require(types && typeof types === 'object', 'Joppa tree schema is missing');
-  // Generic saves must answer the type question with its exact text.
+  // Generic saves answer the type question with its exact text. A type without a question needs none.
   return object => {
     const question = types[kindOf(object)]?.question;
-    require(typeof question === 'string' && question.trim(), `Joppa type ${kindOf(object)} needs a schema question`);
-    return question;
+    require(question === undefined || question === null || typeof question === 'string', `Joppa type ${kindOf(object)} has an invalid schema question`);
+    return question?.trim() ? question : undefined;
   };
 }
 

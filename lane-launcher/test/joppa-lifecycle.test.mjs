@@ -39,6 +39,14 @@ test('claim saves the run-specific assignee at the read revision and keeps the a
   assert.deepEqual(f.run.claim.tasks.map(task => task.revision), [4, 4]);
 });
 
+test('a Task type without a schema question sends no question_checked', async t => {
+  const f = await packageFixture(t);
+  delete f.taskType.question;
+  await claimTask(f.run, f.persist, f.runId);
+  await releaseTaskClaims(f.run, f.persist, 'Lane did not start.');
+  assert(batches(f).flat().every(command => !Object.hasOwn(command, 'question_checked')));
+});
+
 test('release removes only the assignee with a revision-checked save', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);

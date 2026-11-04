@@ -9,7 +9,6 @@ import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
 import {nodeAssignee, saveNode} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
-const text = value => typeof value === 'string' && value.trim();
 
 export async function finishTask(run, stateFile, result, artifacts) {
   if (run.releaseConfirmed === true) return;
@@ -88,7 +87,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     require(operations.length === claims.length * 2 && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
-        !save.data.assignee && text(save.question_checked) && typeof ref === 'string' && archive.op === 'archive_object' &&
+        !save.data.assignee && save.question_checked === question(claim) && typeof ref === 'string' && archive.op === 'archive_object' &&
         archive.target === claim.address && isDeepStrictEqual(archive.revision, {$ref: `${ref}/saved_revision`});
     }), 'Saved completion request does not name the checked SHA; inspect it before retrying');
     persist();

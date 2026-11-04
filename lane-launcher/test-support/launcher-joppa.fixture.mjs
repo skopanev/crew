@@ -24,6 +24,7 @@ async function packageFixture(t, mode = 'success') {
   const tokenFile = path.join(root, 'token');
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
+  const taskType = {role: 'task', question: 'Which change does this Task make?'};
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
     work_ready: true, review_required: false, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
     process: {}, annotations: {comments: {}}});
@@ -49,7 +50,7 @@ async function packageFixture(t, mode = 'success') {
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'},
-      task: {role: 'task', question: 'Which change does this Task make?'}}}};
+      task: structuredClone(taskType)}}};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
     else if (name === 'joppa_objects') {
       const rows = [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
@@ -135,7 +136,7 @@ async function packageFixture(t, mode = 'success') {
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
   const stateFile = path.join(root, 'launch.json');
   fs.writeFileSync(path.join(root, 'output.log'), '');
-  return {root, runId, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
+  return {root, runId, run, stateFile, calls, objects, queue, taskType, persist: () => save(stateFile, run)};
 }
 
 // Update a document in place so test getters on unchanged fields keep working.
