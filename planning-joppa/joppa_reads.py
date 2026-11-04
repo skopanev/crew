@@ -23,7 +23,6 @@ def normalize_detail(args, value):
                               "present": present, "data": result["data"],
                               "links": [authored_link(link) for link in result.get("links", [])]}
         result.setdefault("current_revision", result["revision"])
-        result["process"] = lifecycle(result["document"], result.get("process"))
         if not args.get("revision"):
             result.setdefault("work_ready", True)
     result.setdefault("address", args.get("address"))
@@ -32,7 +31,6 @@ def normalize_detail(args, value):
     result.setdefault("kind", result["address"].split(":", 1)[0])
     result.setdefault("historical", result["document"].get("revision", result["current_revision"]) != result["current_revision"])
     result["process"] = dict(result.get("process") or {})
-    result["process"].setdefault("assignee", None)
     result["annotations"] = dict(result.get("annotations") or {})
     result.setdefault("files", [])
     result.setdefault("references", [])
@@ -40,31 +38,36 @@ def normalize_detail(args, value):
     return result
 
 
-def blocked(assessment):
-    """Live assessment states are waiting and ready. Waiting holds the node. No assessment means ready."""
-    return isinstance(assessment, dict) and assessment.get("state") == "waiting"
+# Task state comes from generic node fields. The native process stays as Joppa returns it.
+def assignee(object):
+    return object["document"]["data"].get("assignee")
 
 
-def lifecycle(document, process):
-    """Derive the Task state from generic node fields. The server has no Task process."""
-    data, result = document["data"], {"assessment": (process or {}).get("assessment")}
-    result["assignee"] = data.get("assignee")
-    if blocked(result["assessment"]):
-        # The reason is a short code such as WORKTREE_PREEXISTED. Failure detail stays in the Task note.
-        result["blocked"] = {"reason": result["assessment"].get("reason") or "",
-                             "actor": result["assessment"].get("actor")}
-    if document["present"] is False:
-        result["done" if data.get("commit") else "retired"] = {"commit": data.get("commit")}
-    return {key: value for key, value in result.items() if value is not None}
+def ended(object):
+    return object["document"].get("present") is False or object["document"]["data"].get("archived") is True
+
+
+def done(object):
+    return ended(object) and bool(object["document"]["data"].get("commit"))
+
+
+def block_reason(object):
+    """A live node with assessment state waiting is held. Return its short reason code."""
+    assessment = (object.get("process") or {}).get("assessment")
+    if ended(object) or not isinstance(assessment, dict) or assessment.get("state") != "waiting":
+        return None
+    return assessment.get("reason") or ""
+
+
+def blocked(object):
+    return block_reason(object) is not None
 
 
 def task_state(object):
     """Classify one Task: done, retired, blocked, active or open."""
-    process = object["process"]
-    for state in ("done", "retired", "blocked"):
-        if process.get(state):
-            return state
-    return "active" if process.get("assignee") else "open"
+    if ended(object):
+        return "done" if done(object) else "retired"
+    return "blocked" if blocked(object) else "active" if assignee(object) else "open"
 
 
 def complete_object(read_page, args, value):

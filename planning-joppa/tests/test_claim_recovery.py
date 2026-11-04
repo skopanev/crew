@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac
+from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac, hold, end
 
 class ProviderTests(unittest.TestCase):
     def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
@@ -185,13 +185,13 @@ class ProviderTests(unittest.TestCase):
                 existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                                      projects=["other", "p"])
                 if blocked:
-                    existing["process"]["blocked"] = {"reason": "Failed", "position": 19}
+                    hold(existing, "Failed")
                 if terminal:
                     finished = deepcopy(existing)
                     finished["address"] = "work:finished"
-                    finished["process"][terminal] = {"reason": "Earlier work"}
+                    end(finished, "a" * 40 if terminal == "done" else None)
                     data["joppa"]["tasks"].append(finished)
-                    existing["process"].pop("blocked")
+                    existing["process"].pop("assessment")
                 active_blocked = blocked and terminal is None
                 if active_blocked:
                     task["steps"].append("Record the exact remaining failure.")

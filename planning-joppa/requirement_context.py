@@ -4,7 +4,7 @@ from common import require
 from context_reads import object_read, read_remote_links, remote_snapshot
 from context_snapshot import source, current_pin, remote_satisfied, snapshot_source
 from test_nodes import identities, read_nodes, tone
-from joppa_reads import task_state
+from joppa_reads import assignee, blocked, done, ended
 
 
 def load_requirement(api, config, req_id, selected=None):
@@ -53,17 +53,16 @@ def load_requirement(api, config, req_id, selected=None):
         require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
         read_remote_links(api, remote, ac)
         work = [item for item in tasks if item["document"]["parent"] == address
-                and not item["process"].get("done") and not item["process"].get("retired")]
+                and not ended(item)]
         if ((not config.get("ac_ids") or address in config["ac_ids"])
                 and ac.get("work_ready") is True
                 and (ac["process"].get("assessment") or {}).get("state") == "ready"
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
-                and all(task_state(item) == "blocked" and not item["process"].get("assignee") for item in work)):
+                and all(blocked(item) and not assignee(item) for item in work)):
             candidates.append(address)
     def satisfied(object):
-        process = object["process"]
         if types[object["kind"]].get("role") == "task":
-            return bool(process.get("done"))
+            return done(object)
         # Every other target is satisfied only by its own current green status.
         return status(object["address"]) == "green"
     def ready(address, trail=None):
@@ -82,9 +81,8 @@ def load_requirement(api, config, req_id, selected=None):
                     continue
                 dependency = get(link["target"])
                 revision = link.get("revision")
-                # Reads give no contract_revision. A pin other than the current revision is stale.
-                current = dependency["current_revision"]
-                pin = revision is None or current_pin(revision, current, dependency.get("contract_revision", current))
+                # Joppa readiness uses the current target state. A pin is valid anywhere from 1 through current.
+                pin = revision is None or current_pin(revision, dependency["current_revision"], 1)
                 if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")

@@ -6,6 +6,7 @@ from common import fingerprint, inside, require, run, strings, text
 import validation
 import context
 from test_nodes import node_results, read_nodes
+from joppa_reads import ended
 from task_contracts import MAX_DATA_VALUE, title_limit, unclaimed, editable, retirable, ordered_tasks, criterion_plan, package_counters, checked_task_title, check_line, contract_fields
 
 
@@ -24,14 +25,14 @@ def validate(plan, assignment):
     for task in plan.get("tasks", []):
         require(not set(task.get("depends_on", [])).intersection(retired), "Task cannot depend on a Task retired by this plan")
     for existing in assignment["joppa"]["objects"].values():
-        if existing["address"] in retired | updates or existing["process"].get("done") or existing["process"].get("retired"):
+        if existing["address"] in retired | updates or ended(existing):
             continue
         dependencies = {link["target"] for link in existing["document"].get("links", [])
                         if link.get("relation") == "depends_on" and link.get("blocking") is True}
         require(not dependencies.intersection(retired),
                 f"retirement requires an update that removes the dependency from {existing['address']}")
     for existing in assignment["joppa"]["tasks"]:
-        if existing["document"].get("parent") not in selected or existing["process"].get("done") or existing["process"].get("retired"):
+        if existing["document"].get("parent") not in selected or ended(existing):
             continue
         unclaimed(existing)
         require(existing["address"] in included,
@@ -104,7 +105,7 @@ def validate_one(plan, assignment):
         task["depends_on"] = [aliases.get(dep, dep) for dep in dependencies if ":" not in dep or dep in aliases]
     updates = {task["target"] for task in normalized["tasks"] if task["action"] == "update"}
     for address, existing in inventory.items():
-        if address in retired or existing["process"].get("done") or existing["process"].get("retired"):
+        if address in retired or ended(existing):
             continue
         dependencies = {link["target"] for link in existing["document"].get("links", [])
                         if link.get("blocking") and link.get("relation") == "depends_on"}
@@ -114,7 +115,7 @@ def validate_one(plan, assignment):
     if plan.get("disposition") == "implement" and any(task["action"] != "retire" for task in normalized["tasks"]):
         fields = ("scenario", "command", "cwd", "expected")
         retained = [task for task in inventory.values() if task["address"] not in targets
-                    and not task["process"].get("done") and not task["process"].get("retired")]
+                    and not ended(task)]
         for check in plan["acceptance_checks"]:
             specification = {key: check[key] for key in fields if key in check}
             assigned = any(task["action"] != "retire" and task["repository"] == check["repository"]

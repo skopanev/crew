@@ -114,8 +114,8 @@ The planning snapshot keeps each node address, title and revision.
 A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
 A new result alone does not invalidate the plan.
 Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
-Reads give no `contract_revision`. A pinned dependency is valid only at the target's `current_revision`.
-Any other pinned revision is a stale pin. An unpinned `depends_on` link keeps the normal order.
+Joppa orders work by the current target state and does not read `link.revision`.
+A pinned revision is valid from 1 through the target's `current_revision`. New `depends_on` links have no pin.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
@@ -146,11 +146,13 @@ Joppa has no Task workflow commands. The planner uses generic node fields:
 - Task state: `data.assignee` on a live Task is active work. `process.assessment.state`
   `waiting` is a block. Its reason is a short code, such as `WORKTREE_PREEXISTED`; the Task note keeps details. An archived Task with `data.commit` is done; without it, retired.
 - The contract digest excludes `data.assignee` and `data.commit`. Every other authored field stays.
+  A child AC save gives its Requirement a new revision with the same authored fields. Ancestor
+  snapshots compare authored fields, so that revision alone does not stop the run.
 
 The planner refuses before claiming if `save_object`, `archive_object` or `assess` is absent.
 Refresh the canonical source and its shared CBM index before launch.
 Verify indexed paths in the inspected source. Do not index an isolated checkout.
-Lifecycle saves raise a revision above earlier dependency pins. Such pins become stale pins.
+Lifecycle saves raise a revision above earlier dependency pins. Such pins stay valid.
 Retirement removes blocking links to the retired Task from remaining Tasks.
 Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.

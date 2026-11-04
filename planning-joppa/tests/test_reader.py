@@ -184,9 +184,13 @@ class ProviderTests(unittest.TestCase):
             hydrated = context.read_assignment(api, {"workspace": "example"}, target)
             self.assertEqual(hydrated["joppa"]["remote"]["objects"][key]["item_id"], foreign["item_id"])
             self.assertEqual(hydrated["joppa"]["objects"][local["address"]]["document"]["data"]["title"], local["document"]["data"]["title"])
+            # A child save gives a Requirement a revision-only change. Its authored text still decides.
             foreign["current_revision"] += 1
+            context.read_assignment(api, {"workspace": "example"}, target)
+            foreign["document"]["data"]["title"] = "Changed remote API"
             with self.assertRaisesRegex(ValueError, "context changed"):
                 context.read_assignment(api, {"workspace": "example"}, target)
+            foreign["document"]["data"]["title"] = "Remote API"
             foreign["current_revision"] -= 1
             foreign_schema["revision"] += 1
             with self.assertRaisesRegex(ValueError, "context changed"):
