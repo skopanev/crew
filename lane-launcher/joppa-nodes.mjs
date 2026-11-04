@@ -43,3 +43,15 @@ export async function* nodePages(read, filters) {
     }
   } while (cursor);
 }
+
+export async function* taskPages(read, filters = {}) {
+  yield* nodePages(read, {kind: await roleKinds(read, 'task'),
+    fields: ['title', 'revision', 'parent', 'data.assignee', 'data.priority', 'data.projects', 'work_ready', 'process.assessment'],
+    ...filters});
+}
+
+export function taskMatchesProject(config, node) {
+  const project = config.joppa.project, short = project.slice(project.indexOf(':') + 1);
+  const projects = node.document?.data?.projects ?? node.data?.projects ?? node['data.projects'];
+  return Array.isArray(projects) && projects.some(value => value === project || value === short);
+}
