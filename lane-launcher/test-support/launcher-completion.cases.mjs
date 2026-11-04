@@ -18,25 +18,31 @@ import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.f
 
 test('Joppa package completes every Task atomically with the same checked landing', async t => {
   const f = await packageFixture(t);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.completed, true);
   assert.deepEqual(result.tasks.map(task => [task.address, task.status]), [['task:t1', 'done'], ['task:t2', 'done']]);
   const operations = f.run.completionRequest.operations;
   const landing = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8').trim();
-  assert.equal(operations.length, 2);
-  operations.forEach(({command}, index) => {
-    assert.equal(command.id, `task:t${index + 1}`);
-    assert.match(command.evidence, new RegExp(`Task: task:t${index + 1}`));
-    assert.equal(command.evidence.startsWith(landing), true);
-    assert.equal(command.commit, landing.match(/^Landed SHA: ([0-9a-f]+)$/m)[1]);
+  const sha = landing.match(/^Landed SHA: ([0-9a-f]+)$/m)[1];
+  assert.deepEqual(operations.map(({command}) => command.op), ['save_object', 'archive_object', 'save_object', 'archive_object']);
+  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 2);
+  [1, 2].forEach(index => {
+    const [{command: save}, {command: archive}] = operations.slice(index * 2 - 2, index * 2);
+    assert.equal(`${save.kind}:${save.id}`, `task:t${index}`);
+    assert.match(save.reason, new RegExp(`Task: task:t${index}`));
+    assert.equal(save.reason.startsWith(landing), true);
+    assert.equal(save.data.commit, sha);
+    assert.equal(Object.hasOwn(save.data, 'assignee'), false);
+    assert.equal(save.question_checked, 'Which change does this Task make?');
+    assert.deepEqual(archive, {op: 'archive_object', target: `task:t${index}`, revision: save.revision + 1, reason: `Crew lane landed ${sha}.`});
   });
 });
 
 test('Joppa completion names the checked existing commit without Task verification fields', async t => {
   const f = await packageFixture(t);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f);
   const evidence = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8');
   const sha = evidence.match(/^Landed SHA: ([0-9a-f]+)$/m)[1];
@@ -46,7 +52,7 @@ test('Joppa completion names the checked existing commit without Task verificati
   const result = {code: 0, status: 'exited'};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.completed, true);
-  assert(f.run.completionRequest.operations.every(({command}) => command.commit === sha));
+  assert(f.run.completionRequest.operations.every(({command}) => command.op !== 'save_object' || command.data.commit === sha));
   assert(f.run.tasks.every(({address}) => !('verification' in f.objects.get(address).process)));
 });
 
@@ -55,7 +61,7 @@ test('Joppa completion keeps a Task current after a test child changes', async t
   parent.contract_revision = parent.current_revision;
   const child = {document: {parent: parent.address, data: {title: 'checks.test.js > first'}}};
   f.objects.set('check:existing', child);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f);
   child.document.data.title = 'checks.test.js > replacement';
   const result = {code: 0, status: 'exited'};
@@ -67,7 +73,7 @@ test('Joppa completion keeps a Task current after a test child changes', async t
 
 test('Joppa completion refuses a different confirmed commit', async t => {
   const f = await packageFixture(t, 'wrong-commit');
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
   await assert.rejects(finishTask(f.run, f.stateFile, result, artifacts), /did not confirm.*checked SHA/);
   assert.equal(result.completed, undefined);
@@ -75,7 +81,7 @@ test('Joppa completion refuses a different confirmed commit', async t => {
 
 test('Joppa completion preserves an older saved request without silently adding commit', async t => {
   const f = await packageFixture(t);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f);
   f.run.completionRequest = {workspace: f.run.workspace, request_id: 'saved-before-upgrade',
     operations: [{command: {op: 'complete_task', id: 'task:t1', revision: 3, evidence: 'Earlier request'}}]};
@@ -87,20 +93,20 @@ test('Joppa completion preserves an older saved request without silently adding 
 
 for (const address of ['ac:a2', 'req:r']) test(`Joppa package refuses completion after ${address} context changes`, async t => {
   const f = await packageFixture(t);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f);
   f.objects.get(address).document.data.title += ' changed';
   await assert.rejects(finishTask(f.run, f.stateFile, {code: 0, status: 'exited'}, artifacts), /context changed/);
   assert.equal(f.run.completionRequest, undefined);
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
-  for (const task of f.run.tasks) assert.equal(f.objects.get(task.address).process.status, 'in_progress');
+  for (const task of f.run.tasks) assert.equal(f.objects.get(task.address).document.data.assignee, f.run.claim.assignee);
 });
 
 test('Joppa package preserves a single Task ticket and execution identifier', async t => {
   const f = await packageFixture(t);
   f.run.tasks = [f.run.tasks[0]];
   f.run.executionId = executionId(f.run.task);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   assert.equal(f.run.claim.id, executionId('task:t1'));
   assert.equal(f.run.claim.ticket.id, executionId('task:t1'));
   assert.equal(f.run.claim.ticket.body, f.objects.get('task:t1').document.data.body);

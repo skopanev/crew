@@ -21,10 +21,12 @@ test('Joppa package claims atomically and preserves each Task contract and scope
   const itemIds = {'task:t1': 'example-T-FIRST', 'task:t2': 'example-T-SECOND',
     'ac:a1': 'example-A-FIRST', 'ac:a2': 'example-A-SECOND', 'req:r': 'example-R-PARENT'};
   for (const [address, itemId] of Object.entries(itemIds)) f.objects.get(address).item_id = itemId;
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const mutations = f.calls.filter(call => call.name === 'joppa_batch');
   assert.equal(mutations.length, 1);
-  assert.deepEqual(mutations[0].args.operations.map(item => item.command.id), ['task:t1', 'task:t2']);
+  assert.deepEqual(mutations[0].args.operations.map(({command}) => [command.op, `${command.kind}:${command.id}`, command.revision]),
+    [['save_object', 'task:t1', 3], ['save_object', 'task:t2', 3]]);
+  assert(mutations[0].args.operations.every(({command}) => command.data.assignee === f.run.claim.assignee));
   assert.deepEqual(f.run.claim.ticket.modulePaths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
   assert.deepEqual(f.run.claim.ticket.tasks[0].modulePaths, ['src/a', 'tests/a']);
   assert.deepEqual(f.run.claim.ticket.tasks[1].modulePaths, ['src/b', 'tests/b']);
@@ -45,7 +47,7 @@ test('Joppa claim guard rechecks remote state and authored pin changes before st
   const link = {workspace: 'remote', target: 'req:r', relation: 'depends_on', blocking: true, revision: 1,
     status: {access: true, present: true, review_required: false, satisfied: true, current_revision: 1}};
   f.objects.get('req:r').remote_links = [link];
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   link.status.satisfied = false;
   await assert.rejects(guardTaskClaims(f.run, f.persist), /DEPENDENCY_NOT_READY: @remote\/req:r/);
   link.status.satisfied = true;
@@ -56,7 +58,7 @@ test('Joppa claim guard rechecks remote state and authored pin changes before st
 
 for (const mode of ['reject', 'incomplete']) test(`Joppa package ${mode} claim cannot start a lane`, async t => {
   const f = await packageFixture(t, mode);
-  await assert.rejects(claimTask(f.run, f.persist), mode === 'reject' ? /operation 2/ : /incomplete/);
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), mode === 'reject' ? /operation 2/ : /incomplete/);
   assert.equal(f.run.claim, undefined);
   assert.equal(Boolean(f.run.claimRejected), mode === 'reject');
   assert.equal(read(f.stateFile).claimRequest.operations.length, 2);
@@ -82,7 +84,7 @@ for (const mode of ['reject', 'incomplete']) test(`Joppa package worker stops be
 
 test('Joppa package blocks all held Tasks with one atomic outcome', async t => {
   const f = await packageFixture(t);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = path.join(f.root, 'artifacts');
   fs.mkdirSync(artifacts);
   fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed');
@@ -91,12 +93,12 @@ test('Joppa package blocks all held Tasks with one atomic outcome', async t => {
   assert.equal(result.blockConfirmed, true);
   assert.deepEqual(result.tasks.map(task => [task.address, task.status]), [['task:t1', 'blocked'], ['task:t2', 'blocked']]);
   const batch = f.calls.filter(call => call.name === 'joppa_batch').at(-1);
-  assert.deepEqual(batch.args.operations.map(item => item.command.op), ['block_task', 'block_task']);
+  assert.deepEqual(batch.args.operations.map(item => item.command.op), ['save_object', 'assess', 'note', 'save_object', 'assess', 'note']);
 });
 
 test('Joppa package refuses more than 100 Tasks before API calls', async t => {
   const f = await packageFixture(t);
   f.run.tasks = Array.from({length: 101}, (_, index) => ({address: `task:t${index}`, revision: 3}));
-  await assert.rejects(claimTask(f.run, f.persist), /100-operation/);
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /100-operation/);
   assert.equal(f.calls.length, 0);
 });

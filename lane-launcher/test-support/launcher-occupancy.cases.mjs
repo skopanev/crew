@@ -65,13 +65,15 @@ for (const mode of ['postclaim-race', 'sameactor-race', 'release-unknown']) test
   assert.equal(result.code, 2, result.stderr);
   assert.equal(fs.existsSync(marker), false);
   const saved = read(f.stateFile), confirmed = mode !== 'release-unknown';
-  assert.deepEqual(saved.releaseRequest.operations.map(item => item.command.id), ['task:t1', 'task:t2']);
+  assert.deepEqual(saved.releaseRequest.operations.map(({command}) => [`${command.kind}:${command.id}`, command.data.assignee]),
+    [['task:t1', undefined], ['task:t2', undefined]]);
   assert.equal(saved.releaseConfirmed === true, confirmed);
   assert.equal(saved.result.released, confirmed);
   assert.equal(saved.result.held, !confirmed);
   assert.equal(saved.result.blocked, false);
   assert.equal(runHoldsTasks(saved), !confirmed);
-  assert.equal(f.objects.get('task:foreign').process.assignee, mode === 'sameactor-race' ? 'lane-1' : 'foreign-worker');
+  assert.equal(f.objects.get('task:foreign').document.data.assignee,
+    mode === 'sameactor-race' ? saved.claim.assignee : 'foreign-worker');
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 2);
   assert.equal(saved.completionRequest, undefined);
   assert.equal(saved.blockRequest, undefined);
@@ -82,13 +84,13 @@ test('Joppa package legacy adopted claim runs the ownership guard before startup
   const f = await packageFixture(t);
   f.run.tasks = [f.run.tasks[0]];
   f.run.executionId = executionId(f.run.task);
-  await claimTask(f.run, f.persist);
+  await claimTask(f.run, f.persist, f.runId);
   delete f.run.claimRequest;
   delete f.run.claim.tasks;
   delete f.run.requirement;
   const foreign = f.objects.get('task:t2');
   foreign.document.data.projects = ['project:other'];
-  foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+  foreign.document.data.assignee = 'foreign-worker';
   const bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
   fs.mkdirSync(bins);
   fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
@@ -99,7 +101,7 @@ test('Joppa package legacy adopted claim runs the ownership guard before startup
   const saved = read(f.stateFile);
   assert.equal(saved.releaseConfirmed, true);
   assert.deepEqual(saved.releaseResults.map(task => task.address), ['task:t1']);
-  assert.equal(foreign.process.assignee, 'foreign-worker');
+  assert.equal(foreign.document.data.assignee, 'foreign-worker');
 });
 
 test('Joppa package ignores held Tasks without a repository contract', async t => {

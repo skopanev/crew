@@ -137,7 +137,8 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
     workspace_key: 'local', current_revision: 1, work_ready: true, review_required: false,
     document: {present: true, parent, links: [], data: {title: address}}, process: {}});
   const parent = make('measure:a', null), task = make('work:one', parent.address);
-  task.process = {status: 'in_progress', assignee: 'worker'};
+  const assignee = 'crew-lane:host:11111111-1111-4111-8111-111111111111';
+  task.document.data.assignee = assignee;
   const link = {workspace: 'remote', target: 'measure:a', relation: 'depends_on', blocking: true, revision: 2,
     status: {access: true, present: true, current_revision: 2, review_required: false, satisfied: true}};
   parent.remote_links = [link];
@@ -148,7 +149,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   const artifacts = path.join(f.root, 'run/artifacts');
   fs.mkdirSync(artifacts, {recursive: true});
   fs.writeFileSync(path.join(artifacts, 'claim.json'), JSON.stringify({source: 'joppa', workspace: 'sample',
-    joppa_url: 'https://service.invalid/mcp', actor: 'worker',
+    joppa_url: 'https://service.invalid/mcp', actor: 'worker', assignee,
     tasks: [{address: task.address, digest: contractDigest(task)}],
     contexts: [{address: parent.address, digest: contractDigest(parent)}]}));
   const env = {...process.env, MEDULLA_RUN_DIR: path.dirname(artifacts),
@@ -171,6 +172,16 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   parent.remote_links_revision++;
   assert.match(check().stderr, /context changed after claim/);
   parent.remote_links_revision--;
+  // Native state: another assignee, a waiting Task, or a planner on the criterion refuses the push.
+  for (const [change, restore, pattern] of [
+    [() => { task.document.data.assignee = 'crew-lane:host:other'; }, () => { task.document.data.assignee = assignee; }, /Task holder changed/],
+    [() => { task.process = {assessment: {state: 'waiting', reason: 'GATE_FAIL'}}; }, () => { task.process = {}; }, /Task holder changed/],
+    [() => { parent.document.data.assignee = 'crew-planning:host:run'; }, () => { delete parent.document.data.assignee; }, /active planning/]]) {
+    change();
+    assert.match(check().stderr, pattern);
+    restore();
+  }
+  assert.equal(check().status, 0);
 
   const repo = path.join(f.root, 'repo'), remote = path.join(f.root, 'origin.git');
   fs.mkdirSync(repo);
