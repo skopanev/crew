@@ -62,6 +62,10 @@ def plan():
             "acceptance_checks": [{"repository": "service", **deepcopy(task["checks"][0])}],
             "tasks": [task]}
 
+# The acceptance mapping that publication writes for plan(): one criterion check carried by the first Task.
+ACCEPTANCE = [{"ac": "criterion:a", "check": "Reject invalid input => No mutation"}]
+
+
 class Fake:
     def __init__(self, result=None, error=None):
         self.result, self.error, self.calls = result, error, []

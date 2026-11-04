@@ -65,6 +65,15 @@ If the contract changed, the operator must restore the prior Requirement head. C
 For target delivery, it also accepts the checked SHA as an ancestor of the current target.
 Joppa `done` records execution. It does not accept the AC or Requirement.
 
+### Covered criteria
+
+With `joppa.coversReference`, a claimed Task can cover other criteria of its Requirement.
+Before the claim, each covered criterion must be present, not waiting, without assignee, `work_ready` and without unmet dependencies.
+Otherwise Dolber claims nothing and reports `COVERED_CONTEXT_NOT_READY`.
+After the claim, Dolber reads each covered criterion again and stores its revision and digest as acceptance context.
+A change in this window releases the claimed Tasks before startup with the same code.
+The startup guard and completion require each saved acceptance context unchanged and `work_ready`.
+
 ## Failure
 
 Dolber blocks confirmed failures with evidence and releases their claims.
@@ -89,6 +98,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | `branch`, `target`, or `requirement` |
 | `testReport` | Optional per repository. Record the JUnit results of the final gate run in Joppa. See below |
+| `joppa.coversReference` | Optional Task reference field that lists covered criteria. Use the planner `covers_reference` value |
 
 `sourceRoot` can contain several repositories or be the repository itself.
 Only configured repositories enter Git and CBM refresh.

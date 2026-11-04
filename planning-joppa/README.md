@@ -120,6 +120,30 @@ The planner reads all test nodes in pages of 25 and groups them by criterion.
 Publication creates only the missing (AC, test name) nodes with `save_object` and revision 0.
 It never edits, deletes or recreates an existing node, so recorded results stay.
 New nodes and the AC assignee release and `assess` go in the same atomic batch.
+
+### Acceptance mapping and shared Tasks
+
+Publication writes `data.acceptance` on each saved implementation Task: `[{ac, check}]`.
+`ac` is the full criterion address. `check` is the rendered acceptance check line that this Task carries.
+The list contains only criterion acceptance checks, in scenario or command form. Task-only checks, such as lint or build checks, stay outside.
+A lane binds at least one verified test to each entry. Tasks without `data.acceptance` keep their previous behavior.
+
+Set `covers_reference` to the name of one Task schema reference field to let one Task cover several criteria of its Requirement:
+
+```json
+"covers_reference": "covers"
+```
+
+- The reference must target the criterion type and allow several values. Crew does not change the schema.
+- Without this key the feature is off. A plan with a nonempty `covers` list is then refused.
+- A plan Task can list other selected criteria of the same Requirement in `covers`. A covered criterion needs disposition `implement`.
+- Its acceptance checks must be in the checks of a covering Task. A covered criterion can then have no Task of its own.
+- Crew writes full `kind:id` addresses. A bare ID that Joppa stored as sent reads as an address of the target type.
+- The covered criteria are selected, so the planning claim, the idle check, the snapshot and the readiness checks apply to them.
+- A covering Task makes its covered criteria owned for queue readiness: an active Task holds them, and a done Task waits for acceptance.
+  The queue reads this from the raw Task data of all tones, including archived Tasks.
+- Only the parent criterion owns an update or retirement of the Task.
+- An unfinished Task under an unselected criterion can carry a covered check. The plan never edits it.
 The planning snapshot keeps each node address, title and revision.
 A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
 A new result alone does not invalidate the plan.

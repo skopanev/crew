@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac, hold, end
+from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac, hold, end, ACCEPTANCE
 
 class ProviderTests(unittest.TestCase):
     def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
@@ -183,7 +183,7 @@ class ProviderTests(unittest.TestCase):
                 task.update(action="update", target="work:old", revision=3)
                 existing = data["joppa"]["tasks"][0]
                 existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
-                                                     projects=["other", "p"])
+                                                     projects=["other", "p"], acceptance=deepcopy(ACCEPTANCE))
                 if blocked:
                     hold(existing, "Failed")
                 if terminal:

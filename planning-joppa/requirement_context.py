@@ -5,6 +5,11 @@ from context_reads import object_read, read_remote_links, remote_snapshot
 from context_snapshot import source, current_pin, remote_satisfied, snapshot_source
 from test_nodes import identities, read_nodes, tone
 from joppa_reads import assignee, blocked, done, ended
+import coverage
+
+
+def json_key(value):
+    return json.dumps(value, sort_keys=True)
 
 
 def load_requirement(api, config, req_id, selected=None):
@@ -39,6 +44,13 @@ def load_requirement(api, config, req_id, selected=None):
     statuses = {}
     tasks = [item for item in objects.values() if types[item["kind"]].get("role") == "task"
              and item["document"].get("parent") in addresses]
+    specs = {}
+    def covers(task):
+        """Criteria of this Requirement that the Task covers besides its parent. Archived Tasks keep raw data."""
+        if task["kind"] not in specs:
+            specs[task["kind"]] = coverage.reference(config, types, task["kind"])
+        return [address for address in coverage.covered(task["document"]["data"], specs[task["kind"]])
+                if address in addresses and address != task["document"]["parent"]]
     candidates = []
     for address in addresses:
         # Admission needs live ownership. Authored snapshots exclude data.assignee.
@@ -47,7 +59,8 @@ def load_requirement(api, config, req_id, selected=None):
         statuses[address] = tone(ac.get("status"))
         require(isinstance(statuses[address], str), f"criterion status is missing: {address}")
         read_remote_links(api, remote, ac)
-        own = [item for item in tasks if item["document"]["parent"] == address]
+        # A covering Task owns its covered criteria for readiness. Its parent alone owns update and retirement.
+        own = [item for item in tasks if item["document"]["parent"] == address or address in covers(item)]
         work = [item for item in own if not ended(item)]
         failures = [item for item in work if blocked(item) and not assignee(item)]
         # Landed work without a live failure waits for acceptance. Planning again would repeat it.
@@ -93,9 +106,15 @@ def load_requirement(api, config, req_id, selected=None):
         require(all(get(repo["project"])["kind"] == reference["target"] for repo in config["repositories"]),
                 "repository project type differs from Task schema")
         schemas[address] = {"task_type": kind, "task_schema": types[kind], "test_nodes": tests[address]}
+        specs.setdefault(kind, coverage.reference(config, types, kind))
+    spec = {json_key(specs[schemas[address]["task_type"]]) for address in candidates}
+    require(len(spec) == 1, "selected criteria need one covers reference configuration")
+    covers_spec = specs[schemas[candidates[0]]["task_type"]]
     assignment["ac"] = criteria[0]
     assignment["joppa"].update(scope="requirement", criteria=criteria, criterion_schemas=schemas,
         tasks=[item for item in tasks if item["document"]["parent"] in candidates])
+    if covers_spec:
+        assignment["joppa"]["covers"] = covers_spec
     snapshot["objects"] = {address: snapshot_source(item, types, candidates) for address, item in objects.items()}
     snapshot["tests"] = {address: identities(tests[address]) for address in candidates}
     snapshot["criteria"] = candidates

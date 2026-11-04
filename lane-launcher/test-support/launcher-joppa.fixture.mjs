@@ -33,6 +33,11 @@ async function packageFixture(t, mode = 'success') {
       title: `[0${index}] Task ${index}`, projects: ['app'],
       body: `Goal: scoped change ${index}\nRepository: app\nModule: m${index}\nChecks: exact check ${index}`}));
   }
+  // Tests can add Task references, a test type or test_results rules to this schema.
+  const types = {req: {role: 'requirement'}, ac: {role: 'ac'},
+    task: {role: 'task', ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}};
+  const schema = {types};
+  let created = 0;
   const server = http.createServer(async (req, res) => {
     if (req.method === 'DELETE') { res.writeHead(204).end(); return; }
     let body = '';
@@ -47,8 +52,7 @@ async function packageFixture(t, mode = 'success') {
     calls.push({name, args});
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
-    if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'},
-      task: {role: 'task', ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}}}};
+    if (name === 'joppa_tree') value = {schema: structuredClone(schema)};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
     else if (name === 'joppa_objects') {
       assert.equal(Object.hasOwn(args, 'work_filter'), false);
@@ -71,7 +75,10 @@ async function packageFixture(t, mode = 'success') {
           title: object.document.data.title, work_ready: object.work_ready,
           'data.assignee': object.document.data.assignee ?? null, 'data.commit': object.document.data.commit ?? null,
           'data.projects': object.document.data.projects ?? null, 'data.priority': object.document.data.priority ?? null,
-          'process.assessment': object.process.assessment ?? null}))
+          'process.assessment': object.process.assessment ?? null,
+          ...Object.fromEntries((args.fields || []).filter(field => field.startsWith('data.') &&
+            !['data.assignee', 'data.commit', 'data.projects', 'data.priority'].includes(field))
+            .map(field => [field, object.document.data[field.slice(5)] ?? null]))}))
         .filter(row => tones ? tones.includes(row.status) : row.present);
       const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
       value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
@@ -83,6 +90,13 @@ async function packageFixture(t, mode = 'success') {
       const commands = args.operations.map(({command}) => command);
       const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
       const release = commands.every(command => command.op === 'save_object' && !command.data.assignee);
+      // A new node save has revision 0 and no ID. The fixture gives it the next address of its type.
+      for (const command of commands) if (command.op === 'save_object' && command.revision === 0 && !command.id) {
+        command.id = `n${++created}`;
+        objects.set(`${command.kind}:${command.id}`, {address: `${command.kind}:${command.id}`, kind: command.kind,
+          historical: false, current_revision: 0, work_ready: true, status: {tone: 'orange'},
+          document: {present: true, parent: command.parent, data: {}, links: []}, process: {}, annotations: {comments: {}}});
+      }
       const target = command => objects.get(command.target || `${command.kind}:${command.id}`);
       if (mode === 'release-unknown' && release) { res.destroy(); return; }
       // Revision checks refuse the whole batch. A changed save advances the revision; batch refs read the saved one.
@@ -145,7 +159,7 @@ async function packageFixture(t, mode = 'success') {
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
   const stateFile = path.join(root, 'launch.json');
   fs.writeFileSync(path.join(root, 'output.log'), '');
-  return {root, runId, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
+  return {root, runId, run, stateFile, calls, objects, queue, schema, persist: () => save(stateFile, run)};
 }
 
 // Update a document in place so test getters on unchanged fields keep working.

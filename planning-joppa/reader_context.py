@@ -102,6 +102,8 @@ def prompt_assignment(assignment):
             for key, item in remote["objects"].items()}}
     if assignment["joppa"].get("workspace_key"):
         result["joppa"]["workspace_key"] = assignment["joppa"]["workspace_key"]
+    if assignment["joppa"].get("covers"):
+        result["joppa"]["covers_reference"] = assignment["joppa"]["covers"]["field"]
     if assignment["joppa"].get("scope") == "requirement":
         criteria = context.selected_criteria(assignment)
         ids = {item["id"] for item in criteria}
