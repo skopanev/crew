@@ -40,6 +40,11 @@ The table reads existing Medulla journals and results. It creates no history dat
 New runs save their output in `output.log` inside the Medulla run folder.
 Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
 The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in the config to change this interval.
+The automatic loop reloads the config before each queue selection, never during a planning pass.
+Each pass reads the config file when it starts. Attempt history stays after a reload.
+An invalid config shows `CONFIG_INVALID` and starts nothing until the file is valid again.
+A change to `workspace`, `url`, `mcp_command` or the resolved `runs_folder` shows `CONFIG_RESTART_REQUIRED`.
+Nothing starts until you restore these fields or restart the dispatcher.
 It selects criteria in the configured workspace. Repository mappings bound Task publication.
 It excludes criteria with active Tasks and criteria whose Tasks are all completed.
 It includes a criterion with blocked Tasks even when a sibling Task is completed.

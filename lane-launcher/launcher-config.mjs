@@ -68,3 +68,8 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   }
   return config;
 }
+
+// The dispatcher lock, reservations and queue belong to these fields. A reload never changes them.
+export const dolberIdentity = config => ({workspace: config.workspace, url: config.joppa.url,
+  mcpCommand: config.joppa.mcpCommand ?? null, id: config.id,
+  stateDir: fs.existsSync(config.stateDir) ? fs.realpathSync(config.stateDir) : config.stateDir});
