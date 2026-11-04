@@ -8,6 +8,9 @@ import context_reads
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
+# A failed release needs one save and one assess per criterion in a single batch.
+RELEASE_OPERATIONS = 2
+MAX_CLAIMED_CRITERIA = MAX_BATCH // RELEASE_OPERATIONS
 KEEP = object()
 
 
@@ -52,6 +55,9 @@ def not_ready(target, code):
 def claim_operations(assignment, criteria, assignee):
     """One save per AC at the revision read for this plan. A stale write refuses the batch."""
     objects, questions = assignment["joppa"]["objects"], assignment["joppa"].get("questions", {})
+    require(len(criteria) <= MAX_CLAIMED_CRITERIA,
+            f"Requirement has {len(criteria)} criteria; a failed release needs {RELEASE_OPERATIONS} operations per "
+            f"criterion in one batch of at most {MAX_BATCH}, so claim at most {MAX_CLAIMED_CRITERIA}; no claim was sent")
     operations = []
     for item in criteria:
         object = objects[item["id"]]
@@ -59,7 +65,6 @@ def claim_operations(assignment, criteria, assignee):
         require(not assignee_of(object), f"Requirement already has an active planning run on {item['id']}")
         operations.append({"command": save_command(object, assignee, "Take this criterion for Crew planning.",
                                                    questions.get(object["kind"]))})
-    require(len(operations) <= MAX_BATCH, f"Requirement claims exceed the Joppa batch limit of {MAX_BATCH} operations")
     return operations
 
 
@@ -184,10 +189,6 @@ def release(api, target, workspace, ac, reason, code=None):
             unassessed.append({"ac": address, "reason": f"revision {object['current_revision']} is not "
                                                         f"the claimed revision {expected.get(address)}"})
     require_fenced(operations)
-    if len(operations) > MAX_BATCH:
-        unassessed += [{"ac": item["command"]["target"], "reason": "batch limit"} for item in operations
-                       if item["command"]["op"] == "assess"]
-        operations = [item for item in operations if item["command"]["op"] != "assess"]
     extra = {"failure_code": code, "unassessed_claims": unassessed} if code else {}
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
