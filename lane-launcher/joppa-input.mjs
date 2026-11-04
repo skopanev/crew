@@ -1,5 +1,5 @@
 import {contractDigest, executionId} from './joppa-common.mjs';
-import {taskContract} from './task-contract.mjs';
+import {taskContract, taskBody} from './task-contract.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -62,22 +62,35 @@ export function latestRecovery(config, object, digest = contractDigest(object), 
   return recovery;
 }
 
+// Rendered check lines of one Task: structured data.checks, or the Checks section of an inline contract.
+export function taskChecks(data) {
+  if (Array.isArray(data?.checks)) return data.checks.filter(text);
+  const body = taskBody(data);
+  return typeof body === 'string' ? (body.split(/\r?\nChecks:\r?\n/)[1] || '').split(/\r?\n/).filter(text) : [];
+}
+
 // Criterion checks that the lane must bind to verified tests: [{ac, check}]. A bare AC ID reads as the parent type.
-export function testAcceptance(object) {
+// Each row must name the Task parent or a covered criterion, and one of the Task checks. Otherwise a row could
+// create a test node under an unrelated criterion that no claim guards.
+export function testAcceptance(object, covers = []) {
   const rows = object.document?.data?.acceptance;
   if (rows === undefined || rows === null) return null;
   const parent = String(object.document.parent || ''), kind = parent.slice(0, parent.indexOf(':'));
   require(Array.isArray(rows) && rows.every(row => row && text(row.ac) && text(row.check)),
     `BINDING_INVALID: ${object.address} data.acceptance needs [{ac, check}]`);
+  const checks = new Set(taskChecks(object.document.data)), scope = new Set([parent, ...covers]);
   const result = [];
   for (const row of rows) {
     const item = {ac: row.ac.includes(':') ? row.ac : `${kind}:${row.ac}`, check: row.check};
+    require(scope.has(item.ac), `BINDING_INVALID: ${object.address} acceptance names ${item.ac}, ` +
+      'which is neither its parent nor a covered criterion');
+    require(checks.has(item.check), `BINDING_INVALID: ${object.address} acceptance check is not a Task check: ${item.check}`);
     if (!result.some(other => other.ac === item.ac && other.check === item.check)) result.push(item);
   }
   return result;
 }
 
-export function taskInput(config, object, contexts = object.contexts) {
+export function taskInput(config, object, contexts = object.contexts, covers = []) {
   require(object.document?.present === true && object.historical === false, 'Joppa Task is absent or historical');
   const data = object.document.data;
   const contract = taskContract(data);
@@ -98,7 +111,7 @@ export function taskInput(config, object, contexts = object.contexts) {
     body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
-    ...(testAcceptance(object) ? {testAcceptance: testAcceptance(object)} : {}),
+    ...(testAcceptance(object, covers) ? {testAcceptance: testAcceptance(object, covers)} : {}),
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,
       instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(modulePaths)}. Complete only the remaining work.`}} : {})}};

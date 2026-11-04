@@ -15,6 +15,8 @@ import test_report
 
 RECORD = "test-bindings-receipt.json"
 BINDINGS = "test-bindings.json"
+# Joppa limits each changed scalar data value, also inside lists and objects.
+MAX_VALUE = 1024
 
 
 class Refused(ValueError):
@@ -45,8 +47,10 @@ def parse(value):
     rows = []
     for row in value:
         if (not isinstance(row, dict) or set(row) != {"task", "ac", "check", "test"}
-                or not all(isinstance(row[name], str) and row[name].strip() for name in row)):
-            raise Refused("BINDING_INVALID", "each binding needs exactly task, ac, check and test")
+                or not all(isinstance(row[name], str) and row[name].strip() and len(row[name]) <= MAX_VALUE
+                           for name in row)):
+            raise Refused("BINDING_INVALID", f"each binding needs exactly task, ac, check and test "
+                                             f"of at most {MAX_VALUE} characters")
         item = {"task": row["task"], "ac": row["ac"], "check": row["check"], "test": row["test"]}
         if item not in rows:
             rows.append(item)
@@ -80,12 +84,18 @@ def write(path, value):
     temporary.replace(path)
 
 
-def bind(gates):
-    """gates is artifacts/gates. Run after gates.py run and verify in the same node."""
+def invalidate(gates):
+    """A new gate run makes any earlier record stale."""
+    (gates.parent / RECORD).unlink(missing_ok=True)
+
+
+def bind(gates, receipt_path=None):
+    """gates is artifacts/gates. gates.py run binds each passing receipt before it becomes current.
+    gates.py bindings binds the current receipt again. Neither runs a check."""
     artifacts = gates.parent
     record = artifacts / RECORD
     # Invalidate an earlier record before any check.
-    record.unlink(missing_ok=True)
+    invalidate(gates)
     ticket_file = artifacts / "ticket.json"
     # The host recomputes the required rows from its claim. A missing ticket file only skips this early check.
     ticket = json.loads(ticket_file.read_text()) if ticket_file.is_file() else {}
@@ -93,14 +103,17 @@ def bind(gates):
     if not expected:
         print("bindings: no Task data.acceptance; nothing to bind")
         return
-    pointer = json.loads((gates / "current.json").read_text())
-    receipt_path = Path(pointer["receipt"]).resolve()
-    if not receipt_path.is_relative_to(gates.resolve()) or digest(receipt_path) != pointer["sha256"]:
-        raise Refused("BINDING_FROZEN_MISMATCH", "gate receipt is outside this run or has changed")
+    if receipt_path is None:
+        pointer = json.loads((gates / "current.json").read_text())
+        receipt_path = Path(pointer["receipt"]).resolve()
+        if not receipt_path.is_relative_to(gates.resolve()) or digest(receipt_path) != pointer["sha256"]:
+            raise Refused("BINDING_FROZEN_MISMATCH", "gate receipt is outside this run or has changed")
+    receipt_path = Path(receipt_path).resolve()
     receipt = json.loads(receipt_path.read_text())
-    base = {"schema": 1, "receipt": str(receipt_path), "receipt_sha256": pointer["sha256"],
+    base = {"schema": 1, "receipt": str(receipt_path), "receipt_sha256": digest(receipt_path),
             "tree": receipt["tree"], "candidate_sha": receipt["candidate_sha"]}
-    if os.environ.get("VERIFY_ONLY") == "true":
+    # A final Requirement landing of a verification run clears VERIFY_ONLY and keeps this marker.
+    if "true" in (os.environ.get("VERIFY_ONLY"), os.environ.get("TEST_BINDINGS_VERIFY_ONLY")):
         # No coder ran. The host reports the gap; no test acceptance is recorded.
         write(record, {**base, "status": "verify_only"})
         print("bindings: BINDING_MISSING: verification run has no coder bindings")

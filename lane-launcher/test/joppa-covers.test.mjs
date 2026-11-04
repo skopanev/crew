@@ -20,7 +20,11 @@ const batches = f => f.calls.filter(call => call.name === 'joppa_batch');
 
 test('covering Task records each covered criterion as acceptance context', async t => {
   const f = await covering(t);
+  // An acceptance row can name a covered criterion with one of the Task checks.
+  Object.assign(f.objects.get('task:t1').document.data, {checks: ['Show => shown'],
+    acceptance: [{ac: 'ac:a2', check: 'Show => shown'}]});
   await claimTask(f.run, f.persist, f.runId);
+  assert.deepEqual(f.run.claim.ticket.testAcceptance, [{ac: 'ac:a2', check: 'Show => shown'}]);
   assert.deepEqual(f.run.claim.tasks[0].covers, ['ac:a2']);
   assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
   assert.equal(f.run.claim.ticket.coveredContexts[0].address, 'ac:a2');

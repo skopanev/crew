@@ -123,6 +123,7 @@ def run(root):
     # Invalidate the old pass before parsing the new plan or invoking any check.
     current = root / "current.json"
     current.unlink(missing_ok=True)
+    test_bindings.invalidate(root)
     commands = plan()
     timeout_text = os.environ.get("gate_timeout_seconds", "900")
     if not re.fullmatch(r"[1-9][0-9]*", timeout_text):
@@ -193,6 +194,8 @@ def run(root):
     print(path)
     if not receipt["passed"]:
         raise ValueError(f"checks failed or changed the candidate; receipt: {path}")
+    # Bind the test names to this receipt before it becomes current. A refusal leaves no current receipt.
+    test_bindings.bind(root, path)
     temporary = root / "current.tmp"
     temporary.write_text(json.dumps({"receipt": str(path), "sha256": digest(path)}))
     temporary.replace(current)

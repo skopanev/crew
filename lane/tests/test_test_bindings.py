@@ -103,6 +103,26 @@ class BindingTests(unittest.TestCase):
             test_bindings.bind(self.gates)
         self.assertEqual(self.record()["status"], "no_report")
 
+    def test_a_new_gate_run_binds_its_own_receipt_and_drops_the_old_record(self):
+        row = {"task": "work:t1", "ac": "criterion:a", "check": "c", "test": ONE}
+        self.bindings([row])
+        test_bindings.bind(self.gates)
+        newer = self.gates / "r2" / "receipt.json"
+        newer.parent.mkdir()
+        newer.write_text(json.dumps({"passed": True, "tree": "d" * 40, "candidate_sha": "e" * 40,
+                                     "test_report": {**CONFIG, "results": [{"test": ONE, "outcome": "pass"}]}}))
+        test_bindings.bind(self.gates, newer)
+        self.assertEqual((self.record()["receipt"], self.record()["tree"]), (str(newer.resolve()), "d" * 40))
+        test_bindings.invalidate(self.gates)
+        self.assertFalse((self.artifacts / test_bindings.RECORD).exists())
+
+    def test_long_values_and_final_verification_landing(self):
+        self.bindings([{"task": "work:t1", "ac": "criterion:a", "check": "c", "test": "x" * 1025}])
+        self.refused("BINDING_INVALID")
+        with mock.patch.dict(os.environ, {"TEST_BINDINGS_VERIFY_ONLY": "true"}):
+            test_bindings.bind(self.gates)
+        self.assertEqual(self.record()["status"], "verify_only")
+
 
 if __name__ == "__main__":
     unittest.main()

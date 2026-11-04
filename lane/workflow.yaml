@@ -512,13 +512,15 @@ nodes:
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then review_base="$(cat .git/lane-base)"; fi
       git diff --binary "${review_base}...HEAD" > "$MEDULLA_RUN_DIR/artifacts/diff.patch"
       export gate_commands="${review_commands:-$gate_commands}"
-      if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
-        echo "<signal:GATE_FAIL>candidate checks failed; see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
+      if ! gate_log="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" run 2>&1)"; then
+        printf '%s\n' "$gate_log" >&2
+        echo "<signal:GATE_FAIL>candidate checks failed: $(printf '%s' "$gate_log" | tail -n 1); see artifacts/gates for logs and receipts</signal:GATE_FAIL>"
         exit 0
       fi
+      printf '%s\n' "$gate_log" >&2
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
-      # Bind the coder's test names to this exact receipt. No check runs again.
+      # gates.py run already bound this receipt. Bind the current receipt again; no check runs again.
       if ! bindings="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" bindings 2>&1)"; then
         printf '%s\n' "$bindings" >&2
         echo "<signal:GATE_FAIL>test bindings refused: $(printf '%s' "$bindings" | tail -n 1)</signal:GATE_FAIL>"
@@ -797,6 +799,8 @@ nodes:
         fi
         # A failed final Task stays private. Retirement must not publish its code.
         # Existing-code verification still needs full gates before requirement delivery.
+        # Its gate runs bind no coder tests. The host reports that gap.
+        [ "${VERIFY_ONLY}" != true ] || export TEST_BINDINGS_VERIFY_ONLY=true
         export VERIFY_ONLY=false
         echo '<signal:var key=VERIFY_ONLY>false</signal:var>'
       fi

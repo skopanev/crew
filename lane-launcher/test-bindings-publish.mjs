@@ -37,8 +37,9 @@ export async function boundNodes({run, call, report}) {
 // After a recorded send: each bound name must be bound by Joppa and carry a result at this commit. Return gaps.
 export async function boundGaps({run, call, bound, sha}) {
   const read = (tool, args) => call(tool, {workspace: run.workspace, ...args});
-  const unbound = new Set(run.testResults.requests.flatMap(entry => entry.reply?.unbound || [])
-    .map(item => typeof item === 'string' ? item : item?.test));
+  // Joppa returns unbound as a list of test names.
+  const unbound = new Set(run.testResults.requests.flatMap(entry =>
+    Array.isArray(entry.reply?.unbound) ? entry.reply.unbound.filter(item => typeof item === 'string') : []));
   const gaps = [];
   for (const {ac, test, node} of bound) {
     if (unbound.has(test)) gaps.push(`TEST_RESULTS_UNBOUND: Joppa did not bind ${test} for ${ac}`);
