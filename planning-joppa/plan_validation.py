@@ -13,7 +13,9 @@ from task_contracts import MAX_DATA_VALUE, title_limit, unclaimed, editable, ret
 def validate(plan, assignment):
     if assignment["joppa"].get("scope") != "requirement":
         return validate_one(plan, assignment)
-    selected = {item["id"] for item in context.selected_criteria(assignment)}
+    # Validate in assignment order so the first reported failure is stable.
+    order = list(dict.fromkeys(item["id"] for item in context.selected_criteria(assignment)))
+    selected = set(order)
     require(all(task.get("ac") in selected for task in plan.get("tasks", [])),
             "Task must belong to a selected Requirement criterion")
     require(all(check.get("ac") in selected for check in plan.get("acceptance_checks", [])),
@@ -47,7 +49,7 @@ def validate(plan, assignment):
         for dependency in task.get("depends_on", []):
             require(dependency in local or dependency in assignment["joppa"]["objects"],
                     f"dependency was not read in the Requirement context: {dependency}")
-    for address in selected:
+    for address in order:
         value = criterion_plan(plan, assignment, address)
         own = {task["id"] for task in value["tasks"]}
         for task in value["tasks"]:
