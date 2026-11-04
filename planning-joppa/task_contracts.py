@@ -15,8 +15,9 @@ def unclaimed(task):
     process = task["process"]
     require(not process.get("done") and not process.get("retired"),
             "completed or retired Tasks cannot be rewritten")
-    require(not process.get("assignee") and not process.get("claim")
-            and process.get("status") != "in_progress", "claimed Tasks cannot be rewritten by Crew planning")
+    # A Task is active while data.assignee names a worker.
+    require(not process.get("assignee") and not task["document"]["data"].get("assignee"),
+            "claimed Tasks cannot be rewritten by Crew planning")
 
 def editable(task):
     unclaimed(task)

@@ -149,40 +149,41 @@ def pending_work(api, config, assignment):
         try:
             return pending_work_page(api, config, assignment)
         except Rejected as error:
-            if "task queue changed; start again without cursor" not in str(error) or attempt == 2:
+            if "start again without cursor" not in str(error) or attempt == 2:
                 raise
 
 def pending_work_page(api, config, assignment):
     """Locate unfinished work across Requirements. Full reads still bind reuse and dependencies."""
+    from joppa_reads import task_state
     visible = set(assignment["joppa"]["objects"])
     projects = {name for repo in config["repositories"] for name in (repo["project"], repo["project"].split(":", 1)[1])}
-    result, cursor = [], None
+    result, cursor, seen = [], None, set()
     while True:
-        args = {"workspace": config["workspace"], "view": "all", "limit": 100}
+        # Lists give current Tasks only. Archived Tasks are done or retired.
+        args = {"workspace": config["workspace"], "kind": assignment["joppa"]["task_type"], "parent": "*",
+                "limit": 25, "fields": ["title", "parent", "revision", "data.projects"]}
         if cursor:
             args["cursor"] = cursor
-        page = api.call("joppa_tasks", args)
-        for task in page["tasks"]:
-            address = task.get("address") or f"task:{task['req']}/{task['id']}"
-            if task["status"] in ("done", "retired") or address in visible:
+        page = api.call("joppa_objects", args)
+        for task in page["items"]:
+            address = task["address"]
+            if address in visible or not projects.intersection(task.get("data.projects") or []):
                 continue
-            if not projects.intersection(task.get("projects", [])):
+            document = object_read(api, config["workspace"], address, allow_archived=True)
+            status = task_state(document)
+            if status in ("done", "retired"):
                 continue
-            document = object_read(api, config["workspace"], address)
             contract = task_contract(document["document"]["data"])
             def field(name):
                 match = re.search(r"^" + name + r":[ \t]*([^\r\n]+)$", contract, re.M)
                 return match[1].strip() if match else None
             how = re.search(r"^How:\s*\n(.*?)(?:\nChecks:|\Z)", contract, re.M | re.S)
-            ac = task.get("parent") or task.get("ac")
-            req = task.get("req")
-            legacy_ac = task.get("ac")
-            if not req and isinstance(legacy_ac, str) and "/" in legacy_ac:
-                req = legacy_ac.removeprefix("ac:").split("/", 1)[0]
-            result.append({"address": address, "revision": task["revision"], "title": task["title"],
-                "ac": ac, "requirement": req, "status": task["status"],
-                "repository": field("Repository"), "module": field("Module"),
+            result.append({"address": address, "revision": document["current_revision"],
+                "title": document["document"]["data"].get("title"), "ac": document["document"].get("parent"),
+                "status": status, "repository": field("Repository"), "module": field("Module"),
                 "how": " ".join(how[1].split()) if how else None})
         cursor = page.get("next_cursor")
         if not cursor:
             return result
+        require(cursor not in seen, "Task list pagination did not advance")
+        seen.add(cursor)

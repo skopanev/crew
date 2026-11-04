@@ -3,10 +3,11 @@ import re
 import json
 import os
 from pathlib import Path
-from common import run, signal, digest, require, write
+from common import read, run, signal, digest, require, write
 import stages as shared
 import context
 import publication
+import planning_claims as claims
 
 
 def settings():
@@ -130,14 +131,13 @@ def retry_startup(api, config, target, assignment, ac, advertised):
              if not task["document"]["data"].get("archived")
              and not task["process"].get("done") and not task["process"].get("retired")]
     if not tasks or not all(isinstance(task["process"].get("blocked"), dict)
-                           and task["process"]["blocked"].get("reason") == "WORKTREE_PREEXISTED" for task in tasks):
+                           and "WORKTREE_PREEXISTED" in str(task["process"]["blocked"].get("reason")) for task in tasks):
         return False
-    require("unblock_task" in advertised, "Startup retry requires deployed unblock_task; no research was started")
-    require(len(tasks) <= 99, "Startup retry supports at most 99 Tasks in one atomic batch")
+    require('"assess"' in advertised, "Startup retry requires deployed assess; no research was started")
+    require(len(tasks) <= 98, "Startup retry supports at most 98 Tasks in one atomic batch")
+    # The block assessment holds the Tasks. The AC itself must be ready for work.
+    require(ac.get("work_ready") is True, "Startup retry requires a ready AC")
     for item in [ac, *tasks]:
-        require(item.get("work_ready") is True and item.get("review_required") is False
-                and item["process"].get("review_required") is not True,
-                "Startup retry requires current owner-reviewed AC and Task contracts")
         require(item["document"].get("present") is True and not item["document"]["data"].get("archived"),
                 "Startup retry requires live objects")
     operations = []
@@ -158,20 +158,18 @@ def retry_startup(api, config, target, assignment, ac, advertised):
                     for project in (repo["project"], repo["project"].split(":", 1)[1])),
                 "Task projects do not include its configured repository")
         require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
-        operations.append({"command": {"op": "unblock_task", "id": task["address"].split(":", 1)[1],
-            "revision": task["current_revision"], "reason": "Retry startup after removing the retained worktree.",
-            "evidence": task["process"]["blocked"].get("evidence", "")}})
-    operations.append({"command": {"op": "finish_planning", "ac": ac["address"],
-        "reason": "Retry startup with the same owner-reviewed Task contracts."}})
+        operations.append({"command": claims.assess(task["address"],
+            "Retry startup after removing the retained worktree.")})
     claim = read(target / "claim.json")
-    publication.held(api, config["workspace"], ac["address"], claim["result"]["position"], claim["actor"])
+    claims.owned(api, config["workspace"], claim)
+    operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts.",
+                                                assignment["joppa"].get("questions", {}).get(ac["kind"])))
     print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
         "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
         "workspace": config["workspace"], "operations": operations}, retain_claim=True)
     results = result.get("results")
-    require(isinstance(results, list) and len(results) == len(operations)
-            and results[-1].get("command", {}).get("op") == "finish_planning",
+    require(isinstance(results, list) and len(results) == len(operations),
             "startup publication response is incomplete; inspect publication.json")
     write(target / "result.json", {"status": "published", "scope": "startup_retry", "ac": ac["address"],
         "acceptance_verified": False, "task_count": len(tasks), "publication": result})

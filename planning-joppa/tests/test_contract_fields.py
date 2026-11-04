@@ -115,27 +115,6 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'recovery step 0 scope mismatch'):
             publication.operations(value, data)
 
-    def test_pending_work_hydrates_structured_queue_rows_without_a_projection_change(self):
-        data, value = assignment(), plan()
-        fields = publication.contract_fields(value['tasks'][0])
-        obj = item('work:outside', 'criterion:outside', fields)
-        calls = []
-        class Server:
-            def call(self, name, args):
-                calls.append((name, args))
-                if name == 'joppa_tasks':
-                    return {'tasks': [{'address': obj['address'], 'revision': 3, 'title': 'Outside',
-                        'projects': ['p'], 'status': 'open', 'body': context.task_contract(fields)[:300]}], 'next_cursor': None}
-                self_address = args['address']
-                if self_address != obj['address']:
-                    raise AssertionError(self_address)
-                return deepcopy(obj)
-        result = context.pending_work(Server(), {'workspace': 'example', 'repositories': data['repositories']}, data)
-        self.assertEqual(result[0]['repository'], 'service')
-        self.assertEqual(result[0]['module'], 'core')
-        self.assertIn('Use the existing mechanism', result[0]['how'])
-        self.assertEqual([name for name, args in calls], ['joppa_tasks', 'joppa_objects'])
-
     def test_legacy_inline_contract_is_written_as_body_without_changing_the_source(self):
         data, value = assignment(), plan()
         task = value['tasks'][0]

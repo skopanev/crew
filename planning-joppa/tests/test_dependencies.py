@@ -70,7 +70,7 @@ class ProviderTests(unittest.TestCase):
                       depends_on=["first", "work:dependency"])
         value["tasks"].append(second)
         ops = publication.operations(value, data)
-        self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "finish_planning"])
+        self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "save_object", "assess"])
         saved = ops[1]["command"]
         self.assertEqual(saved["data"]["owner"], "document-owner")
         self.assertEqual(saved["data"]["custom"], "preserve")
@@ -87,9 +87,10 @@ class ProviderTests(unittest.TestCase):
     def test_refuses_occupied_work(self):
         value = plan()
         value["tasks"][0].update(action="update", target="work:old", revision=3)
-        for field, setting in (("assignee", "worker"), ("claim", {"actor": "worker"}), ("status", "in_progress")):
+        for place in ("process", "data"):
             data = assignment()
-            data["joppa"]["tasks"][0]["process"][field] = setting
+            task = data["joppa"]["tasks"][0]
+            (task["process"] if place == "process" else task["document"]["data"])["assignee"] = "worker"
             with self.assertRaisesRegex(ValueError, "claimed Tasks"):
                 publication.operations(value, data)
 
@@ -106,12 +107,12 @@ class ProviderTests(unittest.TestCase):
         del second["target"], second["revision"]
         value["tasks"].append(second)
         commands = publication.operations(value, data)
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(len(commands), 3)
         self.assertEqual(commands[0]["command"]["data"]["title"], "Consume existing work")
         self.assertIn({"target": "work:old", "revision": 3, "relation": "depends_on", "blocking": True},
                       commands[0]["command"]["links"])
         value["tasks"] = [first]
-        self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["finish_planning"])
+        self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["save_object", "assess"])
 
     def test_rejects_stale_and_completed_updates_and_unknown_dependencies(self):
         value = plan()
