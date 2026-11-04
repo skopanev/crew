@@ -48,6 +48,7 @@ REQUIREMENT_CONTRACT = """Plan all selected criteria in this Requirement as one 
 The input joppa.criteria lists the selected ACs. Each Task needs its exact ac address.
 Include criteria: [{ac: full-address, disposition: implement or verify_existing}] for every selected AC.
 Every acceptance_check also needs its exact ac address. Keep complete mechanisms and observable checks.
+Put each acceptance_check in the checks of a Task with the same ac and repository, because a Task under another AC does not satisfy it.
 Each Task runs and lands independently. Keep each Task within one repository and module.
 Declare depends_on only when a Task requires another Task's delivered output, including within this Requirement.
 Use joppa.task_title_max_by_repository for the maximum unnumbered title length in each repository.
