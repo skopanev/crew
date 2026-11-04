@@ -1,6 +1,7 @@
 """Hold criteria for planning with the generic data.assignee field of each AC."""
 from copy import deepcopy
 from pathlib import Path
+import re
 import socket
 
 from common import read, require, write
@@ -59,8 +60,9 @@ def not_ready(target, code):
 
 
 def note(target, notes):
-    """A native Joppa note on one released AC. It adds no revision."""
-    return {"op": "note", "target": target, "id": notes["id"], "text": notes["text"]}
+    """A native Joppa note on one released AC. It adds no revision. The id is unique for each AC."""
+    local = re.sub(r"[^A-Za-z0-9._-]", "-", target.split(":", 1)[-1])[:64]
+    return {"op": "note", "target": target, "id": f"{notes['id']}-{local}", "text": notes["text"]}
 
 
 def claim_operations(assignment, criteria, assignee):
@@ -213,7 +215,7 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
             operations.append({"command": not_ready(address, code)})
         if with_notes:
             operations.append({"command": note(address, notes)})
-            noted.append(notes["id"])
+            noted.append(operations[-1]["command"]["id"])
     require_fenced(operations)
     require(len(operations) <= MAX_BATCH, f"release needs {len(operations)} operations, more than one batch of "
             f"{MAX_BATCH}; claim retained for recovery")

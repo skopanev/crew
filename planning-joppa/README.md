@@ -200,7 +200,7 @@ The planner refuses publication when a blocked Task keeps its contract and is no
 The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
 Any other rejected publication applied nothing. The failure release then saves and assesses each held AC not ready.
 When a critic rejects the plan after the last revision round, the same release batch adds one native Joppa `note`
-to each released AC. The note has the run ID, the plan digest prefix and at most three blocking findings
+to each released AC, with an id unique to that AC. The note has the run ID, the plan digest prefix and at most three blocking findings
 (claim and resolution, with the critic seat). The next planning pass reads it as AC context. It is evidence to
 verify against current code, not an instruction. Only the explicit critic rejection of the current plan writes it.
 Other failures, stale or malformed verdicts and ACs that the release skips get no note.
