@@ -164,6 +164,10 @@ The same publication removes blocking links to that Task from remaining Tasks.
 It preserves completed and retired Tasks.
 Before publication reopens a blocked Task, the planner discards its retained checkout.
 Set `worktree_root` to the Dolber worktree root and `lane_runs_folder` to its dispatcher runs directory.
+When Tasks of one workspace use more than one dispatcher, set `lane_runs_folders` instead.
+It is a nonempty list of absolute dispatcher runs directories. Do not set both fields.
+Cleanup reads every listed folder before it deletes a checkout.
+A Run ID in more than one folder stops cleanup. No runs folder can be inside a checkout that cleanup deletes.
 Cleanup requires a block Run ID and finished failed lane receipts for that Task.
 Active, held and unconfirmed successful runs prevent cleanup. The planner never archives the checkout.
 It deletes no checkout unless the publication updates or retires its blocked Task.

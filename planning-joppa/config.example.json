@@ -4,7 +4,10 @@
   "mcp_command": ["node", "/path/to/broker-joppa-host.cjs"],
   "runs_folder": "/path/to/private/planning-runs",
   "worktree_root": "/path/to/source-root/.worktrees",
-  "lane_runs_folder": "/path/to/lane-state/crew-dispatchers/dispatcher-id/runs",
+  "lane_runs_folders": [
+    "/path/to/lane-state/crew-dispatchers/service-dispatcher-id/runs",
+    "/path/to/lane-state/crew-dispatchers/web-dispatcher-id/runs"
+  ],
   "cbm_store": "/path/to/shared/cbm-store",
   "cbm_root": "/path/to/source-root",
   "equill_store": "/path/to/equill-store",

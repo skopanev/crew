@@ -199,6 +199,19 @@ def criterion_assignment(assignment, address):
     return result
 
 
+def lane_runs_folders(config):
+    """Return the lane runs folders from lane_runs_folder or lane_runs_folders. Cleanup uses the same rule."""
+    single, many = config.get("lane_runs_folder") is not None, config.get("lane_runs_folders") is not None
+    require(not (single and many), "set lane_runs_folder or lane_runs_folders, not both")
+    if not many:
+        return [config["lane_runs_folder"]] if single else []
+    folders = config["lane_runs_folders"]
+    require(isinstance(folders, list) and folders and all(isinstance(value, str) and value and
+            Path(value).expanduser().is_absolute() for value in folders) and len(set(folders)) == len(folders),
+            "lane_runs_folders must be a nonempty list of distinct absolute paths")
+    return folders
+
+
 def configuration(path):
     config = read(path)
     for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
@@ -215,14 +228,20 @@ def configuration(path):
             continue
         value = Path(config[key]).expanduser()
         config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
-    require(bool(config.get("worktree_root")) == bool(config.get("lane_runs_folder")),
-            "worktree_root and lane_runs_folder must be configured together")
-    for key in ("worktree_root", "lane_runs_folder"):
-        if key not in config:
-            continue
-        value = Path(text(config[key], "config." + key)).expanduser()
+    folders = lane_runs_folders(config)
+    require(bool(config.get("worktree_root")) == bool(folders),
+            "worktree_root and lane runs folders must be configured together")
+
+    def cleanup_path(value, key):
+        value = Path(text(value, "config." + key)).expanduser()
         require(".." not in value.parts, "cleanup path cannot contain parent traversal")
-        config[key] = str(value if value.is_absolute() else root / value)
+        return str(value if value.is_absolute() else root / value)
+    if "worktree_root" in config:
+        config["worktree_root"] = cleanup_path(config["worktree_root"], "worktree_root")
+    if "lane_runs_folders" in config:
+        config["lane_runs_folders"] = [cleanup_path(value, "lane_runs_folders") for value in folders]
+    elif folders:
+        config["lane_runs_folder"] = cleanup_path(folders[0], "lane_runs_folder")
     for repo in config["repositories"]:
         text(repo.get("project"), "repository.project address")
         require(":" in repo["project"], "repository.project must be a full object address")
