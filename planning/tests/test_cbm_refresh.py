@@ -25,16 +25,22 @@ if tool == "index_repository":
     if plan.get("touch") == name:
         open(os.path.join(flags["--repo-path"], "moved.txt"), "w").write("moved\n")
     if plan.get("index_error") == name:
-        print(json.dumps({"isError": True, "content": [{"type": "text", "text": "failed"}]}))
+        print(json.dumps({"isError": True, "content": [{"type": "text", "text": "index failed: disk full"}]}))
         sys.exit(0)
     project = plan.get("index_project", {}).get(name, name)
     text = json.dumps({"project": project, "excluded": {}, "not_indexed_files_count": 5})
 else:
     name = flags["--project"]
-    status = plan.get("status", {}).get(name, "ready")
-    root = plan.get("root", {}).get(name, plan["roots"][name])
-    text = (f"project: {name}\nnodes: 1775\nedges: 8189\nstatus: {status}\nroot_path: {root}\n"
-            "indexed_at: 2026-11-04T09:39:02Z\nparse_partial:\n  files: 0\n  status: partial\n")
+    if plan.get("status_missing") == name:
+        text = json.dumps({"error": "project not found or not indexed",
+                           "hint": "Use list_projects to see indexed projects", "available_projects": []})
+        print(json.dumps({"content": [{"type": "text", "text": text}]}))
+        sys.exit(0)
+    status = {"project": name, "nodes": 1775, "edges": 8189, "status": plan.get("status", {}).get(name, "ready"),
+              "root_path": plan.get("root", {}).get(name, plan["roots"][name]),
+              "indexed_at": "2026-11-04T09:39:02Z", "parse_partial": {"files": 0}}
+    print(json.dumps({"content": [{"type": "text", "text": json.dumps(status)}], "structuredContent": status}))
+    sys.exit(0)
 print(json.dumps({"content": [{"type": "text", "text": text}]}))
 '''
 
@@ -91,7 +97,7 @@ class RefreshIndexTests(unittest.TestCase):
         for repo in self.repos:
             root, name = os.path.realpath(repo["path"]), repo["cbm_project"]
             expected += [["cli", "--json", "index_repository", "--repo-path", root, "--name", name, "--persistence", "false"],
-                         ["cli", "--json", "index_status", "--project", name]]
+                         ["cli", "--json", "index_status", "--project", name, "--format", "json"]]
         self.assertEqual(self.calls(), expected)
 
     def test_a_later_wrong_binding_refuses_before_any_index_call(self):
@@ -104,6 +110,26 @@ class RefreshIndexTests(unittest.TestCase):
     def test_index_status_not_ready_refuses(self):
         self.refused("alpha: CBM project alpha-project is not ready", status={"alpha-project": "indexing"})
 
+    def test_unknown_project_status_refuses_with_the_cbm_error(self):
+        self.refused("CBM index_status failed: project not found or not indexed", status_missing="beta-project")
+
+    def test_all_cli_calls_share_one_deadline(self):
+        clock, timeouts, real_run = [1000.0], [], tools.run
+        def timed_run(argv, timeout=45, **kwargs):
+            timeouts.append(timeout)
+            clock[0] += 100
+            return real_run(argv, timeout=timeout, **kwargs)
+        with patch.object(tools.time, "monotonic", lambda: clock[0]), patch.object(tools, "run", timed_run):
+            self.refused("beta: CBM refresh used its 240 s budget before index_status")
+        self.assertEqual(timeouts, [240, 140, 40])
+        self.assertEqual([call[2] for call in self.calls()], ["index_repository", "index_status", "index_repository"])
+
+    def test_a_cli_timeout_refuses_clearly(self):
+        def slow(argv, timeout=45, **kwargs):
+            raise subprocess.TimeoutExpired(argv, timeout)
+        with patch.object(tools, "run", slow):
+            self.refused("CBM index_repository did not finish within 240 s")
+
     def test_index_status_root_mismatch_refuses(self):
         self.refused("beta: CBM project beta-project is not ready", root={"beta-project": "/elsewhere"})
 
@@ -111,7 +137,7 @@ class RefreshIndexTests(unittest.TestCase):
         self.refused("alpha: source changed during the CBM refresh", touch="alpha-project")
 
     def test_index_error_or_other_project_refuses(self):
-        self.refused("CBM index_repository failed", index_error="alpha-project")
+        self.refused("CBM index_repository failed: index failed: disk full", index_error="alpha-project")
         self.refused("beta: CBM did not index beta-project: .*other", index_project={"beta-project": "other"})
 
 

@@ -28,7 +28,7 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
     target = artifacts()
     rows = indexed_projects() if projects is None else projects
     write(target / "cbm-projects.json", rows)
-    # Check every project binding first, then rebuild each index in memory against an unchanged source.
+    # Check every project binding first, then reindex each project against an unchanged source.
     write(target / "snapshots.json", refresh_index(assignment["repositories"], rows))
     with ThreadPoolExecutor(max_workers=3) as pool:
         contracts = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
