@@ -23,8 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
-
+from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac
 
 class ProviderTests(unittest.TestCase):
     def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
@@ -34,8 +33,7 @@ class ProviderTests(unittest.TestCase):
             old.mkdir(parents=True)
             current.mkdir(parents=True)
             (old / "claim.json").write_text(json.dumps({"status": "confirmed", "server": "https://example.invalid/mcp",
-                "arguments": {"workspace": "example", "operations": [
-                    {"command": {"op": "claim_planning", "ac": address}} for address in ("criterion:a", "criterion:b")]}}))
+                **{key: value for key, value in claim_receipt(["criterion:a", "criterion:b"]).items() if key != "server"}}))
             release = {"status": "confirmed", "released": ["criterion:b"],
                        "skipped_claims": [{"ac": "criterion:a", "unknown": True, "reason": "planning claim could not be read"}]}
             (old / "release.json").write_text(json.dumps(release))
@@ -52,41 +50,38 @@ class ProviderTests(unittest.TestCase):
     def test_requirement_claim_release_is_atomic_and_checks_every_holder(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            receipt = {"status": "confirmed", "holders": {"criterion:a": "planner", "criterion:b": "planner"},
-                "arguments": {"workspace": "example", "operations": [
-                    {"command": {"op": "claim_planning", "ac": address, "revision": 3}}
-                    for address in ("criterion:a", "criterion:b")]},
-                "result": {"results": [{"position": 22}, {"position": 23}]}}
+            receipt = claim_receipt(["criterion:a", "criterion:b"])
             (target / "claim.json").write_text(json.dumps(receipt))
+            holders = {"criterion:a": MARK, "criterion:b": MARK}
             class Server(Fake):
                 def call(self, name, args):
                     self.calls.append((name, deepcopy(args)))
                     if name == "joppa_objects":
-                        return {"process": {"planning_claim": {"actor": "planner", "position":
-                            22 if args["address"] == "criterion:a" else 23}}}
+                        return raw_ac(args["address"], holders[args["address"]])
                     return {"results": [{"position": 24}, {"position": 25}]}
             api = Server()
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             name, arguments = api.calls[-1]
             self.assertEqual(name, "joppa_batch")
-            self.assertEqual([entry["command"]["ac"] for entry in arguments["operations"]],
-                             ["criterion:a", "criterion:b"])
+            # Each release saves the full current document at its current revision without data.assignee.
+            self.assertEqual([entry["command"] for entry in arguments["operations"]], [
+                {"op": "save_object", "kind": "criterion", "id": key, "revision": 4, "parent": "rule:r",
+                 "data": {"title": "criterion:" + key, "owner": "owner", "custom": "keep"},
+                 "links": [{"blocking": False, "relation": "related", "revision": None, "target": "note:n"}],
+                 "reason": "Failure", "question_checked": "Which rule?"} for key in ("a", "b")])
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
             (target / "release.json").unlink()
-            class Replaced(Server):
-                def call(self, name, args):
-                    result = super().call(name, args)
-                    if name == "joppa_objects" and args["address"] == "criterion:b":
-                        result["process"]["planning_claim"] = {"actor": "another-planner", "position": 26}
-                    return result
-            api = Replaced()
+            holders["criterion:b"] = "crew-planning:other:run-2"
+            api = Server()
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
-            self.assertEqual([entry["command"]["ac"] for entry in api.calls[-1][1]["operations"]], ["criterion:a"])
+            self.assertEqual([entry["command"]["id"] for entry in api.calls[-1][1]["operations"]], ["a"])
             release = read(target / "release.json")
             self.assertEqual(release["released"], ["criterion:a"])
             self.assertEqual(release["skipped_claims"][0]["ac"], "criterion:b")
-            with self.assertRaisesRegex(ValueError, "does not hold"):
-                publication.held_claims(api, "example", receipt)
+            with self.assertRaisesRegex(ValueError, "does not hold the planning claim criterion:b"):
+                publication.owned(api, "example", receipt)
+            holders["criterion:b"] = MARK
+            self.assertEqual(publication.owned(api, "example", receipt), holders)
             (target / "release.json").unlink()
             class Uncertain(Server):
                 def call(self, name, args):
@@ -109,7 +104,7 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(read(target / "release.json")["released"], ["criterion:b"])
             self.assertTrue(read(target / "release.json")["skipped_claims"][0]["unknown"])
-            self.assertEqual([entry["command"]["ac"] for entry in api.calls[-1][1]["operations"]], ["criterion:b"])
+            self.assertEqual([entry["command"]["id"] for entry in api.calls[-1][1]["operations"]], ["b"])
             previous_calls = len(api.calls)
             self.assertFalse(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(len(api.calls), previous_calls)
@@ -145,7 +140,7 @@ class ProviderTests(unittest.TestCase):
     def test_uncertain_publication_keeps_claim_and_never_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner", "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}))
+            (target / "claim.json").write_text(json.dumps(claim_receipt(["criterion:a"])))
             api = Fake(error=MCPError("transport failed"))
             with self.assertRaises(MCPError):
                 publication.mutate(api, target / "publication.json", "joppa_batch", {"workspace": "example", "operations": []})
@@ -160,15 +155,17 @@ class ProviderTests(unittest.TestCase):
     def test_confirmed_failure_releases_only_the_same_claim(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            (target / "claim.json").write_text(json.dumps({"status": "confirmed", "result": {"position": 22}, "actor": "planner", "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}))
-            api = Fake(result={"process": {"planning_claim": {"actor": "other", "position": 22}}})
+            (target / "claim.json").write_text(json.dumps(claim_receipt(["criterion:a"])))
+            api = Fake(result=raw_ac("criterion:a", "crew-planning:other:run-2"))
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             self.assertEqual(len(api.calls), 1)
             self.assertEqual(read(target / "release.json")["skipped_claims"][0]["ac"], "criterion:a")
             (target / "release.json").unlink()
-            api = Fake(result={"process": {"planning_claim": {"actor": "planner", "position": 22}}})
+            api = Fake(result=raw_ac("criterion:a", MARK))
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
-            self.assertEqual(api.calls[-1][1]["command"]["op"], "release_planning")
+            command = api.calls[-1][1]["operations"][0]["command"]
+            self.assertEqual((command["op"], command["revision"], command["data"]),
+                             ("save_object", 4, {"title": "criterion:a", "owner": "owner", "custom": "keep"}))
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
 
     def test_rejected_blocked_task_update_keeps_the_planning_claim(self):
@@ -199,16 +196,18 @@ class ProviderTests(unittest.TestCase):
                 if active_blocked:
                     task["steps"].append("Record the exact remaining failure.")
                 for name, body in {"input": data, "plan": value, "joppa-snapshot": {},
-                    "claim": {"status": "confirmed", "actor": "planner", "result": {"position": 22}, "arguments": {"workspace": "example", "command": {"op": "claim_planning", "ac": "criterion:a"}}}}.items():
+                    "claim": claim_receipt(["criterion:a"])}.items():
                     (target / f"{name}.json").write_text(json.dumps(body))
                 class Server(Fake):
                     def call(self, name, args):
                         self.calls.append((name, deepcopy(args)))
                         if name == "joppa_objects":
-                            return {"process": {"planning_claim": {"actor": "planner", "position": 22}}}
-                        if name == "joppa_batch":
+                            return raw_ac(args["address"], MARK)
+                        # Publication contains Task work. A release saves only the AC without its assignee.
+                        if name == "joppa_batch" and any(op["command"].get("kind") != "criterion"
+                                                         for op in args["operations"]):
                             raise Rejected(refusal)
-                        return {"position": 23}
+                        return {"results": [{"position": 23}]}
                 api = Server()
                 with patch.object(stage, "settings", return_value={"workspace": "example"}), \
                      patch.object(stage.shared, "artifacts", return_value=target), \
@@ -216,7 +215,7 @@ class ProviderTests(unittest.TestCase):
                      patch.object(stage.context, "client", return_value=api), \
                      patch.object(stage.context, "read_assignment", return_value=data), \
                      patch.object(stage.context, "load", return_value=(data, {}, None)), \
-                     patch.object(stage.context, "planning_idle"), \
+                     patch.object(stage.claims, "planning_idle"), \
                      patch.object(stage, "run", return_value=""), \
                      patch.object(stage.context, "refresh_reads"), patch.object(stage, "signal"):
                     if active_blocked:

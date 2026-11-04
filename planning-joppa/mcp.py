@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import MCPError, Rejected, complete_object, normalize_detail, normalize_tasks
+from joppa_reads import MCPError, Rejected, complete_object, normalize_detail
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -87,8 +87,6 @@ class Joppa:
         result = self.raw_call(name, args)
         if name == "joppa_objects" and args.get("address") and "," not in args["address"] and not args.get("history"):
             result = complete_object(self.raw_call, args, result)
-        if name == "joppa_tasks":
-            normalize_tasks(result)
         return result
 
     def raw_call(self, name, arguments):
@@ -120,7 +118,7 @@ class Joppa:
 
 
 
-READ_TOOLS = frozenset(("joppa_search", "joppa_tree", "joppa_objects", "joppa_tasks", "joppa_help"))
+READ_TOOLS = frozenset(("joppa_search", "joppa_tree", "joppa_objects", "joppa_help"))
 
 
 class Reader:
@@ -149,7 +147,7 @@ class Reader:
             raise MCPError("Tool arguments must be an object")
         args = dict(arguments)
         args.pop("verbose", None)
-        if name in ("joppa_tasks", "joppa_search") or name == "joppa_objects" and not args.get("address"):
+        if name == "joppa_search" or name == "joppa_objects" and not args.get("address"):
             limit = args.get("limit", 25)
             if type(limit) is not int or limit < 1:
                 raise MCPError("Read limit must be a positive integer")

@@ -60,7 +60,10 @@ class ProviderTests(unittest.TestCase):
         new.update(id="new", depends_on=["first"])
         value["tasks"].append(new)
         commands = publication.operations(value, data)
-        self.assertTrue(commands[1]["command"]["data"]["title"].startswith("[08] "))
+        # The revised blocked Task is marked ready right after its save.
+        self.assertEqual(commands[1]["command"], {"op": "assess", "target": "work:old", "ready": True,
+                                                  "reason": "The reviewed plan replaces the blocked contract."})
+        self.assertTrue(commands[2]["command"]["data"]["title"].startswith("[08] "))
 
     def test_cross_criterion_retirement_cannot_become_a_dependency(self):
         data, value = assignment(), plan()
@@ -107,15 +110,19 @@ class ProviderTests(unittest.TestCase):
         # Input order must not change the prerequisite order.
         value["tasks"].reverse()
         commands = publication.operations(value, data)
-        saves = [operation["command"] for operation in commands if operation["command"]["op"] == "save_object"]
+        saves = [operation["command"] for operation in commands
+                 if operation["command"]["op"] == "save_object" and operation["command"]["kind"] == "work"]
         self.assertEqual([command["parent"] for command in saves], ["criterion:a", "criterion:b", "criterion:c"])
         self.assertEqual([command["data"]["title"][:4] for command in saves], ["[01]", "[02]", "[01]"])
         self.assertEqual(saves[0]["links"][0]["target"], "work:dependency")
         self.assertIn({"target": {"$ref": "task1/address"}, "revision": {"$ref": "task1/saved_revision"},
                        "relation": "depends_on", "blocking": True}, saves[1]["links"])
         self.assertEqual(saves[2]["links"][0]["target"], {"$ref": "task2/address"})
-        self.assertEqual([operation["command"]["ac"] for operation in commands[-3:]],
-                         ["criterion:a", "criterion:b", "criterion:c"])
+        # Each changed AC loses this run's assignee and is marked ready in the same batch.
+        self.assertEqual([(operation["command"]["op"], operation["command"].get("target") or operation["command"]["id"])
+                          for operation in commands[-6:]],
+                         [(op, address if op == "assess" else address.split(":")[1])
+                          for address in ("criterion:a", "criterion:b", "criterion:c") for op in ("save_object", "assess")])
         value["tasks"][0]["ac"] = "criterion:outside"
         with self.assertRaisesRegex(ValueError, "selected Requirement criterion"):
             publication.operations(value, data)
@@ -151,7 +158,8 @@ class ProviderTests(unittest.TestCase):
         done["process"]["done"] = {"evidence": "Already landed"}
         data["joppa"]["tasks"].append(done)
         operations = publication.operations(value, data)
-        saves = [entry["command"] for entry in operations if entry["command"]["op"] == "save_object"]
+        saves = [entry["command"] for entry in operations
+                 if entry["command"]["op"] == "save_object" and entry["command"]["kind"] == "work"]
         self.assertEqual([entry["id"] for entry in saves], ["provider", "old"])
         self.assertEqual([entry["data"]["title"][:4] for entry in saves], ["[01]", "[02]"])
         self.assertFalse(any(link["relation"] == "depends_on" and link["target"] == "work:provider"
@@ -181,10 +189,13 @@ class ProviderTests(unittest.TestCase):
                     "expected": "Required result", "test": "checks.rs > required_behavior",
                     "evidence": "service:checks.rs:1; service:implementation.rs:1"})
             ops = publication.operations(value, data)
-            bindings = [operation["command"] for operation in ops if operation["command"]["op"] == "save_object"]
+            bindings = [operation["command"] for operation in ops if operation["command"].get("revision") == 0]
             self.assertEqual([(command["kind"], command["parent"], command["revision"], command["data"]["title"])
                               for command in bindings], [("check", "criterion:b", 0, "checks.rs > required_behavior")])
-            self.assertEqual([op["command"]["op"] for op in ops[-2:]], ["release_planning", "finish_planning"])
+            # The unchanged AC only loses the assignee. The bound AC is also marked ready.
+            self.assertEqual([(op["command"]["op"], op["command"].get("target") or op["command"]["id"]) for op in ops[-3:]],
+                             [("save_object", "a"), ("save_object", "b"), ("assess", "criterion:b")])
+            self.assertNotIn("assignee", ops[-3]["command"]["data"])
 
     def test_requirement_mixes_implementation_and_existing_test_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -204,6 +215,6 @@ class ProviderTests(unittest.TestCase):
                 "evidence": "service:checks.rs:1; service:implementation.rs:1"})
             ops = publication.operations(value, data)
             self.assertEqual([op["command"]["op"] for op in ops],
-                             ["save_object", "save_object", "finish_planning", "finish_planning"])
+                             ["save_object", "save_object", "save_object", "assess", "save_object", "assess"])
             self.assertEqual((ops[1]["command"]["kind"], ops[1]["command"]["parent"]), ("check", "criterion:b"))
             self.assertEqual(ops[0]["command"]["parent"], "criterion:a")

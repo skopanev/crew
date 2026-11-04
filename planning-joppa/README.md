@@ -2,7 +2,7 @@
 
 Status: live publication and lane completion passed before native context reads were added.
 Native reads pass on four providers. Full native planning publication remains unverified.
-Whole-Requirement planning requires deployed multi-AC planning claims and test-only publication support.
+Whole-Requirement planning uses generic node operations: `save_object`, `archive_object` and `assess`.
 Its provider checks pass. A live grouped run has not passed yet.
 Task completion does not confirm criterion acceptance.
 
@@ -79,7 +79,7 @@ It reuses related Tasks through dependencies. It edits only Tasks under the sele
 The planner publishes complete implementation mechanisms under their original criteria.
 It claims the AC for planning. It uses the shared graph and live Equill roles.
 All planning agents can query Joppa for relevant context in the configured workspace and accessible linked workspaces.
-The reader exposes eight read tools and rejects writes. Joppa enforces workspace access.
+The reader exposes the Joppa read tools and rejects writes. Joppa enforces workspace access.
 Foreign objects keep their immutable workspace IDs, full addresses and separate schemas in the planning snapshot.
 The planner preserves remote links and their status, including inaccessible targets that need review.
 It reads captured foreign contracts again before publication. A changed contract, schema or access refuses publication.
@@ -109,12 +109,12 @@ The schema `test_results` rules supply the name rule and `max_tests`.
 The planner reads all test nodes in pages of 25 and groups them by criterion.
 Publication creates only the missing (AC, test name) nodes with `save_object` and revision 0.
 It never edits, deletes or recreates an existing node, so recorded results stay.
-New nodes and test-only `finish_planning` go in the same atomic batch.
+New nodes and the AC assignee release and `assess` go in the same atomic batch.
 The planning snapshot keeps each node address, title and revision.
 A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
 A new result alone does not invalidate the plan.
 Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
-Dependencies accept pins from `contract_revision` through `current_revision`, inclusive.
+Joppa has no contract pins. A dependency pin is valid from revision 1 through `current_revision`, inclusive.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
@@ -127,12 +127,27 @@ The result records both prepared and current source snapshots.
 A module can define `paths` for its writable roots, such as production code, required tests and migrations.
 Its `path` remains the working directory. Without `paths`, the module uses `path` as its sole writable root.
 
-The deployed server must support `claim_planning`, `finish_planning` and `release_planning`.
-The planner refuses before claiming if those commands are absent.
+Joppa has no Task workflow commands. The planner uses generic node fields:
+
+- Claim: one `joppa_batch` saves each selected AC with its full document and
+  `data.assignee` `crew-planning:<host>:<run_id>` at the revision read for the plan.
+  A stale revision refuses the whole batch. The planner reads the holders again and stops.
+- Ownership: before publication or release, the planner reads each AC again.
+  It requires exactly its own `data.assignee` value.
+- Release: save the AC without `data.assignee` at its current revision.
+- Finish: the publication batch saves Tasks, saves each AC without `data.assignee`
+  and sends `assess` with `ready: true` for each changed AC.
+- A revised blocked Task gets `assess` with `ready: true` in the same batch.
+- Retirement archives the Task with `archive_object` and no `data.commit`.
+- Task state: `data.assignee` on a live Task is active work. `process.assessment` with
+  ready false is a block. An archived Task with `data.commit` is done; without it, retired.
+- The contract digest excludes `data.assignee` and `data.commit`. Every other authored field stays.
+
+The planner refuses before claiming if `save_object`, `archive_object` or `assess` is absent.
 Refresh the canonical source and its shared CBM index before launch.
 Verify indexed paths in the inspected source. Do not index an isolated checkout.
-The deployed server keeps Task dependency pins current through claim and completion events.
-Contract changes and retirement still invalidate those pins.
+Lifecycle saves raise a revision above earlier dependency pins. These pins stay valid.
+Retirement removes blocking links to the retired Task from remaining Tasks.
 Keep required dependencies explicit. Never remove them to make a Task available.
 Dry-run validates configuration without MCP calls, agent calls or writes.
 The dashboard starts the next Requirement after each run.
@@ -149,28 +164,29 @@ It deletes no checkout unless the publication updates or retires its blocked Tas
 For `WORKTREE_PREEXISTED` alone, prepare can retry the existing Tasks without agents.
 The AC and all live unfinished Tasks must have current owner-reviewed contracts and valid repository scopes.
 Each block must identify a finished lane with exit code 73. Active, held and successful lanes prevent deletion.
-This path requires deployed `unblock_task`. It preserves Task contracts, IDs and dependencies.
-Cleanup precedes one atomic batch that unblocks the Tasks and finishes planning.
+This path sends `assess` with `ready: true` for each Task. It preserves Task contracts, IDs and dependencies.
+Cleanup precedes one atomic batch that marks the Tasks ready and finishes planning.
 An uncertain publication retains its receipt and claim for recovery. Other failures use the normal planning graph.
 It skips unchanged documents and pins dependencies from the fresh context.
 Before each claim, it checks previous receipts for this endpoint, workspace and AC.
 Unresolved receipts block a new run. They require explicit recovery.
 Confirmed failures release this run's planning claim. Uncertain mutations retain their request receipts.
-An unchanged blocked Task must pass the server's `finish_planning` check.
+The planner refuses publication when a blocked Task keeps its contract and is not retired.
 The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
 Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
-Never start another mutation blindly. Planning claims do not expire.
-An interrupted process can retain a claim. Release it explicitly after checking its publication receipt.
+Never start another mutation blindly. A planning `data.assignee` does not expire.
+An interrupted process can retain a claim. Release it explicitly after checking its publication receipt:
+save the AC without `data.assignee` at its current revision.
 
 Current limits:
 
 - A human can edit an unclaimed implementation Task. Crew can replace that contract if its reviewed revision still matches.
-- A plan with unchanged Task contracts releases the claim. It does not finish planning, so another run can select the AC.
+- A plan with unchanged Task contracts releases the claim. It sends no `assess`, so another run can select the AC.
 - Receipt checks compare endpoint URLs exactly. Keep the same URL, including its trailing slash, across runs.
 
 Run the focused provider checks:
 
 ```sh
-python3 -m unittest discover -s planning-joppa/tests
+cd planning-joppa && python3 -m pytest -q tests
 ```

@@ -3,10 +3,10 @@ from common import digest, require
 
 
 def source(object):
-    """Ignore journal position and our own planning claim. Keep meaningful state."""
-    process = {key: value for key, value in object.get("process", {}).items() if key != "planning_claim"}
+    """Ignore journal position. Keep meaningful state."""
+    process = dict(object.get("process", {}))
     value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
-                                            "files", "references", "review_required", "work_ready")} | {"process": process}
+                                            "files", "references", "work_ready")} | {"process": process}
     if "contract_revision" in object:
         value["contract_revision"] = object["contract_revision"]
     if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
@@ -15,9 +15,20 @@ def source(object):
         value["remote_review_required"] = object.get("remote_review_required", False)
     return value
 
-def current_pin(pin, current, contract):
+def current_pin(pin, current, contract=None):
+    """Joppa has no contract pins. Without a contract floor, any saved revision up to current is valid."""
+    contract = 1 if contract is None else contract
     return (type(pin) is int and type(current) is int and type(contract) is int
             and 1 <= contract <= pin <= current)
+
+# Lifecycle metadata is not authored contract text. Claims and completion change only these fields.
+LIFECYCLE_FIELDS = ("assignee", "commit")
+
+def authored_document(document):
+    result = dict(document)
+    if isinstance(result.get("data"), dict):
+        result["data"] = {key: value for key, value in result["data"].items() if key not in LIFECYCLE_FIELDS}
+    return result
 
 def remote_satisfied(link):
     status = link.get("status", {})
@@ -35,20 +46,21 @@ def snapshot_source(object, types, selected_ac=None):
     if current.get("remote_links"):
         current["remote_links"] = [{key: value for key, value in link.items() if key != "status"}
                                    for link in current["remote_links"]]
-    for key in ("verification", "pending_run", "summary", "status"):
+    for key in ("verification", "pending_run", "summary", "status", "assignee", "done", "retired"):
         current["process"].pop(key, None)
+    current["document"] = authored_document(current["document"])
     role = types[object["kind"]].get("role")
     selected = {selected_ac} if isinstance(selected_ac, str) else set(selected_ac or [])
-    if role == "task" or (role == "ac" and selected_ac is not None and object["address"] not in selected):
-        # Sibling execution state does not change the authored planning context.
+    if role in ("task", "ac"):
+        # A planning claim or a lane completion saves lifecycle fields and a new revision. Compare authored fields.
         current.pop("current_revision")
-        current.pop("process")
-        current.pop("work_ready")
-        current.pop("review_required")
+        current.pop("contract_revision", None)
         current["document"] = {key: value for key, value in current["document"].items()
                                if key in ("data", "parent", "links", "present", "schema_revision")}
-        if role == "task":
-            current.pop("contract_revision", None)
+    if role == "task" or (role == "ac" and selected_ac is not None and object["address"] not in selected):
+        # Sibling execution state does not change the authored planning context.
+        current.pop("process")
+        current.pop("work_ready")
     if role == "task":
         annotations = dict(current.get("annotations") or {})
         comments = annotations.get("comments")

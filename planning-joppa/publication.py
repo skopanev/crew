@@ -17,6 +17,7 @@ from task_contracts import (
 )
 from plan_validation import validate, validate_one, binding_checks, verify_bindings
 from test_nodes import bind_missing
+from planning_claims import address_of, closing_operations, release, owned
 
 
 def ensure_recovered(root, current, server, workspace, ac):
@@ -28,7 +29,7 @@ def ensure_recovered(root, current, server, workspace, ac):
         claim = read(claim_file)
         args = claim.get("arguments", {})
         commands = [args["command"]] if "command" in args else [item["command"] for item in args.get("operations", [])]
-        if args.get("workspace") != workspace or ac not in {item.get("ac") for item in commands}:
+        if args.get("workspace") != workspace or ac not in {address_of(item) for item in commands}:
             continue
         if claim.get("server") and claim["server"] != server:
             continue
@@ -68,7 +69,8 @@ def operations(plan, assignment):
         require(owner, "criterion owner is required for new Task documents")
         existing = inventory.get(task.get("target"))
         if task["action"] == "retire":
-            result.append({"command": {"op": "retire_task", "id": existing["address"].split(":", 1)[1],
+            # Retirement archives the Task without data.commit. Done Tasks carry the commit.
+            result.append({"command": {"op": "archive_object", "target": existing["address"],
                 "revision": existing["current_revision"], "reason": task["outcome"]}})
             changed.add(ac)
             continue
@@ -111,17 +113,23 @@ def operations(plan, assignment):
                    "revision": existing["current_revision"] if existing else 0,
                    "parent": ac, "data": data, "links": links,
                    "reason": "Publish the reviewed mechanism for this criterion.", "question_checked": schema["question"]}
+        reopen = False
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
             document = existing["document"]
-            if (isinstance(existing["process"].get("blocked"), dict)
-                    and not existing["process"].get("done") and not existing["process"].get("retired")):
+            reopen = (isinstance(existing["process"].get("blocked"), dict)
+                      and not existing["process"].get("done") and not existing["process"].get("retired"))
+            if reopen:
                 require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
             if data == document["data"] and links == document["links"] and ac == document["parent"]:
                 continue
         ref = "task" + str(number)
         result.append({"ref": ref, "command": command})
+        if reopen:
+            # The revised contract answers the block. Mark the same Task ready in this transaction.
+            result.append({"command": {"op": "assess", "target": existing["address"], "ready": True,
+                                       "reason": "The reviewed plan replaces the blocked contract."}})
         changed.add(ac)
         refs[task["id"]] = ref
         if existing:
@@ -143,10 +151,11 @@ def operations(plan, assignment):
         ac = criterion["id"]
         blocked = any(task["document"]["parent"] == ac and isinstance(task["process"].get("blocked"), dict)
                       and not task["process"].get("done") and not task["process"].get("retired") for task in inventory.values())
-        result.append({"command": {"op": "finish_planning" if not grouped or ac in changed or blocked else "release_planning", "ac": ac,
-            "reason": "Publish the reviewed Requirement plan." if grouped
-                      else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
-                      else "Publish reviewed Tasks. The criterion still requires verification."}})
+        result.extend(closing_operations(objects[ac], not grouped or ac in changed or blocked,
+            "Publish the reviewed Requirement plan." if grouped
+            else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
+            else "Publish reviewed Tasks. The criterion still requires verification.",
+            assignment["joppa"].get("questions", {}).get(objects[ac]["kind"])))
     require(len(result) <= MAX_PUBLICATION_OPERATIONS, f"one publication supports at most {MAX_PUBLICATION_OPERATIONS} operations")
     return result
 
@@ -170,81 +179,3 @@ def mutate(api, target, name, arguments, *, retain_claim=False):
         raise
     write(target, {**record, "status": "confirmed", "result": result})
     return result
-
-
-def held(api, workspace, address, position, actor=None):
-    obj = api.call("joppa_objects", {"workspace": workspace, "address": address})
-    claim = obj.get("process", {}).get("planning_claim")
-    require(isinstance(claim, dict) and claim.get("position") == position
-            and (actor is None or claim.get("actor") == actor), "this run does not hold the planning claim")
-    return claim
-
-
-def claim_entries(receipt):
-    require(receipt["status"] == "confirmed", "planning claim was not confirmed")
-    results = receipt["result"].get("results", [receipt["result"]])
-    args = receipt["arguments"]
-    commands = [args["command"]] if "command" in args else [item["command"] for item in args["operations"]]
-    require(len(results) == len(commands), "planning claim response is incomplete; inspect claim.json")
-    entries = []
-    for command, result in zip(commands, results):
-        address = command["ac"]
-        require(type(result.get("position")) is int, "planning claim response has no event position; inspect claim.json")
-        actor = receipt.get("holders", {}).get(address, receipt.get("actor"))
-        entries.append((address, result["position"], actor))
-    return entries
-
-
-def held_claims(api, workspace, receipt):
-    return {address: held(api, workspace, address, position, actor)["actor"]
-            for address, position, actor in claim_entries(receipt)}
-
-
-def release(api, target, workspace, ac, reason):
-    claim_file = target / "claim.json"
-    if not claim_file.exists():
-        return False
-    receipt = read(claim_file)
-    if receipt["status"] != "confirmed":
-        return False
-    publication = target / "publication.json"
-    if publication.exists():
-        result = read(publication)
-        if (result["status"] != "rejected" or result.get("retain_claim")
-                or result.get("error") == "blocked Task needs a new contract or retirement"):
-            return False
-    prior = target / "release.json"
-    if prior.exists():
-        release = read(prior)
-        return release["status"] == "confirmed" and not any(item.get("unknown") for item in release.get("skipped_claims", []))
-    holders, skipped = {}, []
-    for address, position, actor in claim_entries(receipt):
-        try:
-            object = api.call("joppa_objects", {"workspace": workspace, "address": address})
-            require(isinstance(object, dict) and isinstance(object.get("process"), dict), "claim read is incomplete")
-        except Exception:
-            skipped.append({"ac": address, "reason": "planning claim could not be read", "unknown": True})
-            continue
-        claim = object.get("process", {}).get("planning_claim")
-        if not isinstance(claim, dict) or claim.get("position") != position or actor is not None and claim.get("actor") != actor:
-            skipped.append({"ac": address, "reason": "planning claim is missing or replaced"})
-            continue
-        holders[address] = claim["actor"]
-    if holders:
-        write(claim_file, {**receipt, "holders": {**receipt.get("holders", {}), **holders}})
-    operations = [{"command": {"op": "release_planning", "ac": address, "reason": reason[:2000]}}
-                  for address in holders]
-    if not operations:
-        write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped})
-        return not any(item.get("unknown") for item in skipped)
-    tool = "joppa_batch" if "operations" in receipt["arguments"] else "joppa_command"
-    arguments = {"workspace": workspace, "operations": operations} if tool == "joppa_batch" else {
-        "workspace": workspace, "command": operations[0]["command"]}
-    try:
-        mutate(api, prior, tool, arguments)
-    finally:
-        if prior.exists():
-            release = read(prior)
-            write(prior, {**release, "released": list(holders) if release["status"] == "confirmed" else [],
-                          "requested_releases": list(holders), "skipped_claims": skipped})
-    return not any(item.get("unknown") for item in skipped)
