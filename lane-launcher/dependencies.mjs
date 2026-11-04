@@ -41,80 +41,43 @@ export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace
 }
 
 export function dependencyCheck(read) {
-  const objects = new Map(), satisfied = new Map(), checked = new Map();
-  let schema, workspaceKey;
-  const checkWorkspaceKey = value => {
-    if (value === undefined || value === null) return;
-    if (!validWorkspaceId(value)) throw invalid('Dependency workspace_key is invalid');
-    if (workspaceKey && workspaceKey !== value) throw invalid('Dependency read crossed workspace boundary');
-    workspaceKey = value;
-  };
-  const types = async () => (schema ||= read('joppa_tree', {}).then(result => {
-    checkWorkspaceKey(result?.workspace_key);
-    return result.schema.types;
-  }));
+  const objects = new Map();
+  let workspaceKey;
   const object = async address => {
     if (!objects.has(address)) objects.set(address, read('joppa_objects', {address}));
     const value = await objects.get(address);
-    if (!value?.address || value.address !== address || !value.document || value.historical !== false ||
-        !Number.isSafeInteger(value.current_revision)) {
-      throw invalid('Dependency read did not return a current object');
+    if (value?.address !== address || !value.document || value.historical !== false ||
+        !Number.isSafeInteger(value.current_revision)) throw invalid('Dependency read did not return a current object');
+    if (value.workspace_key != null) {
+      if (!validWorkspaceId(value.workspace_key)) throw invalid('Dependency object workspace_key is invalid');
+      if (workspaceKey && workspaceKey !== value.workspace_key) throw invalid('Dependency read crossed workspace boundary');
+      workspaceKey = value.workspace_key;
     }
-    checkWorkspaceKey(value.workspace_key);
     return value;
   };
-  const present = value => value.document.present === true;
-  const role = async value => {
-    const configured = (await types())[value.kind];
-    if (!configured) throw invalid('Dependency object type is absent from the schema');
-    return configured.role;
-  };
-  async function isSatisfied(value) {
-    if (!present(value)) return false;
-    if (satisfied.has(value.address)) return satisfied.get(value.address);
-    let result;
-    if (await role(value) === 'task') {
-      // Completed Tasks are archived. A live Task is not completed.
-      result = false;
-    } else {
-      // Joppa applies the configured own/children/links status rule.
-      result = value.status?.tone === 'green';
-    }
-    satisfied.set(value.address, result);
-    return result;
-  }
-  async function blockedBy(address, trail = new Set()) {
+  return async address => {
     const start = await object(address);
-    if (start.work_ready === false || start.process?.assessment?.state === 'waiting') return start.address;
-    if (trail.has(start.address)) return start.address;
-    if (checked.has(start.address)) return checked.get(start.address);
-    const next = new Set(trail).add(start.address), parents = new Set();
+    // Joppa computes local ordering. Do not reinterpret the target's tone or readiness.
+    if (start.work_ready === false || start.process?.assessment?.state === 'waiting') {
+      return {ready: false, blocker: start.waits_for?.address || start.address};
+    }
+    const seen = new Set();
     let node = start;
     while (node) {
-      if (!present(node) || parents.has(node.address)) return node.address;
-      parents.add(node.address);
+      if (node.document.present !== true || seen.has(node.address)) return {ready: false, blocker: node.address};
+      seen.add(node.address);
       for (const link of node.document.links || []) {
         if (link.relation !== 'depends_on' || link.blocking !== true) continue;
         if (link.workspace !== undefined) throw invalid('Dependency workspace link must use remote_links');
-        const target = await object(link.target);
-        if (!present(target)) continue;
-        const pin = link.revision == null || currentPin(link.revision, target.current_revision, 1);
-        if (!pin) throw invalid(`Unknown linked revision on ${node.address}: ${target.address}`);
-        if (!await isSatisfied(target)) return target.address;
-        const blocker = await blockedBy(target.address, next);
-        if (blocker) return blocker;
+        if (link.revision != null && !currentPin(link.revision, Number.MAX_SAFE_INTEGER, 1)) {
+          throw invalid(`Invalid linked revision on ${node.address}: ${link.target}`);
+        }
       }
-      const remoteBlocker = remoteDependencyBlocker(node, workspaceKey);
-      if (remoteBlocker) return remoteBlocker;
+      const blocker = remoteDependencyBlocker(node, workspaceKey);
+      if (blocker) return {ready: false, blocker};
       node = node.document.parent ? await object(node.document.parent) : null;
     }
-    checked.set(start.address, null);
-    return null;
-  }
-  return async address => {
-    const blocker = await blockedBy(address);
-    if (blocker && typeof blocker === 'object') return {ready: false, ...blocker};
-    return {ready: blocker === null, blocker};
+    return {ready: true, blocker: null};
   };
 }
 

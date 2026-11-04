@@ -7,7 +7,7 @@ import {createDashboard} from '../dashboard.mjs';
 import {fixture} from '../test-support/requirement-delivery.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 
-test('non-Task dependencies use the native tree tone without separate test reads', async () => {
+test('local ordering uses consumer readiness without reinterpreting dependency state', async () => {
   const f = fixture(), target = f.add('spec:before', null);
   f.objects.get('work:one').document.links = [{relation: 'depends_on', blocking: true, target: target.address}];
   const calls = [];
@@ -17,9 +17,14 @@ test('non-Task dependencies use the native tree tone without separate test reads
   };
   for (const tone of ['green', 'orange', 'yellow', 'grey', 'red', undefined]) {
     target.status = {tone};
-    assert.equal((await dependencyCheck(read)('work:one')).ready, tone === 'green');
+    target.work_ready = false;
+    target.process.assessment = {state: 'waiting', reason: 'WAITING'};
+    assert.equal((await dependencyCheck(read)('work:one')).ready, true);
   }
-  assert(calls.every(({tool, args}) => tool === 'joppa_tree' || tool === 'joppa_objects' && args.address));
+  assert(calls.every(({tool, args}) => tool === 'joppa_objects' && args.address !== target.address));
+  f.objects.get('work:one').work_ready = false;
+  f.objects.get('work:one').waits_for = {address: target.address};
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: target.address});
 });
 
 test('local ordering survives completion metadata revisions without changing documents', async () => {
@@ -39,6 +44,8 @@ test('local ordering survives completion metadata revisions without changing doc
   assert.equal(inherited.ready, true);
   target.document.present = true;
   target.document.data.assignee = 'another-run';
+  f.objects.get('work:one').work_ready = false;
+  f.objects.get('work:one').waits_for = {address: target.address};
   assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false, blocker: 'work:two'});
 });
 
@@ -49,6 +56,8 @@ test('the CLI and dashboard leave unfinished dependencies unchanged', async t =>
   target.current_revision = 11;
   const task = f.joppa.objects.get('task:t1');
   task.document.links = [{relation: 'depends_on', blocking: true, target: target.address, revision: 1}];
+  task.work_ready = false;
+  task.waits_for = {address: target.address};
   const before = structuredClone(f.joppa.objects);
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);

@@ -34,8 +34,11 @@ test('a local dependency without a revision still needs its current target to fi
   f.objects.get('work:one').document.links = [{target: target.address, relation: 'depends_on', blocking: true}];
   assert.equal((await dependencyCheck(f.read)('work:one')).ready, true);
   target.document.present = true;
+  f.objects.get('work:one').work_ready = false;
+  f.objects.get('work:one').waits_for = {address: target.address};
   assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false, blocker: target.address});
   target.document.present = false;
+  f.objects.get('work:one').work_ready = true;
   assert.equal((await dependencyCheck(f.read)('work:one')).ready, true);
   const criterion = f.add('measure:live', 'spec:r');
   criterion.status = {tone: 'green'};
