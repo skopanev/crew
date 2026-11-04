@@ -99,10 +99,15 @@ async function packageFixture(t, mode = 'success') {
             object.current_revision = planned.get(object);
             return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision}};
           }
-          if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready'}} :
-            {assessment: {state: 'waiting', reason: command.reason}};
+          if (command.op === 'assess') object.process = {assessment: {state: command.ready ? 'ready' : 'waiting',
+            reason: command.reason, actor: mode === 'foreign-assessor' ? 'another-actor' : 'lane-1'}};
           if (command.op === 'note') object.annotations.comments[command.id] = {actor: 'lane-1', text: command.text, withdrawn: false};
-          if (command.op === 'archive_object' && mode !== 'archive-present') object.document.present = false;
+          if (command.op === 'archive_object') {
+            if (mode !== 'archive-present') object.document.present = false;
+            if (mode === 'missing-commit') delete object.document.data.commit;
+            if (mode === 'leftover-assignee') object.document.data.assignee = 'crew-lane:other:run';
+            object.current_revision++;
+          }
           return {command: {...command, ...(command.op === 'archive_object' ? {revision: resolve(command.revision)} : {})}};
         })};
         if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && claim) {

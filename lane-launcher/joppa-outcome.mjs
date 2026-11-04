@@ -7,7 +7,7 @@ import {api, batchRequest, claimTasks, contractDigest, verifyRemoteDependencies,
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
-import {saveNode} from './joppa-nodes.mjs';
+import {nodeAssignee, saveNode} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -96,7 +96,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const receipt = await api(run.config, run.joppaWorker, 'joppa_batch', run.completionRequest);
     require(Array.isArray(receipt?.results) && receipt.results.length === operations.length,
       'Joppa batch response is incomplete; Tasks remain held for inspection');
-    const savedRevisions = claims.map((claim, index) => {
+    claims.forEach((claim, index) => {
       const [saved, archived] = receipt.results.slice(index * 2, index * 2 + 2);
       const revision = saved.object?.revision;
       require(saved.command?.op === 'save_object' && saved.object?.address === claim.address && Number.isSafeInteger(revision) &&
@@ -104,15 +104,15 @@ export async function finishTask(run, stateFile, result, artifacts) {
         archived.command.target === claim.address && (archived.command.revision === revision ||
           isDeepStrictEqual(archived.command.revision, operations[index * 2 + 1].command.revision)),
       'Joppa batch response does not map to the requested Task; inspect the saved request');
-      return revision;
     });
-    // An archived node reads as present:false and keeps data.commit.
+    // A current read of an archived node shows present:false and keeps data.commit. Its revision is final.
     result.tasks = [];
-    for (const [index, claim] of claims.entries()) {
+    for (const claim of claims) {
       const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-      require(confirmed?.address === claim.address && confirmed.document?.present === false && confirmed.document.data?.commit === sha,
-        'Joppa did not confirm every Task completion at the checked SHA');
-      result.tasks.push({address: claim.address, status: 'done', revision: savedRevisions[index]});
+      require(confirmed?.address === claim.address && confirmed.historical === false && confirmed.document?.present === false &&
+        confirmed.document.data?.commit === sha && !nodeAssignee(confirmed) && Number.isSafeInteger(confirmed.current_revision),
+      'Joppa did not confirm every Task completion at the checked SHA');
+      result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }
     result.completed = true;  } else {
     await failTask(run, stateFile, result, artifacts,
