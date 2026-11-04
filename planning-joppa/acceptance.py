@@ -75,11 +75,14 @@ def acceptance_rows(plan, assignment):
 
 
 def carries(task, address, check):
-    """A retained Task carries a criterion check only when its stored acceptance mapping lists it,
-    in the same repository. Otherwise the lane could not bind a test to it."""
+    """A retained Task carries a criterion check only when its Checks contain it and its stored acceptance
+    mapping lists it, in the same repository. Otherwise the lane could not bind a test to it."""
     data = task["document"]["data"]
     body = context.task_contract(data)
     if re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) != [check["repository"]]:
+        return False
+    # The executable contract must still contain the check. A stale stored mapping does not replace it.
+    if check_line(check) not in body.partition("\nChecks:\n")[2].splitlines():
         return False
     kind = address.split(":", 1)[0]
     rows = data.get("acceptance") if isinstance(data.get("acceptance"), list) else []

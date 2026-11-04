@@ -111,6 +111,11 @@ class CoversTests(unittest.TestCase):
         self.assertNotIn("work:carrier", json.dumps(operations))
         self.assertEqual(carrier, original)
         self.assertNotIn("covers", operations[0]["command"]["data"])
+        # A stale stored mapping does not replace the executable contract: the Checks must still contain the check.
+        carrier["document"]["data"]["body"] = carrier["document"]["data"]["body"].replace(
+            "Show the saved value => The value is visible", "Show another value => Another value is visible")
+        with self.assertRaisesRegex(ValueError, "AC criterion:b: acceptance check"):
+            publication.operations(value, data)
         # An ended Task carries no check. The covered criterion then needs its own work.
         end(carrier, "a" * 40)
         with self.assertRaisesRegex(ValueError, "implementation needs Tasks"):
