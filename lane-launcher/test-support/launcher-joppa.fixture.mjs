@@ -85,10 +85,16 @@ async function packageFixture(t, mode = 'success') {
       const release = commands.every(command => command.op === 'save_object' && !command.data.assignee);
       const target = command => objects.get(command.target || `${command.kind}:${command.id}`);
       if (mode === 'release-unknown' && release) { res.destroy(); return; }
-      // Revision checks refuse the whole batch. A save advances the revision for later operations.
-      const next = new Map(commands.filter(command => command.op === 'save_object').map(command => [target(command), command.revision + 1]));
+      // Revision checks refuse the whole batch. A changed save advances the revision; batch refs read the saved one.
+      const planned = new Map(), refs = new Map();
+      for (const [index, command] of commands.entries()) if (command.op === 'save_object') {
+        const revision = mode === 'unchanged-save' ? command.revision : command.revision + 1;
+        planned.set(target(command), revision);
+        if (args.operations[index].ref) refs.set(`${args.operations[index].ref}/saved_revision`, revision);
+      }
+      const resolve = value => value?.$ref ? refs.get(value.$ref) : value;
       const stale = commands.some(command => command.op === 'save_object' ? target(command)?.current_revision !== command.revision
-        : command.op === 'archive_object' && next.get(target(command)) !== command.revision);
+        : command.op === 'archive_object' && (planned.get(target(command)) ?? target(command)?.current_revision) !== resolve(command.revision));
       if (mode === 'reject' || mode === 'outcome-reject' && !claim || stale) {
         rejected = true; value = {error: 'operation 2 revision changed'};
       }
@@ -98,14 +104,14 @@ async function packageFixture(t, mode = 'success') {
           if (command.op === 'save_object') {
             const data = mode === 'wrong-commit' && command.data.commit ? {...command.data, commit: '0'.repeat(40)} : command.data;
             applyData(object.document.data, data);
-            object.current_revision++;
-            return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision, data}};
+            object.current_revision = planned.get(object);
+            return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision}};
           }
           if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready'}} :
             {assessment: {state: 'waiting', reason: command.reason}};
           if (command.op === 'note') object.annotations.comments[command.id] = {actor: 'lane-1', text: command.text, withdrawn: false};
-          if (command.op === 'archive_object') object.document.data.archived = true;
-          return {command};
+          if (command.op === 'archive_object' && mode !== 'archive-present') object.document.present = false;
+          return {command: {...command, ...(command.op === 'archive_object' ? {revision: resolve(command.revision)} : {})}};
         })};
         if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && claim) {
           const foreign = structuredClone(objects.get('task:t1'));
