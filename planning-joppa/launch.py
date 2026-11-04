@@ -41,6 +41,9 @@ Agents do not call Joppa mutations. Do not create a planning placeholder Task.
 Title length must obey joppa.task_title_max_length.
 """
 
+# Exit status for one refusal only: the config bytes differ from the dispatcher handoff, nothing started.
+HANDOFF_CHANGED = 75
+
 REQUIREMENT_CONTRACT = """Plan all selected criteria in this Requirement as one coherent increment.
 The input joppa.criteria lists the selected ACs. Each Task needs its exact ac address.
 Include criteria: [{ac: full-address, disposition: implement or verify_existing}] for every selected AC.
@@ -66,8 +69,10 @@ def main():
     raw = path.read_bytes()
     # The dispatcher validated these exact bytes. A file edited after its selection is refused before any claim.
     handoff = os.environ.get("PLANNING_JOPPA_HANDOFF_DIGEST")
-    require(handoff is None or hashlib.sha256(raw).hexdigest() == handoff,
-            "planner config changed after the dispatcher selected this pass; no claim was made, the next check reloads it")
+    if handoff is not None and hashlib.sha256(raw).hexdigest() != handoff:
+        print("planning-joppa: planner config changed after the dispatcher selected this pass; "
+              "no claim was made, the next check reloads it", file=sys.stderr)
+        return HANDOFF_CHANGED
     config = context.configuration(path, raw)
     workflow = Path(__file__).resolve().parent
     variables = {"PLANNING_JOPPA_CONFIG": str(path), "PLANNING_JOPPA_CONFIG_DIGEST": digest(config),
@@ -104,7 +109,9 @@ def main():
         variables.update(OPENCODE_CONFIG_HOME=opencode, AGY_PROFILE_HOME=agy)
         for key, value in variables.items():
             command += ["--var", f"{key}={value}"]
-        return subprocess.run(command, check=False).returncode
+        code = subprocess.run(command, check=False).returncode
+        # Keep HANDOFF_CHANGED for the pre-start refusal: a Medulla run never reports it.
+        return 1 if code == HANDOFF_CHANGED else code
 
 
 if __name__ == "__main__":

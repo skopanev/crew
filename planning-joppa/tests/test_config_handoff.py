@@ -34,7 +34,7 @@ class ConfigHandoffTests(unittest.TestCase):
         selected = hashlib.sha256(self.config.read_bytes()).hexdigest()
         self.config.write_text(self.config.read_text().replace('"product"', '"other"'))
         result = self.launch(selected)
-        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.returncode, 75, result.stderr)
         self.assertIn("planner config changed after the dispatcher selected this pass", result.stderr)
         self.assertNotIn(selected, result.stderr + result.stdout)
         self.assertFalse(self.started.exists())

@@ -7,6 +7,10 @@ import {criterionIds} from './queue.mjs';
 const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
 const real = folder => fs.existsSync(folder) ? fs.realpathSync(folder) : folder;
 
+// launch.py exits with this status only when the config bytes differ from the handoff digest.
+// Nothing started, so the dispatcher may select the same item again.
+export const HANDOFF_CHANGED = 75;
+
 // The pass receives the digest of these exact bytes and refuses a file that differs.
 export function plannerConfig(configFile, {ac = null, automatic = false} = {}, bytes = fs.readFileSync(configFile)) {
   const config = JSON.parse(bytes.toString('utf8'));

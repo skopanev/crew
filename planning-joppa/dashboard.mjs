@@ -6,7 +6,7 @@ import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {lock as dispatcherLock} from './run-files.mjs';
 import {plannerRows, titleCell} from './run-rows.mjs';
 import {readyRequirements} from './queue.mjs';
-import {plannerConfig, plannerIdentity} from './planner-config.mjs';
+import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
 import {configReloader} from '../lane-launcher/config-reload.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements} from './queue.mjs';
@@ -111,7 +111,7 @@ export async function main(argv) {
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = requirement;
+      let selected = requirement, attemptKey = null;
       if (automatic) {
         current = null;
         state.error = null;
@@ -130,7 +130,8 @@ export async function main(argv) {
             const next = candidates.find(row => !attempted.has(row.attemptKey));
             if (next) {
               selected = next.address;
-              attempted.add(next.attemptKey);
+              attemptKey = next.attemptKey;
+              attempted.add(attemptKey);
               state.message = `${notice}Planning ${next.address} · ${next.title}`;
             } else state.message = `${notice}Requirements: ${candidates.length} ready · no unattempted Requirements · next check in ${interval}s`;
           }
@@ -170,6 +171,8 @@ export async function main(argv) {
         const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
         await termination;
         if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
+        // A refused handoff started nothing: only this unstarted selection may be tried again.
+        if (code === HANDOFF_CHANGED && attemptKey && !current) attempted.delete(attemptKey);
         if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
         if (!stopped && (once || ac || requirement)) process.exitCode = code ?? 2;
         draw();
