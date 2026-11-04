@@ -108,3 +108,50 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package cleanup r
   assert.throws(() => cleanupBlockedTasks(blocked.input), /Active, held or unconfirmed/);
   assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
 });
+
+// Two dispatchers keep receipts in two runs folders. Cleanup reads both folders.
+function twoFolders(blocked) {
+  const first = path.join(path.dirname(blocked.runs), 'other-receipts');
+  fs.mkdirSync(first);
+  delete blocked.input.config.lane_runs_folder;
+  blocked.input.config.lane_runs_folders = [first, blocked.runs];
+  return first;
+}
+
+test('Joppa package cleanup finds the block receipt in the second runs folder', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f);
+  twoFolders(blocked);
+  const prepared = cleanupBlockedTasks(blocked.input);
+  assert.equal(prepared.length, 1);
+  assert.equal(prepared[0].folder, blocked.folder);
+  assert.equal(fs.existsSync(blocked.folder), false);
+});
+
+test('Joppa package cleanup refuses a Run ID in two runs folders before deleting any checkout', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f), first = twoFolders(blocked);
+  fs.mkdirSync(path.join(first, blocked.runId));
+  save(path.join(first, blocked.runId, 'launch.json'), blocked.run);
+  assert.throws(() => cleanupBlockedTasks(blocked.input), /occurs in more than one runs folder/);
+  assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+});
+
+for (const state of ['both fields', 'empty list', 'relative folder', 'repeated folder']) {
+  test(`Joppa package cleanup refuses runs folder configuration with ${state}`, async t => {
+    const f = await packageFixture(t), blocked = blockedPackage(f), config = blocked.input.config;
+    const folders = {'both fields': [blocked.runs], 'empty list': [], 'relative folder': ['receipts'],
+      'repeated folder': [blocked.runs, blocked.runs]}[state];
+    if (state !== 'both fields') delete config.lane_runs_folder;
+    config.lane_runs_folders = folders;
+    assert.throws(() => cleanupBlockedTasks(blocked.input), /config\.lane_runs_folder/);
+    assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+  });
+}
+
+test('Joppa package cleanup refuses a runs folder inside a discarded checkout', async t => {
+  const f = await packageFixture(t), blocked = blockedPackage(f), first = twoFolders(blocked);
+  const inside = path.join(blocked.folder, 'runs');
+  fs.mkdirSync(inside);
+  blocked.input.config.lane_runs_folders = [first, blocked.runs, inside];
+  assert.throws(() => cleanupBlockedTasks(blocked.input), /Cleanup cannot contain lane receipts/);
+  assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+});

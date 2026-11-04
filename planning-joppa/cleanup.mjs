@@ -14,12 +14,26 @@ const stat = file => {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 };
 
+// Return the lane runs folders from lane_runs_folder or lane_runs_folders. context.py uses the same rule.
+export function laneRunsFolders(config) {
+  const single = config.lane_runs_folder != null, many = config.lane_runs_folders != null;
+  require(!(single && many), 'Set config.lane_runs_folder or config.lane_runs_folders, not both');
+  if (!many) return single ? [config.lane_runs_folder] : [];
+  const folders = config.lane_runs_folders;
+  require(Array.isArray(folders) && folders.length && new Set(folders).size === folders.length &&
+    folders.every(folder => typeof folder === 'string' && path.isAbsolute(folder)),
+  'config.lane_runs_folders must be a nonempty list of distinct absolute paths');
+  return folders;
+}
+
 export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false} = {}) {
   const blocked = tasks.filter(task => task.document?.present === true && nodeWaiting(task));
   if (!blocked.length) return [];
-  require(config.worktree_root && config.lane_runs_folder, 'Blocked retries need config.worktree_root and config.lane_runs_folder');
-  const root = path.resolve(config.worktree_root), runs = path.resolve(config.lane_runs_folder);
-  require(path.isAbsolute(config.worktree_root) && path.isAbsolute(config.lane_runs_folder), 'Cleanup paths must be absolute');
+  const configured = laneRunsFolders(config);
+  require(config.worktree_root && configured.length, 'Blocked retries need config.worktree_root and lane runs folders');
+  require([config.worktree_root, ...configured].every(item => typeof item === 'string' && path.isAbsolute(item)),
+    'Cleanup paths must be absolute');
+  const root = path.resolve(config.worktree_root), folders = configured.map(item => path.resolve(item));
   require(Array.isArray(config.repositories) && config.repositories.length && config.repositories.every(repo =>
     typeof repo.path === 'string' && path.resolve(repo.path) !== root && !path.resolve(repo.path).startsWith(root + path.sep)),
   'Worktree root cannot contain a canonical repository');
@@ -27,13 +41,16 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
   require(!rootStat || rootStat.isDirectory() && !rootStat.isSymbolicLink() && fs.realpathSync(root) === root,
     'Worktree root must be a real directory without symlinks');
   const prepared = new Map(), receipts = new Map();
-  if (stat(runs)) {
+  // Read every folder before any deletion. One Run ID must identify one receipt.
+  for (const runs of folders) {
+    if (!stat(runs)) continue;
     require(stat(runs).isDirectory() && fs.realpathSync(runs) === runs, 'Lane runs folder must be a real directory');
     for (const name of fs.readdirSync(runs)) {
       if (!uuid.test(name)) continue;
       const file = path.join(runs, name, 'launch.json');
       if (!stat(file)) continue;
       require(stat(file).isFile() && fs.realpathSync(file) === file, 'Lane receipt must not use symlinks');
+      require(!receipts.has(name), `Lane Run ID ${name} occurs in more than one runs folder`);
       receipts.set(name, readRun(file));
     }
   }
@@ -92,7 +109,8 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     const execution = receipt.executionId;
     require(typeof execution === 'string' && /^joppa-[0-9a-f]{32}$/.test(execution), 'Lane receipt has an invalid checkout ID');
     const folder = path.join(root, execution), entry = stat(folder);
-    require(runs !== folder && !runs.startsWith(folder + path.sep), 'Cleanup cannot contain lane receipts');
+    require(folders.every(runs => runs !== folder && !runs.startsWith(folder + path.sep)),
+      'Cleanup cannot contain lane receipts');
     require(!entry || entry.isDirectory() && !entry.isSymbolicLink() && fs.realpathSync(folder) === folder,
       'Blocked worktree must be a real directory without symlinks');
     if (!entry && !retry) continue;
