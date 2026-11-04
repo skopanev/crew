@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from common import read, require, run, write
+from common import fingerprint, read, require, run, write
 
 
 def indexed_projects():
@@ -23,6 +23,45 @@ def indexed_projects():
         next_offset = projects.get("next_offset")
         require(type(next_offset) is int and next_offset > offset, "CBM pagination did not advance")
         offset = next_offset
+
+
+def cbm_result(tool, *flags, timeout=45):
+    """Run one CBM CLI tool. Return its JSON object or its top-level `key: value` lines."""
+    reply = json.loads(run([os.environ["CBM_BIN"], "cli", "--json", tool, *flags], timeout=timeout))
+    require(isinstance(reply, dict) and not reply.get("isError"), f"CBM {tool} failed")
+    if isinstance(reply.get("structuredContent"), dict):
+        return reply["structuredContent"]
+    text = next((block.get("text") for block in reply.get("content") or [] if block.get("type") == "text"), None)
+    require(isinstance(text, str), f"CBM {tool} returned no text result")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        lines = (line.partition(":") for line in text.splitlines() if line[:1].strip())
+        return {key.strip(): value.strip() for key, sep, value in lines if sep}
+
+
+def refresh_index(repositories, rows):
+    """Rebuild each bound CBM project in memory. Return the source fingerprint that it indexed."""
+    names = {row.get("name") for row in rows}
+    for repo in repositories:
+        name, root = repo["cbm_project"], os.path.realpath(repo["path"])
+        require(name in names, f"{repo['id']}: CBM project {name} is absent from the index")
+        require(any(row.get("name") == name and row.get("root_path") == root for row in rows),
+                f"{repo['id']}: CBM project {name} is not bound to {root}")
+    snapshots = {}
+    for repo in repositories:
+        name, root = repo["cbm_project"], os.path.realpath(repo["path"])
+        before = fingerprint(repo)
+        result = cbm_result("index_repository", "--repo-path", root, "--name", name,
+                            "--persistence", "false", timeout=1800)
+        require(isinstance(result, dict) and result.get("project") == name,
+                f"{repo['id']}: CBM did not index {name}: {result!r}")
+        status = cbm_result("index_status", "--project", name)
+        require(isinstance(status, dict) and status.get("status") == "ready" and status.get("root_path") == root,
+                f"{repo['id']}: CBM project {name} is not ready at {root}: {status!r}")
+        require(fingerprint(repo) == before, f"{repo['id']}: source changed during the CBM refresh")
+        snapshots[repo["id"]] = before
+    return snapshots
 
 
 def prepare_opencode(read_paths, mcp_servers=None):

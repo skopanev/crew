@@ -10,7 +10,7 @@ from contracts import ROLES, load_contract
 import drift
 import validation
 from responses import body_result
-from tools import indexed_projects, prepare_opencode, prepare_critic, prepare_agy
+from tools import indexed_projects, prepare_opencode, refresh_index, prepare_critic, prepare_agy
 
 
 def artifacts():
@@ -26,13 +26,10 @@ def emit_var(name, value):
 
 def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
     target = artifacts()
-    snapshots = {r["id"]: fingerprint(r) for r in assignment["repositories"]}
-    write(target / "snapshots.json", snapshots)
-    # Probe the configured index without indexing or starting a watcher.
     rows = indexed_projects() if projects is None else projects
     write(target / "cbm-projects.json", rows)
-    names = {p["name"] for p in rows}
-    require(all(r["cbm_project"] in names for r in assignment["repositories"]), "a requested repository is absent from the CBM index")
+    # Check every project binding first, then rebuild each index in memory against an unchanged source.
+    write(target / "snapshots.json", refresh_index(assignment["repositories"], rows))
     with ThreadPoolExecutor(max_workers=3) as pool:
         contracts = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     write(target / "contracts.json", contracts)
