@@ -273,7 +273,7 @@ class CriticNoteTests(unittest.TestCase):
                                             ("assess", "criterion:b"), ("note", "criterion:b")])
             self.assertEqual([batch[1]["ready"], batch[4]["ready"]], [False, False])
             note_id = f"crew-critic-run-7-{digest(PLAN)[:12]}"
-            self.assertEqual({note["id"] for note in notes}, {note_id})
+            self.assertEqual([note["id"] for note in notes], [note_id + "-a", note_id + "-b"])
             text = notes[0]["text"]
             self.assertLessEqual(len(text), 1000)
             self.assertIn("run-7", text)
@@ -285,7 +285,7 @@ class CriticNoteTests(unittest.TestCase):
             self.assertNotIn("EVIDENCE-DUMP", text)
             self.assertNotIn("all selected criteria", text)
             receipt = read(target / "release.json")
-            self.assertEqual(receipt["critic_notes"], [note_id, note_id])
+            self.assertEqual(receipt["critic_notes"], [note_id + "-a", note_id + "-b"])
             self.assertNotIn("critic_notes_dropped", receipt)
             self.assertEqual((result["claim_released"], result["needs_recovery"]), (True, False))
 
@@ -362,6 +362,14 @@ class CriticNoteTests(unittest.TestCase):
                 api = Server({"criterion:a": (MARK, 4), "criterion:b": (MARK, 4)})
                 self.fail(target, api, self.rejection())
                 self.assertEqual(api.batches(), [])
+
+    def test_note_id_is_unique_for_each_criterion_and_sanitized(self):
+        import planning_claims
+        notes = {"id": "crew-critic-run-7-0123456789ab", "text": "x"}
+        self.assertEqual(planning_claims.note("criterion:a", notes)["id"], "crew-critic-run-7-0123456789ab-a")
+        odd = planning_claims.note("criterion:a b/c:" + "z" * 100, notes)["id"]
+        self.assertRegex(odd, r"^crew-critic-run-7-0123456789ab-a-b-c-z+$")
+        self.assertEqual(len(odd), len(notes["id"]) + 1 + 64)
 
     def test_note_without_an_earlier_save_is_refused(self):
         import planning_claims
