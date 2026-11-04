@@ -1,19 +1,12 @@
 // Select a finalize-only candidate when all Tasks in a requirement unit are done on the requirement branch.
-import {parsePublication, requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
+import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
+import {taskMatchesProject} from './joppa-nodes.mjs';
 
 const text = value => typeof value === 'string' && value.trim();
 
 function matchesConfiguredProject(config, row, current) {
-  const configured = config?.joppa?.project;
-  if (!text(configured)) return true;
-  const trimmed = configured.trim();
-  const short = trimmed.includes(':') ? trimmed.split(':').slice(1).join(':') : trimmed;
-  const allowed = new Set([trimmed, short].filter(Boolean));
-  for (const list of [row?.projects, current?.projects, current?.document?.data?.projects]) {
-    if (Array.isArray(list) && !list.some(item => allowed.has(item))) return false;
-  }
-  return true;
+  return !text(config?.joppa?.project) || taskMatchesProject(config, current || row);
 }
 
 function sameFailedFinalizer(runs, requirement, repository, head, targetHead, fingerprint) {
@@ -80,8 +73,8 @@ async function listRequirementBranches(config) {
 
 export async function finalizationCandidate({config, read, object, group, rows = [], occupied = new Set(), runs = []}) {
   if (!config || config.delivery !== 'requirement' || !Array.isArray(rows) || !rows.length) return null;
-  const doneRows = rows.filter(row => row && text(row.address) && row.status === 'done' &&
-    row.review_required !== true && matchesConfiguredProject(config, row, null));
+  const doneRows = rows.filter(row => row && text(row.address) && row.present === false &&
+    row['data.commit'] && matchesConfiguredProject(config, row, null));
   if (!doneRows.length) return null;
 
   const {byRepo, allBranches} = await listRequirementBranches(config);
@@ -107,21 +100,11 @@ export async function finalizationCandidate({config, read, object, group, rows =
   for (const row of doneRows) {
     let current, context, plan;
     try {
-      current = await object(row.address);
-      if (!current || current.historical !== false || current.document?.present !== true ||
-          current.document.data?.archived === true) continue;
-      if (current.process?.status !== 'done' || current.process?.retired ||
-          current.review_required === true || current.process?.review_required === true) continue;
+      current = await object(row.address, {allowArchived: true});
+      if (!current || current.historical !== false || current.document?.present !== false ||
+          !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(current.document.data.commit || '')) continue;
       if (!matchesConfiguredProject(config, row, current)) continue;
-      let publication;
-      try {
-        publication = parsePublication(current.process.done);
-      } catch {
-        continue;
-      }
-      if (!allBranches.has(publication.target)) continue;
-
-      context = await group(row.address);
+      context = await group(row.address, true);
       if (!context || !text(context.requirement) || !text(context.repository)) continue;
       const {requirement, repository} = context;
       const unitKey = `${requirement}\n${repository}`;
@@ -129,7 +112,7 @@ export async function finalizationCandidate({config, read, object, group, rows =
       const repo = (config.repositories || []).find(item => item?.id === repository);
       if (!repo) continue;
       const expectedBranch = requirementBranch(requirement, repository);
-      if (publication.target !== expectedBranch) continue;
+      if (!allBranches.has(expectedBranch)) continue;
       const head = byRepo.get(repository)?.get(expectedBranch) || '';
       if (!head) continue;
       seenUnits.add(unitKey);

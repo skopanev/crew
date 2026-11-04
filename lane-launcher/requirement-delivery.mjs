@@ -2,8 +2,9 @@
 import {createHash} from 'node:crypto';
 import {remoteDependencyBlocker} from './dependencies.mjs';
 import {taskBody} from './task-contract.mjs';
-import {require, validAddress, requirementBranch, normalizeClaim, normalizeBlocked,
-  collectRequirementCriteria, taskRepository, taskStatus, taskRecord, parsePublication} from './requirement-state.mjs';
+import {require, validAddress, requirementBranch,
+  collectRequirementCriteria, taskRepository, taskStatus, taskRecord} from './requirement-state.mjs';
+import {nodeAssignee, taskPages, NODE_TONES} from './joppa-nodes.mjs';
 export {requirementBranch, parsePublication, assertRequirementHead} from './requirement-state.mjs';
 
 export async function requirementPlan(run, read) {
@@ -57,8 +58,7 @@ export async function requirementPlan(run, read) {
   require(present(reqObject) && types[reqObject.kind]?.role === 'requirement',
     'Requirement object is not a current present requirement');
   await remember(reqObject);
-  const reqClaim = normalizeClaim(reqObject.process?.planning_claim ?? reqObject.planning_claim);
-  const reqProcessRev = Number.isSafeInteger(reqObject.process?.revision) ? reqObject.process.revision : null;
+  const reqAssignee = nodeAssignee(reqObject);
 
   const criteriaByAddress = await collectRequirementCriteria(requirement, reqObject.kind, types, read, object, present);
   const requirementAncestor = async (value, strict = false) => {
@@ -87,85 +87,51 @@ export async function requirementPlan(run, read) {
     require(present(current), `Current run Task is absent or archived: ${address}`);
     require(own.revision === undefined || current.current_revision >= own.revision, `Current run Task revision is invalid: ${address}`);
     const status = taskStatus(current);
-    const reviewRequired = current.review_required === true || current.process?.review_required === true;
     require(status !== 'done' && status !== 'retired', `Current run Task is already ${status}: ${address}`);
-    require(!reviewRequired, `Current run Task needs review: ${address}`);
     require(await requirementAncestor(current, true) === requirement, `Current run Task belongs to a different requirement: ${address}`);
     require(taskRepository(current, types) === repository, `Current run Task belongs to a different repository: ${address}`);
     await remember(current);
     manifestByAddress.set(address, {address, revision: current.current_revision, status: 'finishing', finishing: true});
-    requirementTasksByAddress.set(address, taskRecord(current, status, false, true));
+    requirementTasksByAddress.set(address, taskRecord(current, status, true));
   }
-  let cursor;
-  const cursors = new Set();
-  do {
-    const page = await read('joppa_tasks', {view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
-    require(page && Array.isArray(page.tasks), 'Joppa task page is invalid');
-    for (const item of page.tasks) {
+  for await (const page of taskPages(read, {parent: requirement, status: NODE_TONES})) {
+    for (const item of page.items) {
       require(item && validAddress(item.address) && Number.isSafeInteger(item.revision) && item.revision > 0,
         'Joppa task list returned an invalid Task');
       if (ownByAddress.has(item.address)) {
-        require(item.status !== 'done' && item.status !== 'retired', `Current run Task is already ${item.status}: ${item.address}`);
-        require(item.review_required !== true, `Current run Task needs review: ${item.address}`);
-        require(item.req == null || item.req === requirement, `Current run Task belongs to a different requirement: ${item.address}`);
+        require(item.present === true && (await object(item.address)).current_revision === item.revision,
+          `Current run Task changed while reading delivery state: ${item.address}`);
         continue;
       }
-      if (item.req != null) {
-        require(validAddress(item.req), `Joppa task list returned an invalid req address: ${item.address}`);
-        if (item.req !== requirement) continue;
-      }
-      if (item.ac != null && validAddress(item.ac) && !criteriaByAddress.has(item.ac)) continue;
       const current = await object(item.address);
-      if (!present(current)) continue;
+      require(current.current_revision === item.revision, `Task changed while reading delivery state: ${item.address}`);
       if (await requirementAncestor(current, false) !== requirement) continue;
-      const status = taskStatus(current, item.status);
-      const reviewRequired = current.review_required === true || current.process?.review_required === true || item.review_required === true;
+      const status = taskStatus(current);
       if (status === 'retired' && (!taskBody(current.document.data) ||
           !Object.hasOwn(current.document.data, 'steps') &&
           [...String(taskBody(current.document.data)).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].length !== 1)) {
         continue;
       }
       if (taskRepository(current, types) !== repository) continue;
-      requirementTasksByAddress.set(current.address, taskRecord(current, status, reviewRequired, false));
+      requirementTasksByAddress.set(current.address, taskRecord(current, status, false));
       if (status === 'retired') continue;
       await remember(current);
       if (status === 'done') {
-        if (!reviewRequired && current.process?.status === 'done' && !current.process?.retired) {
-          try {
-            const {sha, target} = parsePublication(current.process.done, current.process.commit);
-            publications.push({task: current.address, sha, target});
-          }
-          catch { /* A DONE Task without exact evidence cannot confirm a Requirement head. */ }
-        }
-        if (reviewRequired) {
-          manifestByAddress.set(current.address, {
-            address: current.address,
-            revision: current.current_revision,
-            status: 'review_required',
-            review_required: true,
-            finishing: false,
-          });
-        }
+        publications.push({task: current.address, sha: current.document.data.commit, target: branch});
         continue;
       }
       manifestByAddress.set(current.address, {
         address: current.address,
         revision: current.current_revision,
         status,
-        ...(reviewRequired ? {review_required: true} : {}),
         finishing: false,
       });
     }
-    cursor = page.next_cursor;
-    if (cursor) {
-      require(typeof cursor === 'string' && !cursors.has(cursor), 'Joppa task pagination cursor repeated');
-      cursors.add(cursor);
-    }
-  } while (cursor);
+  }
   const criteria = [...criteriaByAddress.values()].sort((a, b) => a.address.localeCompare(b.address));
   const requirementTasks = [...requirementTasksByAddress.values()].sort((a, b) => a.address.localeCompare(b.address));
   const manifest = [...manifestByAddress.values()].sort((a, b) => a.address.localeCompare(b.address));
-  const planningHeld = Boolean(reqClaim) || criteria.some(item => Boolean(item.planning_claim));
+  const planningHeld = Boolean(reqAssignee) || criteria.some(item => Boolean(item.assignee));
   const final = !planningHeld && manifest.every(item => item.finishing) &&
     (ownByAddress.size > 0 || requirementTasks.some(item => item.status === 'done'));
   publications.sort((a, b) => a.task.localeCompare(b.task));
@@ -174,7 +140,7 @@ export async function requirementPlan(run, read) {
       links: (item.remote_links || []).map(({status, ...link}) => link)}))
     .sort((a, b) => a.address.localeCompare(b.address));
   const fingerprint = createHash('sha256').update(JSON.stringify({
-    requirement: {address: requirement, revision: reqObject.current_revision, process_revision: reqProcessRev, planning_claim: reqClaim},
+    requirement: {address: requirement, revision: reqObject.current_revision, assignee: reqAssignee},
     repository,
     criteria,
     tasks: requirementTasks,

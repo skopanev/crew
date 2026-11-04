@@ -1,5 +1,5 @@
 // Check dependency delivery before a new worker runs any repository code.
-import {parsePublication} from './requirement-delivery.mjs';
+import {requirementBranch} from './requirement-delivery.mjs';
 import {remoteDependencyBlocker} from './dependencies.mjs';
 import {taskContract} from './task-contract.mjs';
 import {execFile} from 'node:child_process';
@@ -61,7 +61,7 @@ export async function guardPublications(run, read, ancestor) {
       if (seen.has(value.address)) invalid('Dependency parent cycle');
       seen.add(value.address);
       if (schema[value.kind]?.role === 'requirement') return value.address;
-      value = value.document.parent ? await object(value.document.parent) : null;
+      value = value.document.parent ? await object(value.document.parent, true) : null;
     }
     invalid('Dependency Task has no requirement ancestor');
   };
@@ -80,26 +80,24 @@ export async function guardPublications(run, read, ancestor) {
     for (const link of value.document.links || []) {
       if (link.relation !== 'depends_on' || link.blocking !== true) continue;
       const target = await object(link.target, true);
-      if (target.document.present !== true || target.document.data?.archived === true) continue;
       if (schema[target.kind]?.role === 'task') {
-        if (target.process?.status !== 'done' || target.process?.retired || target.review_required || target.process?.review_required) {
-          pending(`${target.address} is not completed and current`);
-        }
+        if (target.document.present === true) pending(`${target.address} is not completed`);
+        const sha = target.document.data.commit;
+        if (!sha) continue;
+        if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) invalid(`Dependency commit is invalid: ${target.address}`);
         let contract;
         try { contract = taskContract(target.document.data); }
         catch (error) { invalid(`Dependency Task contract is invalid: ${target.address}: ${error.message}`); }
         const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
         const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
         if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
-        let publication;
-        try { publication = parsePublication(target.process.done, target.process.commit); }
-        catch { pending(`${target.address} has no exact publication evidence`); }
         const internal = run.config.delivery === 'requirement' && repo.id === run.repository.id &&
           await requirement(target) === run.requirement;
-        const branch = internal && publication.target === run.requirementDelivery.branch
-          ? run.requirementDelivery.branch : repo.targetBranch;
-        if (!await ancestor(repo, publication.sha, branch)) pending(`${target.address} commit ${publication.sha} is not on ${branch}`);
+        const branch = internal ? requirementBranch(run.requirement, repo.id) : repo.targetBranch;
+        if (!await ancestor(repo, sha, branch)) pending(`${target.address} commit ${sha} is not on ${branch}`);
+        continue;
       }
+      if (target.document.present !== true || target.document.data?.archived === true) continue;
       await visit(target.address);
     }
     if (value.document.parent) await visit(value.document.parent);

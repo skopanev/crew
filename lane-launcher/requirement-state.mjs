@@ -1,6 +1,7 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
 import {taskContract, taskBody} from './task-contract.mjs';
+import {nodeAssignee, nodeWaiting} from './joppa-nodes.mjs';
 
 export const require = (condition, message) => {
   if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
@@ -51,30 +52,6 @@ export function assertRequirementHead(plan, head) {
   throw error;
 }
 
-export function normalizeClaim(raw) {
-  if (raw === null || raw === undefined || raw === false) return null;
-  if (typeof raw === 'string') {
-    require(Boolean(raw.trim()), 'Planning claim actor is empty');
-    return {actor: raw.trim()};
-  }
-  require(typeof raw === 'object' && !Array.isArray(raw) && Boolean(text(raw.actor)), 'Planning claim is invalid');
-  require(raw.position === undefined || (Number.isSafeInteger(raw.position) && raw.position >= 0),
-    'Planning claim position is invalid');
-  return {actor: raw.actor.trim(), ...(raw.position !== undefined ? {position: raw.position} : {})};
-}
-
-export function normalizeBlocked(raw) {
-  if (!raw) return null;
-  if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return {
-      ...(typeof raw.actor === 'string' ? {actor: raw.actor} : {}),
-      ...(typeof raw.reason === 'string' ? {reason: raw.reason} : {}),
-      ...(Number.isSafeInteger(raw.position) ? {position: raw.position} : {}),
-    };
-  }
-  return Boolean(raw);
-}
-
 export async function collectRequirementCriteria(requirement, requirementKind, types, read, object, present) {
   const criterionBranches = new Set(Object.keys(types).filter(kind => types[kind]?.role === 'ac'));
   const canParentCriteria = new Set();
@@ -103,7 +80,7 @@ export async function collectRequirementCriteria(requirement, requirementKind, t
     let cursor;
     const cursors = new Set();
     do {
-      const page = await read('joppa_objects', {parent: parentAddress, limit: 25,
+      const page = await read('joppa_objects', {parent: parentAddress, depth: 1, limit: 25,
         fields: ['kind', 'present'], ...(cursor ? {cursor} : {})});
       require(page && Array.isArray(page.items), `Joppa child object page is invalid for ${parentAddress}`);
       for (const item of page.items) {
@@ -119,9 +96,8 @@ export async function collectRequirementCriteria(requirement, requirementKind, t
         if (types[item.kind]?.role === 'ac') {
           criteriaByAddress.set(item.address, {
             address: item.address,
-            revision: full.contract_revision ?? full.current_revision,
-            process_revision: Number.isSafeInteger(full.process?.revision) ? full.process.revision : null,
-            planning_claim: normalizeClaim(full.process?.planning_claim ?? full.planning_claim),
+            revision: full.current_revision,
+            assignee: nodeAssignee(full),
           });
         }
         await collectCriteria(item.address, item.kind);
@@ -146,24 +122,23 @@ export function taskRepository(value, types) {
     `Task needs an unambiguous Repository line: ${value.address}`);
   return declarations[0];
 }
-export const taskStatus = (value, listedStatus) => {
-  if (listedStatus === 'done' || listedStatus === 'retired' ||
-      value.process?.status === 'done' || value.process?.status === 'retired' ||
-      Boolean(value.process?.done) || Boolean(value.process?.retired)) {
-    return listedStatus === 'retired' || value.process?.status === 'retired' || Boolean(value.process?.retired) ? 'retired' : 'done';
+export const taskStatus = value => {
+  if (value.document.present === false) {
+    const commit = value.document.data.commit;
+    if (!commit) return 'retired';
+    require(typeof commit === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(commit),
+      `Archived Task has an invalid commit: ${value.address}`);
+    return 'done';
   }
-  if (value.process?.status === 'blocked' || listedStatus === 'blocked' || Boolean(value.process?.blocked)) return 'blocked';
-  if (value.process?.status === 'in_progress' || listedStatus === 'in_progress') return 'in_progress';
-  if (value.process?.status === 'open' || listedStatus === 'open') return 'open';
-  throw Object.assign(new Error(`Task has an invalid process status: ${value.address}`), {code: 'CANDIDATE_INVALID'});
+  if (nodeWaiting(value)) return 'blocked';
+  return nodeAssignee(value) ? 'in_progress' : 'open';
 };
-export const taskRecord = (value, status, reviewRequired, finishing) => ({
+export const taskRecord = (value, status, finishing) => ({
   address: value.address,
   revision: value.current_revision,
-  process_revision: Number.isSafeInteger(value.process?.revision) ? value.process.revision : null,
-  origin_revision: Number.isSafeInteger(value.process?.origin_revision) ? value.process.origin_revision : null,
   status,
-  blocked: normalizeBlocked(value.process?.blocked),
-  review_required: reviewRequired,
+  assignee: nodeAssignee(value),
+  assessment: value.process?.assessment ?? null,
+  commit: value.document.data.commit ?? null,
   finishing,
 });

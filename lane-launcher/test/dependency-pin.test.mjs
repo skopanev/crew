@@ -22,16 +22,13 @@ test('non-Task dependencies use the native tree tone without separate test reads
   assert(calls.every(({tool, args}) => tool === 'joppa_tree' || tool === 'joppa_objects' && args.address));
 });
 
-test('a delivered prerequisite with a changed contract reports its stale pin without changing documents', async () => {
+test('local ordering survives completion metadata revisions without changing documents', async () => {
   const f = fixture(), target = f.objects.get('work:two');
-  Object.assign(target, {current_revision: 11, review_required: false});
-  target.process.origin_revision = 9;
+  target.current_revision = 11;
   const link = {relation: 'depends_on', blocking: true, target: target.address, revision: 1};
   f.objects.get('work:one').document.links = [link];
   const before = structuredClone(f.objects);
-  assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false,
-    code: 'DEPENDENCY_STALE_PIN', consumer: 'work:one', blocker: 'work:two',
-    pin: 1, contractRevision: 9, currentRevision: 11});
+  assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: true, blocker: null});
   assert.deepEqual(f.objects, before);
   link.revision = 11;
   assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: true, blocker: null});
@@ -39,29 +36,29 @@ test('a delivered prerequisite with a changed contract reports its stale pin wit
   f.objects.get('work:one').document.links = [];
   f.objects.get('measure:a').document.links = [link];
   const inherited = await dependencyCheck(f.read)('work:one');
-  assert.equal(inherited.code, 'DEPENDENCY_STALE_PIN');
-  assert.equal(inherited.consumer, 'measure:a');
+  assert.equal(inherited.ready, true);
+  target.document.present = true;
+  target.document.data.assignee = 'another-run';
+  assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false, blocker: 'work:two'});
 });
 
-test('the CLI and dashboard explain zero availability and never claim or re-pin the stale Task', async t => {
+test('the CLI and dashboard leave unfinished dependencies unchanged', async t => {
   const f = await setup(t, {launchLanes: false});
   f.joppa.queue.splice(0, f.joppa.queue.length, 'task:t1');
   const target = f.joppa.objects.get('task:t2');
-  Object.assign(target, {current_revision: 11, review_required: false});
-  target.process = {status: 'done', done: 'Delivered', origin_revision: 9};
+  target.current_revision = 11;
   const task = f.joppa.objects.get('task:t1');
   task.document.links = [{relation: 'depends_on', blocking: true, target: target.address, revision: 1}];
   const before = structuredClone(f.joppa.objects);
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /0 available · 0 held workers · 1 DEPENDENCY_STALE_PIN/);
-  assert.match(result.stdout, /task:t1 → task:t2 · pin=1 · contract=9 · current=11/);
+  assert.match(result.stdout, /0 available/);
   assert.doesNotMatch(result.stdout, /Starting new one/);
   assert.ok(!fs.existsSync(f.events));
 
   const state = {};
   await tick(configFrom(f.configFile, f.env), state);
-  assert.equal(state.counts.dependencyIssues.length, 1);
+  assert.equal(state.counts.dependencyIssues.length, 0);
   assert.equal(state.message, 'No ready tickets');
   let output = '';
   const write = t.mock.method(process.stdout, 'write', chunk => { output += chunk; return true; });
@@ -73,9 +70,7 @@ test('the CLI and dashboard explain zero availability and never claim or re-pin 
     dashboard.close();
     write.mock.restore();
   }
-  assert.match(output, /DEPENDENCY_STALE_PIN/);
-  assert.match(output, /task:t1 → task:t2/);
-  assert.match(output, /pin=1 · contract=9 · current=11/);
+  assert.doesNotMatch(output, /DEPENDENCY_STALE_PIN/);
   assert.deepEqual(f.joppa.objects, before);
   assert.equal(f.calls.some(call => ['joppa_batch', 'joppa_command'].includes(call.name)), false);
 });
