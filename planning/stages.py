@@ -175,13 +175,23 @@ def critique_join():
     signal("REVISE", "Rejected by " + ", ".join(sorted(rejected)) + "; design revises once")
 
 
+class CriticRejection(ValueError):
+    """A critic rejected the plan after the last revision round. finish stops; the plan digest names the plan."""
+
+    def __init__(self, message, plan_digest):
+        super().__init__(message)
+        self.plan_digest = plan_digest
+
+
 def verify_context(assignment, plan, review=True, *, mechanisms_only=False):
     target = artifacts()
     require_necessity(plan)
     reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
+    plan_digest = digest(plan)
     for key, critic_review in reviews.items():
-        validation.critique(critic_review, digest(plan))
-        require(critic_review["verdict"] == "clear", f"{key} critic rejected: {critic_review['summary']}")
+        validation.critique(critic_review, plan_digest)
+        if critic_review["verdict"] != "clear":
+            raise CriticRejection(f"{key} critic rejected: {critic_review['summary']}", plan_digest)
     old, contracts = verify_mechanism_context(assignment, plan) if mechanisms_only else verify_freshness(assignment, review)
     return reviews, old, contracts
 
