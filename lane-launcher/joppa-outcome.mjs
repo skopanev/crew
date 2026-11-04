@@ -5,6 +5,8 @@ import {quote, save} from './runtime.mjs';
 import {api, batchRequest, mutateTasks, claimTasks, contractDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
+import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
+import {saveNode} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -16,11 +18,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
   if (!run.claim) return;
   const persist = () => save(stateFile, run);
   const claims = claimTasks(run);
-  const unclaimed = object => object.historical === false && object.document?.present === true &&
-    Number.isSafeInteger(object.current_revision) && object.process?.status === 'open' &&
-    object.process.assignee === null && !object.process.claim && !object.process.blocked &&
-    !object.process.done && !object.process.retired;
-  const owned = object => object.process?.assignee === run.joppaWorker.actor && object.process.status === 'in_progress';
+  const unclaimed = released;
+  const owned = object => heldBy(run, object);
   const currentTasks = async (validate = false, allowReleased = false) => {
     const objects = [];
     for (const claim of claims) {
@@ -30,7 +29,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
         'Task holder changed; package outcome not written');
       if (validate) {
         verifyRemoteDependencies(object);
-        require(object.work_ready === true && object.review_required === false && object.process?.review_required !== true,
+        require(object.work_ready === true,
           'TASK_REVIEW_REQUIRED: Task context needs review; landed package remains held');
         require(contractDigest(object) === claim.digest, 'Task contract changed during execution; package completion refused');
       }
@@ -43,17 +42,14 @@ export async function finishTask(run, stateFile, result, artifacts) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects',
         {workspace: run.workspace, address: context.address});
       verifyRemoteDependencies(parent);
-      require(parent.address === context.address && parent.document?.present === true && parent.historical === false &&
-        Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 && parent.work_ready === true &&
-        parent.review_required === false && parent.process?.review_required !== true,
+      require(parent.address === context.address && contextLive(parent) && parent.work_ready === true,
         'Task parent context needs review; completion refused');
       require(contractDigest(parent) === context.digest, 'Task parent context changed during execution; package completion refused');
     }
     for (const context of run.claim.contexts || []) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: context.address});
       verifyRemoteDependencies(parent);
-      require(parent.address === context.address && parent.document?.present === true && parent.historical === false &&
-        contractDigest(parent) === context.digest && parent.review_required === false && parent.process?.review_required !== true,
+      require(parent.address === context.address && contextLive(parent) && contractDigest(parent) === context.digest,
         'Package acceptance context changed during execution; completion refused');
     }
   };
@@ -79,21 +75,25 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const followups = path.join(artifacts, 'followups.txt');
     const findings = fs.existsSync(followups) ? fs.readFileSync(followups, 'utf8').trim() : '';
     await verifySavedContexts();
-    const current = await currentTasks(true);
-    run.completionRequest ||= batchRequest(run, current.map(object => ({
-      op: 'complete_task', id: object.address, revision: object.current_revision, commit: sha,
-      evidence: `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${path.basename(path.dirname(stateFile))}${findings ? '\nNonblocking findings:\n' + findings : ''}`})));
-    require(run.completionRequest.operations.every(({command}) => command.commit === sha),
-      'Saved completion request does not name the checked SHA; inspect it before retrying');
+    const current = await currentTasks(true), question = await taskQuestions(run), runId = path.basename(path.dirname(stateFile));
+    // One save records the commit and removes the assignee. The archive at the next revision ends the Task.
+    run.completionRequest ||= batchRequest(run, current.flatMap(object => [
+      saveNode(object, {assignee: undefined, commit: sha}, `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`, question(object)),
+      {op: 'archive_object', target: object.address, revision: object.current_revision + 1, reason: `Crew lane landed ${sha}.`}]));
+    const operations = run.completionRequest.operations.map(({command}) => command);
+    require(operations.length === claims.length * 2 && claims.every((claim, index) => {
+      const [save, archive] = operations.slice(index * 2, index * 2 + 2);
+      return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
+        !save.data.assignee && archive.op === 'archive_object' && archive.target === claim.address && archive.revision === save.revision + 1;
+    }), 'Saved completion request does not name the checked SHA; inspect it before retrying');
     persist();
-    await mutateTasks(run, run.completionRequest);
-    result.tasks = [];
-    for (const claim of claims) {
-      const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-      require(confirmed.address === claim.address && confirmed.process?.status === 'done' && confirmed.process?.commit === sha,
+    const receipt = await mutateTasks(run, run.completionRequest);
+    result.tasks = claims.map((claim, index) => {
+      const saved = receipt.results[index * 2].object;
+      require(saved.revision === operations[index * 2 + 1].revision && (saved.data?.commit ?? sha) === sha,
         'Joppa did not confirm every Task completion at the checked SHA');
-      result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
-    }
+      return {address: claim.address, status: 'done', revision: saved.revision};
+    });
     result.completed = true;  } else {
     await failTask(run, stateFile, result, artifacts,
       {claims, objects, currentTasks, verifySavedContexts, owned, unclaimed, persist});

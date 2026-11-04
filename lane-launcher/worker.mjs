@@ -69,7 +69,7 @@ try {
   } else {
     announce(`[lane] CLAIM ${run.ticket}`);
     const adoptedJoppaClaim = Boolean(run.claim);
-    const claimed = run.claim || await claimTask(run, () => save(stateFile, run));
+    const claimed = run.claim || await claimTask(run, () => save(stateFile, run), path.basename(dir));
     if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
         String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
       delete run.claim;
