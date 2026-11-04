@@ -1,6 +1,7 @@
 """Hold criteria for planning with the generic data.assignee field of each AC."""
 from copy import deepcopy
 from pathlib import Path
+import hashlib
 import re
 import socket
 
@@ -14,6 +15,10 @@ MAX_BATCH = 100
 RELEASE_OPERATIONS = 3
 MAX_CLAIMED_CRITERIA = MAX_BATCH // RELEASE_OPERATIONS
 KEEP = object()
+# A Joppa identifier is ASCII [-_.A-Za-z0-9] of at most 120 bytes. note() appends "-" and 12 hex characters.
+NOTE_ID = re.compile(r"[-_.A-Za-z0-9]+")
+NOTE_ID_BASE = 120 - 13
+NOTE_TEXT = 1000
 
 
 def run_id(target):
@@ -60,9 +65,22 @@ def not_ready(target, code):
 
 
 def note(target, notes):
-    """A native Joppa note on one released AC. It adds no revision. The id is unique for each AC."""
-    local = re.sub(r"[^A-Za-z0-9._-]", "-", target.split(":", 1)[-1])[:64]
-    return {"op": "note", "target": target, "id": f"{notes['id']}-{local}", "text": notes["text"]}
+    """A native Joppa note on one released AC. It adds no revision.
+    A digest of the full target address makes the id unique for each AC."""
+    suffix = hashlib.sha256(target.encode()).hexdigest()[:12]
+    return {"op": "note", "target": target, "id": f"{notes['id']}-{suffix}", "text": notes["text"]}
+
+
+def note_problem(notes):
+    """None for a usable {"id", "text"} note, else the reason to release without notes."""
+    if not isinstance(notes, dict):
+        return "invalid note"
+    if "dropped" in notes:
+        return str(notes["dropped"])[:200] or "invalid note"
+    valid = (set(notes) == {"id", "text"} and isinstance(notes["id"], str) and isinstance(notes["text"], str)
+             and NOTE_ID.fullmatch(notes["id"]) is not None and len(notes["id"]) <= NOTE_ID_BASE
+             and 0 < len(notes["text"]) <= NOTE_TEXT)
+    return None if valid else "invalid note"
 
 
 def claim_operations(assignment, criteria, assignee):
@@ -167,8 +185,9 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
     With a failure code, also assess each AC not ready in the same batch. Leave an AC that changed after this run
     wrote it untouched for recovery. Never split the batch and never omit an assess.
-    notes is {"id", "text"} of a final critic rejection. With a failure code, each released AC also gets that note
-    when the batch fits RELEASE_OPERATIONS per held AC. Otherwise the release omits the notes."""
+    notes is {"id", "text"} of a final critic rejection, or {"dropped": reason}. With a failure code, each released
+    AC also gets that note when the note is valid and the batch fits RELEASE_OPERATIONS per held AC. Otherwise the
+    release omits the notes and records critic_notes_dropped. A note never stops the save and assess."""
     from publication import mutate
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -193,7 +212,9 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
             f"failed release of {len(held)} criteria exceeds one batch of {MAX_BATCH} operations; "
             f"claim retained for recovery")
     expected = {**claimed_revisions(receipt), **receipt.get("revisions", {})} if code else {}
-    with_notes = bool(code and notes) and RELEASE_OPERATIONS * len(held) <= MAX_BATCH
+    dropped = (note_problem(notes) or ("batch" if RELEASE_OPERATIONS * len(held) > MAX_BATCH else None)
+               if code and notes is not None else None)
+    with_notes = bool(code) and notes is not None and not dropped
     operations, released, skipped, noted = [], [], [], []
     for address, (assignee, command) in held.items():
         try:
@@ -220,8 +241,8 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
     require(len(operations) <= MAX_BATCH, f"release needs {len(operations)} operations, more than one batch of "
             f"{MAX_BATCH}; claim retained for recovery")
     extra = {"failure_code": code} if code else {}
-    if code and notes and not with_notes:
-        extra["critic_notes_dropped"] = "batch"
+    if dropped:
+        extra["critic_notes_dropped"] = dropped
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
         return not any(item.get("unknown") for item in skipped)

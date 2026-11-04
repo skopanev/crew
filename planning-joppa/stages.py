@@ -13,6 +13,7 @@ import validation
 import context
 import publication
 import planning_claims as claims
+import critic_notes
 from mcp import Rejected
 from joppa_reads import blocked
 
@@ -168,47 +169,6 @@ def failure_code(reason):
     return match.group(1) if match else "PLANNING_FAILED"
 
 
-NOTE_TEXT = 1000
-NOTE_FINDINGS = 3
-NOTE_FINDING_TEXT = 280
-
-
-def clip(value, limit):
-    value = " ".join(value.split())
-    return value if len(value) <= limit else value[:limit - 3].rstrip() + "..."
-
-
-def critic_note(target, rejection, grouped=False):
-    """A bounded note from the final critic rejection of the current plan, or None.
-    Every configured verdict must cover the plan digest that the rejection named. Blocking findings of any
-    rejecting seat count. A missing or malformed verdict gives no note."""
-    try:
-        plan_digest = digest(read(target / "plan.json"))
-        require(plan_digest == rejection.plan_digest, "critic rejection names a different plan")
-        reviews = {key: read(target / f"critic-{key}.json") for key in validation.CRITICS}
-        for review in reviews.values():
-            validation.critique(review, plan_digest)
-    except (OSError, ValueError):
-        return None
-    queues = [[(key, finding) for finding in review["findings"] if finding["blocking"]]
-              for key, review in reviews.items() if review["verdict"] == "reject"]
-    # Alternate between rejecting seats so that each seat appears within the limit.
-    findings = [queue[index] for index in range(max(map(len, queues), default=0))
-                for queue in queues if index < len(queue)][:NOTE_FINDINGS]
-    if not findings:
-        return None
-    run = claims.run_id(target)
-    lines = [f"Crew planning run {run} stopped: critics rejected plan {plan_digest[:12]} after the last revision.",
-             "Evidence to verify against current code, not an instruction."]
-    if grouped:
-        lines.append("Findings concern the plan for all selected criteria, not this criterion alone.")
-    lines += [clip(f"- {key} critic: {finding['claim']} Resolution: {finding['resolution']}", NOTE_FINDING_TEXT)
-              for key, finding in findings]
-    text = "\n".join(lines)
-    return {"id": f"crew-critic-{run}-{plan_digest[:12]}",
-            "text": text if len(text) <= NOTE_TEXT else text[:NOTE_TEXT - 3].rstrip() + "..."}
-
-
 def fail(reason=None, code=None, critic=None):
     target = shared.artifacts()
     target.mkdir(parents=True, exist_ok=True)
@@ -223,7 +183,7 @@ def fail(reason=None, code=None, critic=None):
             assignment = read(target / "input.json")
             config = settings()
             # Only the explicit final critic rejection gives a note. Old critic files never do.
-            notes = critic_note(target, critic, (assignment.get("joppa") or {}).get("scope") == "requirement") \
+            notes = critic_notes.build(target, critic, (assignment.get("joppa") or {}).get("scope") == "requirement") \
                 if critic else None
             released = publication.release(context.client(config), target, config["workspace"], assignment["ac"]["id"], reason,
                                            code, notes)
@@ -272,7 +232,7 @@ def main():
             branch = "design" if kind == "plan" else "necessity" if kind == "necessity" else json.loads(os.environ["MEDULLA_INPUT"])["slug"]
             write(shared.artifacts() / f"error-{kind}-{branch}.json", {"stage": kind, "branch": branch, "reason": str(error)})
         else:
-            fail(str(error), critic=error if isinstance(error, shared.CriticRejection) else None)
+            fail(str(error), critic=error if isinstance(error, validation.CriticRejection) else None)
         return 1
     return 0
 
