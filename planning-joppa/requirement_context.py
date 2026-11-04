@@ -82,8 +82,9 @@ def load_requirement(api, config, req_id, selected=None):
                     continue
                 dependency = get(link["target"])
                 revision = link.get("revision")
-                # Joppa has no contract pins. Lifecycle saves raise the revision above an earlier pin.
-                pin = revision is None or current_pin(revision, dependency["current_revision"])
+                # Reads give no contract_revision. A pin other than the current revision is stale.
+                current = dependency["current_revision"]
+                pin = revision is None or current_pin(revision, current, dependency.get("contract_revision", current))
                 if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")

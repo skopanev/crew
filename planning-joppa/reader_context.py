@@ -131,10 +131,10 @@ def retry_startup(api, config, target, assignment, ac, advertised):
              if not task["document"]["data"].get("archived")
              and not task["process"].get("done") and not task["process"].get("retired")]
     if not tasks or not all(isinstance(task["process"].get("blocked"), dict)
-                           and "WORKTREE_PREEXISTED" in str(task["process"]["blocked"].get("reason")) for task in tasks):
+                           and task["process"]["blocked"].get("reason") == "WORKTREE_PREEXISTED" for task in tasks):
         return False
     require('"assess"' in advertised, "Startup retry requires deployed assess; no research was started")
-    require(len(tasks) <= 98, "Startup retry supports at most 98 Tasks in one atomic batch")
+    require(len(tasks) <= 49, "Startup retry supports at most 49 Tasks in one atomic batch")
     # The block assessment holds the Tasks. The AC itself must be ready for work.
     require(ac.get("work_ready") is True, "Startup retry requires a ready AC")
     for item in [ac, *tasks]:
@@ -158,12 +158,16 @@ def retry_startup(api, config, target, assignment, ac, advertised):
                     for project in (repo["project"], repo["project"].split(":", 1)[1])),
                 "Task projects do not include its configured repository")
         require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
-        operations.append({"command": claims.assess(task["address"],
-            "Retry startup after removing the retained worktree.")})
+        # Fence each assess with an unchanged save at the read revision of the same Task.
+        reason = "Retry startup after removing the retained worktree."
+        operations.append({"command": claims.save_command(task, claims.KEEP, reason,
+                                                          assignment["joppa"]["task_schema"].get("question"))})
+        operations.append({"command": claims.assess(task["address"], reason)})
     claim = read(target / "claim.json")
     claims.owned(api, config["workspace"], claim)
     operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts.",
                                                 assignment["joppa"].get("questions", {}).get(ac["kind"])))
+    claims.require_fenced(operations)
     print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
         "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
