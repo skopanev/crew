@@ -6,7 +6,7 @@ from common import fingerprint, inside, require, run, strings, text
 import validation
 import context
 from test_nodes import node_results, read_nodes
-from acceptance import specification, covered_work, acceptance_rows
+from acceptance import specification, covered_work, acceptance_rows, carries
 from joppa_reads import ended
 from task_contracts import MAX_DATA_VALUE, title_limit, unclaimed, editable, retirable, ordered_tasks, criterion_plan, package_counters, checked_task_title, check_line, contract_fields
 
@@ -125,7 +125,7 @@ def validate_one(plan, assignment, elsewhere=(), covering=(), carriers=()):
     if plan.get("disposition") == "implement" and (any(task["action"] != "retire" for task in normalized["tasks"])
                                                    or covering or carriers):
         retained = [task for task in inventory.values() if task["address"] not in targets
-                    and not ended(task)] + list(carriers)
+                    and not ended(task)]
         for check in plan["acceptance_checks"]:
             assigned = any(task["action"] != "retire" and task["repository"] == check["repository"]
                            and any(specification(own) == specification(check) for own in task["checks"])
@@ -135,6 +135,8 @@ def validate_one(plan, assignment, elsewhere=(), covering=(), carriers=()):
                 checks = body.partition("\nChecks:\n")[2].splitlines()
                 assigned |= (re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) == [check["repository"]]
                              and check_line(check) in checks)
+            # A carrier is never edited. It counts only when its data.acceptance already lists this exact check.
+            assigned |= any(carries(task, assignment["ac"]["id"], check) for task in carriers)
             if not assigned:
                 raise ValueError(missing_check(check, assignment["ac"]["id"], elsewhere))
     schema = assignment["joppa"]["task_schema"]

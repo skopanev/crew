@@ -143,7 +143,9 @@ Set `covers_reference` to the name of one Task schema reference field to let one
 - A covering Task makes its covered criteria owned for queue readiness: an active Task holds them, and a done Task waits for acceptance.
   The queue reads this from the raw Task data of all tones, including archived Tasks.
 - Only the parent criterion owns an update or retirement of the Task.
-- An unfinished Task under an unselected criterion can carry a covered check. The plan never edits it.
+- An unfinished Task under an unselected criterion can carry a covered check only when its `data.acceptance`
+  already lists that exact criterion and check. The plan never edits it. Otherwise select its parent criterion
+  and update the Task through the normal plan.
 
 A lane completion saves the verified test names in `data.test_bindings` next to `data.commit`.
 Planning treats `assignee`, `commit` and `test_bindings` as lifecycle fields, not authored contract.
