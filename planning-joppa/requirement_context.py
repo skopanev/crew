@@ -56,7 +56,7 @@ def load_requirement(api, config, req_id, selected=None):
                 and not ended(item)]
         if ((not config.get("ac_ids") or address in config["ac_ids"])
                 and ac.get("work_ready") is True
-                and (ac["process"].get("assessment") or {}).get("state") == "ready"
+                and (ac["process"].get("assessment") or {}).get("state") != "waiting"
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
                 and all(blocked(item) and not assignee(item) for item in work)):
             candidates.append(address)
