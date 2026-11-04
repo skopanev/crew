@@ -29,22 +29,24 @@ test('Joppa planner reads all compact pages and uses native criterion tones', as
   const f = await packageFixture(t), sample = f.objects.get('ac:a1');
   f.queue.length = 0;
   for (let i = 0; i < 28; i++) f.objects.set(`ac:extra${i}`, {...structuredClone(sample), address: `ac:extra${i}`});
-  f.objects.get('ac:extra27').process.planning_claim = {actor: 'another-planner'};
+  f.objects.get('ac:extra27').document.data.assignee = 'crew-planning:another:run';
+  f.objects.get('ac:extra4').process.assessment = {state: 'waiting', reason: 'NEEDS_HUMAN'};
   f.objects.get('ac:extra1').status.tone = 'green';
   f.objects.get('ac:extra2').status.tone = 'orange';
   f.objects.get('ac:extra3').status.tone = 'red';
   const rows = await readyCriteria({workspace: f.run.workspace, url: f.run.config.joppa.url}, f.run.joppaWorker.tokenFile);
-  assert.equal(rows.length, 28);
+  assert.equal(rows.length, 27);
   assert(rows.some(row => row.address === 'ac:extra26'));
   assert(!rows.some(row => row.address === 'ac:extra27'));
   assert(!rows.some(row => row.address === 'ac:extra1'));
+  assert(!rows.some(row => row.address === 'ac:extra4'));
   assert(rows.some(row => row.address === 'ac:extra2'));
   assert.equal(rows[0].address, 'ac:extra3');
   const lists = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
   assert(lists.some(call => call.args.cursor === '25'));
-  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('process')));
-  assert(lists.every(call => call.args.fields.includes('status')));
-  assert(f.calls.every(call => ['joppa_objects', 'joppa_tree', 'joppa_tasks'].includes(call.name)));
+  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('process.assessment')));
+  assert(lists.filter(call => call.args.kind.includes('ac')).every(call => call.args.fields.includes('status')));
+  assert(f.calls.every(call => ['joppa_objects', 'joppa_tree'].includes(call.name)));
 });
 
 test('Joppa selects structured Tasks and detects their remote repository holders', async t => {
@@ -54,7 +56,7 @@ test('Joppa selects structured Tasks and detects their remote repository holders
     steps: ['Implement the scoped change.'], checks: [`Exercise the change => exact check ${index}`]});
   const before = contractDigest(f.objects.get('task:t1'));
   assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
-  f.objects.get('task:t2').process = {status: 'in_progress', assignee: 'manual-worker'};
+  f.objects.get('task:t2').document.data.assignee = 'manual-worker';
   assert.equal((await nextTask(f.run.config)).candidate, null);
   assert.equal(contractDigest(f.objects.get('task:t1')), before);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
@@ -63,7 +65,6 @@ test('Joppa selects structured Tasks and detects their remote repository holders
 test('Joppa planner attempt identity stays current when a test child is added', async t => {
   const f = await packageFixture(t), ac = f.objects.get('ac:a1');
   f.queue.length = 0;
-  ac.contract_revision = ac.current_revision;
   const config = {workspace: f.run.workspace, url: f.run.config.joppa.url};
   const before = await readyCriteria(config, f.run.joppaWorker.tokenFile);
   f.objects.set('check:required', {address: 'check:required', kind: 'check',
@@ -75,7 +76,6 @@ test('Joppa planner attempt identity stays current when a test child is added', 
     {schema: {types: {req: {role: 'requirement'}}}} : structuredClone(f.objects.get(args.address));
   assert.deepEqual(await groupRequirements(after, readObject), await groupRequirements(before, readObject));
   ac.current_revision++;
-  ac.contract_revision = ac.current_revision;
   assert.notDeepEqual((await readyCriteria(config, f.run.joppaWorker.tokenFile)).map(row => row.attemptKey),
     before.map(row => row.attemptKey));
 });
@@ -99,6 +99,6 @@ for await(const line of createInterface({input:process.stdin})) {
   save(path.join(reserved, 'launch.json'), {...f.run, requirement: 'req:other', repositoryId: 'app'});
   const selected = await nextTask(config);
   assert.equal(selected.candidate.id, 'task:t1');
-  assert.equal(f.calls.some(call => call.name === 'joppa_tasks' && call.args.view === 'mine'), false);
+  assert.equal(f.calls.some(call => call.name === 'joppa_tasks'), false);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });

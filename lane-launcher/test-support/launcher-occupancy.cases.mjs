@@ -23,7 +23,7 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package excludes 
   const run = {...f.run, repositoryId: 'app', joppaWorker: {actor: 'another-worker'}};
   if (state === 'held') run.result = {code: 2, held: true, finishedAt: new Date().toISOString()};
   if (state === 'uncertain') {
-    run.claimRequest = {operations: [{command: {op: 'claim_task', id: 'task:t1'}}]};
+    run.claimRequest = {operations: [{command: {op: 'save_object', kind: 'task', id: 't1', revision: 3}}]};
     run.result = {code: 2, finishedAt: new Date().toISOString()};
   }
   save(path.join(folder, 'launch.json'), run);
@@ -33,7 +33,7 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package excludes 
 for (const sameRepository of [false, true]) test(`Joppa package detects remote holders; same repository=${sameRepository}`, async t => {
   const f = await packageFixture(t);
   const held = f.objects.get('task:t2');
-  held.process = {status: 'in_progress', assignee: 'manual-worker'};
+  held.document.data.assignee = 'manual-worker';
   if (!sameRepository) {
     held.document.data.body = held.document.data.body.replace('Repository: app', 'Repository: other');
     f.run.config.repositories.push({...f.run.config.repositories[0], id: 'other'});
@@ -47,13 +47,13 @@ for (const configured of [false, true]) test(`Joppa package scans cross-project 
   const f = await packageFixture(t), foreign = f.objects.get('task:t2');
   foreign.document.data.projects = ['project:other'];
   foreign.document.data.body = `Repository: ${configured ? 'app' : 'unconfigured'}\nModule: absent`;
-  foreign.process = {status: 'in_progress', assignee: 'foreign-worker'};
+  foreign.document.data.assignee = 'foreign-worker';
   const selected = await nextTask(f.run.config);
   if (configured) assert.equal(selected.candidate, null);
   else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
-  const scans = f.calls.filter(call => call.name === 'joppa_tasks');
-  assert.equal(scans.find(call => call.args.view === 'all').args.project, undefined);
-  assert.equal(scans.find(call => call.args.view === 'available').args.project, 'project:app');
+  const scans = f.calls.filter(call => call.name === 'joppa_objects' && call.args.kind?.includes('task'));
+  assert(scans.length > 0);
+  assert(scans.every(call => !Object.hasOwn(call.args, 'project') && !Object.hasOwn(call.args, 'view')));
 });
 
 for (const mode of ['postclaim-race', 'sameactor-race', 'release-unknown']) test(`Joppa package ${mode} stops its worker before shell startup`, async t => {
@@ -107,9 +107,9 @@ test('Joppa package legacy adopted claim runs the ownership guard before startup
 test('Joppa package ignores held Tasks without a repository contract', async t => {
   const f = await packageFixture(t), other = f.objects.get('task:t2');
   other.document.data = {title: 'Research task', body: 'Summarize the current decision.'};
-  other.process = {status: 'in_progress', assignee: 'research-worker'};
+  other.document.data.assignee = 'research-worker';
   const selected = await nextTask(f.run.config);
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
-  assert(f.calls.filter(call => call.name === 'joppa_tasks').every(call => !Object.hasOwn(call.args, 'purpose')));
+  assert(!f.calls.some(call => call.name === 'joppa_tasks'));
   assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), true);
 });
