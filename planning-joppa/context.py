@@ -65,6 +65,24 @@ def load(api, config, ac_id):
                 raise
 
 
+# All six tones list present and archived objects. A done Task is archived with the purple tone.
+TONES = ["red", "yellow", "orange", "grey", "green", "purple"]
+
+
+def task_addresses(api, workspace, parent, kind):
+    """List the current and archived Tasks of one criterion. Done Tasks keep their landed work in context."""
+    addresses, cursor, seen = [], None, set()
+    while True:
+        page = api.call("joppa_objects", {"workspace": workspace, "parent": parent, "kind": kind, "status": TONES,
+                                          "limit": 25, "fields": ["address"], **({"cursor": cursor} if cursor else {})})
+        addresses.extend(item["address"] for item in page["items"])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return addresses
+        require(cursor not in seen, "Task list pagination did not advance")
+        seen.add(cursor)
+
+
 def load_once(api, config, ac_id):
     workspace = config["workspace"]
     tree = api.call("joppa_tree", {"workspace": workspace})
@@ -101,16 +119,7 @@ def load_once(api, config, ac_id):
     require(types[task_kind].get("question"), "Task type needs a configured question")
     project_ref = types[task_kind].get("references", {}).get("projects")
     require(project_ref and project_ref.get("multiple") is True, "Task type needs a projects reference list")
-    tasks, cursor = [], None
-    while True:
-        args = {"workspace": workspace, "parent": ac_id, "kind": task_kind, "limit": 25, "fields": ["address"]}
-        if cursor:
-            args["cursor"] = cursor
-        page = api.call("joppa_objects", args)
-        tasks.extend(get(item["address"]) for item in page["items"])
-        cursor = page.get("next_cursor")
-        if not cursor:
-            break
+    tasks = [get(address, True) for address in task_addresses(api, workspace, ac_id, task_kind)]
     # Read explicit references. Do not traverse unrelated tickets or infer ownership.
     for item in [ac, *parents, *tasks]:
         for link in item["document"].get("links", []):
@@ -136,16 +145,7 @@ def load_once(api, config, ac_id):
         for kind, definition in types.items():
             if definition.get("role") != "task" or sibling["kind"] not in definition.get("parents", []):
                 continue
-            cursor = None
-            while True:
-                args = {"workspace": workspace, "parent": address, "kind": kind, "limit": 25, "fields": ["address"]}
-                if cursor:
-                    args["cursor"] = cursor
-                page = api.call("joppa_objects", args)
-                siblings.extend(get(item["address"]) for item in page["items"])
-                cursor = page.get("next_cursor")
-                if not cursor:
-                    break
+            siblings.extend(get(task, True) for task in task_addresses(api, workspace, address, kind))
     for item in siblings:
         for link in item["document"].get("links", []):
             get(link["target"], True)
