@@ -77,36 +77,53 @@ test('failure releases, assesses and notes every Task in one batch', async t => 
   assert.equal(result.blockConfirmed, true);
 });
 
-test('success saves the commit and archives each Task in one batch and checks the receipts', async t => {
-  const f = await packageFixture(t, 'wrong-commit');
+const complete = async (t, mode) => {
+  const f = await packageFixture(t, mode);
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
-  await assert.rejects(finishTask(f.run, f.stateFile, result, artifacts), /did not confirm every Task completion/);
-  assert.equal(result.completed, undefined);
-  const done = batches(f).at(-1);
-  assert.deepEqual(done.map(command => command.op), ['save_object', 'archive_object', 'save_object', 'archive_object']);
-  assert.equal(done[1].revision, done[0].revision + 1);
-});
-
-test('success archives every Task at the revision after its commit save', async t => {
-  const f = await packageFixture(t);
-  await claimTask(f.run, f.persist, f.runId);
-  const result = {code: 0, status: 'exited'};
-  await finishTask(f.run, f.stateFile, result, packageLanding(f));
-  assert.equal(result.completed, true);
-  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
-  assert(['task:t1', 'task:t2'].every(address => f.objects.get(address).document.data.archived === true));
-});
-
-test('a saved completion request with a wrong archive revision is not sent', async t => {
-  const f = await packageFixture(t);
-  await claimTask(f.run, f.persist, f.runId);
-  const artifacts = packageLanding(f), sent = batches(f).length;
   const sha = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8').match(/^Landed SHA: (\S+)$/m)[1];
-  f.run.completionRequest = {workspace: 'fixture', request_id: 'saved', operations: ['t1', 't2'].flatMap(id => [
-    {command: {op: 'save_object', kind: 'task', id, revision: 4, data: {commit: sha}}},
-    {command: {op: 'archive_object', target: `task:${id}`, revision: 4}}])};
-  await assert.rejects(finishTask(f.run, f.stateFile, {code: 0, status: 'exited'}, artifacts), /Saved completion request/);
+  return {f, artifacts, result, sha, finish: () => finishTask(f.run, f.stateFile, result, artifacts)};
+};
+
+test('success saves the commit and archives at the saved revision in one batch', async t => {
+  const {f, result, sha, finish} = await complete(t);
+  await finish();
+  assert.equal(result.completed, true);
+  const [done] = f.calls.filter(call => call.name === 'joppa_batch').slice(-1).map(call => call.args.operations);
+  assert.deepEqual(done.map(({ref, command}) => [ref, command.op]),
+    [['done0', 'save_object'], [undefined, 'archive_object'], ['done1', 'save_object'], [undefined, 'archive_object']]);
+  assert.deepEqual(done[1].command.revision, {$ref: 'done0/saved_revision'});
+  assert(done.every(({command}) => command.op !== 'save_object' || command.question_checked === question));
+  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
+  for (const address of ['task:t1', 'task:t2']) {
+    assert.equal(f.objects.get(address).document.present, false);
+    assert.equal(f.objects.get(address).document.data.commit, sha);
+  }
+});
+
+test('an unchanged save keeps its revision and the archive uses that revision', async t => {
+  const {f, result, finish} = await complete(t, 'unchanged-save');
+  await finish();
+  assert.equal(result.completed, true);
+  assert.deepEqual(result.tasks.map(task => task.revision), [3, 3]);
+  assert(['task:t1', 'task:t2'].every(address => f.objects.get(address).document.present === false));
+});
+
+for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-present', 'a present document']]) {
+  test(`completion is refused when the archived read shows ${label}`, async t => {
+    const {result, finish} = await complete(t, mode);
+    await assert.rejects(finish(), /did not confirm every Task completion at the checked SHA/);
+    assert.equal(result.completed, undefined);
+  });
+}
+
+test('a saved completion request without a saved-revision reference is not sent', async t => {
+  const {f, sha, finish} = await complete(t);
+  const sent = batches(f).length;
+  f.run.completionRequest = {workspace: 'fixture', request_id: 'saved', operations: ['t1', 't2'].flatMap((id, index) => [
+    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4, data: {commit: sha}, question_checked: question}},
+    {command: {op: 'archive_object', target: `task:${id}`, revision: 5}}])};
+  await assert.rejects(finish(), /Saved completion request/);
   assert.equal(batches(f).length, sent);
 });
 
