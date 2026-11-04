@@ -18,7 +18,8 @@ def current_pin(pin, current, contract):
             and 1 <= contract <= pin <= current)
 
 # Lifecycle metadata is not authored contract text. Claims and completion change only these fields.
-LIFECYCLE_FIELDS = ("assignee", "commit")
+# Completion also writes the bound test names of the lane.
+LIFECYCLE_FIELDS = ("assignee", "commit", "test_bindings")
 
 def authored_document(document):
     result = dict(document)

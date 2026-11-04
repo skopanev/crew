@@ -62,6 +62,21 @@ export function latestRecovery(config, object, digest = contractDigest(object), 
   return recovery;
 }
 
+// Criterion checks that the lane must bind to verified tests: [{ac, check}]. A bare AC ID reads as the parent type.
+export function testAcceptance(object) {
+  const rows = object.document?.data?.acceptance;
+  if (rows === undefined || rows === null) return null;
+  const parent = String(object.document.parent || ''), kind = parent.slice(0, parent.indexOf(':'));
+  require(Array.isArray(rows) && rows.every(row => row && text(row.ac) && text(row.check)),
+    `BINDING_INVALID: ${object.address} data.acceptance needs [{ac, check}]`);
+  const result = [];
+  for (const row of rows) {
+    const item = {ac: row.ac.includes(':') ? row.ac : `${kind}:${row.ac}`, check: row.check};
+    if (!result.some(other => other.ac === item.ac && other.check === item.check)) result.push(item);
+  }
+  return result;
+}
+
 export function taskInput(config, object, contexts = object.contexts) {
   require(object.document?.present === true && object.historical === false, 'Joppa Task is absent or historical');
   const data = object.document.data;
@@ -83,6 +98,7 @@ export function taskInput(config, object, contexts = object.contexts) {
     body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
+    ...(testAcceptance(object) ? {testAcceptance: testAcceptance(object)} : {}),
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,
       instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(modulePaths)}. Complete only the remaining work.`}} : {})}};

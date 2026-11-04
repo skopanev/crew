@@ -2,7 +2,8 @@ import os from 'node:os';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
 import {occupancyReader, heldTasks} from './joppa-selection.mjs';
-import {packageInput, taskInput} from './joppa-input.mjs';
+import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
+import {packageBudget, estimatedNodes, reportProblem} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -87,6 +88,13 @@ export async function claimTask(run, persist, runId) {
         require(!problem, `COVERED_CONTEXT_NOT_READY: ${problem}; no Tasks claimed`);
       }
     }
+    // Bound both outcome batches before the claim. Required report evidence must be possible before a coder runs.
+    packageBudget(selected.length, estimatedNodes(selected));
+    if (selected.some(object => testAcceptance(object)?.length)) {
+      const repository = taskInput(run.config, selected[0], []).repo;
+      const problem = reportProblem(repository, repository.reviewCommands ?? run.config.reviewCommands ?? repository.gateCommands);
+      require(!problem, `BINDING_NO_REPORT: ${problem}; no Tasks claimed`);
+    }
     run.claimRequest = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.', question(object))));
   }
@@ -167,6 +175,8 @@ export async function claimTask(run, persist, runId) {
   run.repository = inputs[0].repo;
   // Keep the original receipt fields for readers of single-Task runs.
   if (objects.length === 1) Object.assign(run.claim, run.claim.tasks[0]);
+  // The lane refuses more distinct (AC, test) node saves than the completion batch can hold.
+  run.claim.ticket = {...run.claim.ticket, bindingNodeLimit: packageBudget(objects.length, 0)};
   persist();
   await guardTaskClaims(run, persist);
   return run.claim;

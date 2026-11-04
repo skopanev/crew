@@ -19,6 +19,7 @@ import tempfile
 import time
 import uuid
 
+import test_bindings
 import test_report
 
 
@@ -229,11 +230,12 @@ def verify(root):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "verify"):
-        raise ValueError("usage: gates.py run|verify")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "verify", "bindings"):
+        raise ValueError("usage: gates.py run|verify|bindings")
     root = Path(os.environ["MEDULLA_RUN_DIR"]).resolve() / "artifacts/gates"
     root.mkdir(parents=True, exist_ok=True)
-    (run if sys.argv[1] == "run" else verify)(root)
+    # bindings reads the receipt that run wrote. It never runs a check again.
+    {"run": run, "verify": verify, "bindings": test_bindings.bind}[sys.argv[1]](root)
 
 
 if __name__ == "__main__":

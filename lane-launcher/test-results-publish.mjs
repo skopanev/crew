@@ -8,6 +8,7 @@ import {api} from './joppa-common.mjs';
 import {repositoryGit} from './publication-guard.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {resultRules, buildRequests} from './test-results.mjs';
+import {boundNodes, boundGaps} from './test-bindings-publish.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -62,7 +63,8 @@ async function send(run, persist, call, announce) {
     // No call without a durable intent: an unsaved 'sending' state was never sent.
     try { persist(); } catch (error) { entry.state = 'pending'; throw error; }
     try {
-      await call('joppa_record_results', entry.request);
+      // Keep the reply. Its unbound list shows names without a criterion node.
+      entry.reply = await call('joppa_record_results', entry.request) ?? null;
       entry.state = 'recorded';
     } catch (error) {
       entry.state = error.rejected ? 'refused' : 'uncertain';
@@ -111,6 +113,8 @@ async function publish({run, stateFile, result, artifacts, announce}, deps) {
     });
     const tree = await git(['rev-parse', `${sha}^{tree}`]);
     require(tree === receipt.tree, `TEST_RESULTS_TREE_MISMATCH: ${sha} has tree ${tree}; the gate checked ${receipt.tree}`);
+    // Lane bindings must name full-report tests with a node under their exact criterion. A gap records nothing.
+    const bound = await boundNodes({run, call, report});
     const rules = resultRules(await call('joppa_tree', {workspace: run.workspace}));
     const requests = buildRequests({workspace: run.workspace, commit: sha, cases: report.results, rules});
     // Persist the exact intended requests before the first call. A failed write stops here.
@@ -118,6 +122,14 @@ async function publish({run, stateFile, result, artifacts, announce}, deps) {
       requests: requests.map(request => ({state: 'pending', request}))};
     persist();
     await send(run, persist, call, announce);
+    if (bound.length && run.testResults.status === 'recorded') {
+      run.testResults.bound = bound.length;
+      // The results are recorded. A failed node read is a gap and does not change that status.
+      run.testResults.gaps = await boundGaps({run, call, bound, sha})
+        .catch(error => [`TEST_RESULTS_MISSING: bound nodes could not be read again: ${error.message}`]);
+      for (const gap of run.testResults.gaps) announce(`[lane] ${gap}`);
+      persist();
+    }
   } catch (error) {
     const state = run.testResults ||= {status: 'not_recorded'};
     state.diagnostic = error.message;
@@ -130,7 +142,8 @@ async function publish({run, stateFile, result, artifacts, announce}, deps) {
   } finally {
     if (run.testResults) {
       result.testResults = {status: run.testResults.status,
-        ...(run.testResults.diagnostic ? {diagnostic: run.testResults.diagnostic} : {})};
+        ...(run.testResults.diagnostic ? {diagnostic: run.testResults.diagnostic} : {}),
+        ...(run.testResults.gaps?.length ? {gaps: run.testResults.gaps} : {})};
     }
   }
 }
