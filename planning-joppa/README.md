@@ -154,6 +154,7 @@ Joppa has no Task workflow commands. The planner uses generic node fields:
 The planner refuses before claiming if `save_object`, `archive_object` or `assess` is absent.
 Refresh the canonical source before launch. Prepare checks every CBM project root first.
 Then it reindexes each shared CBM project and refuses if the source moves.
+It holds the lane `<repo>/.git/sync.lock` for one repository at a time and uses `mode: moderate`.
 `persistence: false` only skips the `.codebase-memory/graph.db.zst` snapshot. The shared index store persists.
 Verify indexed paths in the inspected source. Do not index an isolated checkout.
 Lifecycle saves raise a revision above earlier dependency pins. Such pins stay valid.

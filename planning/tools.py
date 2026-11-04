@@ -1,4 +1,6 @@
 """Local tool setup for planning: CBM registry reads and isolated OpenCode/AGY profiles."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,7 @@ import time
 from common import fingerprint, read, require, run, write
 
 REFRESH_SECONDS = 240
+LOCK_POLL_SECONDS = 0.2
 
 
 def indexed_projects():
@@ -46,6 +49,25 @@ def cbm_result(tool, *flags, timeout=45):
     return result
 
 
+@contextmanager
+def sync_lock(repo, root, deadline):
+    """Hold the canonical clone lock that lane safe-sync takes. Never remove the shared file."""
+    with open(os.path.join(root, ".git", "sync.lock"), "a") as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                require(remaining > 0, f"{repo['id']}: canonical sync lock stayed busy for the "
+                        f"whole {REFRESH_SECONDS} s CBM refresh budget")
+                time.sleep(min(LOCK_POLL_SECONDS, remaining))
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def refresh_index(repositories, rows):
     """Reindex each bound CBM project without a graph snapshot file. Return the fingerprint it indexed."""
     names = {row.get("name") for row in rows}
@@ -63,14 +85,16 @@ def refresh_index(repositories, rows):
     snapshots = {}
     for repo in repositories:
         name, root = repo["cbm_project"], os.path.realpath(repo["path"])
-        before = fingerprint(repo)
-        result = call("index_repository", repo, "--repo-path", root, "--name", name, "--persistence", "false")
-        require(result.get("project") == name,
-                f"{repo['id']}: CBM did not index {name}: {result!r}")
-        status = call("index_status", repo, "--project", name, "--format", "json")
-        require(status.get("status") == "ready" and status.get("root_path") == root,
-                f"{repo['id']}: CBM project {name} is not ready at {root}: {status!r}")
-        require(fingerprint(repo) == before, f"{repo['id']}: source changed during the CBM refresh")
+        # One repository lock at a time. The lock wait counts within the same deadline.
+        with sync_lock(repo, root, deadline):
+            before = fingerprint(repo)
+            result = call("index_repository", repo, "--repo-path", root, "--name", name,
+                          "--mode", "moderate", "--persistence", "false")
+            require(result.get("project") == name, f"{repo['id']}: CBM did not index {name}: {result!r}")
+            status = call("index_status", repo, "--project", name, "--format", "json")
+            require(status.get("status") == "ready" and status.get("root_path") == root,
+                    f"{repo['id']}: CBM project {name} is not ready at {root}: {status!r}")
+            require(fingerprint(repo) == before, f"{repo['id']}: source changed during the CBM refresh")
         snapshots[repo["id"]] = before
     return snapshots
 

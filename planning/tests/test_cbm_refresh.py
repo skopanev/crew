@@ -1,9 +1,11 @@
+import fcntl
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -14,12 +16,20 @@ import tools
 
 # A fake CBM CLI: records argv, answers from a JSON plan, and can edit a source during indexing.
 FAKE_CBM = r'''#!/usr/bin/env python3
-import json, os, sys
+import fcntl, json, os, sys
 plan = json.load(open(os.environ["FAKE_CBM_PLAN"]))
 with open(os.environ["FAKE_CBM_LOG"], "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\n")
 tool, args = sys.argv[3], sys.argv[4:]
 flags = dict(zip(args[::2], args[1::2]))
+# Every CBM call must run while the planner holds the canonical sync lock.
+with open(os.path.join(flags.get("--repo-path") or plan["roots"][flags["--project"]], ".git/sync.lock"), "a") as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        print(json.dumps({"isError": True, "content": [{"type": "text", "text": "sync lock not held"}]}))
+        sys.exit(0)
+    except BlockingIOError:
+        pass
 if tool == "index_repository":
     name = flags["--name"]
     if plan.get("touch") == name:
@@ -43,6 +53,14 @@ else:
     sys.exit(0)
 print(json.dumps({"content": [{"type": "text", "text": text}]}))
 '''
+
+# Holds the sync lock in another process, like a lane in startup sync.
+HOLDER = """import fcntl, sys, time
+lock = open(sys.argv[1], "a")
+fcntl.flock(lock, fcntl.LOCK_EX)
+print("held", flush=True)
+time.sleep(float(sys.argv[2]))
+"""
 
 
 class RefreshIndexTests(unittest.TestCase):
@@ -83,8 +101,50 @@ class RefreshIndexTests(unittest.TestCase):
     def refused(self, message, **plan):
         with self.assertRaisesRegex(ValueError, message):
             self.refresh(**plan)
+        self.assert_locks_free()
 
-    def test_happy_path_indexes_each_repository_in_memory_and_records_its_snapshot(self):
+    def assert_locks_free(self):
+        for repo in self.repos:
+            with open(Path(repo["path"]) / ".git/sync.lock", "a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def hold_lock(self, repo, seconds):
+        child = subprocess.Popen([sys.executable, "-c", HOLDER, str(Path(repo["path"]) / ".git/sync.lock"), str(seconds)],
+                                 stdout=subprocess.PIPE, text=True)
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        return child
+
+    def test_a_busy_sync_lock_waits_then_refuses_when_the_budget_ends(self):
+        self.hold_lock(self.repos[1], 30)
+        started = time.monotonic()
+        with patch.object(tools, "REFRESH_SECONDS", 1):
+            self.plan_file.write_text(json.dumps(self.plan))
+            with self.assertRaisesRegex(ValueError, "beta: canonical sync lock stayed busy for the whole 1 s"):
+                tools.refresh_index(self.repos, self.rows)
+        self.assertGreaterEqual(time.monotonic() - started, 0.9)
+        self.assertEqual([call[2] for call in self.calls()], ["index_repository", "index_status"])
+        with open(Path(self.repos[0]["path"]) / ".git/sync.lock", "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertTrue((Path(self.repos[1]["path"]) / ".git/sync.lock").exists())
+
+    def test_the_refresh_continues_after_the_sync_owner_releases(self):
+        self.hold_lock(self.repos[0], 0.5)
+        started = time.monotonic()
+        self.assertEqual(set(self.refresh()), {"alpha", "beta"})
+        self.assertGreaterEqual(time.monotonic() - started, 0.4)
+        self.assert_locks_free()
+
+    def test_an_unexpected_error_releases_the_lock(self):
+        self.plan_file.write_text(json.dumps(self.plan))
+        with patch.object(tools, "fingerprint", side_effect=RuntimeError("git broke")):
+            with self.assertRaisesRegex(RuntimeError, "git broke"):
+                tools.refresh_index(self.repos, self.rows)
+        self.assert_locks_free()
+
+    def test_happy_path_indexes_each_repository_under_its_lock_and_records_its_snapshot(self):
         with tempfile.TemporaryDirectory() as run_dir, \
                 patch.dict(os.environ, {"MEDULLA_RUN_DIR": run_dir}), \
                 patch.object(stages, "ThreadPoolExecutor", side_effect=RuntimeError("stop after CBM")):
@@ -96,7 +156,8 @@ class RefreshIndexTests(unittest.TestCase):
         expected = []
         for repo in self.repos:
             root, name = os.path.realpath(repo["path"]), repo["cbm_project"]
-            expected += [["cli", "--json", "index_repository", "--repo-path", root, "--name", name, "--persistence", "false"],
+            expected += [["cli", "--json", "index_repository", "--repo-path", root, "--name", name,
+                          "--mode", "moderate", "--persistence", "false"],
                          ["cli", "--json", "index_status", "--project", name, "--format", "json"]]
         self.assertEqual(self.calls(), expected)
 
