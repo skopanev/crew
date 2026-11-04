@@ -77,6 +77,17 @@ test('failure releases, assesses and notes every Task in one batch', async t => 
   assert.equal(result.blockConfirmed, true);
 });
 
+test('a block assessed by another actor is not confirmed', async t => {
+  const f = await packageFixture(t, 'foreign-assessor');
+  await claimTask(f.run, f.persist, f.runId);
+  const artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed\n');
+  const result = {code: 1, status: 'failed'};
+  await assert.rejects(finishTask(f.run, f.stateFile, result, artifacts), /did not confirm every Task block/);
+  assert.equal(result.blockConfirmed, undefined);
+});
+
 const complete = async (t, mode) => {
   const f = await packageFixture(t, mode);
   await claimTask(f.run, f.persist, f.runId);
@@ -94,22 +105,23 @@ test('success saves the commit and archives at the saved revision in one batch',
     [['done0', 'save_object'], [undefined, 'archive_object'], ['done1', 'save_object'], [undefined, 'archive_object']]);
   assert.deepEqual(done[1].command.revision, {$ref: 'done0/saved_revision'});
   assert(done.every(({command}) => command.op !== 'save_object' || command.question_checked === question));
-  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
+  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 6], ['task:t2', 6]]);
   for (const address of ['task:t1', 'task:t2']) {
     assert.equal(f.objects.get(address).document.present, false);
     assert.equal(f.objects.get(address).document.data.commit, sha);
   }
 });
 
-test('an unchanged save keeps its revision and the archive uses that revision', async t => {
+test('an unchanged save keeps its revision; the archive uses it and the final read reports the result', async t => {
   const {f, result, finish} = await complete(t, 'unchanged-save');
   await finish();
   assert.equal(result.completed, true);
-  assert.deepEqual(result.tasks.map(task => task.revision), [3, 3]);
+  assert.deepEqual(result.tasks.map(task => task.revision), [4, 4]);
   assert(['task:t1', 'task:t2'].every(address => f.objects.get(address).document.present === false));
 });
 
-for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-present', 'a present document']]) {
+for (const [mode, label] of [['wrong-commit', 'a different commit'], ['missing-commit', 'no commit'],
+  ['archive-present', 'a present document'], ['leftover-assignee', 'an assignee']]) {
   test(`completion is refused when the archived read shows ${label}`, async t => {
     const {result, finish} = await complete(t, mode);
     await assert.rejects(finish(), /did not confirm every Task completion at the checked SHA/);
