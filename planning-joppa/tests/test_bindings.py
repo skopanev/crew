@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, NodeServer
+from provider_fixture import item, assignment, plan, Fake, NodeServer, hold, end
 from test_nodes import bind_missing
 
 
@@ -64,7 +64,7 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(len(publication.operations(value, data)), 2)
             retire = deepcopy(plan()["tasks"][0])
             retire.update(action="retire", target="work:old", revision=3)
-            data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+            hold(data["joppa"]["tasks"][0], "Failed")
             value["tasks"] = [retire]
             nodes.pop()
             self.assertEqual([op["command"]["op"] for op in publication.operations(value, data)],
@@ -183,10 +183,11 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(publication.operations(value, data)[0]["command"]["revision"], 0)
         for field in ("done", "retired"):
             with self.subTest(field=field):
-                old["process"][field] = "Finished"
+                end(old, "a" * 40 if field == "done" else None)
                 with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
                     publication.operations(value, data)
-                old["process"][field] = None
+                old["document"]["present"] = True
+                old["document"]["data"].pop("commit", None)
         value["tasks"][0].update(action="update", target="work:old", revision=3)
         with self.assertRaisesRegex(ValueError, "must be assigned to Task checks"):
             publication.operations(value, data)

@@ -8,7 +8,7 @@ from pathlib import Path
 from common import digest, read, require, strings, text, validate_input
 from mcp import Joppa, Rejected, complete_object
 from context_snapshot import (
-    source, current_pin, remote_satisfied, snapshot_source, selected_criteria, unchanged,
+    source, current_pin, remote_satisfied, snapshot_source, selected_criteria, unchanged, authored_meaning,
 )
 from context_reads import (
     task_contract, pending_work, pending_work_page, object_read, read_remote_links, remote_key,
@@ -176,7 +176,7 @@ def load_once(api, config, ac_id):
                             "task_schema": types[task_kind]},
                   "knowledge_query": ac["document"]["data"].get("body", ac["document"]["data"].get("description")) or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
-                "requirement": meaning, "tests": {ac_id: identities(tests)}}
+                "requirement": authored_meaning(meaning), "tests": {ac_id: identities(tests)}}
     if remote:
         assignment["joppa"]["remote"] = remote
         snapshot["remote"] = remote_snapshot(remote)

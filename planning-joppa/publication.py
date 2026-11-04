@@ -17,6 +17,7 @@ from task_contracts import (
 )
 from plan_validation import validate, validate_one, binding_checks, verify_bindings
 from test_nodes import bind_missing
+from joppa_reads import blocked
 from planning_claims import address_of, closing_operations, release, owned, require_fenced
 
 
@@ -50,8 +51,7 @@ def operations(plan, assignment):
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     targets = {task.get("target") for task in plan["tasks"] if task["action"] in ("update", "retire")}
     for existing in inventory.values():
-        if (isinstance(existing["process"].get("blocked"), dict)
-                and not existing["process"].get("done") and not existing["process"].get("retired")):
+        if blocked(existing):
             require(existing["address"] in targets,
                     f"blocked Task {existing['address']} needs a new contract or retirement")
     repositories = {item["id"]: item for item in assignment["repositories"]}
@@ -100,11 +100,12 @@ def operations(plan, assignment):
         for dependency in task["depends_on"]:
             canonical = aliases.get(dependency, dependency)
             if dependency in refs:
-                target, revision = {"$ref": refs[dependency] + "/address"}, {"$ref": refs[dependency] + "/saved_revision"}
+                target = {"$ref": refs[dependency] + "/address"}
             else:
                 require(canonical in objects, f"unknown dependency: {dependency}")
-                target, revision = canonical, objects[canonical]["current_revision"]
-            candidate = {"target": target, "revision": revision, "relation": "depends_on", "blocking": True}
+                target = canonical
+            # Joppa orders work by the current target state. A new ordering link needs no revision pin.
+            candidate = {"target": target, "relation": "depends_on", "blocking": True}
             # An explicit dependency in this plan replaces its earlier revision pin.
             links = [link for link in links if not (link.get("relation") == "depends_on"
                                                    and link.get("target") in (canonical, target))]
@@ -117,8 +118,7 @@ def operations(plan, assignment):
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
             document = existing["document"]
-            reopen = (isinstance(existing["process"].get("blocked"), dict)
-                      and not existing["process"].get("done") and not existing["process"].get("retired"))
+            reopen = blocked(existing)
             if reopen:
                 require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
@@ -149,9 +149,8 @@ def operations(plan, assignment):
             changed.add(ac)
     for criterion in context.selected_criteria(assignment):
         ac = criterion["id"]
-        blocked = any(task["document"]["parent"] == ac and isinstance(task["process"].get("blocked"), dict)
-                      and not task["process"].get("done") and not task["process"].get("retired") for task in inventory.values())
-        result.extend(closing_operations(objects[ac], not grouped or ac in changed or blocked,
+        held = any(task["document"]["parent"] == ac and blocked(task) for task in inventory.values())
+        result.extend(closing_operations(objects[ac], not grouped or ac in changed or held,
             "Publish the reviewed Requirement plan." if grouped
             else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
             else "Publish reviewed Tasks. The criterion still requires verification.",

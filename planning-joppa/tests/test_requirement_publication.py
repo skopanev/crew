@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, hold, end
 
 
 class ProviderTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class ProviderTests(unittest.TestCase):
         retained["document"]["data"]["title"] = "Legacy approved work"
         self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
         old = data["joppa"]["objects"]["work:old"]
-        old["process"]["blocked"] = {"reason": "Failed"}
+        hold(old, "Failed")
         old["document"]["data"].update(title="[03] Existing work", body="Repository: service\nModule: core")
         retained["document"]["data"]["title"] = "[07] Approved work"
         data["joppa"]["tasks"] = [old]
@@ -71,7 +71,7 @@ class ProviderTests(unittest.TestCase):
             criterion_schemas={address: {key: deepcopy(data["joppa"][key])
                 for key in ("task_type", "task_schema", "test_nodes")} for address in ("criterion:a", "criterion:b")})
         data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed"}
+        hold(data["joppa"]["tasks"][0], "Failed")
         consumer = deepcopy(data["joppa"]["tasks"][0])
         consumer.update(address="work:consumer")
         consumer["document"]["parent"] = "criterion:b"
@@ -115,8 +115,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([command["parent"] for command in saves], ["criterion:a", "criterion:b", "criterion:c"])
         self.assertEqual([command["data"]["title"][:4] for command in saves], ["[01]", "[02]", "[01]"])
         self.assertEqual(saves[0]["links"][0]["target"], "work:dependency")
-        self.assertIn({"target": {"$ref": "task1/address"}, "revision": {"$ref": "task1/saved_revision"},
-                       "relation": "depends_on", "blocking": True}, saves[1]["links"])
+        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, saves[1]["links"])
         self.assertEqual(saves[2]["links"][0]["target"], {"$ref": "task2/address"})
         # Each changed AC loses this run's assignee and is marked ready in the same batch.
         self.assertEqual([(operation["command"]["op"], operation["command"].get("target") or operation["command"]["id"])
@@ -135,7 +134,7 @@ class ProviderTests(unittest.TestCase):
         value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
         value["acceptance_checks"][0]["ac"] = "criterion:a"
         old = data["joppa"]["tasks"][0]
-        old["process"]["blocked"] = {"reason": "Failed"}
+        hold(old, "Failed")
         with self.assertRaisesRegex(ValueError, "explicitly update or retire unfinished Task work:old"):
             publication.operations(value, data)
         provider = deepcopy(old)
@@ -155,7 +154,7 @@ class ProviderTests(unittest.TestCase):
         value["tasks"].append(prerequisite)
         done = deepcopy(old)
         done["address"] = "work:done"
-        done["process"]["done"] = {"evidence": "Already landed"}
+        end(done, "a" * 40)
         data["joppa"]["tasks"].append(done)
         operations = publication.operations(value, data)
         saves = [entry["command"] for entry in operations
@@ -165,7 +164,7 @@ class ProviderTests(unittest.TestCase):
         self.assertFalse(any(link["relation"] == "depends_on" and link["target"] == "work:provider"
                              for entry in saves for link in entry["links"]))
         self.assertTrue(any(link["target"] == "work:dependency" for link in saves[-1]["links"]))
-        provider["process"]["assignee"] = "worker"
+        provider["document"]["data"]["assignee"] = "worker"
         with self.assertRaisesRegex(ValueError, "claimed Tasks"):
             publication.operations(value, data)
 
