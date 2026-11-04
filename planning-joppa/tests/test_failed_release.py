@@ -141,6 +141,17 @@ class FailedReleaseTests(unittest.TestCase):
             self.assertRegex(result["release_error"], "exceeds one batch of 100 operations; claim retained")
             self.assertEqual((result["claim_released"], result["needs_recovery"]), (False, True))
 
+    def test_success_release_over_one_batch_fails_locally_without_a_release_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            addresses = [f"criterion:c{number}" for number in range(101)]
+            (target / "claim.json").write_text(json.dumps(claim_receipt(addresses)))
+            api = Server({address: (MARK, 4) for address in addresses})
+            with self.assertRaisesRegex(ValueError, "release needs 101 operations, more than one batch of 100"):
+                publication.release(api, target, "example", "criterion:c0", "Reviewed Task contracts are unchanged.")
+            self.assertEqual(api.batches(), [])
+            self.assertFalse((target / "release.json").exists())
+
     def test_uncertain_claim_or_publication_sends_no_release_and_needs_recovery(self):
         for name, body in (("claim.json", {**claim_receipt(["criterion:a"]), "status": "uncertain"}),
                            ("publication.json", {"status": "uncertain"})):

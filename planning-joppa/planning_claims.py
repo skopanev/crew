@@ -196,6 +196,8 @@ def release(api, target, workspace, ac, reason, code=None):
         if code:
             operations.append({"command": not_ready(address, code)})
     require_fenced(operations)
+    require(len(operations) <= MAX_BATCH, f"release needs {len(operations)} operations, more than one batch of "
+            f"{MAX_BATCH}; claim retained for recovery")
     extra = {"failure_code": code} if code else {}
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
