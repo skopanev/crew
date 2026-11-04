@@ -121,10 +121,18 @@ function blockedPackage(f) {
   const folder = path.join(root, run.executionId);
   fs.mkdirSync(folder);
   fs.writeFileSync(path.join(folder, 'retained.txt'), 'Retained package work');
+  run.blockRequest = {operations: []};
+  const tasks = f.run.tasks.map(({address}) => {
+    const id = `failure-${address.split(':')[1]}`;
+    const text = `CREW_FAILURE\nTask: ${address}\nRun: ${runId}\nReason: GATE_FAIL\nGate failed.`;
+    run.blockRequest.operations.push({command: {op: 'note', target: address, id, text}});
+    return {address, kind: 'task', current_revision: 3, historical: false,
+      document: {present: true, data: {title: address}, links: [], parent: 'ac:a1'},
+      process: {assessment: {state: 'waiting', reason: 'GATE_FAIL'}},
+      annotations: {comments: {[id]: {actor: run.joppaWorker.actor, text}}}};
+  });
   save(path.join(runs, runId, 'launch.json'), run);
-  const tasks = f.run.tasks.map(({address}) => ({address, kind: 'task', process: {
-    status: 'open', assignee: null, blocked: {reason: 'GATE_FAIL', evidence: `Run: ${runId}`}}}));
-  const operations = tasks.map(task => ({command: {op: 'retire_task', id: task.address.split(':')[1]}}));
+  const operations = tasks.map(task => ({command: {op: 'archive_object', target: task.address, revision: 3, reason: 'Retire'}}));
   return {root, runs, run, folder, runId, input: {tasks, operations, config: {workspace: 'fixture',
     url: f.run.config.joppa.url, worktree_root: root, lane_runs_folder: runs, repositories: [{path: f.root}]}}};
 }
