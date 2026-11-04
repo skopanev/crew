@@ -29,13 +29,11 @@ test('requirement publication evidence needs one exact SHA and target', () => {
 test('final requirement delivery waits for unfinished work and planning claims', async () => {
   const f = fixture();
   assert.equal((await requirementPlan(f.run, f.read)).final, true);
-  const evidence = f.objects.get('work:two').process.done;
-  f.objects.get('work:two').process.status = 'blocked';
-  delete f.objects.get('work:two').process.done;
+  f.objects.get('work:two').document.present = true;
+  f.objects.get('work:two').process.assessment = {state: 'waiting', reason: 'GATE_FAIL'};
   assert.equal((await requirementPlan(f.run, f.read)).final, false);
-  f.objects.get('work:two').process.status = 'done';
-  f.objects.get('work:two').process.done = evidence;
-  f.objects.get('measure:a').process.planning_claim = {actor: 'planner', position: 7};
+  f.objects.get('work:two').document.present = false;
+  f.objects.get('measure:a').document.data.assignee = 'crew-planning:host:run';
   const held = await requirementPlan(f.run, f.read);
   assert.equal(held.final, false);
   assert.equal(held.planningHeld, true);
@@ -55,7 +53,7 @@ test('requirement delivery groups mixed inline and structured Task contracts wit
 test('compact traversal checks an archived container through its full detail', async () => {
   const f = fixture();
   f.add('group:hidden', 'spec:r').document.data.archived = true;
-  f.add('measure:hidden', 'group:hidden').process.planning_claim = {actor: 'other-planner'};
+  f.add('measure:hidden', 'group:hidden').document.data.assignee = 'another-planner';
   const read = async (tool, args) => {
     const value = await f.read(tool, args);
     if (tool !== 'joppa_tree') return value;
@@ -69,18 +67,17 @@ test('compact traversal checks an archived container through its full detail', a
   assert.equal(plan.final, true);
 });
 
-test('only current DONE publication evidence confirms a requirement head', async () => {
+test('only an archived Task with a valid commit confirms a requirement head', async () => {
   const f = fixture(), head = 'a'.repeat(40);
   let plan = await requirementPlan(f.run, f.read);
   assert.doesNotThrow(() => assertRequirementHead(plan, head));
-  f.objects.get('work:two').review_required = true;
+  f.objects.get('work:two').document.present = true;
   plan = await requirementPlan(f.run, f.read);
   assert.equal(plan.final, false);
   assert.throws(() => assertRequirementHead(plan, head), {code: 'REQUIREMENT_HEAD_UNCONFIRMED'});
-  f.objects.get('work:two').review_required = false;
-  f.objects.get('work:two').process.done = 'Work complete without an exact publication receipt';
-  plan = await requirementPlan(f.run, f.read);
-  assert.throws(() => assertRequirementHead(plan, head), {code: 'REQUIREMENT_HEAD_UNCONFIRMED'});
+  f.objects.get('work:two').document.present = false;
+  f.objects.get('work:two').document.data.commit = 'invalid';
+  await assert.rejects(requirementPlan(f.run, f.read), /invalid commit/);
 });
 
 test('requirement fingerprint changes with current contracts and blocks retired own work', async () => {
@@ -88,29 +85,42 @@ test('requirement fingerprint changes with current contracts and blocks retired 
   const before = await requirementPlan(f.run, f.read);
   f.objects.get('measure:a').current_revision++;
   assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before.fingerprint);
-  f.objects.get('work:one').process.status = 'retired';
-  await assert.rejects(requirementPlan(f.run, f.read), /already retired/);
+  f.objects.get('work:one').document.present = false;
+  await assert.rejects(requirementPlan(f.run, f.read), /absent or archived/);
 });
 
 test('requirement fingerprint keeps a criterion current after a test child changes', async () => {
   const f = fixture(), ac = f.objects.get('measure:a');
-  ac.contract_revision = ac.current_revision;
   const before = (await requirementPlan(f.run, f.read)).fingerprint;
   f.objects.set('check:required', {address: 'check:required', kind: 'check',
     document: {parent: ac.address, data: {title: 'checks.test.js > required'}}});
   assert.equal((await requirementPlan(f.run, f.read)).fingerprint, before);
   ac.current_revision++;
-  ac.contract_revision = ac.current_revision;
   assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before);
 });
 
 test('finalize-only delivery needs completed work and no current planning holder', async () => {
   const f = fixture();
-  f.objects.get('work:one').process.status = 'done';
+  f.objects.get('work:one').document.present = false;
+  f.objects.get('work:one').document.data.commit = 'a'.repeat(40);
   const run = {...f.run, tasks: [], finalizeOnly: true};
   assert.equal((await requirementPlan(run, f.read)).final, true);
-  f.objects.get('spec:r').process.planning_claim = {actor: 'planner'};
+  f.objects.get('spec:r').document.data.assignee = 'crew-planning:host:run';
   assert.equal((await requirementPlan(run, f.read)).final, false);
+});
+
+test('Requirement delivery reads every current archived Task across native pages', async () => {
+  const f = fixture(), calls = [];
+  for (let index = 0; index < 28; index++) f.add(`work:closed${index}`, 'measure:a', 'done');
+  const read = (tool, args) => { calls.push({tool, args}); return f.read(tool, args); };
+  const plan = await requirementPlan(f.run, read);
+  assert.equal(plan.final, true);
+  assert.equal(plan.publications.length, 29);
+  assert.equal(new Set(plan.publications.map(item => item.task)).size, 29);
+  const lists = calls.filter(call => call.tool === 'joppa_objects' && call.args.kind);
+  assert.equal(lists.length, 2);
+  assert(lists.every(call => call.args.parent === 'spec:r' && call.args.status.includes('purple')));
+  assert(lists[1].args.cursor);
 });
 
 test('remote dependency state gates publication and finalization with a distinct workspace identity', async () => {
@@ -129,7 +139,6 @@ test('remote dependency state gates publication and finalization with a distinct
   link.revision = link.status.current_revision = 2;
   assert.notEqual((await requirementPlan(f.run, f.read)).fingerprint, before.fingerprint);
   const ignored = f.add('work:retired', 'measure:a', 'retired');
-  ignored.process.retired = {reason: 'Unnecessary'};
   ignored.remote_links = [{...link, status: {...link.status, satisfied: false}}];
   const other = f.add('work:other', 'measure:a', 'in_progress');
   other.document.data.body = 'Repository: another\nOther work.';

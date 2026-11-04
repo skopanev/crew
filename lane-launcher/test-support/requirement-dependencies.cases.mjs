@@ -27,7 +27,7 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   const sha = git(['rev-parse', 'HEAD']);
   const f = fixture();
   git(['push', '-q', 'origin', `HEAD:${f.branch}`]);
-  f.objects.get('work:two').process.done = `Landed SHA: ${sha}\nTarget: ${f.branch}\n`;
+  f.objects.get('work:two').document.data.commit = sha;
   f.objects.get('work:one').document.links = [{relation: 'depends_on', blocking: true, target: 'work:two'}];
   const config = {delivery: 'requirement', repositories: [{id: 'repo', path: repo, targetBranch: 'develop'}]};
   const run = {...f.run, repository: config.repositories[0], config, requirementDelivery: {branch: f.branch}};
@@ -88,13 +88,11 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
 
   const criterion = f.objects.get('measure:b');
   criterion.current_revision = 3;
-  criterion.contract_revision = 1;
   assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
-  criterion.contract_revision = 2;
-  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: 'measure:b',
-    code: 'DEPENDENCY_STALE_PIN', consumer: 'work:one', pin: 1, contractRevision: 2, currentRevision: 3});
+  criterion.document.data.assignee = 'crew-planning:host:run';
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
   criterion.current_revision = 1;
-  delete criterion.contract_revision;
+  delete criterion.document.data.assignee;
 
   f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3, contract_revision: 2})];
   assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), null);

@@ -28,15 +28,15 @@ export async function occupancyReader(config, worker) {
     if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
   };
   const schema = await api(config, worker, 'joppa_tree', {workspace: config.workspace}), objects = new Map();
-  const object = async address => {
+  const object = async (address, {allowArchived = false} = {}) => {
     if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
     const current = await objects.get(address);
-    check(current?.address === address && current.document?.present === true && current.historical === false,
+    check(current?.address === address && (allowArchived || current.document?.present === true) && current.historical === false,
       'Task ownership context is absent or historical');
     return current;
   };
-  const group = async address => {
-    const current = await object(address);
+  const group = async (address, allowArchived = false) => {
+    const current = await object(address, {allowArchived});
     const contract = taskBody(current.document.data) ? taskContract(current.document.data) : '';
     const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
     const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
@@ -64,6 +64,9 @@ export async function heldTasks(config, worker, visit, inventory) {
       if (!nodeAssignee(task)) continue;
       await visit(task);
     }
+  }
+  if (inventory && config.delivery === 'requirement') {
+    for await (const page of taskPages(read, {status: 'purple'})) inventory.push(...page.items);
   }
 }
 
@@ -132,7 +135,7 @@ export async function nextTask(config) {
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
     for (const task of inventory) {
-      if (!taskMatchesProject(config, task) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
+      if (task.present !== true || !taskMatchesProject(config, task) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
           priorities && !priorities.includes(task['data.priority'])) continue;
         try {
           const dependency = await dependencies(task.address);

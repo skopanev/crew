@@ -1,5 +1,6 @@
 // Generic Joppa node reads and revision-checked document saves.
 const require = (condition, message) => { if (!condition) throw new Error(message); };
+export const NODE_TONES = ['red', 'yellow', 'orange', 'grey', 'green', 'purple'];
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
 export const nodeWaiting = node => (node.process?.assessment ?? node['process.assessment'])?.state === 'waiting';
@@ -46,7 +47,8 @@ export async function* nodePages(read, filters) {
 
 export async function* taskPages(read, filters = {}) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
-    fields: ['title', 'revision', 'parent', 'data.assignee', 'data.priority', 'data.projects', 'work_ready', 'process.assessment'],
+    fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority', 'data.projects',
+      'work_ready', 'process.assessment'],
     ...filters});
 }
 

@@ -17,7 +17,11 @@ function fixture() {
     const value = {address, kind: address.split(':')[0], historical: false, current_revision: 1,
       document: {present: true, parent, links: [], data: {title: address,
         ...(status ? {body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
-      process: status ? {status, revision: 1} : {}};
+      process: {}, work_ready: true};
+    if (status === 'in_progress') value.document.data.assignee = 'crew-lane:host:run';
+    if (status === 'blocked') value.process.assessment = {state: 'waiting', reason: 'GATE_FAIL'};
+    if (status === 'done' || status === 'retired') value.document.present = false;
+    if (status === 'done') value.document.data.commit = 'a'.repeat(40);
     objects.set(address, value);
     return value;
   }
@@ -25,14 +29,34 @@ function fixture() {
   add('measure:a', 'spec:r');
   add('work:one', 'measure:a', 'in_progress');
   const sibling = add('work:two', 'measure:a', 'done');
-  sibling.process.done = `Landed SHA: ${'a'.repeat(40)}\nTarget: ${branch}\n`;
   const read = async (tool, args) => {
     if (tool === 'joppa_tree') return {schema: {types}};
     if (tool === 'joppa_objects' && args.address) return structuredClone(objects.get(args.address));
-    if (tool === 'joppa_objects') return {items: [...objects.values()].filter(x => x.document.parent === args.parent)
-      .map(x => ({address: x.address, kind: x.kind, present: x.document.present})), next_cursor: null};
-    if (tool === 'joppa_tasks') return {tasks: [...objects.values()].filter(x => x.kind === 'work')
-      .map(x => ({address: x.address, revision: x.current_revision, status: x.process.status})), next_cursor: null};
+    if (tool === 'joppa_objects') {
+      const kinds = args.kind && [args.kind].flat(), tones = args.status && [args.status].flat();
+      const descendant = value => {
+        if (!args.parent || args.parent === '*') return true;
+        let parent = value.document.parent, depth = 1;
+        while (parent) {
+          if (parent === args.parent) return !args.depth || depth <= args.depth;
+          parent = objects.get(parent)?.document.parent;
+          depth++;
+        }
+        return false;
+      };
+      const rows = [...objects.values()].filter(x => descendant(x) && (!kinds || kinds.includes(x.kind)))
+        .map(x => ({address: x.address, kind: x.kind, parent: x.document.parent,
+          present: x.document.present, revision: x.current_revision, title: x.document.data.title,
+          status: x.document.present ? x.status?.tone || 'grey' : 'purple', work_ready: x.work_ready,
+          'data.assignee': x.document.data.assignee ?? null, 'data.commit': x.document.data.commit ?? null,
+          'process.assessment': x.process.assessment ?? null}))
+        .filter(x => tones ? tones.includes(x.status) : x.present)
+        .sort((a, b) => a.address.localeCompare(b.address));
+      const after = rows.filter(row => !args.cursor || row.address > args.cursor), page = after.slice(0, args.limit || 25);
+      return {items: page.map(row => Object.fromEntries(Object.entries(row)
+        .filter(([key]) => key === 'address' || args.fields?.includes(key)))), total: rows.length,
+        ...(after.length > page.length ? {next_cursor: page.at(-1).address} : {})};
+    }
     throw new Error(`Unexpected read ${tool}`);
   };
   const run = {requirement: 'spec:r', repository: 'repo', tasks: [{address: 'work:one', revision: 1}],
