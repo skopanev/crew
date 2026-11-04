@@ -41,9 +41,8 @@ def normalize_detail(args, value):
 
 
 def blocked(assessment):
-    """An assessment with ready false holds the node. No assessment means ready."""
-    return isinstance(assessment, dict) and (assessment.get("ready") is False
-                                             or assessment.get("state") not in (None, "ready"))
+    """Live assessment states are waiting and ready. Waiting holds the node. No assessment means ready."""
+    return isinstance(assessment, dict) and assessment.get("state") == "waiting"
 
 
 def lifecycle(document, process):
@@ -51,9 +50,9 @@ def lifecycle(document, process):
     data, result = document["data"], {"assessment": (process or {}).get("assessment")}
     result["assignee"] = data.get("assignee")
     if blocked(result["assessment"]):
-        reason = result["assessment"].get("reason") or ""
-        # The assess reason is the only block evidence, such as a lane "Run: <id>" line.
-        result["blocked"] = {"reason": reason, "evidence": reason, "actor": result["assessment"].get("actor")}
+        # The reason is a short code such as WORKTREE_PREEXISTED. Failure detail stays in the Task note.
+        result["blocked"] = {"reason": result["assessment"].get("reason") or "",
+                             "actor": result["assessment"].get("actor")}
     if document["present"] is False:
         result["done" if data.get("commit") else "retired"] = {"commit": data.get("commit")}
     return {key: value for key, value in result.items() if value is not None}

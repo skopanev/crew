@@ -114,7 +114,8 @@ class GenericLifecycleTests(unittest.TestCase):
             target = Path(directory)
             data, value = assignment(), plan()
             receipt = {"status": "confirmed", "arguments": {"workspace": "example", "operations": [{"command": {
-                "op": "save_object", "kind": "criterion", "id": "a", "data": {"assignee": "crew-planning:h:run-1"}}}]},
+                "op": "save_object", "kind": "criterion", "id": "a", "revision": 3,
+                "data": {"assignee": "crew-planning:h:run-1"}}}]},
                 "result": {"results": [{"position": 1}]}}
             for name, body in {"input": data, "plan": value, "joppa-snapshot": {}, "claim": receipt}.items():
                 (target / f"{name}.json").write_text(json.dumps(body))
@@ -161,7 +162,6 @@ class GenericLifecycleTests(unittest.TestCase):
         self.assertEqual(state(), "open")
         self.assertEqual(state(data={"assignee": "lane-1"}), "active")
         self.assertEqual(state(process={"assessment": {"state": "waiting", "reason": "WORKTREE_PREEXISTED"}}), "blocked")
-        self.assertEqual(state(process={"assessment": {"ready": False, "reason": "Lane failed"}}), "blocked")
         self.assertEqual(state(process={"assessment": {"state": "ready", "reason": "Owner"}}), "open")
         self.assertEqual(state(data={"commit": "a" * 40}, present=False), "done")
         self.assertEqual(state(archived=True), "retired")
@@ -172,7 +172,7 @@ class GenericLifecycleTests(unittest.TestCase):
         rows = [{"address": f"work:t{index}", "data.projects": ["p"] if index != 3 else ["elsewhere"]} for index in range(5)]
         details = {"work:t0": raw("work:t0", {"title": "Open", **fields}),
                    "work:t1": raw("work:t1", {"title": "Mine", "assignee": "lane-1", **fields}),
-                   "work:t2": raw("work:t2", {"title": "Held", **fields}, process={"assessment": {"ready": False}}),
+                   "work:t2": raw("work:t2", {"title": "Held", **fields}, process={"assessment": {"state": "waiting", "reason": "LANE_FAILED"}}),
                    "work:t4": raw("work:t4", {"title": "Landed", "commit": "b" * 40, **fields}, present=False)}
         calls = []
         class Lists:
