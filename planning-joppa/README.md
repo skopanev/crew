@@ -116,6 +116,8 @@ A new result alone does not invalidate the plan.
 Publication uses the captured revision after a freshness check. It does not substitute a newer revision for a stale approved plan.
 Joppa orders work by the current target state and does not read `link.revision`.
 A pinned revision is valid from 1 through the target's `current_revision`. New `depends_on` links have no pin.
+Before the batch, the planner reads each local dependency Task once. A done Task is archived with a valid `data.commit`.
+A link to a done Task stays unchanged, and no new link to it is added. A missing or retired target refuses publication.
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
@@ -185,6 +187,7 @@ Unresolved receipts block a new run. They require explicit recovery.
 Confirmed failures release this run's planning claim. Uncertain mutations retain their request receipts.
 The planner refuses publication when a blocked Task keeps its contract and is not retired.
 The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
+Any other rejected publication applied nothing. The failure release then saves and assesses each held AC not ready.
 Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
 Never start another mutation blindly. A planning `data.assignee` does not expire.

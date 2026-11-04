@@ -163,7 +163,8 @@ def release(api, target, workspace, ac, reason, code=None):
     publication = target / "publication.json"
     if publication.exists():
         result = read(publication)
-        if (result["status"] != "rejected" or result.get("retain_claim")
+        # A rejected batch applied nothing. A failure release then holds the AC not ready, also after retain_claim.
+        if (result["status"] != "rejected" or (result.get("retain_claim") and not code)
                 or result.get("error") == "blocked Task needs a new contract or retirement"):
             return False
     prior = target / "release.json"
