@@ -126,7 +126,10 @@ def finish():
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     claims.planning_idle(api, config, fresh, claims.owned(api, config["workspace"], claim))
     verify_bindings(api, config, plan, fresh, snapshots, None)
-    operations = publication.operations(plan, fresh)
+    # Read dependency targets last. A target that ends after this read makes Joppa refuse the whole batch.
+    completed = publication.completed_dependencies(api, config["workspace"], plan, fresh,
+                                                   current.get("schema", {}).get("types", {}))
+    operations = publication.operations(plan, fresh, completed)
     held = any(blocked(task) for task in fresh["joppa"]["tasks"])
     criteria = {item["id"] for item in context.selected_criteria(fresh)}
     if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not held:

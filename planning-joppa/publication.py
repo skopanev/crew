@@ -17,7 +17,8 @@ from task_contracts import (
 )
 from plan_validation import validate, validate_one, binding_checks, verify_bindings
 from test_nodes import bind_missing
-from joppa_reads import blocked
+from joppa_reads import blocked, ended
+from context_reads import object_read
 from planning_claims import address_of, closing_operations, release, owned, require_fenced
 
 
@@ -46,7 +47,51 @@ def ensure_recovered(root, current, server, workspace, ac):
             require(released or finished, f"earlier claim or publication needs recovery: {target}")
 
 
-def operations(plan, assignment):
+COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def dependency_targets(plan, assignment, types):
+    """Explicit local Task targets of the dependency links in saved Tasks. Skip Tasks saved in this batch."""
+    inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
+    aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
+    own = set(aliases) | set(aliases.values()) | {task["id"] for task in plan["tasks"]}
+    candidates = set()
+    for task in plan["tasks"]:
+        if task["action"] == "retire":
+            continue
+        candidates.update(aliases.get(dependency, dependency) for dependency in task["depends_on"])
+        existing = inventory.get(task.get("target"))
+        candidates.update(link["target"] for link in (existing["document"].get("links", []) if existing else [])
+                          if link.get("relation") == "depends_on")
+    result = []
+    for address in sorted(item for item in candidates if isinstance(item, str) and ":" in item and item not in own):
+        kind = address.split(":", 1)[0]
+        require(kind in types, f"dependency type {kind} is not in the workspace schema")
+        if types[kind].get("role") == "task":
+            result.append(address)
+    return result
+
+
+def completed_dependencies(api, workspace, plan, assignment, types):
+    """Read each dependency target once before the batch. Return the done Tasks: archived with a valid data.commit.
+    Refuse an unreadable, missing or retired target before any write."""
+    completed = set()
+    for address in dependency_targets(plan, assignment, types):
+        try:
+            object = object_read(api, workspace, address, allow_archived=True)
+        except Exception as error:
+            raise ValueError(f"dependency {address} could not be read before publication: {error}") from None
+        if not ended(object):
+            continue
+        commit = object["document"]["data"].get("commit")
+        require(isinstance(commit, str) and COMMIT.fullmatch(commit),
+                f"dependency {address} is archived without a valid commit; revise the plan")
+        completed.add(address)
+    return completed
+
+
+def operations(plan, assignment, completed=frozenset()):
+    """Compose the batch. A dependency in completed is satisfied: keep its existing link unchanged or add none."""
     validate(plan, assignment)
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     targets = {task.get("target") for task in plan["tasks"] if task["action"] in ("update", "retire")}
@@ -99,6 +144,9 @@ def operations(plan, assignment):
                                                 and link.get("target") in retired)]
         for dependency in task["depends_on"]:
             canonical = aliases.get(dependency, dependency)
+            if canonical in completed:
+                # Joppa accepts an absent target only in a link that exactly matches an existing link.
+                continue
             if dependency in refs:
                 target = {"$ref": refs[dependency] + "/address"}
             else:

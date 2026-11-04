@@ -204,7 +204,7 @@ class ProviderTests(unittest.TestCase):
                         if name == "joppa_objects":
                             return raw_ac(args["address"], MARK)
                         # Publication contains Task work. A release saves only the AC without its assignee.
-                        if name == "joppa_batch" and any(op["command"].get("kind") != "criterion"
+                        if name == "joppa_batch" and any(op["command"].get("kind", "criterion") != "criterion"
                                                          for op in args["operations"]):
                             raise Rejected(refusal)
                         return {"results": [{"position": 23}]}
@@ -225,10 +225,18 @@ class ProviderTests(unittest.TestCase):
                     else:
                         stage.finish()
                 result = read(target / "result.json")
-                self.assertEqual(result["claim_released"], not active_blocked)
+                # A certain rejection applied nothing. Only the blocked Task refusal keeps the claim.
+                kept = active_blocked and refusal == blocked_refusal
+                self.assertEqual(result["claim_released"], not kept)
                 self.assertEqual(result["status"], "blocked" if active_blocked else "unchanged")
-                self.assertEqual((target / "release.json").exists(), not active_blocked)
-                if active_blocked:
+                self.assertEqual((target / "release.json").exists(), not kept)
+                if active_blocked and not kept:
+                    self.assertFalse(result["needs_recovery"])
+                    self.assertTrue(read(target / "publication.json")["retain_claim"])
+                    released = read(target / "release.json")["arguments"]["operations"]
+                    self.assertEqual([op["command"]["op"] for op in released], ["save_object", "assess"])
+                    self.assertIs(released[1]["command"]["ready"], False)
+                if kept:
                     self.assertTrue(result["needs_recovery"])
                     self.assertTrue(read(target / "publication.json")["retain_claim"])
                     mutations = [(name, args) for name, args in api.calls if name != "joppa_objects"]
