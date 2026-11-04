@@ -4,6 +4,8 @@ import {randomUUID} from 'node:crypto';
 import {command, save} from './runtime.mjs';
 import {api, batchRequest, mutateTasks, claimTasks, contractDigest} from './joppa-common.mjs';
 import {recoverTimeout} from './joppa-recovery.mjs';
+import {releaseTasks, taskQuestions} from './joppa-claims.mjs';
+import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -86,28 +88,14 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged &&
     output.includes(`run.sh: removed unused worktree: ${checkout}`) && isPrepareFailure(artifacts);
   if (startupFailed || prepareFailed) {
-    if (!objects.every(unclaimed)) {
-      require(objects.every(owned), 'PACKAGE_RELEASE_UNCONFIRMED: Task ownership differs within the package');
-      run.releaseRequest = batchRequest(run, objects.map(object => ({op: 'release_task', id: object.address,
-        revision: object.current_revision, reason: prepareFailed
-          ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
-          : containerFailed
-            ? 'Session container never became ready. No native workflow ran; unused checkout removed.'
-            : 'Lane startup failed before workflow launch. No native workflow ran; unused checkout absent.'})));
-      persist();
-      await mutateTasks(run, run.releaseRequest);
-    }
-    run.releaseResults = [];
-    for (const claim of claims) {
-      const current = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-      require(current.address === claim.address && current.historical === false && current.document?.present === true &&
-        Number.isSafeInteger(current.current_revision) && current.process?.status === 'open' &&
-        current.process.assignee === null && !current.process.claim && !current.process.blocked &&
-        !current.process.done && !current.process.retired,
-        'STARTUP_RELEASE_UNCONFIRMED: Joppa did not confirm every Task as current and unclaimed');
-      run.releaseResults.push({address: claim.address, revision: current.current_revision, status: 'open'});
-    }
-    run.releaseConfirmed = true;
+    const releasing = objects.every(unclaimed) ? [] : objects;
+    require(!releasing.length || objects.every(owned), 'PACKAGE_RELEASE_UNCONFIRMED: Task ownership differs within the package');
+    await releaseTasks(run, persist, releasing, prepareFailed
+      ? 'Lane preparation failed before agent work. Unused checkout removed; see the run failure evidence.'
+      : containerFailed
+        ? 'Session container never became ready. No native workflow ran; unused checkout removed.'
+        : 'Lane startup failed before workflow launch. No native workflow ran; unused checkout absent.',
+    'STARTUP_RELEASE_UNCONFIRMED');
     result.released = true;
     result.held = false;
     result.blocked = false;
@@ -128,21 +116,25 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   }
   result.blocked = true;
   const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
-  run.blockRequest ||= batchRequest(run, objects.map(object => ({
-    op: 'block_task', id: object.address, revision: object.current_revision,
-    reason: preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts)),
-    evidence: `${failure || 'Lane failed'}\nTask: ${object.address}\nRun: ${path.basename(path.dirname(stateFile))}`})));
+  const runId = path.basename(path.dirname(stateFile)), question = await taskQuestions(run);
+  const code = preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts));
+  // One batch per package: release save (the assess fence), waiting assessment, and the failure note.
+  run.blockRequest ||= batchRequest(run, objects.flatMap(object => [
+    saveNode(object, {assignee: undefined}, `Crew lane failed: ${code}.`, question(object)),
+    {op: 'assess', target: object.address, ready: false, reason: code},
+    {op: 'note', target: object.address, id: randomUUID(), reply_to: null,
+      text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${(failure || 'Lane failed').trim()}`}]));
   persist();
   await mutateTasks(run, run.blockRequest);
   result.tasks = [];
-  for (const [index, claim] of claims.entries()) {
-    const requested = run.blockRequest.operations?.[index].command || run.blockRequest.command;
+  for (const claim of claims) {
+    const requested = op => run.blockRequest.operations.find(({command}) => command.op === op && command.target === claim.address)?.command;
+    const assess = requested('assess'), note = requested('note');
     const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-    const blocked = confirmed.process?.blocked;
-    require(confirmed.address === claim.address && confirmed.process?.status === 'open' &&
-      confirmed.process.assignee === null && blocked?.actor === run.joppaWorker.actor &&
-      blocked.reason === requested.reason && blocked.evidence === requested.evidence &&
-      Number.isSafeInteger(blocked.position) && blocked.position > 0,
+    const comment = confirmed.annotations?.comments?.[note?.id];
+    require(confirmed.address === claim.address && confirmed.historical === false && confirmed.document?.present === true &&
+      !nodeAssignee(confirmed) && nodeWaiting(confirmed) && assess && confirmed.process?.assessment?.reason === assess.reason &&
+      comment && comment.withdrawn !== true && comment.actor === run.joppaWorker.actor && comment.text === note.text,
       'Joppa did not confirm every Task block; outcome requires inspection');
     result.tasks.push({address: claim.address, status: 'blocked', revision: confirmed.current_revision});
   }

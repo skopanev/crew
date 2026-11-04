@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {command, quote} from './runtime.mjs';
-import {api, batchRequest, mutateTasks} from './joppa-common.mjs';
+import {api, batchRequest} from './joppa-common.mjs';
+import {releaseTasks} from './joppa-claims.mjs';
 import {formatContexts, formatRecoveryNote} from './joppa-input.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -100,20 +101,8 @@ export async function recoverTimeout(run, stateFile, result, artifacts, {claims,
   run.recovery.checkout = archivedCheckout;
   persist();
   const current = (await currentTasks(true))[0];
-  run.releaseRequest = batchRequest(run, [{
-    op: 'release_task', id: current.address, revision: current.current_revision,
-    reason: `implement_code timed out; checkpoint ${head} saved on ${ref} (${noteId}).`,
-  }]);
-  persist();
-  await mutateTasks(run, run.releaseRequest);
-  const released = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: current.address});
-  require(released.address === current.address && released.historical === false && released.document?.present === true &&
-    Number.isSafeInteger(released.current_revision) && released.process?.status === 'open' &&
-    released.process.assignee === null && !released.process.claim && !released.process.blocked &&
-    !released.process.done && !released.process.retired,
-    'RECOVERY_RELEASE_UNCONFIRMED: Joppa did not confirm Task as open and unassigned; Task remains held');
-  run.releaseResults = [{address: current.address, revision: released.current_revision, status: 'open'}];
-  run.releaseConfirmed = true;
+  await releaseTasks(run, persist, [current], `implement_code timed out; checkpoint ${head} saved on ${ref} (${noteId}).`,
+    'RECOVERY_RELEASE_UNCONFIRMED');
   result.held = false;
   result.released = true;
   result.checkpointed = true;

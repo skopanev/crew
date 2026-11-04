@@ -27,6 +27,6 @@ for (const forceColor of ['0', '1']) {
     assert.ok(fs.readFileSync(log, 'utf8').includes(reason + '\n\n'));
     assert.ok(!fs.readFileSync(log, 'utf8').includes('\x1b['));
     assert.equal(f.calls.filter(call => call.name === 'joppa_batch' &&
-      call.args.operations[0].command.op === 'claim_task').length, 1);
+      call.args.operations[0].command.data?.assignee === read(f.stateFile).claim.assignee).length, 1);
   });
 }

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import {spawn, spawnSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
 import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
@@ -12,16 +13,20 @@ import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
+import {nodeAssignee} from '../joppa-nodes.mjs';
 
 async function packageFixture(t, mode = 'success') {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-')));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  // The run folder name is the launch UUID, as in launcher state.
+  const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-package-')));
+  t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
+  const runId = randomUUID(), root = path.join(temp, runId);
+  fs.mkdirSync(root);
   const tokenFile = path.join(root, 'token');
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
     work_ready: true, review_required: false, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
-    process: {status: 'open', assignee: null}});
+    process: {}, annotations: {comments: {}}});
   objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
   for (let index = 1; index <= 2; index++) {
     objects.set(`ac:a${index}`, make(`ac:a${index}`, 'ac', 'req:r', {title: `AC ${index}`}));
@@ -43,7 +48,8 @@ async function packageFixture(t, mode = 'success') {
     calls.push({name, args});
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
-    if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'}, task: {role: 'task'}}}};
+    if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'},
+      task: {role: 'task', question: 'Which change does this Task make?'}}}};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
     else if (name === 'joppa_objects') {
       const rows = [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
@@ -59,36 +65,46 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
       tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
         projects: objects.get(address).document.data.projects || ['project:app'],
-        status: objects.get(address).process.status, assignee: objects.get(address).process.assignee}))
+        // Selection cases still describe holders with the removed process fields.
+        assignee: nodeAssignee(objects.get(address)) ?? objects.get(address).process.assignee ?? null,
+        archived: objects.get(address).document.data.archived === true, legacy: objects.get(address).process.status}))
+        .map(({archived, legacy, ...task}) => ({...task, status: archived ? 'done' : legacy || (task.assignee ? 'in_progress' : 'open')}))
         .filter(task => !args.project || task.projects.includes(args.project))
         .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
     else if (name === 'joppa_batch') {
-      if (mode === 'release-unknown' && args.operations[0].command.op === 'release_task') {
-        res.destroy(); return;
-      }
-      if (mode === 'reject' || mode === 'outcome-reject' && args.operations[0].command.op !== 'claim_task') {
+      const commands = args.operations.map(({command}) => command);
+      const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
+      const release = commands.every(command => command.op === 'save_object' && !command.data.assignee);
+      const target = command => objects.get(command.target || `${command.kind}:${command.id}`);
+      if (mode === 'release-unknown' && release) { res.destroy(); return; }
+      // Revision checks refuse the whole batch. A save advances the revision for later operations.
+      const next = new Map(commands.filter(command => command.op === 'save_object').map(command => [target(command), command.revision + 1]));
+      const stale = commands.some(command => command.op === 'save_object' ? target(command)?.current_revision !== command.revision
+        : command.op === 'archive_object' && next.get(target(command)) !== command.revision);
+      if (mode === 'reject' || mode === 'outcome-reject' && !claim || stale) {
         rejected = true; value = {error: 'operation 2 revision changed'};
       }
       else {
-        value = {results: args.operations.map(({command}, index) => {
-          const object = objects.get(command.id);
-          if (command.op === 'claim_task') object.process = {status: 'in_progress', assignee: 'lane-1'};
-          if (command.op === 'complete_task') {
-            assert.match(command.commit, /^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
-            object.process = {status: 'done', assignee: null, done: command.evidence,
-              commit: mode === 'wrong-commit' ? '0'.repeat(40) : command.commit};
+        value = {results: commands.map(command => {
+          const object = target(command);
+          if (command.op === 'save_object') {
+            const data = mode === 'wrong-commit' && command.data.commit ? {...command.data, commit: '0'.repeat(40)} : command.data;
+            applyData(object.document.data, data);
+            object.current_revision++;
+            return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision, data}};
           }
-          if (command.op === 'release_task') object.process = {status: 'open', assignee: null, claim: null};
-          if (command.op === 'block_task') object.process = {status: 'open', assignee: null,
-            blocked: {actor: 'lane-1', position: index + 1, reason: command.reason, evidence: command.evidence}};
-          return {command: {...command, id: command.id.split(':')[1]}, object: null, position: index + 1};
+          if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready'}} :
+            {assessment: {state: 'waiting', reason: command.reason}};
+          if (command.op === 'note') object.annotations.comments[command.id] = {actor: 'lane-1', text: command.text, withdrawn: false};
+          if (command.op === 'archive_object') object.document.data.archived = true;
+          return {command};
         })};
-        if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && args.operations[0].command.op === 'claim_task') {
+        if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && claim) {
           const foreign = structuredClone(objects.get('task:t1'));
           foreign.address = 'task:foreign';
           foreign.document.data.projects = ['project:other'];
           foreign.document.data.body = 'Repository: app\nModule: unconfigured';
-          foreign.process = {status: 'in_progress', assignee: mode === 'sameactor-race' ? 'lane-1' : 'foreign-worker'};
+          foreign.document.data.assignee = mode === 'sameactor-race' ? commands[0].data.assignee : 'foreign-worker';
           objects.set(foreign.address, foreign);
           queue.push(foreign.address);
         }
@@ -108,7 +124,15 @@ async function packageFixture(t, mode = 'success') {
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
   const stateFile = path.join(root, 'launch.json');
   fs.writeFileSync(path.join(root, 'output.log'), '');
-  return {root, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
+  return {root, runId, run, stateFile, calls, objects, queue, persist: () => save(stateFile, run)};
+}
+
+// Update a document in place so test getters on unchanged fields keep working.
+function applyData(target, data) {
+  for (const key of Object.keys(target)) if (!Object.hasOwn(data, key)) delete target[key];
+  for (const [key, value] of Object.entries(data)) {
+    if (JSON.stringify(target[key]) !== JSON.stringify(value)) target[key] = value;
+  }
 }
 
 function blockedPackage(f) {

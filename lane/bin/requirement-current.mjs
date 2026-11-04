@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {callJoppa} from '../../lane-launcher/joppa-api.mjs';
 import {contractDigest} from '../../lane-launcher/joppa.mjs';
+import {nodeAssignee, nodeWaiting} from '../../lane-launcher/joppa-nodes.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../../lane-launcher/dependencies.mjs';
 import {assertRequirementHead, requirementPlan} from '../../lane-launcher/requirement-delivery.mjs';
 
@@ -11,6 +12,8 @@ const require = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 const text = value => typeof value === 'string' && Boolean(value.trim());
+// Live context has no waiting assessment and no planner assignee.
+const live = object => !nodeWaiting(object) && !nodeAssignee(object);
 
 try {
   const args = process.argv.slice(2);
@@ -46,8 +49,8 @@ try {
   };
 
   if (!finalizeOnly) {
-    const actor = text(claim.actor) ? claim.actor.trim() : '';
-    require(Boolean(actor), 'Captured Task claim is missing actor');
+    const assignee = text(claim.assignee) ? claim.assignee : '';
+    require(Boolean(assignee), 'Captured Task claim is missing its run assignee');
     const tasks = Array.isArray(claim.tasks) && claim.tasks.length
       ? claim.tasks
       : (text(claim.address) && text(claim.digest)
@@ -61,11 +64,8 @@ try {
       require(current && current.address === task.address && current.historical === false &&
         current.document?.present === true && current.document.data?.archived !== true,
         `Claimed Task is absent or historical: ${task.address}`);
-      require(current.process?.status === 'in_progress' && current.process?.assignee === actor &&
-        !current.process?.retired && !current.process?.done && !current.process?.blocked,
-        `Task holder changed: ${task.address}`);
-      require(current.work_ready === true && current.review_required === false && current.process?.review_required !== true,
-        `Claimed Task needs review or is not work_ready: ${task.address}`);
+      require(nodeAssignee(current) === assignee && !nodeWaiting(current), `Task holder changed: ${task.address}`);
+      require(current.work_ready === true, `Claimed Task is not work_ready: ${task.address}`);
       require(contractDigest(current) === task.digest, `Task contract changed after claim: ${task.address}`);
       if (task.parent) {
         require(text(task.parent.address) && text(task.parent.digest), `Captured Task parent context is invalid: ${task.address}`);
@@ -74,8 +74,7 @@ try {
         require(parent && parent.address === task.parent.address && parent.historical === false &&
           parent.document?.present === true && parent.document.data?.archived !== true &&
           Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 &&
-          parent.work_ready === true && parent.review_required === false && parent.process?.review_required !== true &&
-          !parent.process?.planning_claim && !parent.planning_claim,
+          parent.work_ready === true && live(parent),
           `Task parent context needs review or has active planning: ${task.parent.address}`);
         require(contractDigest(parent) === task.parent.digest, `Task parent context changed after claim: ${task.parent.address}`);
       }
@@ -87,8 +86,7 @@ try {
       require(!remoteDependencyBlocker(parent), `Acceptance context has an unmet remote dependency: ${context.address}`);
       require(parent && parent.address === context.address && parent.historical === false &&
         parent.document?.present === true && parent.document.data?.archived !== true &&
-        parent.review_required === false && parent.process?.review_required !== true &&
-        !parent.process?.planning_claim && !parent.planning_claim,
+        live(parent),
         `Acceptance context is invalid, needs review, or has active planning: ${context.address}`);
       require(contractDigest(parent) === context.digest, `Acceptance context changed after claim: ${context.address}`);
     }
