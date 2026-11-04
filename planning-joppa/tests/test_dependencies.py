@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, hold, end
 
 
 class ProviderTests(unittest.TestCase):
@@ -78,21 +78,19 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("assignee", saved)
         self.assertNotIn("status", saved)
         self.assertEqual(saved["question_checked"], "What work?")
-        self.assertIn({"target": {"$ref": "task1/address"}, "revision": {"$ref": "task1/saved_revision"},
-                       "relation": "depends_on", "blocking": True}, saved["links"])
-        self.assertIn({"target": "work:dependency", "revision": 3, "relation": "depends_on", "blocking": True}, saved["links"])
+        # New ordering links carry no revision pin.
+        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, saved["links"])
+        self.assertIn({"target": "work:dependency", "relation": "depends_on", "blocking": True}, saved["links"])
         self.assertIn("1. Use the existing mechanism", context.task_contract(saved["data"]))
         self.assertEqual(data, original)
 
     def test_refuses_occupied_work(self):
         value = plan()
         value["tasks"][0].update(action="update", target="work:old", revision=3)
-        for place in ("process", "data"):
-            data = assignment()
-            task = data["joppa"]["tasks"][0]
-            (task["process"] if place == "process" else task["document"]["data"])["assignee"] = "worker"
-            with self.assertRaisesRegex(ValueError, "claimed Tasks"):
-                publication.operations(value, data)
+        data = assignment()
+        data["joppa"]["tasks"][0]["document"]["data"]["assignee"] = "worker"
+        with self.assertRaisesRegex(ValueError, "claimed Tasks"):
+            publication.operations(value, data)
 
     def test_noop_prerequisite_keeps_fresh_reference_without_save(self):
         data = assignment()
@@ -109,7 +107,7 @@ class ProviderTests(unittest.TestCase):
         commands = publication.operations(value, data)
         self.assertEqual(len(commands), 3)
         self.assertEqual(commands[0]["command"]["data"]["title"], "Consume existing work")
-        self.assertIn({"target": "work:old", "revision": 3, "relation": "depends_on", "blocking": True},
+        self.assertIn({"target": "work:old", "relation": "depends_on", "blocking": True},
                       commands[0]["command"]["links"])
         value["tasks"] = [first]
         self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["save_object", "assess"])
@@ -121,7 +119,7 @@ class ProviderTests(unittest.TestCase):
             publication.operations(value, assignment())
         value["tasks"][0]["revision"] = 3
         data = assignment()
-        data["joppa"]["tasks"][0]["process"]["done"] = {"evidence": "Complete"}
+        end(data["joppa"]["tasks"][0], "a" * 40)
         with self.assertRaisesRegex(ValueError, "completed or retired"):
             publication.operations(value, data)
         value = plan()
@@ -136,7 +134,7 @@ class ProviderTests(unittest.TestCase):
         existing = data["joppa"]["tasks"][0]
         existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                              projects=["other", "p"])
-        existing["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        hold(existing, "Failed")
         with self.assertRaisesRegex(ValueError, "blocked Task work:old needs a new contract or retirement"):
             publication.operations(value, data)
         task.update(action="create")

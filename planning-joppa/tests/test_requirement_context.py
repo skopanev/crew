@@ -69,16 +69,14 @@ class ProviderTests(unittest.TestCase):
         if True:
             ready, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
+            # Joppa readiness ignores link.revision. A pin from 1 through current is valid; contract_revision is not read.
             objects["criterion:outside"]["contract_revision"] = 4
-            stale, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertNotIn("criterion:b", [entry["id"] for entry in stale["joppa"]["criteria"]])
-            # Live reads give no contract_revision. A pin below the current revision stays a stale pin.
+            earlier, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in earlier["joppa"]["criteria"]])
             del objects["criterion:outside"]["contract_revision"]
-            gone, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertNotIn("criterion:b", [entry["id"] for entry in gone["joppa"]["criteria"]])
-            objects["criterion:b"]["document"]["links"][0]["revision"] = 4
-            exact, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertIn("criterion:b", [entry["id"] for entry in exact["joppa"]["criteria"]])
+            objects["criterion:b"]["document"]["links"][0]["revision"] = 5
+            future, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertNotIn("criterion:b", [entry["id"] for entry in future["joppa"]["criteria"]])
             objects["criterion:b"]["document"]["links"][0].pop("revision")
             unpinned, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
@@ -147,7 +145,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(value["knowledge_query"], ac["document"]["data"]["body"])
         self.assertEqual(value["joppa"]["task_type"], "work")
         self.assertEqual(value["requirement"]["revision"], 3)
-        self.assertEqual(snapshot["requirement"]["number"], 3)
+        self.assertNotIn("number", snapshot["requirement"])
         self.assertEqual(snapshot["requirement"]["comments"], {"decision": {"id": "decision", "text": "Approved"}})
         self.assertEqual(snapshot["requirement"]["body"], "Required behavior")
         self.assertNotIn("tasks", snapshot["requirement"])

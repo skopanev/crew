@@ -13,6 +13,7 @@ import context
 import publication
 import planning_claims as claims
 from mcp import Rejected
+from joppa_reads import blocked
 
 _failure_message = None
 from reader_context import retry_startup, settings, reader_servers, prepare_reader, prepare_critic, prompt_assignment
@@ -126,11 +127,9 @@ def finish():
     claims.planning_idle(api, config, fresh, claims.owned(api, config["workspace"], claim))
     verify_bindings(api, config, plan, fresh, snapshots, None)
     operations = publication.operations(plan, fresh)
-    blocked = any(isinstance(task["process"].get("blocked"), dict)
-                  and not task["process"].get("done") and not task["process"].get("retired")
-                  for task in fresh["joppa"]["tasks"])
+    held = any(blocked(task) for task in fresh["joppa"]["tasks"])
     criteria = {item["id"] for item in context.selected_criteria(fresh)}
-    if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not blocked:
+    if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not held:
         released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
                                        "Reviewed Task contracts are unchanged.")
         require(released, "unchanged Tasks require confirmed claim release")
@@ -138,11 +137,11 @@ def finish():
               "acceptance_verified": False, "claim_released": True, "task_count": 0})
         signal("READY", "Existing Task contracts match the reviewed plan. Planning claim released.")
         return
-    if blocked and len(operations) > 1:
+    if held and len(operations) > 1:
         print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))],
             input=json.dumps({"config": config, "tasks": fresh["joppa"]["tasks"], "operations": operations}), timeout=120), end="")
     result = publication.mutate(api, target / "publication.json", "joppa_batch", {
-        "workspace": config["workspace"], "operations": operations}, retain_claim=blocked)
+        "workspace": config["workspace"], "operations": operations}, retain_claim=held)
     results = result.get("results")
     require(isinstance(results, list) and len(results) == len(operations),
             "publication response is incomplete; inspect publication.json before another run")

@@ -18,7 +18,7 @@ from joppa_reads import normalize_detail, task_state
 from mcp import Rejected
 import publication
 
-from provider_fixture import item, assignment, plan
+from provider_fixture import item, assignment, plan, hold, end
 
 REMOVED = ("joppa_tasks", "claim_task", "claim_next_task", "release_task", "block_task", "unblock_task",
            "complete_task", "review_task", "retire_task", "claim_planning", "finish_planning", "release_planning",
@@ -136,7 +136,7 @@ class GenericLifecycleTests(unittest.TestCase):
         data["joppa"]["objects"]["criterion:a"]["document"]["data"]["assignee"] = "crew-planning:h:run-1"
         task = value["tasks"][0]
         task.update(action="update", target="work:old", revision=3)
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Lane failed"}
+        hold(data["joppa"]["tasks"][0], "Lane failed")
         operations = publication.operations(value, data)
         self.assertEqual([entry["command"]["op"] for entry in operations], ["save_object", "assess", "save_object", "assess"])
         self.assertEqual(operations[1]["command"], {"op": "assess", "target": "work:old", "ready": True,
@@ -149,7 +149,7 @@ class GenericLifecycleTests(unittest.TestCase):
 
     def test_retire_archives_without_commit(self):
         data, value = assignment(), plan()
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Lane failed"}
+        hold(data["joppa"]["tasks"][0], "Lane failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         command = publication.operations(value, data)[0]["command"]
         self.assertEqual(command, {"op": "archive_object", "target": "work:old", "revision": 3,
