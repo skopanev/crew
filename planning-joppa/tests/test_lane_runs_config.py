@@ -27,6 +27,11 @@ class LaneRunsConfigTests(unittest.TestCase):
         self.assertEqual(config["lane_runs_folder"], "/state/one/runs")
         self.assertEqual(context.lane_runs_folders(config), ["/state/one/runs"])
 
+    def test_null_plural_field_stays_null_beside_the_single_field(self):
+        config = self.configure(worktree_root="/work/trees", lane_runs_folder="/state/one/runs", lane_runs_folders=None)
+        self.assertIsNone(config["lane_runs_folders"])
+        self.assertEqual(context.lane_runs_folders(config), ["/state/one/runs"])
+
     def test_lane_runs_folders_lists_every_dispatcher(self):
         folders = ["/state/one/runs", "/state/two/runs"]
         config = self.configure(worktree_root="/work/trees", lane_runs_folders=folders)
