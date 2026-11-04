@@ -33,8 +33,13 @@ class ProviderTests(unittest.TestCase):
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
-        for object in objects.values():
-            object["process"]["assessment"] = {"state": "ready"}
+        # Joppa treats an absent assessment as ready. A waiting or not work_ready criterion is excluded.
+        for address in ("criterion:b", "criterion:c"):
+            objects[address]["process"]["assessment"] = {"state": "ready"}
+        objects["criterion:waiting"] = item("criterion:waiting", "rule:r",
+                                            process={"assessment": {"state": "waiting", "reason": "Owner"}})
+        objects["criterion:unready"] = item("criterion:unready", "rule:r")
+        objects["criterion:unready"]["work_ready"] = False
         objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
                         "criterion:outside": item("criterion:outside", "rule:outside"),
                         "rule:outside": item("rule:outside")})
@@ -42,7 +47,7 @@ class ProviderTests(unittest.TestCase):
             {"target": "criterion:outside", "revision": 3, "relation": "depends_on", "blocking": True}]
         objects["criterion:c"]["document"]["links"] = [
             {"target": "criterion:a", "revision": 3, "relation": "depends_on", "blocking": True}]
-        roster = ["criterion:archived", "criterion:a", "criterion:b", "criterion:c"]
+        roster = ["criterion:archived", "criterion:a", "criterion:b", "criterion:c", "criterion:waiting", "criterion:unready"]
         objects["criterion:archived"] = item("criterion:archived", "rule:r")
         objects["criterion:archived"]["document"]["present"] = False
         class Server:
