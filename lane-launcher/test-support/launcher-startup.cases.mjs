@@ -92,11 +92,12 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container
     if (scenario === 'broken-symlink') fs.symlinkSync(path.join(f.root, 'missing-target'), checkout);
     if (['native-run', 'released-native-run'].includes(scenario)) fs.mkdirSync(path.join(laneRunFolder(f.run.runFolder, f.run.config.id), 'run-1'), {recursive: true});
     const manuallyReleased = scenario.startsWith('released-');
+    // An operator removes the assignee while the lane starts.
     if (manuallyReleased) for (const object of [f.objects.get('task:t1'), f.objects.get('task:t2')]) {
-      let process = object.process;
-      Object.defineProperty(object, 'process', {enumerable: true,
-        get: () => fs.existsSync(marker) ? {status: 'open', assignee: null} : process,
-        set: value => { process = value; },
+      let data = object.document.data;
+      Object.defineProperty(object.document, 'data', {enumerable: true,
+        get: () => fs.existsSync(marker) ? Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'assignee')) : data,
+        set: value => { data = value; },
       });
     }
     if (scenario === 'contract-changed') {
@@ -117,10 +118,10 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container
     assert.equal(Boolean(saved.result.blocked), false, scenario);
     assert.equal(runHoldsTasks(saved), !released, scenario);
     if (manuallyReleased) assert.equal(f.calls.filter(call => call.name === 'joppa_batch' &&
-      call.args.operations.some(item => item.command.op === 'release_task')).length, 0, scenario);
+      call.args.operations.some(item => item.command.op === 'save_object' && !item.command.data.assignee)).length, 0, scenario);
+    assert.match(saved.claim.assignee, new RegExp(`^crew-lane:[^:]+:${f.runId}$`), scenario);
     for (const address of ['task:t1', 'task:t2']) {
-      assert.equal(f.objects.get(address).process.status, released || manuallyReleased ? 'open' : 'in_progress', scenario);
-      assert.equal(f.objects.get(address).process.assignee, released || manuallyReleased ? null : 'lane-1', scenario);
+      assert.equal(f.objects.get(address).document.data.assignee, released || manuallyReleased ? undefined : saved.claim.assignee, scenario);
     }
   });
 }
