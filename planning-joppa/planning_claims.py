@@ -44,6 +44,11 @@ def assess(target, reason):
     return {"op": "assess", "target": target, "ready": True, "reason": reason}
 
 
+def not_ready(target, code):
+    """Hold a criterion after failed planning. The code is short. The detail stays in the save reason."""
+    return {"op": "assess", "target": target, "ready": False, "reason": code}
+
+
 def claim_operations(assignment, criteria, assignee):
     """One save per AC at the revision read for this plan. A stale write refuses the batch."""
     objects, questions = assignment["joppa"]["objects"], assignment["joppa"].get("questions", {})
@@ -139,8 +144,9 @@ def planning_idle(api, config, assignment, expected=None):
             require(not assignee, f"Requirement already has an active planning run on {address}")
 
 
-def release(api, target, workspace, ac, reason):
-    """Save each AC that this run still holds without data.assignee. Keep every other field."""
+def release(api, target, workspace, ac, reason, code=None):
+    """Save each AC that this run still holds without data.assignee. Keep every other field.
+    With a failure code, also assess each AC not ready in the same batch, but only at the revision this run wrote."""
     from publication import mutate
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -158,7 +164,8 @@ def release(api, target, workspace, ac, reason):
     if prior.exists():
         release = read(prior)
         return release["status"] == "confirmed" and not any(item.get("unknown") for item in release.get("skipped_claims", []))
-    operations, released, skipped = [], [], []
+    expected = {**claimed_revisions(receipt), **receipt.get("revisions", {})} if code else {}
+    operations, released, skipped, unassessed = [], [], [], []
     for address, (assignee, command) in claimed(receipt).items():
         try:
             object = context_reads.object_read(api, workspace, address)
@@ -171,8 +178,19 @@ def release(api, target, workspace, ac, reason):
         operations.append({"command": save_command(object, None, reason[:1024] or "Release the planning claim.",
                                                    command.get("question_checked"))})
         released.append(address)
+        if code and object["current_revision"] == expected.get(address):
+            operations.append({"command": not_ready(address, code)})
+        elif code:
+            unassessed.append({"ac": address, "reason": f"revision {object['current_revision']} is not "
+                                                        f"the claimed revision {expected.get(address)}"})
+    require_fenced(operations)
+    if len(operations) > MAX_BATCH:
+        unassessed += [{"ac": item["command"]["target"], "reason": "batch limit"} for item in operations
+                       if item["command"]["op"] == "assess"]
+        operations = [item for item in operations if item["command"]["op"] != "assess"]
+    extra = {"failure_code": code, "unassessed_claims": unassessed} if code else {}
     if not operations:
-        write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped})
+        write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
         return not any(item.get("unknown") for item in skipped)
     try:
         mutate(api, prior, "joppa_batch", {"workspace": workspace, "operations": operations})
@@ -180,7 +198,7 @@ def release(api, target, workspace, ac, reason):
         if prior.exists():
             release = read(prior)
             write(prior, {**release, "released": released if release["status"] == "confirmed" else [],
-                          "requested_releases": released, "skipped_claims": skipped})
+                          "requested_releases": released, "skipped_claims": skipped, **extra})
     return not any(item.get("unknown") for item in skipped)
 
 

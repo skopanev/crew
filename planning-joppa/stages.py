@@ -158,19 +158,27 @@ def finish():
     signal("READY", "Reviewed plan published. Criterion acceptance remains a separate result.")
 
 
-def fail(reason=None):
+def failure_code(reason):
+    """A short code for the Joppa assess reason: a leading UPPER_CODE: prefix, or PLANNING_FAILED."""
+    match = re.match(r"([A-Z][A-Z0-9_]{2,63}):", reason)
+    return match.group(1) if match else "PLANNING_FAILED"
+
+
+def fail(reason=None, code=None):
     target = shared.artifacts()
     target.mkdir(parents=True, exist_ok=True)
     reason = reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "workflow stopped without a valid result"
     errors = [read(path) for path in sorted(target.glob("error-*.json"))]
     if errors:
         reason += "; " + "; ".join(item["reason"] for item in errors)
+    code = code or failure_code(reason)
     released, release_error = False, None
     try:
         if (target / "input.json").exists():
             assignment = read(target / "input.json")
             config = settings()
-            released = publication.release(context.client(config), target, config["workspace"], assignment["ac"]["id"], reason)
+            released = publication.release(context.client(config), target, config["workspace"], assignment["ac"]["id"], reason,
+                                           code)
     except Exception as error:
         release_error = str(error)
     uncertain = any(path.exists() and read(path)["status"] in ("pending", "uncertain")
@@ -180,9 +188,10 @@ def fail(reason=None):
     claim_path = target / "claim.json"
     retained = claim_path.exists() and read(claim_path)["status"] == "confirmed" and not released
     needs_recovery = uncertain or incomplete or bool(release_error) or retained
-    write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason,
+    receipt = read(target / "release.json") if (target / "release.json").exists() else {}
+    write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason, "failure_code": code,
           "claim_released": released, "release_error": release_error,
-          "skipped_claims": read(target / "release.json").get("skipped_claims", []) if (target / "release.json").exists() else [],
+          "skipped_claims": receipt.get("skipped_claims", []), "unassessed_claims": receipt.get("unassessed_claims", []),
           "needs_recovery": needs_recovery,
           "acceptance_verified": False})
     signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if needs_recovery else ""))
@@ -192,7 +201,7 @@ def needs_human():
     assessment = shared.require_necessity(allow_owner_gaps=True)
     require(assessment["owner_gaps"], "no required owner decision")
     fail("Required owner decision: " + "; ".join(
-        f"{item['owner']}: {item['decision']}" for item in assessment["owner_gaps"]))
+        f"{item['owner']}: {item['decision']}" for item in assessment["owner_gaps"]), "NEEDS_HUMAN")
 
 
 def main():
