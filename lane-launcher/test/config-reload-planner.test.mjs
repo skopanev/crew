@@ -100,18 +100,35 @@ test('an edit between the initial load and the reloader start is a change, not a
   assert.equal(reload().reloaded, false);
 });
 
-test('a config edited between selection and spawn makes no claim and starts no Medulla', async t => {
-  // The pass replaces the selected file before the real run.sh and launch.py read it.
-  const pass = '#!/bin/sh\nprintf \'%s\' "$TEST_REPLACEMENT" > "$3"\nexec /bin/sh "$@"\n';
+test('a config edited between selection and spawn makes no claim, starts no Medulla and the item starts once later', async t => {
+  // The first pass replaces the selected file before the real run.sh and launch.py read it. Later passes only record.
+  const pass = '#!/bin/sh\nif [ ! -e "$TEST_REPLACED" ]; then touch "$TEST_REPLACED"\n' +
+    'printf \'%s\' "$TEST_REPLACEMENT" > "$3"\nexec /bin/sh "$@"\nfi\nprintf \'start %s\\n\' "$5" >> "$TEST_PASSES"\n';
   const f = await plannerFixture(t, {ac_ids: ['ac:a1']}, 0, pass);
   const medulla = path.join(f.root, 'medulla'), started = path.join(f.root, 'medulla-started');
   fs.writeFileSync(medulla, `#!/bin/sh\ntouch '${started}'\n`, {mode: 0o755});
-  Object.assign(f.env, {MEDULLA_BIN: medulla,
+  Object.assign(f.env, {MEDULLA_BIN: medulla, TEST_REPLACED: path.join(f.root, 'replaced'),
     TEST_REPLACEMENT: JSON.stringify({...f.config, ac_ids: ['ac:a1'], workspace: 'other'})});
   const run = f.start();
   await run.until(output => /planner config changed after the dispatcher selected this pass/.test(output));
   await run.until(output => /CONFIG_RESTART_REQUIRED/.test(output));
   assert.ok(!fs.existsSync(started), 'Medulla must not start for the replacement config');
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0, 'No claim was made');
+  assert.deepEqual(f.passes(), []);
+  const mark = run.mark();
+  f.write(f.config);
+  await run.until(() => f.passes().length === 1);
+  await run.until(output => count(output.slice(mark), /Requirements: 1 ready · no unattempted/g) >= 3);
+  assert.deepEqual(f.passes(), ['start req:r'], 'The same item starts exactly once after the restore');
+  assert.equal(await run.stop(), 130);
+});
+
+test('a genuine pass failure stays attempted', async t => {
+  const pass = '#!/bin/sh\nprintf \'start %s\\n\' "$5" >> "$TEST_PASSES"\nexit 2\n';
+  const f = await plannerFixture(t, {ac_ids: ['ac:a1']}, 0, pass);
+  const run = f.start();
+  await run.until(() => f.passes().length === 1);
+  await run.until(output => count(output, /Requirements: 1 ready · no unattempted/g) >= 3);
+  assert.deepEqual(f.passes(), ['start req:r']);
   assert.equal(await run.stop(), 130);
 });
