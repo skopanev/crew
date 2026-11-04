@@ -46,6 +46,12 @@ def shape(commands):
     return [(entry["op"], entry.get("target") or entry["kind"] + ":" + entry["id"]) for entry in commands]
 
 
+def paired(commands):
+    """Every save in a failure batch is followed by the assess of the same AC. No assess is omitted."""
+    pairs = shape(commands)
+    return pairs == [pair for _, address in pairs[::2] for pair in (("save_object", address), ("assess", address))]
+
+
 class FailedReleaseTests(unittest.TestCase):
     def run_fail(self, target, api, *args):
         stage = load_stages()
@@ -74,7 +80,7 @@ class FailedReleaseTests(unittest.TestCase):
             self.assertEqual((result["failure_code"], result["claim_released"], result["needs_recovery"]),
                              ("PLANNING_FAILED", True, False))
             self.assertIn("context reader stopped", result["reason"])
-            self.assertEqual(read(target / "release.json")["unassessed_claims"], [])
+            self.assertTrue(paired(batch))
 
     def test_failure_code_uses_a_leading_upper_code_or_the_generic_code(self):
         stage = load_stages()
@@ -89,9 +95,9 @@ class FailedReleaseTests(unittest.TestCase):
             api = Server({"criterion:a": (MARK, 4)})
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Reviewed Task contracts are unchanged."))
             self.assertEqual([shape(batch) for batch in api.batches()], [[("save_object", "criterion:a")]])
-            self.assertNotIn("unassessed_claims", read(target / "release.json"))
+            self.assertNotIn("failure_code", read(target / "release.json"))
 
-    def test_failure_never_assesses_a_reassigned_or_newer_criterion(self):
+    def test_failure_leaves_a_reassigned_or_newer_criterion_untouched(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             receipt = claim_receipt(["criterion:a", "criterion:b", "criterion:c"])
@@ -101,12 +107,39 @@ class FailedReleaseTests(unittest.TestCase):
                           "criterion:c": (MARK, 4)})
             result = self.run_fail(target, api, "WORKTREE_PREEXISTED: src exists")
             [batch] = api.batches()
-            self.assertEqual(shape(batch), [("save_object", "criterion:b"), ("save_object", "criterion:c"),
-                                            ("assess", "criterion:c")])
-            self.assertEqual(batch[2]["reason"], "WORKTREE_PREEXISTED")
-            self.assertEqual([item["ac"] for item in result["skipped_claims"]], ["criterion:a"])
-            self.assertEqual(result["unassessed_claims"],
-                             [{"ac": "criterion:b", "reason": "revision 6 is not the claimed revision 4"}])
+            self.assertEqual(shape(batch), [("save_object", "criterion:c"), ("assess", "criterion:c")])
+            self.assertEqual(batch[1]["reason"], "WORKTREE_PREEXISTED")
+            self.assertEqual(result["skipped_claims"], [
+                {"ac": "criterion:a", "reason": "planning claim is missing or replaced"},
+                {"ac": "criterion:b", "unknown": True,
+                 "reason": "criterion changed after this run claimed it: revision 6, expected 4"}])
+            self.assertEqual((result["claim_released"], result["needs_recovery"]), (False, True))
+
+    def test_newer_criterion_alone_sends_no_batch_and_needs_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "run" / "artifacts"
+            target.mkdir(parents=True)
+            (target / "claim.json").write_text(json.dumps(claim_receipt(["criterion:a"])))
+            api = Server({"criterion:a": (MARK, 5)})
+            result = self.run_fail(target, api, "context reader stopped")
+            self.assertEqual(api.batches(), [])
+            self.assertTrue(result["skipped_claims"][0]["unknown"])
+            self.assertEqual((result["claim_released"], result["needs_recovery"]), (False, True))
+            with self.assertRaisesRegex(ValueError, "claim or publication needs recovery"):
+                publication.ensure_recovered(directory, Path(directory) / "next" / "artifacts",
+                                             "https://example.invalid/mcp", "example", "criterion:a")
+
+    def test_older_claim_over_the_release_budget_sends_no_batch_and_keeps_the_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            addresses = [f"criterion:c{number}" for number in range(51)]
+            (target / "claim.json").write_text(json.dumps(claim_receipt(addresses)))
+            api = Server({address: (MARK, 4) for address in addresses})
+            result = self.run_fail(target, api, "context reader stopped")
+            self.assertEqual(api.calls, [])
+            self.assertFalse((target / "release.json").exists())
+            self.assertRegex(result["release_error"], "exceeds one batch of 100 operations; claim retained")
+            self.assertEqual((result["claim_released"], result["needs_recovery"]), (False, True))
 
     def test_uncertain_claim_or_publication_sends_no_release_and_needs_recovery(self):
         for name, body in (("claim.json", {**claim_receipt(["criterion:a"]), "status": "uncertain"}),
@@ -168,7 +201,8 @@ class FailedReleaseTests(unittest.TestCase):
             self.assertEqual(len(batch), 100)
             self.assertEqual(shape(batch), [pair for address in addresses
                                             for pair in (("save_object", address), ("assess", address))])
-            self.assertEqual((result["unassessed_claims"], result["claim_released"]), ([], True))
+            self.assertTrue(paired(batch))
+            self.assertEqual((result["claim_released"], result["needs_recovery"]), (True, False))
 
 
 if __name__ == "__main__":
