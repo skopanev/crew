@@ -5,6 +5,7 @@ import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {taskContract, taskBody} from './task-contract.mjs';
 import {taskInput} from './joppa-input.mjs';
+import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
@@ -134,6 +135,7 @@ export async function nextTask(config) {
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
+    let coversOf;
     for (const task of inventory) {
       if (task.present !== true || !taskMatchesProject(config, task) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
           priorities && !priorities.includes(task['data.priority'])) continue;
@@ -147,7 +149,9 @@ export async function nextTask(config) {
           const current = await object(task.address);
           if (!text(task.address) || !Number.isSafeInteger(task.revision) ||
               current.current_revision !== task.revision) continue;
-          try { taskInput(config, current); }
+          // A shared Task may name its configured covered criteria in data.acceptance.
+          coversOf ||= coveredBy(config, (await read('joppa_tree', {})).schema.types);
+          try { taskInput(config, current, undefined, coversOf(current)); }
           catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }
           const context = await group(task.address);
           if (!context || occupied.has(`${context.requirement}\n${context.repository}`)) continue;

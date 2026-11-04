@@ -1,7 +1,7 @@
 // A covering Task claims only when each covered criterion is live, unheld and ready.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {claimTask, guardTaskClaims} from '../joppa.mjs';
+import {claimTask, guardTaskClaims, nextTask} from '../joppa.mjs';
 import {coversSpec, taskCovers} from '../joppa-covers.mjs';
 import {validateJoppa} from '../joppa-config.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
@@ -71,4 +71,31 @@ test('covers reference must target several criteria and is ignored when not conf
   assert.throws(() => taskCovers({field: 'covers', target: 'ac'}, {document: {data: {covers: 'ac:a2'}}}), /list of criterion/);
   assert.throws(() => validateJoppa({joppa: {url: 'http://localhost', project: 'project:p', coversReference: ' ',
     mcpCommand: ['node'], workers: [{actor: 'a'}]}, limit: 1}), /coversReference/);
+});
+
+test('selection keeps a shared Task with parent and covered acceptance rows, and the claim still guards the covered AC', async t => {
+  // crew/pm reproduction on 2ab46f3: selection skipped this Task as BINDING_INVALID and wrote nothing.
+  const f = await covering(t);
+  f.queue.splice(0, f.queue.length, 'task:t1');
+  Object.assign(f.objects.get('task:t1').document.data, {covers: ['ac:a2'], checks: ['own check', 'covered check'],
+    acceptance: [{ac: 'ac:a1', check: 'own check'}, {ac: 'ac:a2', check: 'covered check'}]});
+  const selected = (await nextTask(f.run.config)).candidate;
+  assert.deepEqual(selected.tasks.map(task => task.address), ['task:t1']);
+  assert.equal(batches(f).length, 0);
+  Object.assign(f.run, {task: selected.id, taskRevision: selected.revision, tasks: selected.tasks});
+  f.objects.get('ac:a2').document.data.assignee = 'crew-planning:host:run';
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /COVERED_CONTEXT_NOT_READY: ac:a2 is held/);
+  delete f.objects.get('ac:a2').document.data.assignee;
+  await claimTask(f.run, f.persist, f.runId);
+  assert.deepEqual(f.run.claim.ticket.testAcceptance,
+    [{ac: 'ac:a1', check: 'own check'}, {ac: 'ac:a2', check: 'covered check'}]);
+  assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
+});
+
+test('selection skips a Task whose acceptance names a criterion outside its parent and covers', async t => {
+  const f = await covering(t);
+  Object.assign(f.objects.get('task:t1').document.data, {checks: ['Run one => ok'],
+    acceptance: [{ac: 'ac:foreign', check: 'Run one => ok'}]});
+  const selected = (await nextTask(f.run.config)).candidate;
+  assert.notEqual(selected?.tasks?.[0]?.address, 'task:t1');
 });
