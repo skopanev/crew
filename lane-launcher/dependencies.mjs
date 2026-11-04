@@ -74,8 +74,8 @@ export function dependencyCheck(read) {
     if (satisfied.has(value.address)) return satisfied.get(value.address);
     let result;
     if (await role(value) === 'task') {
-      result = Boolean(value.process?.done) && !value.process?.retired &&
-        value.review_required === false && value.process?.review_required !== true;
+      // Completed Tasks are archived. A live Task is not completed.
+      result = false;
     } else {
       // Joppa applies the configured own/children/links status rule.
       result = value.status?.tone === 'green';
@@ -85,6 +85,7 @@ export function dependencyCheck(read) {
   }
   async function blockedBy(address, trail = new Set()) {
     const start = await object(address);
+    if (start.work_ready === false || start.process?.assessment?.state === 'waiting') return start.address;
     if (trail.has(start.address)) return start.address;
     if (checked.has(start.address)) return checked.get(start.address);
     const next = new Set(trail).add(start.address), parents = new Set();
@@ -97,12 +98,8 @@ export function dependencyCheck(read) {
         if (link.workspace !== undefined) throw invalid('Dependency workspace link must use remote_links');
         const target = await object(link.target);
         if (!present(target)) continue;
-        const task = await role(target) === 'task';
-        const contractRevision = task ? target.process?.origin_revision :
-          target.contract_revision === undefined ? target.current_revision : target.contract_revision;
-        const pin = link.revision == null || currentPin(link.revision, target.current_revision, contractRevision);
-        if (!pin) return {code: 'DEPENDENCY_STALE_PIN', consumer: node.address, blocker: target.address,
-          pin: link.revision, contractRevision, currentRevision: target.current_revision};
+        const pin = link.revision == null || currentPin(link.revision, target.current_revision, 1);
+        if (!pin) throw invalid(`Unknown linked revision on ${node.address}: ${target.address}`);
         if (!await isSatisfied(target)) return target.address;
         const blocker = await blockedBy(target.address, next);
         if (blocker) return blocker;

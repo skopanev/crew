@@ -1,6 +1,7 @@
 // Joppa planning queue reads: ready criteria and their Requirement groups.
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
+import {nodeAssignee, nodeWaiting, nodePages} from '../lane-launcher/joppa-nodes.mjs';
 
 export function criterionIds(config) {
   const ids = config.ac_ids;
@@ -13,60 +14,35 @@ export function criterionIds(config) {
 export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
-  const blocked = new Map(), active = new Set(), pending = new Map();
+  const blocked = new Map(), active = new Set();
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
-  const dependencies = dependencyCheck((tool, args) => api(service, {tokenFile}, tool,
-    {workspace: config.workspace, ...args}, {signal}));
-  let cursor;
-  do {
-    const page = await api(service, {tokenFile}, 'joppa_tasks', {
-      workspace: config.workspace, view: 'all', limit: 100, ...(cursor ? {cursor} : {}),
-    }, {signal});
-    for (const task of page.tasks) {
-      if (['done', 'retired'].includes(task.status) || ids && !ids.includes(task.ac)) continue;
-      if (typeof task.ac !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
+  const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
+  const dependencies = dependencyCheck(read);
+  const schema = (await read('joppa_tree', {})).schema.types;
+  const kinds = role => Object.keys(schema).filter(kind => schema[kind].role === role);
+  for await (const page of nodePages(read, {kind: kinds('task'),
+    fields: ['parent', 'revision', 'data.assignee', 'process.assessment']})) {
+    for (const task of page.items) {
+      if (ids && !ids.includes(task.parent)) continue;
+      if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
         throw new Error('Unfinished Task is missing its criterion, address or revision');
       }
-      if (task.assignee || task.claim || task.claimable === true) active.add(task.ac);
-      if (task.waiting_reason !== 'Task is blocked for planning' || task.assignee || task.claim) continue;
-      const tasks = blocked.get(task.ac) || [];
+      if (nodeAssignee(task) || !nodeWaiting(task)) active.add(task.parent);
+      if (!nodeWaiting(task) || nodeAssignee(task)) continue;
+      const tasks = blocked.get(task.parent) || [];
       tasks.push(`${task.address}:${task.revision}`);
-      blocked.set(task.ac, tasks);
-    }
-    cursor = page.next_cursor;
-  } while (cursor);
-  do {
-    const page = await api(service, {tokenFile}, 'joppa_objects', {
-      workspace: config.workspace, parent: '*', work_filter: 'unstarted', limit: 25,
-      fields: ['title', 'kind', 'revision', 'contract_revision', 'status', 'work_ready', 'review_required', 'process', 'work_summary'],
-      ...(cursor ? {cursor} : {}),
-    }, {signal});
-    for (const row of page.items) {
-      const work = row.work_summary;
-      if ((!ids || ids.includes(row.address)) && row.work_ready === true && !row.review_required &&
-          !row.process?.planning_claim && (work?.active === 0 || blocked.has(row.address)) && !active.has(row.address) &&
-          (work?.done === 0 || blocked.has(row.address))) pending.set(row.address, row);
-    }
-    cursor = page.next_cursor;
-  } while (cursor);
-  for (const ac of blocked.keys()) {
-    if (pending.has(ac) || active.has(ac)) continue;
-    const object = await api(service, {tokenFile}, 'joppa_objects', {
-      workspace: config.workspace, address: ac,
-    }, {signal});
-    if (object.document?.present === true && object.historical === false &&
-        object.work_ready === true && !object.review_required && !object.process?.planning_claim &&
-        object.process?.assessment?.state === 'ready' && !object.process?.readiness_blocker) {
-      pending.set(ac, {...object, revision: object.current_revision, title: object.document.data.title,
-        status: object.status?.tone});
+      blocked.set(task.parent, tasks);
     }
   }
-  for (const row of pending.values()) {
-    if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
-    const failures = (blocked.get(row.address) || []).sort();
-    if (row.status !== 'green' && row.status !== 'purple' && (await dependencies(row.address)).ready) {
+  for await (const page of nodePages(read, {kind: kinds('ac'),
+    fields: ['title', 'kind', 'revision', 'status', 'work_ready', 'data.assignee', 'process.assessment']})) {
+    for (const row of page.items) {
+      if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || active.has(row.address)) continue;
+      if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
+      const failures = (blocked.get(row.address) || []).sort();
+      if (row.status === 'green' || row.status === 'purple' || !(await dependencies(row.address)).ready) continue;
       rows.push({...row, failedTaskCount: failures.length,
-        attemptKey: JSON.stringify([row.address, row.contract_revision ?? row.revision, failures])});
+        attemptKey: JSON.stringify([row.address, row.revision, failures])});
     }
   }
   return rows.sort((a, b) => Number(b.failedTaskCount > 0) - Number(a.failedTaskCount > 0) ||

@@ -8,6 +8,7 @@ import {taskInput} from './joppa-input.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
+import {nodeAssignee, nodeWaiting, taskPages, taskMatchesProject} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -56,17 +57,14 @@ export async function occupancyReader(config, worker) {
 }
 
 export async function heldTasks(config, worker, visit, inventory) {
-  let cursor;
-  do {
-    const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace,
-      view: 'all', limit: 100, ...(cursor ? {cursor} : {})});
-    for (const task of page.tasks) {
+  const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
+  for await (const page of taskPages(read)) {
+    for (const task of page.items) {
       inventory?.push(task);
-      if (task.status === 'done' || task.status === 'retired' || task.status !== 'in_progress' && !task.assignee) continue;
+      if (!nodeAssignee(task)) continue;
       await visit(task);
     }
-    cursor = page.next_cursor;
-  } while (cursor);
+  }
 }
 
 export async function nextTask(config) {
@@ -89,8 +87,6 @@ export async function nextTask(config) {
   for (const worker of config.joppa.workers) {
     if (!config.joppa.mcpCommand) {
       if (busy.has(worker.actor)) continue;
-      const mine = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, view: 'mine', limit: 1});
-      if (mine.total) { held++; continue; }
     }
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
@@ -109,7 +105,7 @@ export async function nextTask(config) {
               require(current.address === task.address && current.historical === false &&
                 typeof current.document?.present === 'boolean' && Number.isSafeInteger(current.current_revision),
               'Retained Task state is absent or historical');
-              if (current.document.present && !['done', 'retired'].includes(current.process?.status)) {
+              if (current.document.present) {
                 terminal = false;
                 break;
               }
@@ -130,12 +126,14 @@ export async function nextTask(config) {
       const context = await group(task.address);
       if (context) occupied.add(`${context.requirement}\n${context.repository}`);
     }, inventory);
-    let cursor;
-    do {
-      const page = await api(config, worker, 'joppa_tasks', {workspace: config.workspace, project: config.joppa.project,
-        view: 'available', limit: 100, ...(cursor ? {cursor} : {}),
-        ...(config.joppa.priorities ? {priorities: config.joppa.priorities} : {})});
-      for (const task of page.tasks) {
+    held = Math.max(held, inventory.filter(task => nodeAssignee(task) && taskMatchesProject(config, task)).length);
+    const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
+    const priorities = config.joppa.priorities;
+    if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
+      'joppa.priorities must contain priority values');
+    for (const task of inventory) {
+      if (!taskMatchesProject(config, task) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
+          priorities && !priorities.includes(task['data.priority'])) continue;
         try {
           const dependency = await dependencies(task.address);
           if (!dependency.ready) {
@@ -162,9 +160,13 @@ export async function nextTask(config) {
           }
           throw error;
         }
-      }
-      cursor = page.next_cursor;
-    } while (cursor);
+    }
+    const priorityOrder = priorities || (await read('joppa_tree', {})).schema.priorities || [];
+    const rank = task => {
+      const index = priorityOrder.indexOf(task['data.priority']);
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    eligible.sort((a, b) => rank(a) - rank(b) || a.address.localeCompare(b.address));
     available = Math.max(available, eligible.length);
     if (config.delivery === 'requirement') {
       const candidate = await finalizationCandidate({config, worker,
@@ -175,7 +177,7 @@ export async function nextTask(config) {
     while (eligible.length) {
       const first = eligible[0];
       const task = eligible.filter(item => item.requirement === first.requirement && item.repository === first.repository)
-        .sort((a, b) => taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
+        .sort((a, b) => rank(a) - rank(b) || taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
       const tasks = [{address: task.address, revision: task.revision, title: task.title}];
       if (config.delivery === 'requirement') {
         let paused = true;
