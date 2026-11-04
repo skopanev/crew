@@ -35,7 +35,10 @@ cp -n lane-launcher/dolber-joppa.example.json lane-launcher/project.json
 Pass a JSON configuration file as the first argument; relative paths resolve from
 the current directory. `--config <file>` is equivalent. Without a file argument,
 `dolber-joppa.sh` reads **`dolber-joppa.json` beside the script**, regardless of the current
-directory. Settings are loaded once at startup; restart after editing them.
+directory. The loop reloads the file before each queue selection. Running lanes keep the config
+saved at their launch. An invalid file shows `CONFIG_INVALID` and starts nothing until it is valid.
+A change to `id`, `workspace`, `joppa.url`, `joppa.mcpCommand` or the resolved `stateDir` shows
+`CONFIG_RESTART_REQUIRED` and starts nothing; restart the dispatcher to use it.
 
 Set `id` in the selected JSON config. Use a stable ID per dispatcher, for example `project-backend` and `project-app`; retain it across restarts. Each ID has its own lane limit, lock and reservations. Each individual launch still has a fresh UUID. Moving the terminal does not change dispatcher identity.
 

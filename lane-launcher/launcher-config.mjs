@@ -6,12 +6,12 @@ import {read, validateWritableDirs} from './runtime.mjs';
 import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
 
-export function configFrom(file, env = process.env, {dryRun = false} = {}) {
+export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
     readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
-    ...read(file)};
+    ...(bytes ? JSON.parse(bytes.toString('utf8')) : read(file))};
   // Saved run state records the source; operator recovery checks it.
   config.source = 'joppa';
   config.delivery ??= 'branch';
@@ -68,3 +68,8 @@ export function configFrom(file, env = process.env, {dryRun = false} = {}) {
   }
   return config;
 }
+
+// The dispatcher lock, reservations and queue belong to these fields. A reload never changes them.
+export const dolberIdentity = config => ({workspace: config.workspace, url: config.joppa.url,
+  mcpCommand: config.joppa.mcpCommand ?? null, id: config.id,
+  stateDir: fs.existsSync(config.stateDir) ? fs.realpathSync(config.stateDir) : config.stateDir});
