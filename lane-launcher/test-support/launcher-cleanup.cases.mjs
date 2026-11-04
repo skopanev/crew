@@ -35,6 +35,7 @@ for (const state of ['confirmed', 'overlapping', 'unconfirmed', 'newer']) {
     const earlier = {...blocked.run, task: tasks[0].address, tasks, claim: {tasks},
       createdAt: '2026-10-14T10:00:00.000Z', result: {code: 0, completed: state !== 'unconfirmed',
         finishedAt: state === 'newer' ? '2026-10-14T13:00:00.000Z' : '2026-10-14T11:00:00.000Z'}};
+    delete earlier.blockRequest;
     save(path.join(folder, 'launch.json'), earlier);
     if (state === 'confirmed') {
       const prepared = cleanupBlockedTasks(blocked.input, {dryRun: true});
@@ -56,6 +57,19 @@ test('Joppa package cleanup refuses an incomplete AC scope before deleting any c
   assert.throws(() => cleanupBlockedTasks(blocked.input), /every blocked Task.*whole Requirement/);
   assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
 });
+
+for (const state of ['assigned', 'stale revision', 'wrong note', 'withdrawn note']) {
+  test(`Native cleanup preserves a checkout with ${state}`, async t => {
+    const f = await packageFixture(t), blocked = blockedPackage(f), task = blocked.input.tasks[0];
+    const note = Object.values(task.annotations.comments)[0];
+    if (state === 'assigned') task.document.data.assignee = 'another-run';
+    if (state === 'stale revision') task.current_revision++;
+    if (state === 'wrong note') note.text += '\nEdited';
+    if (state === 'withdrawn note') note.withdrawn = true;
+    assert.throws(() => cleanupBlockedTasks(blocked.input));
+    assert.equal(fs.existsSync(path.join(blocked.folder, 'retained.txt')), true);
+  });
+}
 
 test('Joppa package cleanup requires an operation for every retained Task', async t => {
   const f = await packageFixture(t), blocked = blockedPackage(f);
@@ -87,7 +101,7 @@ for (const state of ['live', 'held', 'uncertain']) test(`Joppa package cleanup r
   if (state === 'held') active.result = {code: 2, held: true, finishedAt: new Date().toISOString()};
   if (state === 'uncertain') {
     delete active.claim;
-    active.claimRequest = {operations: [{command: {op: 'claim_task', id: 'task:t2'}}]};
+    active.claimRequest = {operations: [{command: {op: 'save_object', id: 't2', kind: 'task', revision: 3}}]};
     active.result = {code: 2, finishedAt: new Date().toISOString()};
   }
   save(path.join(folder, 'launch.json'), active);

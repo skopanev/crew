@@ -4,6 +4,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {executionId, runHoldsTasks} from '../lane-launcher/joppa.mjs';
 import {readRun} from '../lane-launcher/runtime.mjs';
+import {nodeAssignee, nodeWaiting} from '../lane-launcher/joppa-nodes.mjs';
+import {isDeepStrictEqual} from 'node:util';
 
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,7 +15,7 @@ const stat = file => {
 };
 
 export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false} = {}) {
-  const blocked = tasks.filter(task => task.process?.blocked && !task.process.done && !task.process.retired);
+  const blocked = tasks.filter(task => task.document?.present === true && nodeWaiting(task));
   if (!blocked.length) return [];
   require(config.worktree_root && config.lane_runs_folder, 'Blocked retries need config.worktree_root and config.lane_runs_folder');
   const root = path.resolve(config.worktree_root), runs = path.resolve(config.lane_runs_folder);
@@ -43,22 +45,46 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
   };
   const operationFor = task => {
     const id = task.address.slice(task.address.indexOf(':') + 1);
-    return operations.find(({command: cmd}) => (cmd.id === id || cmd.id === task.address) &&
-      (cmd.op === 'unblock_task' || cmd.op === 'retire_task' || cmd.op === 'save_object' && cmd.kind === task.kind));
+    return operations.find(({command: cmd}) => cmd.op === 'archive_object' && cmd.target === task.address ||
+      cmd.op === 'save_object' && cmd.id === id && cmd.kind === task.kind);
   };
   const validateTask = task => {
-    require(!task.process.assignee && !task.process.claim && task.process.status !== 'in_progress', 'Blocked Task has a holder');
+    require(!nodeAssignee(task), 'Blocked Task has a holder');
     const operation = operationFor(task);
     require(operation, 'Every blocked Task needs an unblock, contract update or retirement before cleanup');
-    require(operation.command.op !== 'unblock_task' || task.process.blocked.reason === 'WORKTREE_PREEXISTED',
-      'Only worktree startup failures can use unblock cleanup');
-    return operation;
+    const cmd = operation.command;
+    require(cmd.revision === task.current_revision, 'Cleanup operation uses a different Task revision');
+    const retry = cmd.op === 'save_object' && isDeepStrictEqual(cmd.data, task.document.data) &&
+      isDeepStrictEqual(cmd.links, task.document.links) && cmd.parent === task.document.parent;
+    if (cmd.op === 'save_object') {
+      require(!cmd.data.assignee, 'Cleanup cannot assign a Task');
+      require(operations.slice(operations.indexOf(operation) + 1).some(({command}) =>
+        command.op === 'assess' && command.target === task.address && command.ready === true),
+      'Task contract save must precede its ready assessment');
+    }
+    require(!retry || task.process.assessment.reason === 'WORKTREE_PREEXISTED',
+      'Only worktree startup failures can use unchanged contract cleanup');
+    return {operation, retry};
+  };
+  const failureReceipt = task => {
+    const comments = Object.entries(task.annotations?.comments || {});
+    for (const [id, note] of comments.reverse()) {
+      if (note.withdrawn || !note.text?.startsWith('CREW_FAILURE\n')) continue;
+      const field = name => new RegExp(`^${name}: ([^\\r\\n]+)$`, 'm').exec(note.text)?.[1];
+      if (field('Task') !== task.address || field('Reason') !== task.process.assessment.reason) continue;
+      const runId = field('Run'), receipt = receipts.get(runId);
+      if (!uuid.test(runId || '') || !receipt) continue;
+      const requested = receipt.blockRequest?.operations?.find(({command}) =>
+        command.op === 'note' && command.target === task.address && command.id === id)?.command;
+      require(note.actor === receipt.joppaWorker?.actor && requested?.text === note.text &&
+        receipt.result?.blockConfirmed === true, 'Failure note does not match a confirmed lane block');
+      return {runId, receipt};
+    }
+    return {};
   };
   for (const task of blocked) {
-    const operation = validateTask(task);
-    const retry = operation.command.op === 'unblock_task';
-    const runId = /^Run:\s*([^\s]+)\s*$/m.exec(task.process.blocked.evidence || '')?.[1];
-    const receipt = receipts.get(runId);
+    const {retry} = validateTask(task);
+    const {runId, receipt} = failureReceipt(task);
     const related = [...receipts.values()].filter(run => members(run).includes(task.address));
     if (!receipt && !related.length && !stat(path.join(root, executionId(task.address))) && !retry) continue;
     require(runId && uuid.test(runId) && receipt, 'Blocked worktree has no terminal lane Run ID or receipt');
