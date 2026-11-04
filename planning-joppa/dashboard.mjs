@@ -39,11 +39,14 @@ export async function main(argv) {
   if (dryRun && !ac && !requirement) throw new Error('--dry-run needs --req-id or --ac-id');
   const configFile = path.resolve(file);
   const automatic = !ac && !requirement && !monitor;
-  let {config, root, interval, tokenFile} = plannerConfig(configFile, {ac, automatic});
+  const bytes = fs.readFileSync(configFile);
+  let {config, root, interval, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
+  // launch.py compares the bytes it parses with this digest before it claims or starts Medulla.
+  const handoff = () => ({...process.env, PLANNING_JOPPA_HANDOFF_DIGEST: digest});
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
     ...(requirement ? ['--req-id', requirement] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {
-    const child = spawn('sh', args, {stdio: 'inherit'});
+    const child = spawn('sh', args, {stdio: 'inherit', env: handoff()});
     process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
     return;
   }
@@ -101,8 +104,8 @@ export async function main(argv) {
   try {
     if (automatic) {
       lock = dispatcherLock(root);
-      const load = () => plannerConfig(configFile, {automatic});
-      reload = configReloader(configFile, load, plannerIdentity, {config, root, interval, tokenFile});
+      const parse = raw => plannerConfig(configFile, {automatic}, raw);
+      reload = configReloader(configFile, parse, plannerIdentity, {config, root, interval, tokenFile, digest}, bytes);
     }
     if (process.stdout.isTTY) screen = createScreen(state, paint, render);
     draw();
@@ -114,7 +117,7 @@ export async function main(argv) {
         state.error = null;
         // Reload only here: no planner pass is active between passes.
         const loaded = reload();
-        ({config, interval, tokenFile} = loaded.config);
+        ({config, interval, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
         try {
           if (loaded.error) state.error = loaded.error;
@@ -138,7 +141,7 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || selected) {
         const runArgs = ac || requirement ? args : [...args, '--req-id', selected];
-        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true});
+        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: handoff()});
         let pending = '', buffered = '';
         const output = data => {
           const text = data.toString();

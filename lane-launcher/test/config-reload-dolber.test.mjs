@@ -30,7 +30,8 @@ test('Dolber uses a changed config at the next selection and stays quiet while i
 test('invalid Dolber config shows CONFIG_INVALID, reads no queue and recovers when fixed', async t => {
   const {f, run} = await dolber(t, {launchLanes: false});
   await run.until(output => /preview: запуск отключён/.test(output));
-  fs.writeFileSync(f.configFile, '{"id": "test-project", "tokenFile": "secret-value-in-broken-file"');
+  fs.writeFileSync(`${f.configFile}.next`, '{"id": "test-project", "tokenFile": "secret-value-in-broken-file"');
+  fs.renameSync(`${f.configFile}.next`, f.configFile);
   await run.until(output => /CONFIG_INVALID: the file is not valid JSON/.test(output));
   const reads = queueReads(f);
   await pause(2200);

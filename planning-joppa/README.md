@@ -42,6 +42,8 @@ Ctrl+C stops this display and interrupts its own run. It does not stop other run
 The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in the config to change this interval.
 The automatic loop reloads the config before each queue selection, never during a planning pass.
 Each pass reads the config file when it starts. Attempt history stays after a reload.
+The dispatcher gives each pass the digest of the config bytes it validated (`PLANNING_JOPPA_HANDOFF_DIGEST`).
+`launch.py` refuses a file with other bytes before any claim or Medulla start. The next check reloads it.
 An invalid config shows `CONFIG_INVALID` and starts nothing until the file is valid again.
 A change to `workspace`, `url`, `mcp_command` or the resolved `runs_folder` shows `CONFIG_RESTART_REQUIRED`.
 Nothing starts until you restore these fields or restart the dispatcher.
