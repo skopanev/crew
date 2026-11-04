@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT / "planning-joppa"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import read
 import publication
-from provider_fixture import Fake, MARK, claim_receipt, raw_ac
+from provider_fixture import Fake, MARK, assignment, claim_receipt, item, raw_ac
+import context
 
 
 def load_stages():
@@ -119,6 +120,55 @@ class FailedReleaseTests(unittest.TestCase):
                 self.assertEqual(api.batches(), [])
                 self.assertFalse((target / "release.json").exists())
                 self.assertEqual((result["claim_released"], result["needs_recovery"]), (False, True))
+
+    def test_claim_admission_refuses_more_criteria_than_one_failed_release_batch_fits(self):
+        import planning_claims
+        self.assertEqual(planning_claims.MAX_CLAIMED_CRITERIA * planning_claims.RELEASE_OPERATIONS,
+                         planning_claims.MAX_BATCH)
+        stage = load_stages()
+        for count in (planning_claims.MAX_CLAIMED_CRITERIA + 1, planning_claims.MAX_CLAIMED_CRITERIA):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory)
+                data = assignment()
+                criteria = [{"id": f"criterion:c{number}", "revision": 3} for number in range(count)]
+                data["joppa"]["objects"].update({entry["id"]: context.source(item(entry["id"], "rule:r"))
+                                                 for entry in criteria})
+                class Help(Fake):
+                    def call(self, name, args):
+                        self.calls.append((name, deepcopy(args)))
+                        if name == "joppa_help":
+                            return {"operations": ["save_object", "archive_object", "assess"]}
+                        raise RuntimeError("stop after the claim batch")
+                api = Help()
+                with patch.dict("os.environ", {"PLANNING_JOPPA_REQ": "rule:r"}), \
+                     patch.object(stage, "settings", return_value={"workspace": "example", "runs_folder": directory,
+                                                                    "url": "https://example.invalid/mcp"}), \
+                     patch.object(stage, "reader_servers"), patch.object(stage.shared, "artifacts", return_value=target), \
+                     patch.object(stage.context, "client", return_value=api), \
+                     patch.object(stage.context, "load_requirement", return_value=(data, {}, None)), \
+                     patch.object(stage.context, "selected_criteria", return_value=criteria), \
+                     patch.object(stage.claims, "planning_idle"), patch.object(stage.publication, "ensure_recovered"):
+                    error = "claim at most 50; no claim was sent" if count > 50 else "stop after the claim batch"
+                    with self.assertRaisesRegex(Exception, error):
+                        stage.prepare()
+                batches = [args for name, args in api.calls if name == "joppa_batch"]
+                if count > 50:
+                    self.assertEqual((batches, (target / "claim.json").exists()), ([], False))
+                else:
+                    self.assertEqual(len(batches[0]["operations"]), 50)
+
+    def test_failure_release_of_fifty_criteria_is_one_batch_of_one_hundred_operations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            addresses = [f"criterion:c{number}" for number in range(50)]
+            (target / "claim.json").write_text(json.dumps(claim_receipt(addresses)))
+            api = Server({address: (MARK, 4) for address in addresses})
+            result = self.run_fail(target, api, "context reader stopped")
+            [batch] = api.batches()
+            self.assertEqual(len(batch), 100)
+            self.assertEqual(shape(batch), [pair for address in addresses
+                                            for pair in (("save_object", address), ("assess", address))])
+            self.assertEqual((result["unassessed_claims"], result["claim_released"]), ([], True))
 
 
 if __name__ == "__main__":
