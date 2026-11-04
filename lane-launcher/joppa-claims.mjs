@@ -27,7 +27,12 @@ const read = (run, address) => api(run.config, run.joppaWorker, 'joppa_objects',
 export async function taskQuestions(run) {
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   require(types && typeof types === 'object', 'Joppa tree schema is missing');
-  return object => types[kindOf(object)]?.question;
+  // Generic saves must answer the type question with its exact text.
+  return object => {
+    const question = types[kindOf(object)]?.question;
+    require(typeof question === 'string' && question.trim(), `Joppa type ${kindOf(object)} needs a schema question`);
+    return question;
+  };
 }
 
 // Release saves remove only data.assignee at the read revision. Joppa must then show every Task unassigned.
