@@ -1,7 +1,7 @@
 // Joppa planning queue reads: ready criteria and their Requirement groups.
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
-import {nodeAssignee, nodeWaiting, nodePages} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 
 export function criterionIds(config) {
   const ids = config.ac_ids;
@@ -14,18 +14,22 @@ export function criterionIds(config) {
 export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
-  const blocked = new Map(), active = new Set();
+  const blocked = new Map(), active = new Set(), completed = new Set();
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
   const dependencies = dependencyCheck(read);
   const schema = (await read('joppa_tree', {})).schema.types;
   const kinds = role => Object.keys(schema).filter(kind => schema[kind].role === role);
-  for await (const page of nodePages(read, {kind: kinds('task'),
-    fields: ['parent', 'revision', 'data.assignee', 'process.assessment']})) {
+  for await (const page of nodePages(read, {kind: kinds('task'), status: NODE_TONES,
+    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'process.assessment']})) {
     for (const task of page.items) {
       if (ids && !ids.includes(task.parent)) continue;
       if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
-        throw new Error('Unfinished Task is missing its criterion, address or revision');
+        throw new Error('Task is missing its criterion, address or revision');
+      }
+      if (task.present === false) {
+        if (task['data.commit']) completed.add(task.parent);
+        continue;
       }
       if (nodeAssignee(task) || !nodeWaiting(task)) active.add(task.parent);
       if (!nodeWaiting(task) || nodeAssignee(task)) continue;
@@ -41,6 +45,7 @@ export async function readyCriteria(config, tokenFile, signal) {
           active.has(row.address)) continue;
       if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
       const failures = (blocked.get(row.address) || []).sort();
+      if (completed.has(row.address) && !failures.length) continue;
       if (row.status === 'green' || row.status === 'purple' || !(await dependencies(row.address)).ready) continue;
       rows.push({...row, failedTaskCount: failures.length,
         attemptKey: JSON.stringify([row.address, row.revision, failures])});

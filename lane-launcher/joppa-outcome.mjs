@@ -9,7 +9,6 @@ import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
 import {saveNode} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
-const text = value => typeof value === 'string' && value.trim();
 
 export async function finishTask(run, stateFile, result, artifacts) {
   if (run.releaseConfirmed === true) return;
@@ -88,7 +87,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     require(operations.length === claims.length * 2 && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
-        !save.data.assignee && text(save.question_checked) && typeof ref === 'string' && archive.op === 'archive_object' &&
+        !save.data.assignee && save.question_checked === question(current[index]) && typeof ref === 'string' && archive.op === 'archive_object' &&
         archive.target === claim.address && isDeepStrictEqual(archive.revision, {$ref: `${ref}/saved_revision`});
     }), 'Saved completion request does not name the checked SHA; inspect it before retrying');
     persist();
@@ -101,8 +100,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       const revision = saved.object?.revision;
       require(saved.command?.op === 'save_object' && saved.object?.address === claim.address && Number.isSafeInteger(revision) &&
         revision >= operations[index * 2].command.revision && archived.command?.op === 'archive_object' && !archived.object &&
-        archived.command.target === claim.address && (archived.command.revision === revision ||
-          isDeepStrictEqual(archived.command.revision, operations[index * 2 + 1].command.revision)),
+        archived.command.target === claim.address && archived.command.revision === revision,
       'Joppa batch response does not map to the requested Task; inspect the saved request');
       return revision;
     });
@@ -110,11 +108,14 @@ export async function finishTask(run, stateFile, result, artifacts) {
     result.tasks = [];
     for (const [index, claim] of claims.entries()) {
       const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-      require(confirmed?.address === claim.address && confirmed.document?.present === false && confirmed.document.data?.commit === sha,
+      require(confirmed?.address === claim.address && confirmed.historical === false &&
+        Number.isSafeInteger(confirmed.current_revision) && confirmed.current_revision > savedRevisions[index] &&
+        confirmed.document?.present === false && confirmed.document.data?.commit === sha && !confirmed.document.data.assignee,
         'Joppa did not confirm every Task completion at the checked SHA');
-      result.tasks.push({address: claim.address, status: 'done', revision: savedRevisions[index]});
+      result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }
-    result.completed = true;  } else {
+    result.completed = true;
+  } else {
     await failTask(run, stateFile, result, artifacts,
       {claims, objects, currentTasks, verifySavedContexts, owned, unclaimed, persist});
   }

@@ -157,8 +157,10 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
     return spawnSync(process.execPath, [checker, '--tasks'], {env, encoding: 'utf8', timeout: 10_000});
   };
   assert.equal(check().status, 0);
+  link.status.current_revision = 3;
+  assert.equal(check().status, 0);
   for (const status of [{satisfied: false}, {access: false}, {present: false},
-    {current_revision: 3}, {review_required: true}]) {
+    {current_revision: 1}, {review_required: true}]) {
     const before = {...link.status};
     Object.assign(link.status, status);
     const result = check();

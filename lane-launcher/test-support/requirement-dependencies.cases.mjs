@@ -53,7 +53,7 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
   f.add('spec:other', null);
   f.add('measure:b', 'spec:other');
   const localArchived = f.add('work:archived', 'measure:a', 'in_progress');
-  localArchived.document.data.archived = true;
+  localArchived.document.present = false;
   f.objects.get('measure:b').status = {tone: 'green'};
   const read = f.read;
   const remoteLink = (overrides = {}, statusOverrides = {}) => ({
@@ -94,12 +94,9 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
   criterion.current_revision = 1;
   delete criterion.document.data.assignee;
 
-  f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3, contract_revision: 2})];
+  f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3})];
   assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), null);
-  for (const contract_revision of [0, 3, 4, null, true, '2']) {
-    f.objects.get('work:one').remote_links = [remoteLink({}, {current_revision: 3, contract_revision})];
-    assert.equal(remoteDependencyBlocker(f.objects.get('work:one')), '@ws-remote/requirement:api');
-  }
+  assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: true, blocker: null});
 
   f.objects.get('work:one').remote_links = [
     remoteLink({target: 'work:one', revision: 1}, {current_revision: 1, satisfied: true}),
@@ -114,7 +111,7 @@ test('top-level remote_links enforce access, presence, pinned revision, and sati
     remoteLink({}, {access: false, present: undefined, current_revision: undefined, review_required: undefined, satisfied: false}),
     remoteLink({}, {present: false, current_revision: undefined, review_required: undefined, satisfied: false}),
     remoteLink({revision: 1}, {current_revision: 2, review_required: true}),
-    remoteLink({revision: 1}, {current_revision: 2, review_required: false}),
+    remoteLink({revision: 3}, {current_revision: 2, review_required: false}),
     remoteLink({revision: undefined}),
     remoteLink({revision: 0}),
     remoteLink({}, {satisfied: false}),

@@ -136,7 +136,7 @@ def retry_startup(api, config, target, assignment, ac, advertised):
     # The block assessment holds the Tasks. The AC itself must be ready for work.
     require(ac.get("work_ready") is True, "Startup retry requires a ready AC")
     for item in [ac, *tasks]:
-        require(item["document"].get("present") is True and not item["document"]["data"].get("archived"),
+        require(item["document"].get("present") is True,
                 "Startup retry requires live objects")
     operations = []
     for task in tasks:

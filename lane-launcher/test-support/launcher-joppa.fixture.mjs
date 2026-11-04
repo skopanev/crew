@@ -48,7 +48,7 @@ async function packageFixture(t, mode = 'success') {
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: {types: {req: {role: 'requirement'}, ac: {role: 'ac'},
-      task: {role: 'task', question: 'Which change does this Task make?'}}}};
+      task: {role: 'task', ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}}}};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
     else if (name === 'joppa_objects') {
       assert.equal(Object.hasOwn(args, 'work_filter'), false);
@@ -88,7 +88,8 @@ async function packageFixture(t, mode = 'success') {
       // Revision checks refuse the whole batch. A changed save advances the revision; batch refs read the saved one.
       const planned = new Map(), refs = new Map();
       for (const [index, command] of commands.entries()) if (command.op === 'save_object') {
-        const revision = mode === 'unchanged-save' ? command.revision : command.revision + 1;
+        const revision = JSON.stringify(target(command).document.data) === JSON.stringify(command.data)
+          ? command.revision : command.revision + 1;
         planned.set(target(command), revision);
         if (args.operations[index].ref) refs.set(`${args.operations[index].ref}/saved_revision`, revision);
       }
@@ -107,10 +108,16 @@ async function packageFixture(t, mode = 'success') {
             object.current_revision = planned.get(object);
             return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision}};
           }
-          if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready'}} :
-            {assessment: {state: 'waiting', reason: command.reason}};
+          if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready', actor: 'lane-1'}} :
+            {assessment: {state: 'waiting', reason: command.reason, actor: mode === 'wrong-assessor' ? 'other' : 'lane-1'}};
           if (command.op === 'note') object.annotations.comments[command.id] = {actor: 'lane-1', text: command.text, withdrawn: false};
-          if (command.op === 'archive_object' && mode !== 'archive-present') object.document.present = false;
+          if (command.op === 'archive_object' && mode !== 'archive-present') {
+            object.document.present = false;
+            object.current_revision++;
+            if (mode === 'archive-historical') object.historical = true;
+            if (mode === 'archive-assigned') object.document.data.assignee = 'other-run';
+            if (mode === 'archive-missing-commit') delete object.document.data.commit;
+          }
           return {command: {...command, ...(command.op === 'archive_object' ? {revision: resolve(command.revision)} : {})}};
         })};
         if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && claim) {

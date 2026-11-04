@@ -27,11 +27,11 @@ const read = (run, address) => api(run.config, run.joppaWorker, 'joppa_objects',
 export async function taskQuestions(run) {
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   require(types && typeof types === 'object', 'Joppa tree schema is missing');
-  // Generic saves must answer the type question with its exact text.
+  // Answer the type question when the schema defines one.
   return object => {
-    const question = types[kindOf(object)]?.question;
-    require(typeof question === 'string' && question.trim(), `Joppa type ${kindOf(object)} needs a schema question`);
-    return question;
+    const type = types[kindOf(object)];
+    require(type && typeof type === 'object', `Joppa type ${kindOf(object)} is missing`);
+    return type.question;
   };
 }
 
@@ -62,11 +62,6 @@ export async function claimTask(run, persist, runId) {
   require(new Set(tasks.map(task => task.address)).size === tasks.length, 'Repository package contains duplicate Tasks');
   const assignee = laneAssignee(runId);
   if (!run.claimRequest) {
-    const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
-    for (const task of tasks) {
-      const dependency = await check(task.address);
-      require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
-    }
     const question = await taskQuestions(run), selected = [];
     for (const task of tasks) {
       const object = await read(run, task.address);
@@ -75,6 +70,11 @@ export async function claimTask(run, persist, runId) {
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
       require(!nodeWaiting(object), `TASK_WAITING: ${task.address} is waiting; no Tasks claimed`);
       selected.push(object);
+    }
+    const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
+    for (const task of tasks) {
+      const dependency = await check(task.address);
+      require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
     }
     run.claimRequest = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.', question(object))));

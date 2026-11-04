@@ -129,7 +129,7 @@ export async function nextTask(config) {
       const context = await group(task.address);
       if (context) occupied.add(`${context.requirement}\n${context.repository}`);
     }, inventory);
-    held = Math.max(held, inventory.filter(task => nodeAssignee(task) && taskMatchesProject(config, task)).length);
+    held = Math.max(held, inventory.filter(task => task.present === true && nodeAssignee(task) && taskMatchesProject(config, task)).length);
     const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),

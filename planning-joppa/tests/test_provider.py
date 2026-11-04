@@ -27,16 +27,17 @@ from provider_fixture import item, assignment, plan, Fake
 
 
 class ProviderTests(unittest.TestCase):
-    def test_contract_revision_keeps_only_current_pins(self):
+    def test_remote_status_checks_current_pins_without_a_contract_revision(self):
         value = item("criterion:a")
         value["contract_revision"] = 2
-        self.assertEqual(context.source(value)["contract_revision"], 2)
+        self.assertNotIn("contract_revision", context.source(value))
         for pin, current, contract, expected in ((2, 3, 2, True), (1, 3, 2, False),
                 (4, 3, 2, False), (2, 3, 0, False), (True, 3, 1, False)):
             self.assertEqual(context.current_pin(pin, current, contract), expected)
+        for pin, current, review, expected in ((2, 3, False, True), (1, 3, True, False),
+                (4, 3, False, False), (True, 3, False, False), (2, 3, None, False)):
             link = {"revision": pin, "status": {"access": True, "present": True,
-                "current_revision": current, "contract_revision": contract,
-                "review_required": False, "satisfied": True}}
+                "current_revision": current, "review_required": review, "satisfied": True}}
             self.assertEqual(context.remote_satisfied(link), expected)
 
     def test_snapshots_keep_selected_lists_and_ignore_runtime_task_revisions(self):

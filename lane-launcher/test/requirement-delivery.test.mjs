@@ -52,7 +52,7 @@ test('requirement delivery groups mixed inline and structured Task contracts wit
 
 test('compact traversal checks an archived container through its full detail', async () => {
   const f = fixture();
-  f.add('group:hidden', 'spec:r').document.data.archived = true;
+  f.add('group:hidden', 'spec:r').document.present = false;
   f.add('measure:hidden', 'group:hidden').document.data.assignee = 'another-planner';
   const read = async (tool, args) => {
     const value = await f.read(tool, args);

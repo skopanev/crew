@@ -164,7 +164,8 @@ class GenericLifecycleTests(unittest.TestCase):
         self.assertEqual(state(process={"assessment": {"state": "waiting", "reason": "WORKTREE_PREEXISTED"}}), "blocked")
         self.assertEqual(state(process={"assessment": {"state": "ready", "reason": "Owner"}}), "open")
         self.assertEqual(state(data={"commit": "a" * 40}, present=False), "done")
-        self.assertEqual(state(archived=True), "retired")
+        self.assertEqual(state(present=False), "retired")
+        self.assertEqual(state(data={"archived": True}), "open")
 
     def test_task_list_paginates_and_reports_unfinished_states(self):
         data = assignment()
