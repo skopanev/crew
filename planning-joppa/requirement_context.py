@@ -4,6 +4,7 @@ from common import require
 from context_reads import object_read, read_remote_links, remote_snapshot
 from context_snapshot import source, current_pin, remote_satisfied, snapshot_source
 from test_nodes import identities, read_nodes, tone
+from joppa_reads import task_state
 
 
 def load_requirement(api, config, req_id, selected=None):
@@ -26,8 +27,12 @@ def load_requirement(api, config, req_id, selected=None):
     objects = assignment["joppa"]["objects"]
     remote = assignment["joppa"].get("remote", {})
     def get(address):
+        # A done or retired Task is archived. Its document still decides readiness.
         if address not in objects:
-            objects[address] = source(object_read(api, workspace, address))
+            object = object_read(api, workspace, address, allow_archived=True)
+            require(object["document"]["present"] or types[object["kind"]].get("role") == "task",
+                    f"object is absent: {address}")
+            objects[address] = source(object)
         return objects[address]
     # One paginated read below the Requirement gives every criterion's test nodes.
     tests = read_nodes(api, workspace, assignment["joppa"]["test_type"], req_id, addresses)
@@ -41,7 +46,7 @@ def load_requirement(api, config, req_id, selected=None):
              and item["document"].get("parent") in addresses]
     candidates = []
     for address in addresses:
-        # Admission needs live ownership. Authored snapshots exclude planning claims.
+        # Admission needs live ownership. Authored snapshots exclude data.assignee.
         ac = object_read(api, workspace, address)
         objects[address] = source(ac)
         statuses[address] = tone(ac.get("status"))
@@ -50,17 +55,15 @@ def load_requirement(api, config, req_id, selected=None):
         work = [item for item in tasks if item["document"]["parent"] == address
                 and not item["process"].get("done") and not item["process"].get("retired")]
         if ((not config.get("ac_ids") or address in config["ac_ids"])
-                and ac.get("work_ready") is True and ac.get("review_required") is False
-                and ac["process"].get("assessment", {}).get("state") == "ready"
-                and not ac["process"].get("readiness_blocker")
-                and (selected is not None or not ac["process"].get("planning_claim")) and statuses[address] != "green"
-                and all(not item["process"].get("assignee") and not item["process"].get("claim")
-                        and isinstance(item["process"].get("blocked"), dict) for item in work)):
+                and ac.get("work_ready") is True
+                and (ac["process"].get("assessment") or {}).get("state") == "ready"
+                and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
+                and all(task_state(item) == "blocked" and not item["process"].get("assignee") for item in work)):
             candidates.append(address)
     def satisfied(object):
         process = object["process"]
         if types[object["kind"]].get("role") == "task":
-            return bool(process.get("done")) and not process.get("retired") and not object.get("review_required")
+            return bool(process.get("done"))
         # Every other target is satisfied only by its own current green status.
         return status(object["address"]) == "green"
     def ready(address, trail=None):
@@ -79,10 +82,8 @@ def load_requirement(api, config, req_id, selected=None):
                     continue
                 dependency = get(link["target"])
                 revision = link.get("revision")
-                origin = (dependency["process"].get("origin_revision")
-                          if types[dependency["kind"]].get("role") == "task"
-                          else dependency.get("contract_revision", dependency["current_revision"]))
-                pin = revision is None or current_pin(revision, dependency["current_revision"], origin)
+                # Joppa has no contract pins. Lifecycle saves raise the revision above an earlier pin.
+                pin = revision is None or current_pin(revision, dependency["current_revision"])
                 if not pin or not satisfied(dependency) or not ready(dependency["address"], trail):
                     return False
             parent = object["document"].get("parent")

@@ -74,9 +74,13 @@ def load_once(api, config, ac_id):
         require(len(ac_types) == 1, "use a full criterion address when the schema has multiple criterion types")
         ac_id = ac_types[0] + ":" + ac_id
     objects, remote = {}, {}
-    def get(address):
+    def get(address, archived=False):
+        # A done or retired Task is archived. Its document still decides readiness.
         if address not in objects:
-            objects[address] = object_read(api, workspace, address)
+            object = object_read(api, workspace, address, allow_archived=archived)
+            require(object["document"]["present"] or types[object["kind"]].get("role") == "task",
+                    f"object is absent: {address}")
+            objects[address] = object
         return objects[address]
     ac = get(ac_id)
     require(types[ac["kind"]]["role"] == "ac", "input must be a criterion")
@@ -110,7 +114,7 @@ def load_once(api, config, ac_id):
     # Read explicit references. Do not traverse unrelated tickets or infer ownership.
     for item in [ac, *parents, *tasks]:
         for link in item["document"].get("links", []):
-            get(link["target"])
+            get(link["target"], True)
         read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
@@ -144,7 +148,7 @@ def load_once(api, config, ac_id):
                     break
     for item in siblings:
         for link in item["document"].get("links", []):
-            get(link["target"])
+            get(link["target"], True)
         read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
@@ -167,6 +171,8 @@ def load_once(api, config, ac_id):
                             "test_rules": tree["schema"].get("test_results") or {},
                             "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
+                            "questions": {kind: value["question"] for kind, value in types.items()
+                                          if value.get("role") == "ac" and value.get("question")},
                             "task_schema": types[task_kind]},
                   "knowledge_query": ac["document"]["data"].get("body", ac["document"]["data"].get("description")) or ac["document"]["data"]["title"]}
     snapshot = {"schema": tree["schema"], "objects": {key: snapshot_source(item, types, ac_id) for key, item in objects.items()},
@@ -191,22 +197,6 @@ def criterion_assignment(assignment, address):
     if detail:
         result["joppa"].update(detail)
     return result
-
-
-def planning_idle(api, config, assignment, expected=None):
-    """Do not split one Requirement between concurrent planning runs."""
-    expected = expected or {}
-    revision = json.loads(assignment["decisions"][0])
-    addresses = {item["address"] for item in current_criteria(api, config["workspace"], revision)} | {assignment["ac"]["id"]}
-    require(set(expected).issubset(addresses), "planning receipt contains another Requirement criterion")
-    for address in addresses:
-        object = object_read(api, config["workspace"], address)
-        claim = object.get("process", {}).get("planning_claim")
-        if address in expected:
-            require(isinstance(claim, dict) and all(claim.get(key) == expected[address].get(key) for key in ("actor", "position")),
-                    f"this run no longer holds planning claim {address}")
-        else:
-            require(not claim, f"Requirement already has an active planning run on {address}")
 
 
 def configuration(path):

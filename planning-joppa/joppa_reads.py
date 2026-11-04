@@ -18,20 +18,19 @@ def normalize_detail(args, value):
     if "document" not in result:
         if not isinstance(result.get("data"), dict) or type(result.get("revision")) is not int or result["revision"] < 1:
             raise MCPError("Joppa object detail is incomplete")
+        present = result.get("present", True) is not False and result.get("archived") is not True
         result["document"] = {"revision": result["revision"], "parent": result.get("parent"),
-                              "present": result.get("present", True), "data": result["data"],
+                              "present": present, "data": result["data"],
                               "links": [authored_link(link) for link in result.get("links", [])]}
         result.setdefault("current_revision", result["revision"])
+        result["process"] = lifecycle(result["document"], result.get("process"))
         if not args.get("revision"):
-            result.setdefault("review_required", False)
             result.setdefault("work_ready", True)
     result.setdefault("address", args.get("address"))
     if not isinstance(result["address"], str):
         raise MCPError("Joppa object address is missing")
     result.setdefault("kind", result["address"].split(":", 1)[0])
     result.setdefault("historical", result["document"].get("revision", result["current_revision"]) != result["current_revision"])
-    if not args.get("revision"):
-        result.setdefault("contract_revision", result["current_revision"])
     result["process"] = dict(result.get("process") or {})
     result["process"].setdefault("assignee", None)
     result["annotations"] = dict(result.get("annotations") or {})
@@ -41,14 +40,32 @@ def normalize_detail(args, value):
     return result
 
 
-def normalize_tasks(result):
-    lean = "tasks" not in result and "items" in result
-    result.setdefault("tasks", result.get("items", []))
-    if lean:
-        for row in result["tasks"]:
-            row.setdefault("ac", row.get("parent"))
-            row.setdefault("claimable", False)
-            row.setdefault("review_required", False)
+def blocked(assessment):
+    """An assessment with ready false holds the node. No assessment means ready."""
+    return isinstance(assessment, dict) and (assessment.get("ready") is False
+                                             or assessment.get("state") not in (None, "ready"))
+
+
+def lifecycle(document, process):
+    """Derive the Task state from generic node fields. The server has no Task process."""
+    data, result = document["data"], {"assessment": (process or {}).get("assessment")}
+    result["assignee"] = data.get("assignee")
+    if blocked(result["assessment"]):
+        reason = result["assessment"].get("reason") or ""
+        # The assess reason is the only block evidence, such as a lane "Run: <id>" line.
+        result["blocked"] = {"reason": reason, "evidence": reason, "actor": result["assessment"].get("actor")}
+    if document["present"] is False:
+        result["done" if data.get("commit") else "retired"] = {"commit": data.get("commit")}
+    return {key: value for key, value in result.items() if value is not None}
+
+
+def task_state(object):
+    """Classify one Task: done, retired, blocked, active or open."""
+    process = object["process"]
+    for state in ("done", "retired", "blocked"):
+        if process.get(state):
+            return state
+    return "active" if process.get("assignee") else "open"
 
 
 def complete_object(read_page, args, value):

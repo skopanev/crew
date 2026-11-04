@@ -29,7 +29,7 @@ def item(address, parent=None, data=None, process=None, role=None):
             "current_revision": 3, "document": {"present": True, "data": data or {"title": address, "owner": "owner"},
              "parent": parent, "links": [], "revision": 3, "actor": "document-owner", "position": 10},
             "process": process or {}, "annotations": {"comments": []}, "files": [], "references": [],
-            "position": 20, "historical": False, "review_required": False, "work_ready": True,
+            "position": 20, "historical": False, "work_ready": True,
             "status": {"tone": "orange", "label": "No tests"}}
 
 CHECK_TYPE = {"role": "test", "parents": ["criterion"], "title_max_length": 400}
@@ -98,3 +98,26 @@ class NodeServer:
         page = rows[:min(args.get("limit", 25), 25)]
         return {"items": [{"address": address, **{key: node[key] for key in args["fields"]}} for address, node in page],
                 **({"next_cursor": page[-1][0]} if len(rows) > len(page) else {})}
+
+
+MARK = "crew-planning:host:run-1"
+
+
+def claim_receipt(addresses, assignee=MARK):
+    """A confirmed claim: one full AC save with data.assignee per criterion."""
+    return {"status": "confirmed", "server": "https://example.invalid/mcp", "arguments": {"workspace": "example",
+            "operations": [{"command": {"op": "save_object", "kind": address.split(":")[0], "id": address.split(":")[1],
+                "revision": 3, "parent": "rule:r", "data": {"title": address, "owner": "owner", "assignee": assignee},
+                "links": [], "reason": "Take this criterion for Crew planning.", "question_checked": "Which rule?"}}
+                for address in addresses]},
+            "result": {"results": [{"position": 22 + index} for index, _ in enumerate(addresses)]}}
+
+
+def raw_ac(address, assignee=None, revision=4):
+    """A live joppa_objects detail: data, revision, parent and links. No claim process."""
+    data = {"title": address, "owner": "owner", "custom": "keep"}
+    if assignee:
+        data["assignee"] = assignee
+    return {"address": address, "data": data, "revision": revision, "parent": "rule:r",
+            "links": [{"target": "note:n", "relation": "related", "blocking": False}],
+            "status": {"tone": "orange", "label": "No tests"}}

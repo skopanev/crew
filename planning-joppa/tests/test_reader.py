@@ -88,7 +88,10 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn('verbose', args)
         for limit in (0, -1, '25', True):
             with self.assertRaisesRegex(MCPError, 'positive integer'):
-                reader.call('joppa_tasks', {'limit': limit})
+                reader.call('joppa_search', {'query': 'x', 'limit': limit})
+        # Joppa removed the Task workflow tool. The reader neither lists nor forwards it.
+        with self.assertRaisesRegex(MCPError, 'does not permit'):
+            reader.call('joppa_tasks', {})
 
     def test_compact_detail_capture_refuses_a_changed_document_or_revision(self):
         for drift in ('document', 'current_revision'):
