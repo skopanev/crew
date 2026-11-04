@@ -2,8 +2,17 @@
 bridge_dir="$MEDULLA_BRIDGE/equill"
 mkdir -p "$bridge_dir/req" "$bridge_dir/resp"
 if [[ ! -f "$bridge_dir/bridge.pid" ]] || ! kill -0 "$(cat "$bridge_dir/bridge.pid" 2>/dev/null)" 2>/dev/null; then
-  nohup bash "$WORKFLOW_DIR/bridge/equill-bridge.sh" >>"$MEDULLA_BRIDGE/equill-bridge.log" 2>&1 &
-  disown || true
+  # The bridge is shared by every lane, so it must not live in this lane's
+  # process group: the lane worker signals that group on exit. A new session
+  # (setsid(2) via Python, portable to macOS without a setsid binary) detaches
+  # it; stdin is /dev/null and output goes to the shared log. The bridge's own
+  # flock keeps concurrent starts down to one bridge.
+  python3 -c '
+import subprocess, sys
+with open(sys.argv[2], "ab") as log:
+    subprocess.Popen(["bash", sys.argv[1]], stdin=subprocess.DEVNULL, stdout=log,
+                     stderr=log, start_new_session=True, close_fds=True)
+' "$WORKFLOW_DIR/bridge/equill-bridge.sh" "$MEDULLA_BRIDGE/equill-bridge.log"
 fi
 
 for ((bridge_attempt=0; bridge_attempt<25; bridge_attempt++)); do
