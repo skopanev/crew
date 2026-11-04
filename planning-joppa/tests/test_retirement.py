@@ -23,13 +23,13 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, hold, end
 
 
 class ProviderTests(unittest.TestCase):
     def test_retirement_uses_the_existing_atomic_publication(self):
         data, value = assignment(), plan()
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        hold(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3,
                                  outcome="The approved outcome needs no further work.")
         original = deepcopy(data)
@@ -42,13 +42,13 @@ class ProviderTests(unittest.TestCase):
 
     def test_retirement_accepts_a_blocked_task_without_purpose(self):
         data, value = assignment(), plan()
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        hold(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "archive_object")
 
     def test_retirement_requires_existing_dependents_to_remove_the_link(self):
         data, value = assignment(), plan()
-        data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+        hold(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         consumer = deepcopy(data["joppa"]["tasks"][0])
         consumer["address"] = "work:consumer"
@@ -76,14 +76,14 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(any(link["target"] == "record:note" for link in links))
 
     def test_retirement_preserves_finished_dependents(self):
-        for field, setting in (("done", "Evidence"), ("retired", {"reason": "Old"})):
+        for field, setting in (("done", "a" * 40), ("retired", None)):
             with self.subTest(field=field):
                 data, value = assignment(), plan()
-                data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
+                hold(data["joppa"]["tasks"][0], "Failed")
                 value["tasks"][0].update(action="retire", target="work:old", revision=3)
                 consumer = deepcopy(data["joppa"]["tasks"][0])
                 consumer["address"] = "work:consumer"
-                consumer["process"][field] = setting
+                end(consumer, setting)
                 consumer["document"]["links"].append(
                     {"target": "work:old", "relation": "depends_on", "blocking": True, "revision": 3})
                 data["joppa"]["tasks"].append(consumer)
@@ -97,12 +97,14 @@ class ProviderTests(unittest.TestCase):
         task = value["tasks"][0]
         task.update(action="retire", target="work:old", revision=3)
         blocked = data["joppa"]["tasks"][0]
-        blocked["process"]["blocked"] = {"reason": "Failed", "position": 19}
-        for field, setting in (("blocked", None), ("assignee", "worker"),
-                               ("done", "Evidence"), ("retired", {"reason": "Old"})):
+        hold(blocked, "Failed")
+        def unblock(task): task["process"].pop("assessment")
+        def claim(task): task["document"]["data"]["assignee"] = "worker"
+        for field, change in (("blocked", unblock), ("assignee", claim),
+                              ("done", lambda task: end(task, "a" * 40)), ("retired", end)):
             with self.subTest(field=field):
                 changed = deepcopy(data)
-                changed["joppa"]["tasks"][0]["process"][field] = setting
+                change(changed["joppa"]["tasks"][0])
                 with self.assertRaises(ValueError):
                     publication.operations(value, changed)
         stale = deepcopy(value)

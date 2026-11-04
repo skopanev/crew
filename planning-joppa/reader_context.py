@@ -8,6 +8,7 @@ import stages as shared
 import context
 import publication
 import planning_claims as claims
+from joppa_reads import block_reason, ended, task_state
 
 
 def settings():
@@ -73,8 +74,7 @@ def prompt_assignment(assignment):
     tasks = assignment["joppa"]["tasks"]
     task_ids = {task["address"] for task in tasks}
     def prompt_data(item):
-        terminal_task = item.get("kind") == assignment["joppa"]["task_type"] and (
-            item["process"].get("done") or item["process"].get("retired"))
+        terminal_task = item.get("kind") == assignment["joppa"]["task_type"] and ended(item)
         return {key: value for key, value in item["document"]["data"].items()
                 if key not in ("contract", "steps", "checks") or not terminal_task}
     result["joppa"] = {"task_type": assignment["joppa"]["task_type"], "task_schema": assignment["joppa"]["task_schema"],
@@ -87,12 +87,13 @@ def prompt_assignment(assignment):
         "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],
                    **({"remote_links": task["remote_links"]} if task.get("remote_links") else {}),
                    "data": prompt_data(task), "links": task["document"]["links"],
-                   "process": {key: task["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
+                   "state": task_state(task), "assessment": task["process"].get("assessment")}
                   for task in tasks],
         "objects": {address: {"item_id": item.get("item_id"), "revision": item["current_revision"], "data": prompt_data(item),
                               **({"remote_links": item["remote_links"]} if item.get("remote_links") else {}),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
-                              "process": {key: item["process"].get(key) for key in ("status", "assignee", "done", "retired", "blocked")}}
+                              "assessment": item["process"].get("assessment"),
+                              **({"state": task_state(item)} if item.get("kind") == assignment["joppa"]["task_type"] else {})}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
     if assignment["joppa"].get("remote"):
         remote = assignment["joppa"]["remote"]
@@ -127,11 +128,8 @@ def prompt_assignment(assignment):
 
 
 def retry_startup(api, config, target, assignment, ac, advertised):
-    tasks = [task for task in assignment["joppa"]["tasks"]
-             if not task["document"]["data"].get("archived")
-             and not task["process"].get("done") and not task["process"].get("retired")]
-    if not tasks or not all(isinstance(task["process"].get("blocked"), dict)
-                           and task["process"]["blocked"].get("reason") == "WORKTREE_PREEXISTED" for task in tasks):
+    tasks = [task for task in assignment["joppa"]["tasks"] if not ended(task)]
+    if not tasks or not all(block_reason(task) == "WORKTREE_PREEXISTED" for task in tasks):
         return False
     require('"assess"' in advertised, "Startup retry requires deployed assess; no research was started")
     require(len(tasks) <= 49, "Startup retry supports at most 49 Tasks in one atomic batch")

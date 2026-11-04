@@ -37,7 +37,7 @@ CHECK_TYPE = {"role": "test", "parents": ["criterion"], "title_max_length": 400}
 def assignment():
     task = context.source(item("work:old", "criterion:a", {"title": "Existing", "owner": "document-owner",
         "body": "Existing contract", "projects": ["other"], "custom": "preserve"},
-        {"assignee": None, "status": "open", "done": None, "retired": None}))
+        {}))
     task["document"]["links"] = [{"target": "record:note", "relation": "related", "revision": 3, "blocking": False}]
     ac = context.source(item("criterion:a", "rule:r"))
     dependency = context.source(item("work:dependency", "criterion:b"))
@@ -121,3 +121,15 @@ def raw_ac(address, assignee=None, revision=4):
     return {"address": address, "data": data, "revision": revision, "parent": "rule:r",
             "links": [{"target": "note:n", "relation": "related", "blocking": False}],
             "status": {"tone": "orange", "label": "No tests"}}
+
+
+def hold(task, reason="Failed"):
+    """Joppa holds a live node with assessment state waiting and a short reason code."""
+    task["process"]["assessment"] = {"state": "waiting", "reason": reason}
+
+
+def end(task, commit=None):
+    """An ended Task is archived. A done Task also has data.commit."""
+    task["document"]["present"] = False
+    if commit:
+        task["document"]["data"]["commit"] = commit

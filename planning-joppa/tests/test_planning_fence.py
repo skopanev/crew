@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from provider_fixture import assignment
+from provider_fixture import assignment, hold, hold, end
 from test_generic_lifecycle import Server, raw
 
 
@@ -56,7 +56,7 @@ class PlanningFenceTests(unittest.TestCase):
             data["repositories"][0]["path"] = directory
             task = data["joppa"]["tasks"][0]
             task["document"]["data"].update(body="Goal\nRepository: service\nModule: core", projects=["p"])
-            task["process"]["blocked"] = {"reason": "WORKTREE_PREEXISTED"}
+            hold(task, "WORKTREE_PREEXISTED")
             ac = deepcopy(data["joppa"]["objects"]["criterion:a"])
             ac["document"]["data"]["assignee"] = "crew-planning:h:run-1"
             config = {"workspace": "example", "repositories": data["repositories"]}
@@ -68,9 +68,14 @@ class PlanningFenceTests(unittest.TestCase):
             with patch.object(reader_context.claims, "owned"), patch.object(reader_context, "run", return_value=""), \
                  patch.object(reader_context.publication, "mutate", side_effect=mutate), \
                  patch.object(reader_context, "signal"):
-                task["process"]["blocked"]["reason"] = "WORKTREE_PREEXISTED: detail"
+                hold(task, "WORKTREE_PREEXISTED: detail")
                 self.assertFalse(reader_context.retry_startup(None, config, target, data, ac, '"assess"'))
-                task["process"]["blocked"]["reason"] = "WORKTREE_PREEXISTED"
+                hold(task, "WORKTREE_PREEXISTED")
+                task["document"]["data"]["assignee"] = "lane-1"
+                with self.assertRaisesRegex(ValueError, "claimed Tasks"):
+                    reader_context.retry_startup(None, config, target, data, ac, '"assess"')
+                self.assertEqual(sent, [])
+                del task["document"]["data"]["assignee"]
                 self.assertTrue(reader_context.retry_startup(None, config, target, data, ac, '"assess"'))
             operations = [entry["command"] for entry in sent[0]]
             self.assertEqual([(entry["op"], entry.get("target") or entry["kind"] + ":" + entry["id"]) for entry in operations],
@@ -78,6 +83,51 @@ class PlanningFenceTests(unittest.TestCase):
                               ("save_object", "criterion:a"), ("assess", "criterion:a")])
             self.assertEqual((operations[0]["revision"], operations[0]["data"]), (3, task["document"]["data"]))
             self.assertNotIn("assignee", operations[2]["data"])
+
+    def test_detail_reads_keep_the_native_process_and_add_no_task_fields(self):
+        from joppa_reads import normalize_detail, task_state
+        process = {"annotation_address": "work:t", "verification": {"state": "pass"}, "acceptance": {"by": "owner"},
+                   "assessment": {"state": "waiting", "reason": "WORKTREE_PREEXISTED"}}
+        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "assignee": "lane-1"},
+                                                           process=deepcopy(process)))
+        self.assertEqual(value["process"], process)
+        self.assertEqual(task_state(value), "blocked")
+
+    def test_parent_requirement_revision_bump_from_a_claim_keeps_the_snapshot(self):
+        import context
+        from joppa_reads import normalize_detail
+        types = {"requirement": {"role": "requirement"}, "group": {"role": "group"}}
+        before = raw("requirement:r", {"title": "R", "body": "Rule", "owner": "o"}, revision=3, parent="group:g",
+                     links=[{"target": "note:n", "relation": "related"}], reason="Write the rule")
+        def snapshot(value):
+            return context.snapshot_source(normalize_detail({"address": "requirement:r"}, value), types, ["criterion:a"])
+        # The claim saves data.assignee on a child AC. Joppa then writes the parent with the same authored fields.
+        after = {**deepcopy(before), "revision": 4, "reason": "Criterion criterion:a changed: Take this criterion."}
+        context.unchanged(snapshot(before), snapshot(after))
+        meaning = {"number": 3, "title": "R", "body": "Rule", "reason": "Write the rule", "acs": [{"id": "criterion:a"}]}
+        self.assertEqual(context.authored_meaning(meaning),
+                         context.authored_meaning({**meaning, "number": 4, "reason": after["reason"]}))
+        for change in (lambda value: value["data"].update(body="Changed rule"),
+                       lambda value: value["links"].append({"target": "note:m", "relation": "related"}),
+                       lambda value: value.update(parent="group:other")):
+            changed = deepcopy(after)
+            change(changed)
+            with self.assertRaisesRegex(ValueError, "context changed"):
+                context.unchanged(snapshot(before), snapshot(changed))
+        self.assertNotEqual(context.authored_meaning(meaning), context.authored_meaning({**meaning, "body": "Changed"}))
+
+    def test_pins_accept_any_revision_through_current_and_new_links_have_no_pin(self):
+        import context
+        import publication
+        from provider_fixture import plan
+        self.assertTrue(context.current_pin(1, 4, 1))
+        self.assertTrue(context.current_pin(4, 4, 1))
+        self.assertFalse(context.current_pin(5, 4, 1))
+        self.assertFalse(context.current_pin(0, 4, 1))
+        value = plan()
+        value["tasks"][0]["depends_on"] = ["work:dependency"]
+        links = publication.operations(value, assignment())[0]["command"]["links"]
+        self.assertEqual(links, [{"target": "work:dependency", "relation": "depends_on", "blocking": True}])
 
 
 if __name__ == "__main__":

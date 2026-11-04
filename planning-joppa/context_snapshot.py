@@ -44,12 +44,12 @@ def snapshot_source(object, types, selected_ac=None):
     if current.get("remote_links"):
         current["remote_links"] = [{key: value for key, value in link.items() if key != "status"}
                                    for link in current["remote_links"]]
-    for key in ("verification", "pending_run", "summary", "status", "assignee", "done", "retired"):
+    for key in ("verification", "pending_run", "summary", "status"):
         current["process"].pop(key, None)
     current["document"] = authored_document(current["document"])
     role = types[object["kind"]].get("role")
     selected = {selected_ac} if isinstance(selected_ac, str) else set(selected_ac or [])
-    if role in ("task", "ac"):
+    if role in ("task", "ac", "requirement", "group"):
         # A planning claim or a lane completion saves lifecycle fields and a new revision. Compare authored fields.
         current.pop("current_revision")
         current.pop("contract_revision", None)
@@ -70,6 +70,10 @@ def snapshot_source(object, types, selected_ac=None):
                 annotations.pop(key, None)
         current["annotations"] = annotations
     return current
+
+def authored_meaning(meaning):
+    """A child AC save gives its Requirement a new revision and reason with the same authored fields."""
+    return {key: value for key, value in meaning.items() if key not in ("number", "reason")}
 
 def selected_criteria(assignment):
     return assignment["joppa"].get("criteria", [assignment["ac"]])

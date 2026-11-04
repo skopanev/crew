@@ -4,6 +4,7 @@ import json
 import re
 from common import require, text
 import context
+from joppa_reads import assignee, blocked, ended
 MAX_PUBLICATION_OPERATIONS = 100
 MAX_DATA_VALUE = 1024
 
@@ -12,12 +13,9 @@ def title_limit(schema):
     return schema.get("title_max_length") or schema.get("title_preview_length") or 64
 
 def unclaimed(task):
-    process = task["process"]
-    require(not process.get("done") and not process.get("retired"),
-            "completed or retired Tasks cannot be rewritten")
+    require(not ended(task), "completed or retired Tasks cannot be rewritten")
     # A Task is active while data.assignee names a worker.
-    require(not process.get("assignee") and not task["document"]["data"].get("assignee"),
-            "claimed Tasks cannot be rewritten by Crew planning")
+    require(not assignee(task), "claimed Tasks cannot be rewritten by Crew planning")
 
 def editable(task):
     unclaimed(task)
@@ -25,7 +23,7 @@ def editable(task):
 
 def retirable(task):
     unclaimed(task)
-    require(isinstance(task["process"].get("blocked"), dict),
+    require(blocked(task),
             "only blocked Tasks can be retired by Crew planning")
 
 def ordered_tasks(tasks):
@@ -81,7 +79,7 @@ def package_counters(plan, assignment):
     counters = {}
     for existing in assignment["joppa"]["objects"].values():
         if (existing["document"].get("parent") not in criteria
-                or existing["process"].get("done") or existing["process"].get("retired")):
+                or ended(existing)):
             continue
         data = existing["document"]["data"]
         repository = re.findall(r"^Repository:[ \t]*([^\r\n]+)$", context.task_contract(data), re.M)
