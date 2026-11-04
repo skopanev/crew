@@ -63,7 +63,6 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
   if (tool === 'joppa_objects' && arguments_.address && !arguments_.history) {
     return completeDetail(arguments_, result, args => rawCall(url, tokenFile, tool, args, options));
   }
-  if (tool === 'joppa_tasks') normalizeTasks(result);
   return result;
 }
 
@@ -157,16 +156,13 @@ function normalizeDetail(args, value) {
       data: result.data, links: (result.links || []).map(authoredLink)};
     result.current_revision ??= result.revision;
     if (!args.revision) {
-      result.review_required ??= false;
       result.work_ready ??= true;
     }
   }
   result.address ??= args.address;
   result.kind ??= result.address.split(':', 1)[0];
   result.historical ??= result.document.revision !== undefined && result.document.revision !== result.current_revision;
-  if (!args.revision) result.contract_revision ??= result.current_revision;
   result.process = {...result.process};
-  result.process.assignee ??= null;
   result.annotations = {...result.annotations};
   result.files ??= [];
   result.references ??= [];
@@ -207,14 +203,4 @@ async function completeDetail(args, value, readPage) {
   result.annotations.comments = comments;
   delete result.comments;
   return result;
-}
-
-function normalizeTasks(result) {
-  const lean = !result.tasks && Array.isArray(result.items);
-  result.tasks ??= result.items || [];
-  if (lean) for (const row of result.tasks) {
-    row.ac ??= row.parent;
-    row.claimable ??= false;
-    row.review_required ??= false;
-  }
 }

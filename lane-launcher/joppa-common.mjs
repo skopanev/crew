@@ -6,10 +6,8 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 export const executionId = address => 'joppa-' + createHash('sha256').update(address).digest('hex').slice(0, 32);
 export const contractDigest = object => {
   const data = {...object.document.data};
-  if (object.contract_revision !== undefined) {
-    require(Number.isSafeInteger(object.current_revision) && Number.isSafeInteger(object.contract_revision) && object.contract_revision > 0 &&
-      object.contract_revision <= object.current_revision, 'Joppa contract revision is invalid');
-  }
+  delete data.assignee;
+  delete data.commit;
   return createHash('sha256').update(JSON.stringify({
     parent: object.document.parent, data, links: object.document.links,
     ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
@@ -45,9 +43,10 @@ export async function mutateTasks(run, request) {
       'Joppa batch response is incomplete; Tasks remain held for inspection');
     for (const [index, item] of result.results.entries()) {
       const expected = request.operations[index].command;
-      const address = item.object?.address || item.command?.id;
-      require(item.command?.op === expected.op && (address === expected.id ||
-        address === expected.id.split(':').slice(1).join(':')),
+      const matches = expected.op === 'save_object'
+        ? item.object?.address === `${expected.kind}:${expected.id}` && Number.isSafeInteger(item.object.revision)
+        : Object.entries(expected).every(([key, value]) => JSON.stringify(item.command?.[key]) === JSON.stringify(value));
+      require(item.command?.op === expected.op && matches,
         'Joppa batch response does not map to the requested Task; inspect the saved request');
     }
   }
