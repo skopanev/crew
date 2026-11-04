@@ -209,14 +209,18 @@ runpy.run_path({str(script)!r}, run_name="__main__")
             transport.call("joppa_command", {})
 
     def test_source_claim_exclusion_and_authority_changes(self):
+        types = {"criterion": {"role": "ac"}}
         old = item("criterion:a")
         current = deepcopy(old)
         current["position"] = 30
-        current["process"]["planning_claim"] = {"actor": "planner", "position": 21}
-        context.unchanged(context.source(old), context.source(current))
+        # A planning claim saves data.assignee and a new revision. The authored digest stays the same.
+        current["document"]["data"]["assignee"] = "crew-planning:host:run"
+        current["current_revision"] = current["document"]["revision"] = 4
+        snapshot = lambda value: context.snapshot_source(value, types, ["criterion:a"])
+        context.unchanged(snapshot(old), snapshot(current))
         current["annotations"]["comments"].append({"kind": "decision", "text": "New constraint"})
         with self.assertRaisesRegex(ValueError, "context changed"):
-            context.unchanged(context.source(old), context.source(current))
+            context.unchanged(snapshot(old), snapshot(current))
 
     def test_snapshot_ignores_task_runtime_changes_but_preserves_contracts(self):
         old = item("work:one", process={"assignee": "worker", "status": "in_progress"})

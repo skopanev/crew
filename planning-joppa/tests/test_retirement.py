@@ -34,16 +34,17 @@ class ProviderTests(unittest.TestCase):
                                  outcome="The approved outcome needs no further work.")
         original = deepcopy(data)
         commands = publication.operations(value, data)
-        self.assertEqual([item["command"]["op"] for item in commands], ["retire_task", "finish_planning"])
-        self.assertEqual(commands[0]["command"], {"op": "retire_task", "id": "old", "revision": 3,
+        self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object", "assess"])
+        self.assertEqual(commands[0]["command"], {"op": "archive_object", "target": "work:old", "revision": 3,
                                                   "reason": value["tasks"][0]["outcome"]})
+        self.assertNotIn("commit", json.dumps(commands[0]))
         self.assertEqual(data, original)
 
     def test_retirement_accepts_a_blocked_task_without_purpose(self):
         data, value = assignment(), plan()
         data["joppa"]["tasks"][0]["process"]["blocked"] = {"reason": "Failed", "position": 19}
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
-        self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "retire_task")
+        self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "archive_object")
 
     def test_retirement_requires_existing_dependents_to_remove_the_link(self):
         data, value = assignment(), plan()
@@ -63,8 +64,12 @@ class ProviderTests(unittest.TestCase):
         changed.update(id="consumer", action="update", target="work:consumer", revision=3, depends_on=[])
         value["tasks"].append(changed)
         commands = publication.operations(value, data)
+        # The blocked consumer gets a new contract, so the same batch marks it ready again.
         self.assertEqual([item["command"]["op"] for item in commands],
-                         ["retire_task", "save_object", "finish_planning"])
+                         ["archive_object", "save_object", "assess", "save_object", "assess"])
+        self.assertEqual(commands[2]["command"], {"op": "assess", "target": "work:consumer", "ready": True,
+                                                  "reason": "The reviewed plan replaces the blocked contract."})
+        self.assertEqual(commands[4]["command"]["target"], "criterion:a")
         links = commands[1]["command"]["links"]
         self.assertFalse(any(link["target"] == "work:old" for link in links))
         self.assertTrue(any(link["target"] == "work:dependency" for link in links))
@@ -84,7 +89,7 @@ class ProviderTests(unittest.TestCase):
                 data["joppa"]["tasks"].append(consumer)
                 original = deepcopy(data)
                 commands = publication.operations(value, data)
-                self.assertEqual([item["command"]["op"] for item in commands], ["retire_task", "finish_planning"])
+                self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object", "assess"])
                 self.assertEqual(data, original)
 
     def test_retirement_refuses_unsafe_targets_and_dependency_use(self):
@@ -94,7 +99,6 @@ class ProviderTests(unittest.TestCase):
         blocked = data["joppa"]["tasks"][0]
         blocked["process"]["blocked"] = {"reason": "Failed", "position": 19}
         for field, setting in (("blocked", None), ("assignee", "worker"),
-                               ("claim", {"actor": "worker"}), ("status", "in_progress"),
                                ("done", "Evidence"), ("retired", {"reason": "Old"})):
             with self.subTest(field=field):
                 changed = deepcopy(data)

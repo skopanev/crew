@@ -21,6 +21,7 @@ from common import read
 import context
 from mcp import MCPError, Rejected, Reader
 import publication
+import planning_claims
 
 
 from provider_fixture import item, assignment, plan, Fake, CHECK_TYPE
@@ -68,9 +69,13 @@ class ProviderTests(unittest.TestCase):
         if True:
             ready, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
+            # Joppa has no contract pins. A pin below the current revision stays valid.
             objects["criterion:outside"]["contract_revision"] = 4
-            stale, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertNotIn("criterion:b", [entry["id"] for entry in stale["joppa"]["criteria"]])
+            earlier, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in earlier["joppa"]["criteria"]])
+            objects["criterion:b"]["document"]["links"][0]["revision"] = 5
+            future, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertNotIn("criterion:b", [entry["id"] for entry in future["joppa"]["criteria"]])
             objects["criterion:b"]["document"]["links"][0].pop("revision")
             unpinned, _, _ = context.load_requirement(Server(), config, "r")
             self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
@@ -89,7 +94,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in filtered["joppa"]["criteria"]], ["criterion:c"])
         config.pop("ac_ids")
         objects["criterion:c"]["document"]["links"] = original_links
-        objects["criterion:a"]["process"]["planning_claim"] = {"actor": "planner", "position": 21}
+        objects["criterion:a"]["document"]["data"]["assignee"] = "crew-planning:host:run"
         with self.assertRaisesRegex(ValueError, "no ready criteria"):
             context.load_requirement(Server(), config, "r")
         resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a"])
@@ -170,32 +175,33 @@ class ProviderTests(unittest.TestCase):
     def test_requirement_claim_guard_checks_siblings_and_exact_own_receipt(self):
         data = assignment()
         data["decisions"] = [json.dumps({"acs": [{"id": "criterion:a"}, {"id": "criterion:b"}]})]
-        own = {"actor": "planner", "position": 22}
+        own = "crew-planning:host:run-1"
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b")}
-        objects["criterion:a"]["process"]["planning_claim"] = {**own, "future_metadata": "allowed"}
-        objects["criterion:b"]["process"]["planning_claim"] = {"actor": "other", "position": 23}
+        objects["criterion:a"]["document"]["data"]["assignee"] = own
+        objects["criterion:b"]["document"]["data"]["assignee"] = "crew-planning:other:run-2"
         class Server:
             def call(self, name, args):
                 return deepcopy(objects[args["address"]])
+        idle = planning_claims.planning_idle
         with self.assertRaisesRegex(ValueError, "active planning run"):
-            context.planning_idle(Server(), {"workspace": "example"}, data)
+            idle(Server(), {"workspace": "example"}, data)
         with self.assertRaisesRegex(ValueError, "active planning run on criterion:b"):
-            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
-        objects["criterion:b"]["process"].pop("planning_claim")
-        context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+            idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+        objects["criterion:b"]["document"]["data"].pop("assignee")
+        idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
         with self.assertRaisesRegex(ValueError, "no longer holds"):
-            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": {**own, "position": 24}})
+            idle(Server(), {"workspace": "example"}, data, {"criterion:a": "crew-planning:host:run-3"})
         objects["criterion:b"]["document"]["present"] = False
-        context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
+        idle(Server(), {"workspace": "example"}, data, {"criterion:a": own})
         with self.assertRaisesRegex(ValueError, "another Requirement criterion"):
-            context.planning_idle(Server(), {"workspace": "example"}, data, {"criterion:b": own})
+            idle(Server(), {"workspace": "example"}, data, {"criterion:b": own})
 
     def test_direct_ac_filter_refuses_before_claim(self):
         spec = importlib.util.spec_from_file_location("joppa_stage_filter", ROOT / "planning-joppa/stages.py")
         stage = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(stage)
         data = assignment()
-        api = Fake(result={"commands": ["claim_planning", "finish_planning", "release_planning"]})
+        api = Fake(result={"ops": ["save_object", "archive_object", "assess"]})
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"PLANNING_JOPPA_AC": "criterion:a"}, clear=False), \
              patch.object(stage, "settings", return_value={"workspace": "example", "ac_ids": ["criterion:b"]}), \
              patch.object(stage, "reader_servers"), patch.object(stage.context, "client", return_value=api), \
