@@ -238,7 +238,7 @@ def configuration(path):
         return str(value if value.is_absolute() else root / value)
     if "worktree_root" in config:
         config["worktree_root"] = cleanup_path(config["worktree_root"], "worktree_root")
-    if "lane_runs_folders" in config:
+    if config.get("lane_runs_folders") is not None:
         config["lane_runs_folders"] = [cleanup_path(value, "lane_runs_folders") for value in folders]
     elif folders:
         config["lane_runs_folder"] = cleanup_path(folders[0], "lane_runs_folder")
