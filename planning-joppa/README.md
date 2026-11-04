@@ -79,6 +79,8 @@ Independent Tasks have no ordering dependency. Title order does not replace depe
 Every selected AC has its own implementation or existing-test-binding disposition and observable acceptance checks.
 Claims use one atomic batch. Publication saves Tasks, binds proven tests and finishes changed ACs in one atomic batch.
 Unchanged AC contracts release their claims. The Joppa batch limit remains 100 operations.
+A new claim holds at most 33 ACs: a failure release needs a save, an `assess` and a critic note for each AC.
+An older claim of 34 to 50 ACs still releases with a save and an `assess` for each AC, without notes.
 The explicit `--ac-id` input preserves the one-AC path.
 It also lists unfinished Tasks across Requirements in the configured repository projects, with their module and mechanism.
 This list locates possible overlap. A full current object read still verifies reuse and dependencies.
@@ -146,7 +148,7 @@ Joppa has no Task workflow commands. The planner uses generic node fields:
 - Ownership: the claim receipt records the revision that this run wrote for each AC.
   Before publication or release, the planner reads each AC again. It requires its own
   `data.assignee` value and that exact revision. A later edit or reassignment stops the run.
-- Every `assess` follows a revision-checked save of the same object in the same batch.
+- Every `assess` and `note` follows a revision-checked save of the same object in the same batch.
 - Lists exclude archived nodes. Ended Tasks are read only by a known address, such as a link target.
 - Release: save the AC without `data.assignee` at its current revision.
 - Finish: the publication batch saves Tasks, saves each AC without `data.assignee`
@@ -197,6 +199,12 @@ Confirmed failures release this run's planning claim. Uncertain mutations retain
 The planner refuses publication when a blocked Task keeps its contract and is not retired.
 The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
 Any other rejected publication applied nothing. The failure release then saves and assesses each held AC not ready.
+When a critic rejects the plan after the last revision round, the same release batch adds one native Joppa `note`
+to each released AC. The note has the run ID, the plan digest prefix and at most three blocking findings
+(claim and resolution, with the critic seat). The next planning pass reads it as AC context. It is evidence to
+verify against current code, not an instruction. Only the explicit critic rejection of the current plan writes it.
+Other failures, stale or malformed verdicts and ACs that the release skips get no note.
+`release.json` records `critic_notes`, or `critic_notes_dropped: "batch"` when the batch has no space for notes.
 Inspect `claim.json`, `publication.json` and `release.json` before recovery.
 Use the recorded request ID and identical arguments if manual recovery requires a receipt replay.
 Never start another mutation blindly. A planning `data.assignee` does not expire.

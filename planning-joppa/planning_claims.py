@@ -8,15 +8,21 @@ import context_reads
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
-# A failed release needs one save and one assess per criterion in a single batch.
-RELEASE_OPERATIONS = 2
+# A failed release needs one save, one assess and one critic note per criterion in a single batch.
+# The cap applies to new claims. An older claim of up to MAX_BATCH // 2 criteria still releases without notes.
+RELEASE_OPERATIONS = 3
 MAX_CLAIMED_CRITERIA = MAX_BATCH // RELEASE_OPERATIONS
 KEEP = object()
 
 
+def run_id(target):
+    """The run folder name of an artifacts folder."""
+    return Path(target).resolve().parent.name
+
+
 def marker(target):
     """One value per host and run: crew-planning:<host>:<run_id>."""
-    return f"{PREFIX}{socket.gethostname()}:{Path(target).resolve().parent.name}"
+    return f"{PREFIX}{socket.gethostname()}:{run_id(target)}"
 
 
 def address_of(command):
@@ -52,6 +58,11 @@ def not_ready(target, code):
     return {"op": "assess", "target": target, "ready": False, "reason": code}
 
 
+def note(target, notes):
+    """A native Joppa note on one released AC. It adds no revision."""
+    return {"op": "note", "target": target, "id": notes["id"], "text": notes["text"]}
+
+
 def claim_operations(assignment, criteria, assignee):
     """One save per AC at the revision read for this plan. A stale write refuses the batch."""
     objects, questions = assignment["joppa"]["objects"], assignment["joppa"].get("questions", {})
@@ -69,14 +80,15 @@ def claim_operations(assignment, criteria, assignee):
 
 
 def require_fenced(operations):
-    """Each assess needs an earlier revision-checked save of the same target in the same batch."""
+    """Each assess or note needs an earlier revision-checked save of the same target in the same batch."""
     saved = set()
     for operation in operations:
         command = operation["command"]
         if command["op"] == "save_object" and command.get("revision") and command.get("id"):
             saved.add(command["kind"] + ":" + command["id"])
-        elif command["op"] == "assess":
-            require(command["target"] in saved, f"assess {command['target']} needs an earlier save in its batch")
+        elif command["op"] in ("assess", "note"):
+            require(command["target"] in saved,
+                    f"{command['op']} {command['target']} needs an earlier save in its batch")
     return operations
 
 
@@ -149,10 +161,12 @@ def planning_idle(api, config, assignment, expected=None):
             require(not assignee, f"Requirement already has an active planning run on {address}")
 
 
-def release(api, target, workspace, ac, reason, code=None):
+def release(api, target, workspace, ac, reason, code=None, notes=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
     With a failure code, also assess each AC not ready in the same batch. Leave an AC that changed after this run
-    wrote it untouched for recovery. Never split the batch and never omit an assess."""
+    wrote it untouched for recovery. Never split the batch and never omit an assess.
+    notes is {"id", "text"} of a final critic rejection. With a failure code, each released AC also gets that note
+    when the batch fits RELEASE_OPERATIONS per held AC. Otherwise the release omits the notes."""
     from publication import mutate
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -173,11 +187,12 @@ def release(api, target, workspace, ac, reason, code=None):
         return release["status"] == "confirmed" and not any(item.get("unknown") for item in release.get("skipped_claims", []))
     held = claimed(receipt)
     # An older claim can hold more criteria than one failed release batch fits. Retain it for recovery.
-    require(not code or len(held) <= MAX_CLAIMED_CRITERIA,
+    require(not code or len(held) <= MAX_BATCH // 2,
             f"failed release of {len(held)} criteria exceeds one batch of {MAX_BATCH} operations; "
             f"claim retained for recovery")
     expected = {**claimed_revisions(receipt), **receipt.get("revisions", {})} if code else {}
-    operations, released, skipped = [], [], []
+    with_notes = bool(code and notes) and RELEASE_OPERATIONS * len(held) <= MAX_BATCH
+    operations, released, skipped, noted = [], [], [], []
     for address, (assignee, command) in held.items():
         try:
             object = context_reads.object_read(api, workspace, address)
@@ -196,10 +211,15 @@ def release(api, target, workspace, ac, reason, code=None):
         released.append(address)
         if code:
             operations.append({"command": not_ready(address, code)})
+        if with_notes:
+            operations.append({"command": note(address, notes)})
+            noted.append(notes["id"])
     require_fenced(operations)
     require(len(operations) <= MAX_BATCH, f"release needs {len(operations)} operations, more than one batch of "
             f"{MAX_BATCH}; claim retained for recovery")
     extra = {"failure_code": code} if code else {}
+    if code and notes and not with_notes:
+        extra["critic_notes_dropped"] = "batch"
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
         return not any(item.get("unknown") for item in skipped)
@@ -208,8 +228,10 @@ def release(api, target, workspace, ac, reason, code=None):
     finally:
         if prior.exists():
             release = read(prior)
-            write(prior, {**release, "released": released if release["status"] == "confirmed" else [],
-                          "requested_releases": released, "skipped_claims": skipped, **extra})
+            confirmed = release["status"] == "confirmed"
+            write(prior, {**release, "released": released if confirmed else [],
+                          "requested_releases": released, "skipped_claims": skipped, **extra,
+                          **({"critic_notes": noted if confirmed else []} if noted else {})})
     return not any(item.get("unknown") for item in skipped)
 
 

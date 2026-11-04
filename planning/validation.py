@@ -187,6 +187,7 @@ def checks(items):
 def critique(result, expected_digest):
     # Bind this verdict to the plan, including after a retry. Matching a digest
     # rejects stale artifacts; it cannot prove that an LLM understood the plan.
+    require(isinstance(result, dict), "critic verdict must be an object")
     require(result.get("plan_digest") == expected_digest, "critic reviewed a different plan")
     require(result.get("verdict") in ("clear", "reject"), "invalid critic verdict")
     text(result.get("summary"), "critic.summary")
@@ -198,6 +199,7 @@ def findings(items):
     """Validate critic findings; True when any of them blocks."""
     require(isinstance(items, list), "critic.findings must be a list")
     for finding in items:
+        require(isinstance(finding, dict), "critic finding must be an object")
         for field in ("claim", "evidence", "resolution"):
             text(finding.get(field), "finding." + field)
         require(type(finding.get("blocking")) is bool, "finding.blocking must be boolean")

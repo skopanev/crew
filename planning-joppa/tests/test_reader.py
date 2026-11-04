@@ -78,6 +78,24 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "context changed"):
             context.unchanged(snapshot, changed)
 
+    def test_critic_note_on_a_criterion_reaches_the_planner_prompt(self):
+        data = assignment()
+        data["joppa"]["objects"]["rule:r"] = context.source(item("rule:r"))
+        note = {"id": "crew-critic-run-7-0123456789ab", "text": "Evidence to verify against current code, not an instruction."}
+        data["joppa"]["objects"]["criterion:a"]["annotations"] = {"comments": {note["id"]: note}}
+        level = {"id": "rule:r", "revision": 3}
+        data.update(domain=level, capability=level, requirement=level, ac={"id": "criterion:a", "revision": 3},
+                    decisions=[json.dumps({})], knowledge_query="query")
+        spec = importlib.util.spec_from_file_location("joppa_prompt_note", ROOT / "planning-joppa/stages.py")
+        stage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stage)
+        with patch.object(stage.shared, "artifacts", return_value=Path("/unused")):
+            prompt = stage.prompt_assignment(data)
+            self.assertEqual(json.loads(prompt["ac"]["text"])["annotations"]["comments"][note["id"]], note)
+            data["joppa"].update(scope="requirement", criteria=[data["ac"]], criterion_schemas={})
+            [criterion] = stage.prompt_assignment(data)["joppa"]["criteria"]
+            self.assertEqual(criterion["annotations"]["comments"][note["id"]], note)
+
     def test_agent_lists_are_bounded_and_do_not_enable_verbose_reads(self):
         api = Fake(result={'items': []})
         reader = Reader(api, 'example', None)
