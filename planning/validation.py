@@ -195,6 +195,21 @@ def critique(result, expected_digest):
     require(blocking == (result["verdict"] == "reject"), "critic verdict and blocking findings disagree")
 
 
+class CriticRejection(ValueError):
+    """A critic rejected the plan after the last revision round. finish stops; the plan digest names the plan."""
+
+    def __init__(self, message, plan_digest):
+        super().__init__(message)
+        self.plan_digest = plan_digest
+
+
+def require_clear(reviews, plan_digest):
+    """Call after every verdict is valid. Raise for the first rejecting seat in CRITICS order."""
+    for key in CRITICS:
+        if reviews[key]["verdict"] != "clear":
+            raise CriticRejection(f"{key} critic rejected: {reviews[key]['summary']}", plan_digest)
+
+
 def findings(items):
     """Validate critic findings; True when any of them blocks."""
     require(isinstance(items, list), "critic.findings must be a list")
