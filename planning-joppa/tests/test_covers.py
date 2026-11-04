@@ -98,6 +98,15 @@ class CoversTests(unittest.TestCase):
         original = deepcopy(carrier)
         value["tasks"][0]["covers"] = []
         value["tasks"][0]["checks"] = value["tasks"][0]["checks"][:1]
+        # A matching body check alone is not enough: the lane could not bind a test without data.acceptance.
+        with self.assertRaisesRegex(ValueError, "AC criterion:b: acceptance check"):
+            publication.operations(value, data)
+        carrier["document"]["data"]["acceptance"] = [{"ac": "criterion:b", "check": "Other => check"}]
+        with self.assertRaisesRegex(ValueError, "AC criterion:b: acceptance check"):
+            publication.operations(value, data)
+        carrier["document"]["data"]["acceptance"] = [
+            {"ac": "b", "check": "Show the saved value => The value is visible"}]
+        original = deepcopy(carrier)
         operations = publication.operations(value, data)
         self.assertNotIn("work:carrier", json.dumps(operations))
         self.assertEqual(carrier, original)

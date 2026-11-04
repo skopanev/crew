@@ -1,4 +1,6 @@
 """Match criterion acceptance checks to the Tasks that carry them, including Tasks that cover a criterion."""
+import re
+
 from common import require
 import context
 import coverage
@@ -70,3 +72,17 @@ def acceptance_rows(plan, assignment):
                     if row not in rows.setdefault(task["id"], []):
                         rows[task["id"]].append(row)
     return rows
+
+
+def carries(task, address, check):
+    """A retained Task carries a criterion check only when its stored acceptance mapping lists it,
+    in the same repository. Otherwise the lane could not bind a test to it."""
+    data = task["document"]["data"]
+    body = context.task_contract(data)
+    if re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) != [check["repository"]]:
+        return False
+    kind = address.split(":", 1)[0]
+    rows = data.get("acceptance") if isinstance(data.get("acceptance"), list) else []
+    return any(isinstance(row, dict) and row.get("check") == check_line(check)
+               and (row.get("ac") if ":" in str(row.get("ac")) else kind + ":" + str(row.get("ac"))) == address
+               for row in rows)
