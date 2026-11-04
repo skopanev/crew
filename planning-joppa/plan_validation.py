@@ -53,9 +53,9 @@ def validate(plan, assignment):
         for task in value["tasks"]:
             task["depends_on"] = [dependency for dependency in task.get("depends_on", [])
                                   if aliases.get(dependency, dependency) in own or dependency not in local and dependency not in aliases]
-        validate_one(value, context.criterion_assignment(assignment, address))
+        validate_one(value, context.criterion_assignment(assignment, address), plan.get("tasks", []))
 
-def validate_one(plan, assignment):
+def validate_one(plan, assignment, elsewhere=()):
     normalized = deepcopy(plan)
     normalized["tasks"] = ordered_tasks(normalized.get("tasks", []))
     if normalized.get("disposition") == "verify_existing":
@@ -113,21 +113,19 @@ def validate_one(plan, assignment):
                 f"retirement requires an update that removes the dependency from {address}")
     validation.plan(normalized, assignment)
     if plan.get("disposition") == "implement" and any(task["action"] != "retire" for task in normalized["tasks"]):
-        fields = ("scenario", "command", "cwd", "expected")
         retained = [task for task in inventory.values() if task["address"] not in targets
                     and not ended(task)]
         for check in plan["acceptance_checks"]:
-            specification = {key: check[key] for key in fields if key in check}
             assigned = any(task["action"] != "retire" and task["repository"] == check["repository"]
-                           and any({key: own[key] for key in fields if key in own} == specification
-                                   for own in task["checks"]) for task in normalized["tasks"])
+                           and any(specification(own) == specification(check) for own in task["checks"])
+                           for task in normalized["tasks"])
             for task in retained:
                 body = context.task_contract(task["document"]["data"])
                 checks = body.partition("\nChecks:\n")[2].splitlines()
                 assigned |= (re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) == [check["repository"]]
                              and check_line(check) in checks)
-            require(assigned,
-                    "every AC acceptance check must be assigned to Task checks in its repository")
+            if not assigned:
+                raise ValueError(missing_check(check, assignment["ac"]["id"], elsewhere))
     schema = assignment["joppa"]["task_schema"]
     limit = title_limit(schema)
     for task in plan.get("tasks", []):
@@ -143,6 +141,24 @@ def validate_one(plan, assignment):
                         require(len(entry) <= MAX_DATA_VALUE,
                                 f"Task {task['id']}: data.{path} has {len(entry)} characters; "
                                 f"use at most {MAX_DATA_VALUE}; no text was truncated")
+
+def specification(check):
+    return {key: check[key] for key in ("scenario", "command", "cwd", "expected") if key in check}
+
+def bounded(value, limit=160):
+    return value if len(value) <= limit else value[:limit - 3] + "..."
+
+def missing_check(check, address, elsewhere):
+    """Name the unassigned check and a Task under another AC that carries the same check."""
+    message = (f"AC {address}: acceptance check \"{bounded(check_line(check))}\" must be assigned to Task checks "
+               f"of a Task under this AC in repository {check['repository']}")
+    found = next((task for task in elsewhere if task.get("ac") != address and task.get("action") != "retire"
+                  and task.get("repository") == check["repository"]
+                  and any(specification(own) == specification(check) for own in task.get("checks", []))), None)
+    if found:
+        message += (f"; Task {found['id']} \"{bounded(found.get('title', ''))}\" under AC {found['ac']} carries it,"
+                    " but a Task under another AC does not satisfy this AC")
+    return message
 
 def binding_checks(plan, assignment):
     repositories = {repo["id"]: repo for repo in assignment["repositories"]}
