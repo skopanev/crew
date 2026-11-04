@@ -37,7 +37,8 @@ export async function readyCriteria(config, tokenFile, signal) {
   for await (const page of nodePages(read, {kind: kinds('ac'),
     fields: ['title', 'kind', 'revision', 'status', 'work_ready', 'data.assignee', 'process.assessment']})) {
     for (const row of page.items) {
-      if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || active.has(row.address)) continue;
+      if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || nodeWaiting(row) ||
+          active.has(row.address)) continue;
       if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
       const failures = (blocked.get(row.address) || []).sort();
       if (row.status === 'green' || row.status === 'purple' || !(await dependencies(row.address)).ready) continue;

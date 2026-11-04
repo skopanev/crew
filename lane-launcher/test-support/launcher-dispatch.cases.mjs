@@ -33,7 +33,9 @@ test('an available Task launches once; the pending tab consumes the only slot', 
   let result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 1);
-  assert.equal(f.calls.find(call => call.args.view === 'available').args.project, 'project:app');
+  assert(f.calls.some(call => call.name === 'joppa_objects' && call.args.kind?.includes('task') &&
+    call.args.fields.includes('data.projects')));
+  assert.equal(f.calls.some(call => call.name === 'joppa_tasks'), false);
   const events = herdrEvents(f);
   const create = events.find(args => args[1] === 'create');
   assert.deepEqual(create.slice(0, 4), ['tab', 'create', '--workspace', 'workspace']);

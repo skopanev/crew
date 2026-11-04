@@ -11,7 +11,8 @@ const launcher = fileURLToPath(new URL('../launcher.mjs', import.meta.url));
 const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
 
 // One dispatcher pass reads the available Task queue once per free worker.
-const queueReads = f => f.calls.filter(call => call.name === 'joppa_tasks' && call.args.view === 'available').length;
+const queueReads = f => f.calls.filter(call => call.name === 'joppa_objects' &&
+  [call.args.kind].flat().includes('task') && !call.args.cursor && !call.args.status).length;
 
 function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
   return new Promise((resolve, reject) => {

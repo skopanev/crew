@@ -68,19 +68,17 @@ for (const flat of [false, true]) test(`native checkpoints and compact agent sna
   Object.assign(object.annotations.comments.c26, {actor: 'worker', actor_type: 'agent', text: [
     'CREW_RECOVERY_CHECKPOINT', 'Task: work:one', `Digest: ${digest}`, 'Ref: refs/heads/recovery/checkpoint',
     `SHA: ${'a'.repeat(40)}`, `Tree: ${'b'.repeat(40)}`, `Base: ${'c'.repeat(40)}`, 'Node: implement_code'].join('\n')});
-  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, objects: {'work:one': object},
-    responses: {joppa_tasks: {total: 0}}}));
+  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, objects: {'work:one': object}}));
   const result = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls});
   assert.equal(Object.keys(result.annotations.comments).length, 31);
   assert.equal(result.kind, 'work');
   assert.equal(result.historical, false);
-  assert.equal(result.process.assignee, null);
-  assert.equal(result.contract_revision, 3);
+  assert.equal(result.process.assignee, undefined);
+  assert.equal(result.contract_revision, undefined);
   assert.equal(latestRecovery({joppa: {workers: [{actor: 'worker'}]}}, result).noteId, 'c26');
   assert.equal(contractDigest(result), digest);
   assert.deepEqual(result.document, object.document);
-  assert.deepEqual((await callJoppa('https://service.invalid/mcp', undefined, 'joppa_tasks', {}, {mcpCommand: calls})).tasks, []);
   const movingState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   movingState.commentDrift = true;
   fs.writeFileSync(stateFile, JSON.stringify(movingState));
@@ -105,7 +103,6 @@ assert len(second['comments']['items'])==6
 saved=json.loads((Path(sys.argv[3])/'joppa-snapshot.json').read_text())['objects']['work:one']
 assert len(saved['annotations']['comments'])==30
 assert 'c30' in saved['annotations']['comments']
-assert api.call('joppa_tasks',{})['tasks']==[]
 api.stdio.close()
 `;
   const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls), f.root],

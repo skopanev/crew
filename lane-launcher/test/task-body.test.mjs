@@ -19,7 +19,7 @@ test('Task rendering reads full body and keeps historical contracts readable', (
 });
 
 test('body migration changes the raw digest and does not conceal later edits', () => {
-  const object = {current_revision: 3, contract_revision: 3,
+  const object = {current_revision: 3,
     document: {parent: 'criterion:a', data: {contract: 'Required output'}, links: []}};
   const before = contractDigest(object);
   object.document.data = {body: 'Required output'};
@@ -31,16 +31,16 @@ test('body migration changes the raw digest and does not conceal later edits', (
 
 test('a local dependency without a revision still needs its current target to finish', async () => {
   const f = fixture(), target = f.objects.get('work:two');
-  target.review_required = false;
   f.objects.get('work:one').document.links = [{target: target.address, relation: 'depends_on', blocking: true}];
   assert.equal((await dependencyCheck(f.read)('work:one')).ready, true);
-  delete target.process.done;
-  target.process.status = 'open';
+  target.document.present = true;
   assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false, blocker: target.address});
-  target.process.done = 'Completed';
-  target.process.status = 'done';
-  f.objects.get('work:one').document.links[0].revision = 0;
-  assert.equal((await dependencyCheck(f.read)('work:one')).ready, false);
+  target.document.present = false;
+  assert.equal((await dependencyCheck(f.read)('work:one')).ready, true);
+  const criterion = f.add('measure:live', 'spec:r');
+  criterion.status = {tone: 'green'};
+  f.objects.get('work:one').document.links = [{target: criterion.address, relation: 'depends_on', blocking: true, revision: 0}];
+  await assert.rejects(dependencyCheck(f.read)('work:one'), {code: 'DEPENDENCY_INVALID'});
   const remote = {remote_links: [{workspace: 'other', target: 'work:remote', relation: 'depends_on', blocking: true,
     status: {access: true, present: true, satisfied: true, review_required: false, current_revision: 1}}]};
   assert.equal(remoteDependencyBlocker(remote), '@other/work:remote');

@@ -13,7 +13,6 @@ import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
-import {nodeAssignee} from '../joppa-nodes.mjs';
 
 async function packageFixture(t, mode = 'success') {
   // The run folder name is the launch UUID, as in launcher state.
@@ -25,13 +24,13 @@ async function packageFixture(t, mode = 'success') {
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
-    work_ready: true, review_required: false, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
+    work_ready: true, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
     process: {}, annotations: {comments: {}}});
   objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
   for (let index = 1; index <= 2; index++) {
     objects.set(`ac:a${index}`, make(`ac:a${index}`, 'ac', 'req:r', {title: `AC ${index}`}));
     objects.set(`task:t${index}`, make(`task:t${index}`, 'task', `ac:a${index}`, {
-      title: `[0${index}] Task ${index}`,
+      title: `[0${index}] Task ${index}`, projects: ['app'],
       body: `Goal: scoped change ${index}\nRepository: app\nModule: m${index}\nChecks: exact check ${index}`}));
   }
   const server = http.createServer(async (req, res) => {
@@ -52,25 +51,34 @@ async function packageFixture(t, mode = 'success') {
       task: {role: 'task', question: 'Which change does this Task make?'}}}};
     else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
     else if (name === 'joppa_objects') {
-      const rows = [...objects.values()].filter(object => object.kind === 'ac').map(object => ({
-        address: object.address, revision: object.current_revision, contract_revision: object.contract_revision,
-        kind: object.kind, status: object.status.tone,
-        title: object.document.data.title, work_ready: object.work_ready, review_required: object.review_required,
-        process: object.process, work_summary: {active: 0, done: 0}}));
+      assert.equal(Object.hasOwn(args, 'work_filter'), false);
+      const kinds = args.kind && [args.kind].flat(), tones = args.status && [args.status].flat();
+      const descendant = object => {
+        if (!args.parent || args.parent === '*') return true;
+        let parent = object.document.parent, depth = 1;
+        while (parent) {
+          if (parent === args.parent) return !args.depth || depth <= args.depth;
+          parent = objects.get(parent)?.document.parent;
+          depth++;
+        }
+        return false;
+      };
+      const rows = [...objects.values()].filter(object => descendant(object) &&
+        (!kinds || kinds.includes(object.kind)) && (object.kind !== 'task' || queue.includes(object.address)))
+        .map(object => ({address: object.address, revision: object.current_revision,
+          kind: object.kind, parent: object.document.parent, present: object.document.present,
+          status: object.document.present ? object.status?.tone || 'grey' : 'purple',
+          title: object.document.data.title, work_ready: object.work_ready,
+          'data.assignee': object.document.data.assignee ?? null, 'data.commit': object.document.data.commit ?? null,
+          'data.projects': object.document.data.projects ?? null, 'data.priority': object.document.data.priority ?? null,
+          'process.assessment': object.process.assessment ?? null}))
+        .filter(row => tones ? tones.includes(row.status) : row.present);
       const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
       value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
         .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
         ...(end < rows.length ? {next_cursor: String(end)} : {})};
     }
-    else if (name === 'joppa_tasks') value = args.view === 'mine' ? {total: 0} : {
-      tasks: queue.map(address => ({address, revision: 3, title: objects.get(address).document.data.title,
-        projects: objects.get(address).document.data.projects || ['project:app'],
-        // Selection cases still describe holders with the removed process fields.
-        assignee: nodeAssignee(objects.get(address)) ?? objects.get(address).process.assignee ?? null,
-        archived: objects.get(address).document.data.archived === true, legacy: objects.get(address).process.status}))
-        .map(({archived, legacy, ...task}) => ({...task, status: archived ? 'done' : legacy || (task.assignee ? 'in_progress' : 'open')}))
-        .filter(task => !args.project || task.projects.includes(args.project))
-        .filter(task => args.view === 'all' || task.status === 'open' && !task.assignee)};
+    else if (name === 'joppa_tasks') throw new Error('The removed Task tool was called');
     else if (name === 'joppa_batch') {
       const commands = args.operations.map(({command}) => command);
       const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
