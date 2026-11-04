@@ -8,7 +8,8 @@ import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
 import {formatDependencyIssue} from './dependencies.mjs';
-import {configFrom} from './launcher-config.mjs';
+import {configFrom, dolberIdentity} from './launcher-config.mjs';
+import {configReloader} from './config-reload.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
 export {configFrom} from './launcher-config.mjs';
 
@@ -162,7 +163,8 @@ export async function main(argv) {
     else throw new Error(`usage: ${usage}`);
   }
   if (!fs.existsSync(file)) throw new Error(`Configuration not found: ${file}. Copy ${path.join(here, 'dolber-joppa.example.json')} to this path and fill in workspace.`);
-  const config = configFrom(file, process.env, {dryRun: mode === 'dry-run'});
+  const bytes = fs.readFileSync(file);
+  let config = configFrom(file, process.env, {dryRun: mode === 'dry-run', bytes});
   if (mode === 'monitor') {
     if (!process.stdout.isTTY) throw new Error('--monitor needs a terminal');
     const dashboard = createDashboard({...config, monitorOnly: true}, paint);
@@ -197,6 +199,9 @@ export async function main(argv) {
     throw new Error(`Dispatcher lock exists: ${lock}. Check owner.json; remove only after its process has stopped.`);
   }
   save(path.join(lock, 'owner.json'), {pid: process.pid, startedAt: new Date().toISOString()});
+  // Running lanes keep the config saved in their launch.json; only new selections use a reload.
+  const reload = configReloader(file, raw => { const next = configFrom(file, process.env, {bytes: raw}); preflight(next); return next; },
+    dolberIdentity, config, bytes);
   let stopped = false, wake;
   const stop = () => { stopped = true; wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
@@ -211,7 +216,15 @@ export async function main(argv) {
     if (dashboard) { draw(); ticker = setInterval(draw, 5000); }
     do {
       deadline = null;
-      try { await tick(config, dashboard?.state); }
+      try {
+        const loaded = reload();
+        if (loaded.error) throw new Error(loaded.error);
+        config = loaded.config;
+        dashboard?.use(config);
+        if (loaded.reloaded && !dashboard) console.log('config reloaded');
+        await tick(config, dashboard?.state);
+        if (loaded.reloaded && dashboard) dashboard.state.message = `config reloaded · ${dashboard.state.message}`;
+      }
       catch (error) {
         if (mode !== 'loop') throw error;
         if (dashboard) dashboard.state.fail(error.message);

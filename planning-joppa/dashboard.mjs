@@ -5,7 +5,9 @@ import {fileURLToPath} from 'node:url';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {lock as dispatcherLock} from './run-files.mjs';
 import {plannerRows, titleCell} from './run-rows.mjs';
-import {criterionIds, readyRequirements} from './queue.mjs';
+import {readyRequirements} from './queue.mjs';
+import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
+import {configReloader} from '../lane-launcher/config-reload.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements} from './queue.mjs';
 
@@ -36,23 +38,15 @@ export async function main(argv) {
   }
   if (dryRun && !ac && !requirement) throw new Error('--dry-run needs --req-id or --ac-id');
   const configFile = path.resolve(file);
-  const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-  const ids = criterionIds(config);
-  if (ac && ids && !ids.includes(ac)) throw new Error('Selected AC is outside config.ac_ids');
-  if (typeof config.workspace !== 'string' || typeof config.runs_folder !== 'string') throw new Error('Config needs workspace and runs_folder');
-  const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
-  const configuredRoot = path.resolve(path.dirname(configFile), expand(config.runs_folder));
-  const root = fs.existsSync(configuredRoot) ? fs.realpathSync(configuredRoot) : configuredRoot;
-  const interval = config.interval_seconds ?? 60;
-  if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
-  const tokenFile = config.token_file ? path.resolve(path.dirname(configFile), expand(config.token_file)) : null;
-  if (!ac && !requirement && !monitor && !tokenFile && !config.mcp_command) {
-    throw new Error('Config needs mcp_command or token_file for automatic selection');
-  }
+  const automatic = !ac && !requirement && !monitor;
+  const bytes = fs.readFileSync(configFile);
+  let {config, root, interval, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
+  // launch.py compares the bytes it parses with this digest before it claims or starts Medulla.
+  const handoff = () => ({...process.env, PLANNING_JOPPA_HANDOFF_DIGEST: digest});
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
     ...(requirement ? ['--req-id', requirement] : []), ...(dryRun ? ['--dry-run'] : [])];
   if (dryRun) {
-    const child = spawn('sh', args, {stdio: 'inherit'});
+    const child = spawn('sh', args, {stdio: 'inherit', env: handoff()});
     process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
     return;
   }
@@ -97,7 +91,7 @@ export async function main(argv) {
   const terminate = () => stop('SIGTERM');
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', terminate);
-  let ticker, lock;
+  let ticker, lock, reload;
   const attempted = new Set();
   const pause = () => new Promise(resolve => {
     nextCheck = performance.now() + interval * 1000;
@@ -108,19 +102,26 @@ export async function main(argv) {
     if (stopped) wake();
   });
   try {
-    if (!ac && !requirement && !monitor) {
+    if (automatic) {
       lock = dispatcherLock(root);
+      const parse = raw => plannerConfig(configFile, {automatic}, raw);
+      reload = configReloader(configFile, parse, plannerIdentity, {config, root, interval, tokenFile, digest}, bytes);
     }
     if (process.stdout.isTTY) screen = createScreen(state, paint, render);
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = requirement;
-      if (!ac && !requirement && !monitor) {
+      let selected = requirement, attemptKey = null;
+      if (automatic) {
         current = null;
         state.error = null;
+        // Reload only here: no planner pass is active between passes.
+        const loaded = reload();
+        ({config, interval, tokenFile, digest} = loaded.config);
+        const notice = loaded.reloaded ? 'config reloaded · ' : '';
         try {
-          if (plannerRows(root, null, Infinity, config).some(row => row.status === 'HELD')) {
+          if (loaded.error) state.error = loaded.error;
+          else if (plannerRows(root, null, Infinity, config).some(row => row.status === 'HELD')) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
           } else {
             selection = new AbortController();
@@ -129,9 +130,10 @@ export async function main(argv) {
             const next = candidates.find(row => !attempted.has(row.attemptKey));
             if (next) {
               selected = next.address;
-              attempted.add(next.attemptKey);
-              state.message = `Planning ${next.address} · ${next.title}`;
-            } else state.message = `Requirements: ${candidates.length} ready · no unattempted Requirements · next check in ${interval}s`;
+              attemptKey = next.attemptKey;
+              attempted.add(attemptKey);
+              state.message = `${notice}Planning ${next.address} · ${next.title}`;
+            } else state.message = `${notice}Requirements: ${candidates.length} ready · no unattempted Requirements · next check in ${interval}s`;
           }
         } catch (error) { state.error = `Selection failed: ${error.message}`; }
         if (state.error && once && !stopped) process.exitCode = 2;
@@ -140,7 +142,7 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || selected) {
         const runArgs = ac || requirement ? args : [...args, '--req-id', selected];
-        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true});
+        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: handoff()});
         let pending = '', buffered = '';
         const output = data => {
           const text = data.toString();
@@ -169,6 +171,8 @@ export async function main(argv) {
         const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
         await termination;
         if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
+        // A refused handoff started nothing: only this unstarted selection may be tried again.
+        if (code === HANDOFF_CHANGED && attemptKey && !current) attempted.delete(attemptKey);
         if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
         if (!stopped && (once || ac || requirement)) process.exitCode = code ?? 2;
         draw();

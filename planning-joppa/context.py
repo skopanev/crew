@@ -212,8 +212,8 @@ def lane_runs_folders(config):
     return folders
 
 
-def configuration(path):
-    config = read(path)
+def configuration(path, raw=None):
+    config = json.loads(raw) if raw is not None else read(path)
     for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
         text(config.get(key), "config." + key)
     if config.get("mcp_command") is not None:
