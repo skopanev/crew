@@ -126,6 +126,41 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "selected Requirement criterion"):
             publication.operations(value, data)
 
+    def test_misplaced_cross_criterion_check_names_its_criterion_and_task(self):
+        data, value = assignment(), plan()
+        data["joppa"].update(scope="requirement", tasks=[], criteria=[], criterion_schemas={})
+        value["criteria"], value["tasks"], value["acceptance_checks"] = [], [], []
+        addresses = ("criterion:a", "criterion:b", "criterion:c")
+        for index, address in enumerate(addresses):
+            data["joppa"]["criteria"].append({"id": address, "revision": 3})
+            data["joppa"]["objects"][address] = context.source(item(address, "rule:r"))
+            data["joppa"]["criterion_schemas"][address] = {key: deepcopy(data["joppa"][key])
+                for key in ("task_type", "task_schema", "test_nodes")}
+            task = deepcopy(plan()["tasks"][0])
+            task.update(id=f"step{index}", ac=address, title=f"Panel part {index}",
+                        checks=[{"scenario": f"Module check {index}", "expected": "Module output"}])
+            value["tasks"].append(task)
+            value["criteria"].append({"ac": address, "disposition": "implement"})
+            value["acceptance_checks"].append({"ac": address, "repository": "service",
+                "scenario": f"Open panel {index} " + "x" * 200, "expected": f"Panel {index} shows"})
+        shared = value["tasks"][2]
+        # A shared Task under criterion:c carries the checks of every criterion.
+        shared["checks"] = [{key: check[key] for key in ("scenario", "expected")} for check in value["acceptance_checks"]]
+        with self.assertRaises(ValueError) as caught:
+            publication.operations(value, data)
+        message = str(caught.exception)
+        self.assertIn("AC criterion:a: acceptance check \"Open panel 0 xxx", message)
+        self.assertIn("in repository service", message)
+        self.assertIn("Task step2 \"Panel part 2\" under AC criterion:c carries it", message)
+        self.assertNotIn("x" * 160, message)
+        for task, check in zip(value["tasks"][:2], value["acceptance_checks"][:2]):
+            shared["checks"].remove({key: check[key] for key in ("scenario", "expected")})
+            task["checks"].append({key: check[key] for key in ("scenario", "expected")})
+        publication.operations(value, data)
+        value["tasks"][1]["checks"].pop()
+        with self.assertRaisesRegex(ValueError, "AC criterion:b: .*in repository service$"):
+            publication.operations(value, data)
+
     def test_requirement_explicitly_orders_every_unfinished_selected_task(self):
         data, value = assignment(), plan()
         data["joppa"].update(scope="requirement", criteria=[{"id": "criterion:a"}],
