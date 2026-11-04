@@ -18,7 +18,7 @@ def normalize_detail(args, value):
     if "document" not in result:
         if not isinstance(result.get("data"), dict) or type(result.get("revision")) is not int or result["revision"] < 1:
             raise MCPError("Joppa object detail is incomplete")
-        present = result.get("present", True) is not False and result.get("archived") is not True
+        present = result.get("present", True) is not False
         result["document"] = {"revision": result["revision"], "parent": result.get("parent"),
                               "present": present, "data": result["data"],
                               "links": [authored_link(link) for link in result.get("links", [])]}
@@ -44,7 +44,7 @@ def assignee(object):
 
 
 def ended(object):
-    return object["document"].get("present") is False or object["document"]["data"].get("archived") is True
+    return object["document"].get("present") is False
 
 
 def done(object):

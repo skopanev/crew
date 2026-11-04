@@ -62,7 +62,7 @@ try {
       const current = await read('joppa_objects', {address: task.address});
       require(!remoteDependencyBlocker(current), `Claimed Task has an unmet remote dependency: ${task.address}`);
       require(current && current.address === task.address && current.historical === false &&
-        current.document?.present === true && current.document.data?.archived !== true,
+        current.document?.present === true,
         `Claimed Task is absent or historical: ${task.address}`);
       require(nodeAssignee(current) === assignee && !nodeWaiting(current), `Task holder changed: ${task.address}`);
       require(current.work_ready === true, `Claimed Task is not work_ready: ${task.address}`);
@@ -72,7 +72,7 @@ try {
         const parent = await read('joppa_objects', {address: task.parent.address});
         require(!remoteDependencyBlocker(parent), `Task parent has an unmet remote dependency: ${task.parent.address}`);
         require(parent && parent.address === task.parent.address && parent.historical === false &&
-          parent.document?.present === true && parent.document.data?.archived !== true &&
+          parent.document?.present === true &&
           Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 &&
           parent.work_ready === true && live(parent),
           `Task parent context needs review or has active planning: ${task.parent.address}`);
@@ -85,7 +85,7 @@ try {
       const parent = await read('joppa_objects', {address: context.address});
       require(!remoteDependencyBlocker(parent), `Acceptance context has an unmet remote dependency: ${context.address}`);
       require(parent && parent.address === context.address && parent.historical === false &&
-        parent.document?.present === true && parent.document.data?.archived !== true &&
+        parent.document?.present === true &&
         live(parent),
         `Acceptance context is invalid, needs review, or has active planning: ${context.address}`);
       require(contractDigest(parent) === context.digest, `Acceptance context changed after claim: ${context.address}`);

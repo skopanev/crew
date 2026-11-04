@@ -17,8 +17,8 @@ const remoteLinkReady = link => {
   if (!status || typeof status !== 'object') return false;
   if (status.access !== true || status.present !== true || status.satisfied !== true) return false;
   if (status.review_required !== false) return false;
-  return currentPin(link.revision, status.current_revision,
-    status.contract_revision === undefined ? status.current_revision : status.contract_revision);
+  // Joppa checks the target contract and exposes the result as review_required.
+  return currentPin(link.revision, status.current_revision, 1);
 };
 
 export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace_key) {
@@ -63,7 +63,7 @@ export function dependencyCheck(read) {
     checkWorkspaceKey(value.workspace_key);
     return value;
   };
-  const present = value => value.document.present === true && value.document.data?.archived !== true;
+  const present = value => value.document.present === true;
   const role = async value => {
     const configured = (await types())[value.kind];
     if (!configured) throw invalid('Dependency object type is absent from the schema');

@@ -94,28 +94,41 @@ test('success saves the commit and archives at the saved revision in one batch',
     [['done0', 'save_object'], [undefined, 'archive_object'], ['done1', 'save_object'], [undefined, 'archive_object']]);
   assert.deepEqual(done[1].command.revision, {$ref: 'done0/saved_revision'});
   assert(done.every(({command}) => command.op !== 'save_object' || command.question_checked === question));
-  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
+  assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 6], ['task:t2', 6]]);
   for (const address of ['task:t1', 'task:t2']) {
     assert.equal(f.objects.get(address).document.present, false);
     assert.equal(f.objects.get(address).document.data.commit, sha);
   }
 });
 
-test('an unchanged save keeps its revision and the archive uses that revision', async t => {
-  const {f, result, finish} = await complete(t, 'unchanged-save');
+test('a Task type without a schema question can be claimed and completed', async t => {
+  const {f, result, finish} = await complete(t, 'no-question');
   await finish();
   assert.equal(result.completed, true);
-  assert.deepEqual(result.tasks.map(task => task.revision), [3, 3]);
-  assert(['task:t1', 'task:t2'].every(address => f.objects.get(address).document.present === false));
+  assert(batches(f).flat().filter(command => command.op === 'save_object')
+    .every(command => !Object.hasOwn(command, 'question_checked')));
 });
 
-for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-present', 'a present document']]) {
+for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-present', 'a present document'],
+  ['archive-historical', 'a historical document'], ['archive-assigned', 'an assigned document'],
+  ['archive-missing-commit', 'a missing commit']]) {
   test(`completion is refused when the archived read shows ${label}`, async t => {
     const {result, finish} = await complete(t, mode);
     await assert.rejects(finish(), /did not confirm every Task completion at the checked SHA/);
     assert.equal(result.completed, undefined);
   });
 }
+
+test('failure is not confirmed when another actor owns the assessment', async t => {
+  const f = await packageFixture(t, 'wrong-assessor');
+  await claimTask(f.run, f.persist, f.runId);
+  const artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed\n');
+  const result = {code: 1, status: 'failed'};
+  await assert.rejects(finishTask(f.run, f.stateFile, result, artifacts), /did not confirm every Task block/);
+  assert.equal(result.blockConfirmed, undefined);
+});
 
 test('a saved completion request without a saved-revision reference is not sent', async t => {
   const {f, sha, finish} = await complete(t);

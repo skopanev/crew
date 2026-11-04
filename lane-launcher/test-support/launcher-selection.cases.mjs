@@ -62,6 +62,26 @@ test('Joppa selects structured Tasks and detects their remote repository holders
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
+test('Joppa planner excludes completed criteria but selects their failed remaining Tasks', async t => {
+  const f = await packageFixture(t);
+  const config = {workspace: f.run.workspace, url: f.run.config.joppa.url};
+  const done = f.objects.get('task:t1');
+  done.document.present = false;
+  done.document.data.commit = 'a'.repeat(40);
+  f.objects.get('task:t2').document.parent = 'ac:a1';
+  f.objects.get('task:t2').document.present = false;
+  const read = () => readyCriteria(config, f.run.joppaWorker.tokenFile);
+  assert.deepEqual((await read()).map(row => row.address), ['ac:a2']);
+  const failed = f.objects.get('task:t2');
+  failed.document.present = true;
+  failed.process.assessment = {state: 'waiting', reason: 'GATE_FAIL', actor: 'lane-1'};
+  const rows = await read();
+  assert.equal(rows[0].address, 'ac:a1');
+  assert.equal(rows[0].failedTaskCount, 1);
+  failed.document.data.assignee = 'another-run';
+  assert.deepEqual((await read()).map(row => row.address), ['ac:a2']);
+});
+
 test('Joppa planner attempt identity stays current when a test child is added', async t => {
   const f = await packageFixture(t), ac = f.objects.get('ac:a1');
   f.queue.length = 0;

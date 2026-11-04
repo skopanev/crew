@@ -7,8 +7,6 @@ def source(object):
     process = dict(object.get("process", {}))
     value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
                                             "files", "references", "work_ready")} | {"process": process}
-    if "contract_revision" in object:
-        value["contract_revision"] = object["contract_revision"]
     if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
         value["remote_links"] = object.get("remote_links", [])
         value["remote_links_revision"] = object.get("remote_links_revision", 0)
@@ -31,8 +29,8 @@ def authored_document(document):
 def remote_satisfied(link):
     status = link.get("status", {})
     revision = link.get("revision")
-    return (current_pin(revision, status.get("current_revision"),
-                        status.get("contract_revision", status.get("current_revision")))
+    # Joppa exposes its contract check as review_required, not contract_revision.
+    return (current_pin(revision, status.get("current_revision"), 1)
             and status.get("access") is True
             and status.get("present") is True and status.get("review_required") is False
             and status.get("satisfied") is True)

@@ -87,7 +87,7 @@ export async function collectRequirementCriteria(requirement, requirementKind, t
         require(item && validAddress(item.address) && Boolean(types[item.kind]), 'Joppa child object is invalid');
         const itemPresent = typeof item.present === 'boolean' ? item.present : item.document?.present;
         require(typeof itemPresent === 'boolean', `Joppa child presence is missing: ${item.address}`);
-        if (!itemPresent || item.document?.data?.archived === true) continue;
+        if (!itemPresent) continue;
         if (!criterionBranches.has(item.kind)) continue;
         const full = await object(item.address);
         if (!present(full)) continue;

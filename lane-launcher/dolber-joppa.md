@@ -52,7 +52,7 @@ Other failures retry after 60 seconds. Existing run results supply the retry tim
 A repeated finalization checks target ancestry under the lock and skips checks and push if the code already landed.
 This mode requires `sharedLockDir` and a server-enforced read-only `joppa.readerTokenFile`.
 Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
-The host confirms the exact remote SHA before it calls `complete_task`.
+The host confirms the remote SHA before it saves `data.commit` and archives the Task in one batch.
 The command sends that SHA in `commit`. The host then checks the returned Task commit.
 An existing-code check sends the verified remote SHA. It does not create a commit.
 A completed Task records delivered work. Criterion test results decide acceptance separately.

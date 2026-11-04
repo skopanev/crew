@@ -53,7 +53,7 @@ export async function requirementPlan(run, read) {
       value = value.document.parent ? await object(value.document.parent) : null;
     }
   };
-  const present = value => value.document.present === true && value.document.data?.archived !== true;
+  const present = value => value.document.present === true;
   const reqObject = await object(requirement);
   require(present(reqObject) && types[reqObject.kind]?.role === 'requirement',
     'Requirement object is not a current present requirement');

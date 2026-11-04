@@ -97,7 +97,7 @@ export async function guardPublications(run, read, ancestor) {
         if (!await ancestor(repo, sha, branch)) pending(`${target.address} commit ${sha} is not on ${branch}`);
         continue;
       }
-      if (target.document.present !== true || target.document.data?.archived === true) continue;
+      if (target.document.present !== true) continue;
       await visit(target.address);
     }
     if (value.document.parent) await visit(value.document.parent);

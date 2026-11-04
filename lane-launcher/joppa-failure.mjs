@@ -134,6 +134,7 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     const comment = confirmed.annotations?.comments?.[note?.id];
     require(confirmed.address === claim.address && confirmed.historical === false && confirmed.document?.present === true &&
       !nodeAssignee(confirmed) && nodeWaiting(confirmed) && assess && confirmed.process?.assessment?.reason === assess.reason &&
+      confirmed.process.assessment.actor === run.joppaWorker.actor &&
       comment && comment.withdrawn !== true && comment.actor === run.joppaWorker.actor && comment.text === note.text,
       'Joppa did not confirm every Task block; outcome requires inspection');
     result.tasks.push({address: claim.address, status: 'blocked', revision: confirmed.current_revision});
