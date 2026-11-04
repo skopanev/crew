@@ -49,8 +49,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
     for (const context of run.claim.contexts || []) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: context.address});
       verifyRemoteDependencies(parent);
-      require(parent.address === context.address && contextLive(parent) && contractDigest(parent) === context.digest,
-        'Package acceptance context changed during execution; completion refused');
+      require(parent.address === context.address && contextLive(parent) && parent.work_ready === true &&
+        contractDigest(parent) === context.digest, 'Package acceptance context changed during execution; completion refused');
     }
   };
   const objects = await currentTasks(result.code === 0, result.code !== 0);

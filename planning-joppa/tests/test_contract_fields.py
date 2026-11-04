@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake
+from provider_fixture import item, assignment, plan, Fake, ACCEPTANCE
 
 
 class ProviderTests(unittest.TestCase):
@@ -80,7 +80,8 @@ class ProviderTests(unittest.TestCase):
         task.update(action='update', target='work:old', revision=3, steps=['x' * 1024, 'y' * 1024],
                     depends_on=['work:dependency'])
         old = data['joppa']['tasks'][0]['document']['data']
-        old.update(title=task['title'], body=publication.contract(task, value), projects=['other', 'p'])
+        old.update(title=task['title'], body=publication.contract(task, value), projects=['other', 'p'],
+                   acceptance=deepcopy(ACCEPTANCE))
         before = deepcopy(old)
         saved = publication.operations(value, data)[0]['command']['data']
         self.assertGreater(len(saved['body']), 1024)

@@ -216,6 +216,8 @@ def configuration(path, raw=None):
     config = json.loads(raw) if raw is not None else read(path)
     for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
         text(config.get(key), "config." + key)
+    if config.get("covers_reference") is not None:
+        text(config["covers_reference"], "config.covers_reference")
     if config.get("mcp_command") is not None:
         from stdio import validate_command
         validate_command(config["mcp_command"])

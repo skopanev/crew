@@ -33,6 +33,9 @@ Explicitly update or retire every unfinished Task under the selected ACs.
 Title order does not replace depends_on links. Keep independent Tasks independent.
 For Requirement scope, add criteria: [{ac, disposition}] for every selected AC.
 Each Task and acceptance check must name its selected ac. Follow each AC's implementation or existing-test-binding disposition.
+When assignment.joppa.covers_reference is set, a Task can list other selected ACs of its Requirement in covers.
+A covered AC needs disposition implement. Put its acceptance checks in the checks of the covering Task.
+Without covers_reference, do not use covers. Keep one execution Task for shared work.
 Apply the supplied writing rules. Return only one JSON object:
 
 {"disposition":"implement","outcome":"Observable selected-scope outcome",

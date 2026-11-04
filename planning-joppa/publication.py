@@ -15,7 +15,7 @@ from task_contracts import (
     criterion_plan, package_counters, title_budgets, task_title, checked_task_title, check_line,
     contract_fields, contract,
 )
-from plan_validation import validate, validate_one, binding_checks, verify_bindings
+from plan_validation import validate, validate_one, binding_checks, verify_bindings, acceptance_rows
 from test_nodes import bind_missing
 from joppa_reads import blocked, ended
 from context_reads import object_read
@@ -103,6 +103,7 @@ def operations(plan, assignment, completed=frozenset()):
     retired = {task["target"] for task in plan["tasks"] if task["action"] == "retire"}
     aliases = {task["id"]: task["target"] for task in plan["tasks"] if task.get("target")}
     changed, counters = set(), package_counters(plan, assignment)
+    acceptance, spec = acceptance_rows(plan, assignment), assignment["joppa"].get("covers")
     for number, task in enumerate(ordered_tasks(plan["tasks"]), 1):
         ac = task["ac"]
         scope = context.criterion_assignment(assignment, ac)
@@ -129,6 +130,15 @@ def operations(plan, assignment, completed=frozenset()):
         if "contract" in data:
             data.setdefault("body", data["contract"])
             del data["contract"]
+        # The lane binds one verified test to each listed criterion check. Task-only checks stay outside.
+        data.pop("acceptance", None)
+        if acceptance.get(task["id"]):
+            data["acceptance"] = acceptance[task["id"]]
+        if spec:
+            # Write full criterion addresses. The parent criterion still owns update and retirement.
+            data.pop(spec["field"], None)
+            if task.get("covers"):
+                data[spec["field"]] = list(task["covers"])
         project = repositories[task["repository"]]["project"]
         project_id = project.split(":", 1)[1]
         projects = list(data.get("projects") or [])
@@ -176,6 +186,7 @@ def operations(plan, assignment, completed=frozenset()):
             result.append({"command": {"op": "assess", "target": existing["address"], "ready": True,
                                        "reason": "The reviewed plan replaces the blocked contract."}})
         changed.add(ac)
+        changed.update(task.get("covers", []))
         refs[task["id"]] = ref
         if existing:
             refs[existing["address"]] = ref

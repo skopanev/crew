@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end
+from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE
 
 
 class ProviderTests(unittest.TestCase):
@@ -99,7 +99,7 @@ class ProviderTests(unittest.TestCase):
         first.update(action="update", target="work:old", revision=3)
         original = data["joppa"]["tasks"][0]
         original["document"]["data"].update(title=first["title"], body=publication.contract(first, value),
-                                             projects=["other", "p"])
+                                             projects=["other", "p"], acceptance=deepcopy(ACCEPTANCE))
         second = deepcopy(first)
         second.update(id="consumer", action="create", title="Consume existing work", depends_on=["first"])
         del second["target"], second["revision"]

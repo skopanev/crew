@@ -8,7 +8,7 @@ import {taskInput} from './joppa-input.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
-import {nodeAssignee, nodeWaiting, taskPages, taskMatchesProject} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, taskPages, taskMatchesProject, coversFields} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -58,7 +58,7 @@ export async function occupancyReader(config, worker) {
 
 export async function heldTasks(config, worker, visit, inventory) {
   const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
-  for await (const page of taskPages(read)) {
+  for await (const page of taskPages(read, {}, coversFields(config))) {
     for (const task of page.items) {
       inventory?.push(task);
       if (!nodeAssignee(task)) continue;
@@ -66,7 +66,7 @@ export async function heldTasks(config, worker, visit, inventory) {
     }
   }
   if (inventory && config.delivery === 'requirement') {
-    for await (const page of taskPages(read, {status: 'purple'})) inventory.push(...page.items);
+    for await (const page of taskPages(read, {status: 'purple'}, coversFields(config))) inventory.push(...page.items);
   }
 }
 

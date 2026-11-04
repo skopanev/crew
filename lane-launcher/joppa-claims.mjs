@@ -4,6 +4,7 @@ import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
 import {occupancyReader, heldTasks} from './joppa-selection.mjs';
 import {packageInput, taskInput} from './joppa-input.mjs';
 import {dependencyCheck} from './dependencies.mjs';
+import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes a release save, an assessment and a note for each Task in one batch.
@@ -76,6 +77,16 @@ export async function claimTask(run, persist, runId) {
       const dependency = await check(task.address);
       require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
     }
+    // A covering Task also needs each covered criterion live, unheld and ready before any claim.
+    const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
+    for (const object of selected) {
+      const covered = taskCovers(coversSpec(run.config, types, kindOf(object)), object);
+      const requirement = covered.length ? (await read(run, object.document.parent))?.document?.parent : undefined;
+      for (const address of covered) {
+        const problem = coveredProblem(await read(run, address), address, await check(address), requirement);
+        require(!problem, `COVERED_CONTEXT_NOT_READY: ${problem}; no Tasks claimed`);
+      }
+    }
     run.claimRequest = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.', question(object))));
   }
@@ -124,7 +135,26 @@ export async function claimTask(run, persist, runId) {
       }
       address = parent.document.parent;
     }
+    const covered = taskCovers(coversSpec(run.config, schema.schema.types, kindOf(object)), object);
+    const coveredContexts = [], fresh = covered.length && dependencyCheck((tool, args) =>
+      api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
+    for (const address of covered) {
+      // Read again after the claim. A change since the pre-claim check releases this run's Tasks.
+      const criterion = await read(run, address);
+      const problem = coveredProblem(criterion, address, await fresh(address), parents.get(object.document.parent)?.document?.parent);
+      if (problem) {
+        await releaseTaskClaims(run, persist, `Covered criterion is not ready: ${problem}. Lane did not start.`);
+        throw new Error(`COVERED_CONTEXT_NOT_READY: ${problem}; this run released its own Tasks before startup`);
+      }
+      const snapshot = {address, revision: criterion.current_revision, digest: contractDigest(criterion)};
+      taskContexts.push(snapshot);
+      if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
+      coveredContexts.push({use: 'Covered acceptance reference. Execute only this Task contract.',
+        address, item_id: criterion.item_id, revision: criterion.current_revision, data: criterion.document.data});
+    }
+    if (covered.length) run.claim.tasks[index].covers = covered;
     const input = taskInput(run.config, object, taskContexts);
+    if (coveredContexts.length) input.ticket.coveredContexts = coveredContexts;
     if (parentContext) input.ticket.parentContext = parentContext;
     if (requirementContext) input.ticket.requirementContext = requirementContext;
     require(!inputs.length || inputs[0].repo.id === input.repo.id, 'Claimed Tasks belong to different repositories');
@@ -158,7 +188,8 @@ export async function guardTaskClaims(run, persist) {
   for (const context of run.claim.contexts || []) {
     const object = await reader.object(context.address);
     verifyRemoteDependencies(object);
-    require(contextLive(object) && contractDigest(object) === context.digest, 'Acceptance context changed before lane startup');
+    require(contextLive(object) && object.work_ready === true && contractDigest(object) === context.digest,
+      'Acceptance context changed before lane startup');
   }
   let conflict;
   await heldTasks(run.config, run.joppaWorker, async task => {

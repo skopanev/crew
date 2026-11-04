@@ -122,7 +122,8 @@ def code_coverage(report, calls, assignment):
                 f"CBM search and similarity-query receipts missing for {repo['id']}")
 
 
-def plan(result, assignment):
+def plan(result, assignment, covered=False):
+    """covered: a Task under another criterion carries this criterion's checks, so it may have no own Task."""
     require(result.get("disposition") in ("implement", "verify_existing", "blocked"), "invalid plan disposition")
     for key in ("outcome", "necessity", "approach", "rationale"):
         text(result.get(key), "plan." + key)
@@ -135,7 +136,9 @@ def plan(result, assignment):
         require(result["blockers"], "blocked plan needs a reason")
         return
     require(not result["blockers"], "blocked plan cannot proceed")
-    require(bool(tasks) == (result["disposition"] == "implement"), "implementation needs Tasks; existing behavior must not create Tasks")
+    require(bool(tasks) == (result["disposition"] == "implement")
+            or (covered and result["disposition"] == "implement"),
+            "implementation needs Tasks; existing behavior must not create Tasks")
     repos = {r["id"]: r for r in assignment["repositories"]}
     seen = set()
     for task in tasks:

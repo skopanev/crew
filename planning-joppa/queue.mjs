@@ -11,6 +11,32 @@ export function criterionIds(config) {
   return ids;
 }
 
+// config.covers_reference names the Task reference that lists covered criteria. Without it the feature is off.
+export function coversReference(config, schema, taskKinds) {
+  const field = config.covers_reference;
+  if (field === undefined || field === null) return null;
+  if (typeof field !== 'string' || !field.trim()) throw new Error('covers_reference must name one Task reference field');
+  let target;
+  for (const kind of taskKinds) {
+    const reference = schema[kind]?.references?.[field];
+    if (!reference || reference.multiple !== true || schema[reference.target]?.role !== 'ac' ||
+        (target && target !== reference.target)) {
+      throw new Error(`Task reference ${field} must list several criteria of one criterion type`);
+    }
+    target = reference.target;
+  }
+  return {field, target};
+}
+
+// Full criterion addresses in one Task covers value. A bare ID reads as the target type address.
+export function coveredCriteria(spec, value) {
+  if (!spec || value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim())) {
+    throw new Error(`Task reference ${spec.field} must be a list of criterion addresses`);
+  }
+  return [...new Set(value.map(item => item.includes(':') ? item : `${spec.target}:${item}`))];
+}
+
 export async function readyCriteria(config, tokenFile, signal) {
   const ids = criterionIds(config);
   const rows = [];
@@ -20,36 +46,47 @@ export async function readyCriteria(config, tokenFile, signal) {
   const dependencies = dependencyCheck(read);
   const schema = (await read('joppa_tree', {})).schema.types;
   const kinds = role => Object.keys(schema).filter(kind => schema[kind].role === role);
+  const covers = coversReference(config, schema, kinds('task'));
+  const criteria = [];
+  for await (const page of nodePages(read, {kind: kinds('ac'),
+    fields: ['title', 'kind', 'parent', 'revision', 'status', 'work_ready', 'data.assignee', 'process.assessment']})) {
+    criteria.push(...page.items);
+  }
+  const requirementOf = new Map(criteria.map(row => [row.address, row.parent]));
+  // A Task owns its parent and the covered criteria of the same Requirement. Archived Tasks keep raw data.
+  const owners = task => [task.parent, ...coveredCriteria(covers, covers && task[`data.${covers.field}`])
+    .filter(address => address !== task.parent && requirementOf.has(address) &&
+      requirementOf.get(address) === requirementOf.get(task.parent))];
   for await (const page of nodePages(read, {kind: kinds('task'), status: NODE_TONES,
-    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'process.assessment']})) {
+    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'process.assessment',
+      ...(covers ? [`data.${covers.field}`] : [])]})) {
     for (const task of page.items) {
-      if (ids && !ids.includes(task.parent)) continue;
       if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
         throw new Error('Task is missing its criterion, address or revision');
       }
-      if (task.present === false) {
-        if (task['data.commit']) completed.add(task.parent);
-        continue;
+      for (const owner of owners(task)) {
+        if (ids && !ids.includes(owner)) continue;
+        if (task.present === false) {
+          if (task['data.commit']) completed.add(owner);
+          continue;
+        }
+        if (nodeAssignee(task) || !nodeWaiting(task)) active.add(owner);
+        if (!nodeWaiting(task) || nodeAssignee(task)) continue;
+        const tasks = blocked.get(owner) || [];
+        tasks.push(`${task.address}:${task.revision}`);
+        blocked.set(owner, tasks);
       }
-      if (nodeAssignee(task) || !nodeWaiting(task)) active.add(task.parent);
-      if (!nodeWaiting(task) || nodeAssignee(task)) continue;
-      const tasks = blocked.get(task.parent) || [];
-      tasks.push(`${task.address}:${task.revision}`);
-      blocked.set(task.parent, tasks);
     }
   }
-  for await (const page of nodePages(read, {kind: kinds('ac'),
-    fields: ['title', 'kind', 'revision', 'status', 'work_ready', 'data.assignee', 'process.assessment']})) {
-    for (const row of page.items) {
-      if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || nodeWaiting(row) ||
-          active.has(row.address)) continue;
-      if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
-      const failures = (blocked.get(row.address) || []).sort();
-      if (completed.has(row.address) && !failures.length) continue;
-      if (row.status === 'green' || row.status === 'purple' || !(await dependencies(row.address)).ready) continue;
-      rows.push({...row, failedTaskCount: failures.length,
-        attemptKey: JSON.stringify([row.address, row.revision, failures])});
-    }
+  for (const row of criteria) {
+    if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || nodeWaiting(row) ||
+        active.has(row.address)) continue;
+    if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
+    const failures = (blocked.get(row.address) || []).sort();
+    if (completed.has(row.address) && !failures.length) continue;
+    if (row.status === 'green' || row.status === 'purple' || !(await dependencies(row.address)).ready) continue;
+    rows.push({...row, failedTaskCount: failures.length,
+      attemptKey: JSON.stringify([row.address, row.revision, failures])});
   }
   return rows.sort((a, b) => Number(b.failedTaskCount > 0) - Number(a.failedTaskCount > 0) ||
     Number(b.status === 'red') - Number(a.status === 'red') ||

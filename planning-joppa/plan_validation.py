@@ -6,12 +6,15 @@ from common import fingerprint, inside, require, run, strings, text
 import validation
 import context
 from test_nodes import node_results, read_nodes
+from acceptance import specification, covered_work, acceptance_rows
 from joppa_reads import ended
 from task_contracts import MAX_DATA_VALUE, title_limit, unclaimed, editable, retirable, ordered_tasks, criterion_plan, package_counters, checked_task_title, check_line, contract_fields
 
 
 def validate(plan, assignment):
     if assignment["joppa"].get("scope") != "requirement":
+        require(not any(task.get("covers") not in (None, []) for task in plan.get("tasks", [])),
+                "Task covers needs Requirement scope planning")
         return validate_one(plan, assignment)
     # Validate in assignment order so the first reported failure is stable.
     order = list(dict.fromkeys(item["id"] for item in context.selected_criteria(assignment)))
@@ -39,6 +42,7 @@ def validate(plan, assignment):
         unclaimed(existing)
         require(existing["address"] in included,
                 f"Requirement plan must explicitly update or retire unfinished Task {existing['address']}")
+    covering, carriers = covered_work(plan, assignment, order, included)
     ordered = ordered_tasks(plan.get("tasks", []))
     local = {task["id"]: task for task in ordered}
     aliases = {task["target"]: task["id"] for task in ordered if task.get("target")}
@@ -55,9 +59,12 @@ def validate(plan, assignment):
         for task in value["tasks"]:
             task["depends_on"] = [dependency for dependency in task.get("depends_on", [])
                                   if aliases.get(dependency, dependency) in own or dependency not in local and dependency not in aliases]
-        validate_one(value, context.criterion_assignment(assignment, address), plan.get("tasks", []))
+        validate_one(value, context.criterion_assignment(assignment, address), plan.get("tasks", []),
+                     covering[address], carriers[address])
 
-def validate_one(plan, assignment, elsewhere=()):
+
+
+def validate_one(plan, assignment, elsewhere=(), covering=(), carriers=()):
     normalized = deepcopy(plan)
     normalized["tasks"] = ordered_tasks(normalized.get("tasks", []))
     if normalized.get("disposition") == "verify_existing":
@@ -113,14 +120,16 @@ def validate_one(plan, assignment, elsewhere=()):
                         if link.get("blocking") and link.get("relation") == "depends_on"}
         require(not dependencies.intersection(retired) or address in updates,
                 f"retirement requires an update that removes the dependency from {address}")
-    validation.plan(normalized, assignment)
-    if plan.get("disposition") == "implement" and any(task["action"] != "retire" for task in normalized["tasks"]):
+    # A criterion covered by a Task under another selected criterion can have no own Task.
+    validation.plan(normalized, assignment, covered=bool(covering or carriers))
+    if plan.get("disposition") == "implement" and (any(task["action"] != "retire" for task in normalized["tasks"])
+                                                   or covering or carriers):
         retained = [task for task in inventory.values() if task["address"] not in targets
-                    and not ended(task)]
+                    and not ended(task)] + list(carriers)
         for check in plan["acceptance_checks"]:
             assigned = any(task["action"] != "retire" and task["repository"] == check["repository"]
                            and any(specification(own) == specification(check) for own in task["checks"])
-                           for task in normalized["tasks"])
+                           for task in [*normalized["tasks"], *covering])
             for task in retained:
                 body = context.task_contract(task["document"]["data"])
                 checks = body.partition("\nChecks:\n")[2].splitlines()
@@ -143,9 +152,6 @@ def validate_one(plan, assignment, elsewhere=()):
                         require(len(entry) <= MAX_DATA_VALUE,
                                 f"Task {task['id']}: data.{path} has {len(entry)} characters; "
                                 f"use at most {MAX_DATA_VALUE}; no text was truncated")
-
-def specification(check):
-    return {key: check[key] for key in ("scenario", "command", "cwd", "expected") if key in check}
 
 def bounded(value, limit=160):
     return value if len(value) <= limit else value[:limit - 3] + "..."
