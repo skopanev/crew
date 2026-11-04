@@ -191,7 +191,7 @@ def fail(reason=None, code=None):
     receipt = read(target / "release.json") if (target / "release.json").exists() else {}
     write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason, "failure_code": code,
           "claim_released": released, "release_error": release_error,
-          "skipped_claims": receipt.get("skipped_claims", []), "unassessed_claims": receipt.get("unassessed_claims", []),
+          "skipped_claims": receipt.get("skipped_claims", []),
           "needs_recovery": needs_recovery,
           "acceptance_verified": False})
     signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if needs_recovery else ""))

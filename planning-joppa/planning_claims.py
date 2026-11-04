@@ -151,7 +151,8 @@ def planning_idle(api, config, assignment, expected=None):
 
 def release(api, target, workspace, ac, reason, code=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
-    With a failure code, also assess each AC not ready in the same batch, but only at the revision this run wrote."""
+    With a failure code, also assess each AC not ready in the same batch. Leave an AC that changed after this run
+    wrote it untouched for recovery. Never split the batch and never omit an assess."""
     from publication import mutate
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -169,9 +170,14 @@ def release(api, target, workspace, ac, reason, code=None):
     if prior.exists():
         release = read(prior)
         return release["status"] == "confirmed" and not any(item.get("unknown") for item in release.get("skipped_claims", []))
+    held = claimed(receipt)
+    # An older claim can hold more criteria than one failed release batch fits. Retain it for recovery.
+    require(not code or len(held) <= MAX_CLAIMED_CRITERIA,
+            f"failed release of {len(held)} criteria exceeds one batch of {MAX_BATCH} operations; "
+            f"claim retained for recovery")
     expected = {**claimed_revisions(receipt), **receipt.get("revisions", {})} if code else {}
-    operations, released, skipped, unassessed = [], [], [], []
-    for address, (assignee, command) in claimed(receipt).items():
+    operations, released, skipped = [], [], []
+    for address, (assignee, command) in held.items():
         try:
             object = context_reads.object_read(api, workspace, address)
         except Exception:
@@ -180,16 +186,17 @@ def release(api, target, workspace, ac, reason, code=None):
         if assignee_of(object) != assignee:
             skipped.append({"ac": address, "reason": "planning claim is missing or replaced"})
             continue
+        if code and object["current_revision"] != expected.get(address):
+            skipped.append({"ac": address, "unknown": True, "reason": f"criterion changed after this run claimed it: "
+                            f"revision {object['current_revision']}, expected {expected.get(address)}"})
+            continue
         operations.append({"command": save_command(object, None, reason[:1024] or "Release the planning claim.",
                                                    command.get("question_checked"))})
         released.append(address)
-        if code and object["current_revision"] == expected.get(address):
+        if code:
             operations.append({"command": not_ready(address, code)})
-        elif code:
-            unassessed.append({"ac": address, "reason": f"revision {object['current_revision']} is not "
-                                                        f"the claimed revision {expected.get(address)}"})
     require_fenced(operations)
-    extra = {"failure_code": code, "unassessed_claims": unassessed} if code else {}
+    extra = {"failure_code": code} if code else {}
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
         return not any(item.get("unknown") for item in skipped)
