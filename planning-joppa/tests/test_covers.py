@@ -126,6 +126,13 @@ class CoversTests(unittest.TestCase):
             coverage.covered({"covers": "criterion:b"}, SPEC)
 
 
+class LifecycleTests(unittest.TestCase):
+    def test_lane_test_bindings_are_lifecycle_fields(self):
+        from context_snapshot import authored_document
+        document = {"data": {"title": "t", "commit": "a" * 40, "test_bindings": [{"ac": "criterion:a"}]}}
+        self.assertEqual(authored_document(document)["data"], {"title": "t"})
+
+
 class CoveredReadinessTests(unittest.TestCase):
     def server(self, task):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},

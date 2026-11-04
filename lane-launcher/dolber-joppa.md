@@ -206,6 +206,47 @@ An unknown `status` or `result` value refuses the report. Only other executed ca
 Crew records only cases in the report. Crew does not change test lists or criteria.
 Recorded results are test evidence. They do not accept a criterion or a Requirement.
 
+### Test bindings
+
+A Task with `data.acceptance` (`[{ac, check}]`, written by the planner) needs lane test evidence.
+The ticket gives these rows as `testAcceptance`. The coder writes `artifacts/test-bindings.json`:
+`[{task, ac, check, test}]`. Each (task, AC, check) needs at least one verified test name. Several names are allowed.
+Identical rows are removed. The bound pairs must equal the union of `data.acceptance` in the package.
+
+- Before the claim, Dolber bounds both outcome batches: `max(3 * N, 2 * N + B) <= 100`.
+  `N` is the Task count. `B` is the count of distinct required (AC, test) node saves.
+  Before names exist, `B` is the count of distinct (AC, check) rows in `data.acceptance`: one new node for each row.
+  A larger package claims nothing: `PACKAGE_BUDGET`. The lane gets the remaining node limit as `bindingNodeLimit`.
+- With `testReport` and `data.acceptance`, a review command must write `$CREW_TEST_REPORT_DIR`.
+  Dolber checks this text before the claim and reports `BINDING_NO_REPORT`. No coder runs.
+- `prepare_review` runs `gates.py bindings` after `gates.py run`. It reads the test report of that receipt and runs no check again.
+  Each name must be in the report with outcome pass. The record `artifacts/test-bindings-receipt.json` binds the file
+  SHA-256 to the exact receipt SHA-256, tree and candidate. A refusal returns the work to the coder.
+- At completion, the host recomputes every check. A changed file, receipt or row refuses completion.
+  The completion batch saves `data.test_bindings` next to `data.commit` and creates each missing test node
+  under its exact AC, after the saved contexts check. An existing node is never changed.
+- At the final target landing, Dolber reads the done Tasks of the Requirement and repository with `data.test_bindings`.
+  Each name must be in the full `gateCommands` report, and its node must be under its exact AC. Then Dolber records
+  the results and reads each bound node again. Each needs a result at the landed SHA.
+- Repositories without `testReport`, verification runs and Tasks without `data.acceptance` keep their behavior.
+  The run log and result show the gap. No report means no test acceptance.
+
+| Code | Meaning |
+|---|---|
+| `BINDING_MISSING` | No binding file or record, or a Task without `data.acceptance` |
+| `BINDING_INVALID` | The rows have a wrong shape, differ from `data.acceptance`, or break the test node rules |
+| `BINDING_NOT_IN_REPORT` | A bound name is not in the reviewed or the full gate report |
+| `BINDING_NOT_PASSED` | A bound name does not pass in the reviewed report |
+| `BINDING_FROZEN_MISMATCH` | The file, receipt, tree or rows changed after the bindings step |
+| `BINDING_NO_REPORT` | The repository or the receipt gives no usable test report |
+| `BINDING_NODE_MISSING` | The final landing finds no node with the name under its AC |
+| `PACKAGE_BUDGET` | The failure or completion batch would exceed 100 operations |
+| `COVERED_CONTEXT_NOT_READY` | A covered criterion is not live, unheld and ready |
+| `TEST_RESULTS_UNBOUND` | The record reply lists a bound name as unbound |
+| `TEST_RESULTS_MISSING` | A bound node has no result at the landed SHA after the record |
+
+Each code is an evidence gap. None of them makes a criterion green.
+
 The run state `testResults` keeps each exact request before Crew sends it.
 A lost response marks the request `uncertain` and Crew never sends it again.
 Inspect the test nodes with `joppa_objects` before a manual retry.

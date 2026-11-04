@@ -144,6 +144,10 @@ Set `covers_reference` to the name of one Task schema reference field to let one
   The queue reads this from the raw Task data of all tones, including archived Tasks.
 - Only the parent criterion owns an update or retirement of the Task.
 - An unfinished Task under an unselected criterion can carry a covered check. The plan never edits it.
+
+A lane completion saves the verified test names in `data.test_bindings` next to `data.commit`.
+Planning treats `assignee`, `commit` and `test_bindings` as lifecycle fields, not authored contract.
+See `lane-launcher/dolber-joppa.md` for the binding codes.
 The planning snapshot keeps each node address, title and revision.
 A bound, renamed or replaced node invalidates the plan, even when the AC revision is unchanged.
 A new result alone does not invalidate the plan.

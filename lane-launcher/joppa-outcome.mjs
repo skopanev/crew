@@ -8,6 +8,8 @@ import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
 import {saveNode} from './joppa-nodes.mjs';
+import {frozenBindings, packageBudget} from './test-bindings.mjs';
+import {missingTestNodes} from './test-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 
 export async function finishTask(run, stateFile, result, artifacts) {
@@ -78,13 +80,24 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const current = await currentTasks(true), question = await taskQuestions(run), runId = path.basename(path.dirname(stateFile));
     // One save records the commit and removes the assignee. The archive uses the revision that save returns.
     if (!run.completionRequest) {
-      run.completionRequest = batchRequest(run, current.flatMap((object, index) => [
-        saveNode(object, {assignee: undefined, commit: sha}, `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`, question(object)),
-        {op: 'archive_object', target: object.address, revision: {$ref: `done${index}/saved_revision`}, reason: `Crew lane landed ${sha}.`}]));
+      // Recompute the frozen test bindings. Create each missing (AC, test) node in the completion batch.
+      const bindings = frozenBindings(run, artifacts, current);
+      const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
+      const nodes = bindings.rows.length ? await missingTestNodes(read, (await read('joppa_tree', {})).schema, bindings.rows) : [];
+      packageBudget(current.length, nodes.length);
+      run.testBindings = {status: bindings.status, gaps: bindings.gaps, nodes: nodes.length};
+      const bound = object => bindings.rows.filter(row => row.task === object.address)
+        .map(({ac, check, test}) => ({ac, check, test}));
+      run.completionRequest = batchRequest(run, [...current.flatMap((object, index) => [
+        saveNode(object, {assignee: undefined, commit: sha, ...(bound(object).length ? {test_bindings: bound(object)} : {})},
+          `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`, question(object)),
+        {op: 'archive_object', target: object.address, revision: {$ref: `done${index}/saved_revision`}, reason: `Crew lane landed ${sha}.`}]),
+        ...nodes]);
       current.forEach((_, index) => { run.completionRequest.operations[index * 2].ref = `done${index}`; });
     }
-    const operations = run.completionRequest.operations;
-    require(operations.length === claims.length * 2 && claims.every((claim, index) => {
+    const operations = run.completionRequest.operations, nodeCount = operations.length - claims.length * 2;
+    require(nodeCount >= 0 && operations.slice(claims.length * 2).every(({command}) =>
+      command.op === 'save_object' && command.revision === 0 && !command.id) && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
         !save.data.assignee && save.question_checked === question(current[index]) && typeof ref === 'string' && archive.op === 'archive_object' &&
@@ -104,6 +117,10 @@ export async function finishTask(run, stateFile, result, artifacts) {
       'Joppa batch response does not map to the requested Task; inspect the saved request');
       return revision;
     });
+    for (const created of receipt.results.slice(claims.length * 2)) {
+      require(created.command?.op === 'save_object' && typeof created.object?.address === 'string' &&
+        Number.isSafeInteger(created.object.revision), 'Joppa batch response does not confirm each test node; inspect the saved request');
+    }
     // An archived node reads as present:false and keeps data.commit.
     result.tasks = [];
     for (const [index, claim] of claims.entries()) {
@@ -115,6 +132,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }
     result.completed = true;
+    if (run.testBindings) result.testBindings = run.testBindings;
   } else {
     await failTask(run, stateFile, result, artifacts,
       {claims, objects, currentTasks, verifySavedContexts, owned, unclaimed, persist});

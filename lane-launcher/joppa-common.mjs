@@ -8,6 +8,8 @@ export const contractDigest = object => {
   const data = {...object.document.data};
   delete data.assignee;
   delete data.commit;
+  // Completion writes the bound test names next to the commit. They are lifecycle evidence, not contract.
+  delete data.test_bindings;
   return createHash('sha256').update(JSON.stringify({
     parent: object.document.parent, data, links: object.document.links,
     ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),

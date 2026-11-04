@@ -429,6 +429,12 @@ nodes:
       If the ticket has tasks, execute them in executionOrder in this coder session.
       Keep each Task within its contract and writable roots. Record each Task result in coder-report.txt.
       Artifacts: {{var:RUN_ARTIFACTS}}.
+      Test report: {{var:test_report}}
+      If the ticket or its tasks have testAcceptance, write {{var:RUN_ARTIFACTS}}/test-bindings.json:
+        [{"task": "Task address", "ac": "row ac", "check": "row check", "test": "test name"}]
+      Give each testAcceptance row of each Task at least one row. Copy task, ac and check exactly.
+      Use a test that verifies that check and passes. Use the exact name that the test report identity gives.
+      Add no other rows. Review checks refuse a missing, unknown or failing name.
 
   prepare_review:
     env:
@@ -512,6 +518,13 @@ nodes:
       fi
       printf '%s\n%s\n' "$tree" "$base" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"
       receipt="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify)"
+      # Bind the coder's test names to this exact receipt. No check runs again.
+      if ! bindings="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" bindings 2>&1)"; then
+        printf '%s\n' "$bindings" >&2
+        echo "<signal:GATE_FAIL>test bindings refused: $(printf '%s' "$bindings" | tail -n 1)</signal:GATE_FAIL>"
+        exit 0
+      fi
+      printf '%s\n' "$bindings"
       # Share one Equill contract across all review harnesses and rounds.
       qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
       # Extract content and publish atomically after a successful read.
@@ -591,7 +604,9 @@ nodes:
       Worktree: {{var:LANE_WORKTREE}}.
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
       {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
+      {{var:RUN_ARTIFACTS}}/test-bindings.json if present;
       {{var:RUN_ARTIFACTS}}/diff.patch.
+      Check that each bound test verifies its criterion check.
       Read {{var:RUN_ARTIFACTS}}/ticket.json. If it has tasks, review every Task contract and its writable roots.
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS
