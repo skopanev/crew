@@ -62,7 +62,7 @@ def scenario(links=()):
 
 
 def saved_links(data, value, server):
-    completed = publication.completed_dependencies(server, "example", value, data, TYPES)
+    completed = publication.completed_dependencies(server, "example", value, TYPES)
     return publication.operations(value, data, completed)[0]["command"]["links"]
 
 
@@ -88,16 +88,26 @@ class DependencyLinkTests(unittest.TestCase):
                          [{"target": "work:dependency", "relation": "depends_on", "blocking": True}])
         self.assertEqual(links, publication.operations(value, data)[0]["command"]["links"])
 
+    def test_inherited_links_to_ended_targets_are_kept_without_reads(self):
+        inherited = [{"target": "work:done", "relation": "depends_on", "blocking": True, "revision": 2},
+                     {"target": "work:retired", "relation": "depends_on", "blocking": True}]
+        data, value = scenario(inherited)
+        value["tasks"][0]["depends_on"] = []
+        existing = deepcopy(data["joppa"]["tasks"][0]["document"]["links"])
+        server = Server("done")
+        self.assertEqual(saved_links(data, value, server), existing)
+        self.assertEqual(server.calls, [])
+
     def test_in_batch_and_non_task_targets_are_not_read(self):
-        data, value = scenario([{"target": "record:note", "relation": "depends_on", "blocking": True}])
+        data, value = scenario()
         first = deepcopy(value["tasks"][0])
         first.update(id="first-new", action="create", depends_on=[])
         first.pop("target"), first.pop("revision")
-        value["tasks"][0]["depends_on"] = ["first-new"]
+        value["tasks"][0]["depends_on"] = ["first-new", "record:note"]
         value["tasks"].append(first)
-        self.assertEqual(publication.dependency_targets(value, data, TYPES), [])
+        self.assertEqual(publication.dependency_targets(value, TYPES), [])
         with self.assertRaisesRegex(ValueError, "type record is not in the workspace schema"):
-            publication.dependency_targets(value, data, {"work": {"role": "task"}})
+            publication.dependency_targets(value, {"work": {"role": "task"}})
 
 
 def load_stages():

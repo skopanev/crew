@@ -127,7 +127,7 @@ def finish():
     claims.planning_idle(api, config, fresh, claims.owned(api, config["workspace"], claim))
     verify_bindings(api, config, plan, fresh, snapshots, None)
     # Read dependency targets last. A target that ends after this read makes Joppa refuse the whole batch.
-    completed = publication.completed_dependencies(api, config["workspace"], plan, fresh,
+    completed = publication.completed_dependencies(api, config["workspace"], plan,
                                                    current.get("schema", {}).get("types", {}))
     operations = publication.operations(plan, fresh, completed)
     held = any(blocked(task) for task in fresh["joppa"]["tasks"])
