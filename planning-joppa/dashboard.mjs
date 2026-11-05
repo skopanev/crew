@@ -6,6 +6,7 @@ import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {lock as dispatcherLock} from './run-files.mjs';
 import {plannerRows, titleCell} from './run-rows.mjs';
 import {readyRequirements} from './queue.mjs';
+import {retryMarks} from './retry-receipts.mjs';
 import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
 import {configReloader} from '../lane-launcher/config-reload.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
@@ -125,7 +126,7 @@ export async function main(argv) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
           } else {
             selection = new AbortController();
-            const candidates = await readyRequirements(config, tokenFile, selection.signal);
+            const candidates = await readyRequirements(config, tokenFile, selection.signal, retryMarks(root, config));
             selection = null;
             const next = candidates.find(row => !attempted.has(row.attemptKey));
             if (next) {

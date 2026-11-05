@@ -7,6 +7,7 @@ import socket
 
 from common import read, require, write
 import context_reads
+from planning_retry import MAX_RETRIES, expected as fenced
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
@@ -55,13 +56,14 @@ def save_command(object, assignee, reason, question=None):
     return command
 
 
-def assess(target, reason):
-    return {"op": "assess", "target": target, "ready": True, "reason": reason}
+def assess(target, reason, position=None):
+    """Mark a node ready. position fences the assess on the exact assessment mark that this run expects."""
+    return {"op": "assess", "target": target, "ready": True, "reason": reason, **fenced(position)}
 
 
-def not_ready(target, code):
+def not_ready(target, code, position=None):
     """Hold a criterion after failed planning. The code is short. The detail stays in the save reason."""
-    return {"op": "assess", "target": target, "ready": False, "reason": code}
+    return {"op": "assess", "target": target, "ready": False, "reason": code, **fenced(position)}
 
 
 def note(target, notes):
@@ -83,8 +85,10 @@ def note_problem(notes):
     return None if valid else "invalid note"
 
 
-def claim_operations(assignment, criteria, assignee):
-    """One save per AC at the revision read for this plan. A stale write refuses the batch."""
+def claim_operations(assignment, criteria, assignee, retries=None):
+    """One save per AC at the revision read for this plan. A stale write refuses the batch.
+    A retry AC also gets assess ready, fenced on the exact position of Crew's own failure mark."""
+    retries = retries or {}
     objects, questions = assignment["joppa"]["objects"], assignment["joppa"].get("questions", {})
     require(len(criteria) <= MAX_CLAIMED_CRITERIA,
             f"Requirement has {len(criteria)} criteria; a failed release needs {RELEASE_OPERATIONS} operations per "
@@ -96,7 +100,11 @@ def claim_operations(assignment, criteria, assignee):
         require(not assignee_of(object), f"Requirement already has an active planning run on {item['id']}")
         operations.append({"command": save_command(object, assignee, "Take this criterion for Crew planning.",
                                                    questions.get(object["kind"]))})
-    return operations
+        if item["id"] in retries:
+            retry = retries[item["id"]]
+            operations.append({"command": assess(item["id"], f"Crew retries failed planning automatically: attempt "
+                                                 f"{retry['attempt']} of {MAX_RETRIES}.", retry["position"])})
+    return require_fenced(operations)
 
 
 def require_fenced(operations):
@@ -114,23 +122,28 @@ def require_fenced(operations):
 
 def claimed_revisions(receipt):
     """The revision this run wrote: the saved object revision, or the read revision plus one."""
-    results = receipt["result"].get("results", [receipt["result"]])
     revisions = {}
-    for (address, (_, command)), result in zip(claimed(receipt).items(), results):
+    for command, result in claim_pairs(receipt):
+        address = address_of(command)
         saved = (result.get("object") or {}).get("revision") if isinstance(result, dict) else None
         revisions[address] = saved if type(saved) is int else command["revision"] + 1
     return revisions
 
 
-def claimed(receipt):
-    """Return {address: (assignee, claim command)} for a confirmed claim receipt."""
+def claim_pairs(receipt):
+    """[(save command, result)] of a confirmed claim. A retry assess in the same batch is skipped."""
     require(receipt["status"] == "confirmed", "planning claim was not confirmed")
     args = receipt["arguments"]
     commands = [args["command"]] if "command" in args else [item["command"] for item in args["operations"]]
     results = receipt["result"].get("results", [receipt["result"]])
     require(len(results) == len(commands), "planning claim response is incomplete; inspect claim.json")
+    return [(command, result) for command, result in zip(commands, results) if command.get("op") != "assess"]
+
+
+def claimed(receipt):
+    """Return {address: (assignee, claim command)} for a confirmed claim receipt."""
     result = {}
-    for command in commands:
+    for command, _ in claim_pairs(receipt):
         assignee = (command.get("data") or {}).get("assignee")
         require(command.get("op") == "save_object" and isinstance(assignee, str) and assignee.startswith(PREFIX),
                 "planning claim receipt has no Crew planning assignee; inspect claim.json")
@@ -212,6 +225,8 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
             f"failed release of {len(held)} criteria exceeds one batch of {MAX_BATCH} operations; "
             f"claim retained for recovery")
     expected = {**claimed_revisions(receipt), **receipt.get("revisions", {})} if code else {}
+    # A failure assess expects the exact mark that this run recorded at its claim. Without it, no mark is recorded.
+    positions = receipt.get("positions", {}) if code else {}
     dropped = (note_problem(notes) or ("batch" if RELEASE_OPERATIONS * len(held) > MAX_BATCH else None)
                if code and notes is not None else None)
     with_notes = bool(code) and notes is not None and not dropped
@@ -233,7 +248,7 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
                                                    command.get("question_checked"))})
         released.append(address)
         if code:
-            operations.append({"command": not_ready(address, code)})
+            operations.append({"command": not_ready(address, code, positions.get(address))})
         if with_notes:
             operations.append({"command": note(address, notes)})
             noted.append(operations[-1]["command"]["id"])
@@ -246,8 +261,9 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
     if not operations:
         write(prior, {"status": "confirmed", "released": [], "skipped_claims": skipped, **extra})
         return not any(item.get("unknown") for item in skipped)
+    reply = None
     try:
-        mutate(api, prior, "joppa_batch", {"workspace": workspace, "operations": operations})
+        reply = mutate(api, prior, "joppa_batch", {"workspace": workspace, "operations": operations})
     finally:
         if prior.exists():
             release = read(prior)
@@ -255,14 +271,17 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
             write(prior, {**release, "released": released if confirmed else [],
                           "requested_releases": released, "skipped_claims": skipped, **extra,
                           **({"critic_notes": noted if confirmed else []} if noted else {})})
+    if code and reply is not None:
+        import retry_marks
+        write(prior, {**read(prior), **retry_marks.record(api, workspace, target, receipt, operations, reply)})
     return not any(item.get("unknown") for item in skipped)
 
 
-def closing_operations(object, finished, reason, question=None):
-    """Clear this run's assignee. A finished plan also marks the AC ready."""
+def closing_operations(object, finished, reason, question=None, position=None):
+    """Clear this run's assignee. A finished plan also marks the AC ready, fenced on the claimed position."""
     operations = [{"command": save_command(object, None, reason, question)}]
     if finished:
-        operations.append({"command": assess(object["address"], reason)})
+        operations.append({"command": assess(object["address"], reason, position)})
     return require_fenced(operations)
 
 

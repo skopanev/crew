@@ -9,6 +9,7 @@ import context
 import publication
 import planning_claims as claims
 from joppa_reads import block_reason, ended, task_state
+from planning_retry import position
 
 
 def settings():
@@ -162,11 +163,12 @@ def retry_startup(api, config, target, assignment, ac, advertised):
         reason = "Retry startup after removing the retained worktree."
         operations.append({"command": claims.save_command(task, claims.KEEP, reason,
                                                           assignment["joppa"]["task_schema"].get("question"))})
-        operations.append({"command": claims.assess(task["address"], reason)})
+        operations.append({"command": claims.assess(task["address"], reason, position(task))})
     claim = read(target / "claim.json")
     claims.owned(api, config["workspace"], claim)
     operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts.",
-                                                assignment["joppa"].get("questions", {}).get(ac["kind"])))
+                                                assignment["joppa"].get("questions", {}).get(ac["kind"]),
+                                                claim.get("positions", {}).get(ac["address"])))
     claims.require_fenced(operations)
     print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
         "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")

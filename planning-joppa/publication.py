@@ -20,6 +20,7 @@ from test_nodes import bind_missing
 from joppa_reads import blocked, ended
 from context_reads import object_read
 from planning_claims import address_of, closing_operations, release, owned, require_fenced
+from planning_retry import expected, position
 
 
 def ensure_recovered(root, current, server, workspace, ac):
@@ -87,8 +88,10 @@ def completed_dependencies(api, workspace, plan, types):
     return completed
 
 
-def operations(plan, assignment, completed=frozenset()):
-    """Compose the batch. A dependency in completed is satisfied: keep its existing link unchanged or add none."""
+def operations(plan, assignment, completed=frozenset(), positions=None):
+    """Compose the batch. A dependency in completed is satisfied: keep its existing link unchanged or add none.
+    positions fences each AC assess ready on the assessment position that the claim recorded."""
+    positions = positions or {}
     validate(plan, assignment)
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     targets = {task.get("target") for task in plan["tasks"] if task["action"] in ("update", "retire")}
@@ -185,7 +188,8 @@ def operations(plan, assignment, completed=frozenset()):
         if reopen:
             # The revised contract answers the block. Mark the same Task ready in this transaction.
             result.append({"command": {"op": "assess", "target": existing["address"], "ready": True,
-                                       "reason": "The reviewed plan replaces the blocked contract."}})
+                                       "reason": "The reviewed plan replaces the blocked contract.",
+                                       **expected(position(existing))}})
         changed.add(ac)
         changed.update(task.get("covers", []))
         refs[task["id"]] = ref
@@ -211,17 +215,17 @@ def operations(plan, assignment, completed=frozenset()):
             "Publish the reviewed Requirement plan." if grouped
             else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
             else "Publish reviewed Tasks. The criterion still requires verification.",
-            assignment["joppa"].get("questions", {}).get(objects[ac]["kind"])))
+            assignment["joppa"].get("questions", {}).get(objects[ac]["kind"]), positions.get(ac)))
     require(len(result) <= MAX_PUBLICATION_OPERATIONS, f"one publication supports at most {MAX_PUBLICATION_OPERATIONS} operations")
     return require_fenced(result)
 
 
-def mutate(api, target, name, arguments, *, retain_claim=False):
-    """Record each request before its only attempt. Retain uncertain results."""
+def mutate(api, target, name, arguments, *, retain_claim=False, extra=None):
+    """Record each request before its only attempt. Retain uncertain results. extra adds receipt fields."""
     require(not target.exists(), f"mutation already attempted: inspect {target.name}; no automatic retry")
     args = deepcopy(arguments)
     args["request_id"] = "crew-planning-" + str(uuid4())
-    record = {"tool": name, "arguments": args, "status": "pending", "server": getattr(api, "url", None)}
+    record = {"tool": name, "arguments": args, "status": "pending", "server": getattr(api, "url", None), **(extra or {})}
     if retain_claim:
         record["retain_claim"] = True
     write(target, record)

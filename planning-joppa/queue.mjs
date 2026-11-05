@@ -2,6 +2,7 @@
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeWaiting, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
+import {retryDue} from './retry-receipts.mjs';
 
 export function criterionIds(config) {
   const ids = config.ac_ids;
@@ -40,7 +41,8 @@ export function coveredCriteria(spec, value) {
   return [...new Set(value.map(item => item.includes(':') ? item : `${spec.target}:${item}`))];
 }
 
-export async function readyCriteria(config, tokenFile, signal) {
+// marks: retryMarks() of the planner runs folder. A waiting AC is selected only for a due retry of Crew's own mark.
+export async function readyCriteria(config, tokenFile, signal, marks = new Map()) {
   const ids = criterionIds(config);
   const rows = [];
   const blocked = new Map(), active = new Set(), completed = new Set();
@@ -82,8 +84,9 @@ export async function readyCriteria(config, tokenFile, signal) {
     }
   }
   for (const row of criteria) {
-    if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || nodeWaiting(row) ||
-        active.has(row.address)) continue;
+    const retry = nodeWaiting(row) && retryDue(row, marks.get(row.address));
+    if (ids && !ids.includes(row.address) || !retry && (row.work_ready !== true || nodeWaiting(row)) ||
+        nodeAssignee(row) || active.has(row.address)) continue;
     if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
     const failures = (blocked.get(row.address) || []).sort();
     if (completed.has(row.address) && !failures.length) continue;
@@ -124,8 +127,8 @@ export async function groupRequirements(candidates, read) {
     attemptKey: JSON.stringify([item.address, item.revision, members.sort()])}));
 }
 
-export async function readyRequirements(config, tokenFile, signal) {
-  const candidates = await readyCriteria(config, tokenFile, signal);
+export async function readyRequirements(config, tokenFile, signal, marks) {
+  const candidates = await readyCriteria(config, tokenFile, signal, marks);
   if (!candidates.length) return [];
   return groupRequirements(candidates, (tool, args) => api({joppa: {url: config.url, mcpCommand: config.mcp_command}}, {tokenFile}, tool,
     {workspace: config.workspace, ...args}, {signal}));

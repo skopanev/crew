@@ -255,3 +255,45 @@ Run the focused provider checks:
 ```sh
 cd planning-joppa && python3 -m pytest -q tests
 ```
+
+### Bounded automatic retry
+
+A failed pass can retry automatically, at most two times for one unchanged authored AC context.
+The queue stays read-only. It reads the existing run receipts and creates no store.
+
+- Fences: each Crew `assess` sends `expected_position` when Crew knows the exact assessment position.
+  `0` means that the AC has no assessment. A stale position refuses the whole batch, and an operator assessment stays.
+- `claim.json` records `positions`: the position that each later fenced `assess` of the run expects.
+  A plain claim keeps the position read before the claim. A retry claim reads the AC again after its batch.
+- The failure release fences each `assess` not ready on `claim.json` `positions`.
+  A refused release keeps the claim for recovery. An older claim without `positions` releases unfenced.
+- The publication `assess` ready of each AC and of each reopened Task uses the same fence.
+- `release.json` records `marks` for each AC with a confirmed fenced failure `assess`:
+  `position`, `code`, `context`, `revision`, `marked_at`, `mark_source`, `attempts`, `retry_exhausted` and `retry_after`.
+  The position comes from the batch reply (`results[i].position` of the `assess`).
+  A read after the batch must show the same position, reason, revision and no planning assignee. Otherwise
+  `marks_skipped` gives the reason and the AC gets no mark.
+- `context` is the digest of the authored AC document: data without `assignee`, `commit` and `test_bindings`,
+  and parent, links, present and schema revision. Notes, comments, assessments and revisions stay outside.
+- A retry claim records `retry` in `claim.json` before its batch: `{ac: {position, context, attempt, from_run}}`.
+  The count is the number of claim receipts with a `retry` entry for the same AC and `context`.
+  Config, Crew and repository changes do not reset it. A changed authored AC context starts a new count.
+- Delays: the first retry waits 60 seconds after the failure mark. The second retry waits 300 seconds.
+- After two retries the next failure records `retry_exhausted: true` in the mark and the AC in
+  `release.json` `retry_exhausted`. The result and the output log show `RETRY_EXHAUSTED`. The dashboard shows the stage `RETRY_EXHAUSTED`.
+- A retry claim is one batch: the AC save with the planning assignee, then `assess` ready with
+  `expected_position` equal to the recorded mark. Only this receipt position is provenance. Actor and reason are not.
+- The claim keeps `MAX_CLAIMED_CRITERIA`. A retry adds one operation for each AC, so the batch stays below 100 operations.
+- The retried pass runs the full graph with the two-round critic limit. It reads critic notes as AC context, as before.
+
+Crew never retries automatically:
+
+- `NEEDS_HUMAN` and `OUT_OF_MODULE`. Lane receipts do not give complete path evidence for `OUT_OF_MODULE`.
+- An AC whose assessment position differs from the last Crew mark, such as any operator assessment.
+- A mark from a run with a pending or uncertain receipt or an unknown skipped claim.
+- An AC without a mark, such as each receipt written before this feature.
+- An AC that a later run claimed. A rejected later claim applied nothing and does not count.
+
+The dispatcher selects a waiting AC only for a due retry. `planning_retry.py` checks again before the claim.
+An exhausted AC returns to the queue after an AC edit. The planner starts a new count only when the authored context changed.
+Explicit `--ac-id` planning does not retry automatically.
