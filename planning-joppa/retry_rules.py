@@ -7,8 +7,12 @@ import re
 ALLOWLIST = {
     "AGENT_INCOMPLETE": (re.compile(r"agent did not complete successfully"),
                          "An agent process exited before its report, so a researcher or reviewer gave no report."),
-    "CBM_UNAVAILABLE": (re.compile(r"codebase-memory-mcp|source changed during the CBM refresh"),
-                        "The shared code index was busy, or the source moved during its refresh."),
+    # Only the verified busy, timeout and source-drift signals. A missing executable or a bad project stays manual.
+    "CBM_UNAVAILABLE": (re.compile(r"CBM daemon is active or starting but could not accept this client"
+                                   r"|another index operation for this project is active"
+                                   r"|codebase-memory-mcp'[^\n]*\]' timed out after \d+ seconds"
+                                   r"|source changed during the CBM refresh"),
+                        "The shared code index daemon was busy or slow, or the source moved during its refresh."),
     "MCP_STARTUP": (re.compile(r"post hook vetoed the attempt.*(\"initialize\"|protocolVersion|notifications/initialized)",
                                re.S),
                     "The reader MCP connector failed during its startup handshake."),

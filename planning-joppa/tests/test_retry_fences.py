@@ -81,9 +81,14 @@ class RetryFenceTests(unittest.TestCase):
         self.assertNotIn("expected_position", unfenced)
 
     def test_reply_position_reads_the_verified_assess_result_shape(self):
-        self.assertEqual(retry_marks.reply_position({"command": {"op": "assess"}, "object": None, "position": 953}), 953)
-        self.assertEqual(retry_marks.reply_position({"assessment": {"position": 7}, "position": 9}), 7)
-        self.assertIsNone(retry_marks.reply_position({"object": None}))
+        native = {"command": {"op": "assess", "target": AC}, "object": None, "position": 953}
+        self.assertEqual(retry_marks.reply_position(native, AC), 953)
+        # Only the top-level native position of this assess counts. Contradictions and other results are refused.
+        self.assertIsNone(retry_marks.reply_position({**native, "assessment": {"position": 7}}, AC))
+        self.assertIsNone(retry_marks.reply_position({**native, "command": {"op": "save_object"}}, AC))
+        self.assertIsNone(retry_marks.reply_position({**native, "command": {"op": "assess", "target": "criterion:b"}}, AC))
+        self.assertIsNone(retry_marks.reply_position({"assessment": {"position": 7}}, AC))
+        self.assertIsNone(retry_marks.reply_position({"command": {"op": "assess"}, "object": None}, AC))
 
     def test_position_is_zero_without_assessment_and_unknown_without_a_server_position(self):
         self.assertEqual(retry.position({"process": {}}), 0)

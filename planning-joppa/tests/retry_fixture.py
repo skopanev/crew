@@ -57,6 +57,8 @@ class Joppa:
         self.calls.append((name, deepcopy(args)))
         if name == "joppa_objects":
             return self.read(args["address"])
+        if name == "joppa_help":
+            return {"operations": ["save_object", "archive_object", "assess"]}
         assert name == "joppa_batch", name
         staged, results = deepcopy(self.acs), []
         for operation in args["operations"]:
@@ -74,7 +76,7 @@ class Joppa:
                 if "expected_position" in command and command["expected_position"] != current:
                     raise Rejected("stale assessment position")
                 position = self.assess(staged, command["target"], command["ready"], command["reason"], "crew")
-                results.append({"command": {"op": "assess"}, "object": None,
+                results.append({"command": {"op": "assess", "target": command["target"]}, "object": None,
                                 **({"position": position} if self.reply_positions else {})})
             else:
                 self.journal += 1
