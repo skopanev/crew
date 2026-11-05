@@ -131,9 +131,10 @@ def operations(plan, assignment, completed=frozenset()):
             data.setdefault("body", data["contract"])
             del data["contract"]
         # The lane binds one verified test to each listed criterion check. Task-only checks stay outside.
-        data.pop("acceptance", None)
+        # Joppa reserves data.acceptance for process commands. The authored mapping is data.acceptance_checks.
+        data.pop("acceptance_checks", None)
         if acceptance.get(task["id"]):
-            data["acceptance"] = acceptance[task["id"]]
+            data["acceptance_checks"] = acceptance[task["id"]]
         if spec:
             # Write full criterion addresses. The parent criterion still owns update and retirement.
             data.pop(spec["field"], None)

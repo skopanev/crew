@@ -17,7 +17,7 @@ export const FAILURE_OPERATIONS = 3, COMPLETION_OPERATIONS = 2;
 export const RECORD = 'test-bindings-receipt.json', BINDINGS = 'test-bindings.json';
 
 // Refuse a package whose failure or completion batch cannot fit. Before test names exist, count one node per
-// distinct (AC, check) of data.acceptance. This is the minimum the lane needs when no node exists yet.
+// distinct (AC, check) of data.acceptance_checks. This is the minimum the lane needs when no node exists yet.
 export function packageBudget(tasks, nodes) {
   const failure = tasks * FAILURE_OPERATIONS, completion = tasks * COMPLETION_OPERATIONS + nodes;
   if (Math.max(failure, completion) > MAX_BATCH) {
@@ -55,13 +55,13 @@ export function parseBindings(value) {
   return rows;
 }
 
-// Each (task, AC, check) needs at least one test. The bound pairs equal the package data.acceptance union.
+// Each (task, AC, check) needs at least one test. The bound pairs equal the package data.acceptance_checks union.
 export function checkBindings(rows, required, report) {
   const expected = new Set(required.map(row => key(row.task, row.ac, row.check)));
   const actual = new Set(rows.map(row => key(row.task, row.ac, row.check)));
   const missing = [...expected].filter(item => !actual.has(item)), extra = [...actual].filter(item => !expected.has(item));
   if (missing.length || extra.length) {
-    fail('BINDING_INVALID', `bindings differ from data.acceptance: missing ${missing.join(', ') || 'none'}; ` +
+    fail('BINDING_INVALID', `bindings differ from data.acceptance_checks: missing ${missing.join(', ') || 'none'}; ` +
       `extra ${extra.join(', ') || 'none'}`);
   }
   if (!report || report.error || !Array.isArray(report.results)) {
@@ -77,7 +77,7 @@ export function checkBindings(rows, required, report) {
 // Recompute the frozen lane evidence. Return {status, rows, gaps}. A required mismatch refuses completion.
 export function frozenBindings(run, artifacts, objects, coversOf = () => []) {
   const gaps = objects.filter(object => !testAcceptance(object, coversOf(object)))
-    .map(object => `BINDING_MISSING: ${object.address} has no data.acceptance; no test can be bound`);
+    .map(object => `BINDING_MISSING: ${object.address} has no data.acceptance_checks; no test can be bound`);
   const required = requiredRows(objects, coversOf);
   if (!required.length) return {status: 'legacy', rows: [], gaps};
   if (!run.repository?.testReport) {

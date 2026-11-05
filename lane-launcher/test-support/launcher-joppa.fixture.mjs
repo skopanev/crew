@@ -88,6 +88,8 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_tasks') throw new Error('The removed Task tool was called');
     else if (name === 'joppa_batch') {
       const commands = args.operations.map(({command}) => command);
+      // Joppa reserves data.acceptance for process commands. Earlier fixtures accepted it.
+      const reserved = commands.findIndex(command => command.op === 'save_object' && Object.hasOwn(command.data || {}, 'acceptance'));
       const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
       const release = commands.every(command => command.op === 'save_object' && !command.data.assignee);
       // A new node save has revision 0 and no ID. The fixture gives it the next address of its type.
@@ -110,7 +112,10 @@ async function packageFixture(t, mode = 'success') {
       const resolve = value => value?.$ref ? refs.get(value.$ref) : value;
       const stale = commands.some(command => command.op === 'save_object' ? target(command)?.current_revision !== command.revision
         : command.op === 'archive_object' && (planned.get(target(command)) ?? target(command)?.current_revision) !== resolve(command.revision));
-      if (mode === 'reject' || mode === 'outcome-reject' && !claim || stale) {
+      if (reserved >= 0) {
+        rejected = true; value = {error: `operation ${reserved + 1}: use process commands for acceptance`};
+      }
+      else if (mode === 'reject' || mode === 'outcome-reject' && !claim || stale) {
         rejected = true; value = {error: 'operation 2 revision changed'};
       }
       else {

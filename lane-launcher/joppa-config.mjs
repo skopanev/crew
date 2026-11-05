@@ -37,8 +37,9 @@ export function validateJoppa(config) {
       'Joppa token files must stay outside source, Crew, run, key and extra mount directories');
     actors.add(worker.actor); tokens.add(token);
   }
-  require(joppa.coversReference == null || (text(joppa.coversReference) && joppa.coversReference === joppa.coversReference.trim()),
-    'joppa.coversReference must name one Task reference field');
+  require(joppa.coversReference == null || (text(joppa.coversReference) && joppa.coversReference === joppa.coversReference.trim() &&
+    !['acceptance', 'acceptance_checks', 'test_bindings', 'projects', 'assignee', 'commit'].includes(joppa.coversReference)),
+  'joppa.coversReference must name one Task reference field other than a reserved data field');
   require(!config.tags?.length && !config.preferTags?.length, 'Joppa uses a project filter, not tags');
   require(Array.isArray(config.repositories) && config.repositories.length, 'Config needs repositories');
   require(text(config.sourceRoot) && path.isAbsolute(config.sourceRoot), 'Config needs absolute sourceRoot');

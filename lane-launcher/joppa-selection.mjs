@@ -149,7 +149,7 @@ export async function nextTask(config) {
           const current = await object(task.address);
           if (!text(task.address) || !Number.isSafeInteger(task.revision) ||
               current.current_revision !== task.revision) continue;
-          // A shared Task may name its configured covered criteria in data.acceptance.
+          // A shared Task may name its configured covered criteria in data.acceptance_checks.
           coversOf ||= coveredBy(config, (await read('joppa_tree', {})).schema.types);
           try { taskInput(config, current, undefined, coversOf(current)); }
           catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }

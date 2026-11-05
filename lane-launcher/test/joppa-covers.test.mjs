@@ -22,7 +22,7 @@ test('covering Task records each covered criterion as acceptance context', async
   const f = await covering(t);
   // An acceptance row can name a covered criterion with one of the Task checks.
   Object.assign(f.objects.get('task:t1').document.data, {checks: ['Show => shown'],
-    acceptance: [{ac: 'ac:a2', check: 'Show => shown'}]});
+    acceptance_checks: [{ac: 'ac:a2', check: 'Show => shown'}]});
   await claimTask(f.run, f.persist, f.runId);
   assert.deepEqual(f.run.claim.ticket.testAcceptance, [{ac: 'ac:a2', check: 'Show => shown'}]);
   assert.deepEqual(f.run.claim.tasks[0].covers, ['ac:a2']);
@@ -69,8 +69,10 @@ test('covers reference must target several criteria and is ignored when not conf
   const object = {document: {parent: 'ac:a1', data: {covers: ['a1', 'a2', 'ac:a2', 'ac:a3']}}};
   assert.deepEqual(taskCovers({field: 'covers', target: 'ac'}, object), ['ac:a2', 'ac:a3']);
   assert.throws(() => taskCovers({field: 'covers', target: 'ac'}, {document: {data: {covers: 'ac:a2'}}}), /list of criterion/);
-  assert.throws(() => validateJoppa({joppa: {url: 'http://localhost', project: 'project:p', coversReference: ' ',
-    mcpCommand: ['node'], workers: [{actor: 'a'}]}, limit: 1}), /coversReference/);
+  for (const field of [' ', 'acceptance', 'acceptance_checks', 'test_bindings']) {
+    assert.throws(() => validateJoppa({joppa: {url: 'http://localhost', project: 'project:p', coversReference: field,
+      mcpCommand: ['node'], workers: [{actor: 'a'}]}, limit: 1}), /coversReference/);
+  }
 });
 
 test('selection keeps a shared Task with parent and covered acceptance rows, and the claim still guards the covered AC', async t => {
@@ -78,7 +80,7 @@ test('selection keeps a shared Task with parent and covered acceptance rows, and
   const f = await covering(t);
   f.queue.splice(0, f.queue.length, 'task:t1');
   Object.assign(f.objects.get('task:t1').document.data, {covers: ['ac:a2'], checks: ['own check', 'covered check'],
-    acceptance: [{ac: 'ac:a1', check: 'own check'}, {ac: 'ac:a2', check: 'covered check'}]});
+    acceptance_checks: [{ac: 'ac:a1', check: 'own check'}, {ac: 'ac:a2', check: 'covered check'}]});
   const selected = (await nextTask(f.run.config)).candidate;
   assert.deepEqual(selected.tasks.map(task => task.address), ['task:t1']);
   assert.equal(batches(f).length, 0);
@@ -95,7 +97,21 @@ test('selection keeps a shared Task with parent and covered acceptance rows, and
 test('selection skips a Task whose acceptance names a criterion outside its parent and covers', async t => {
   const f = await covering(t);
   Object.assign(f.objects.get('task:t1').document.data, {checks: ['Run one => ok'],
-    acceptance: [{ac: 'ac:foreign', check: 'Run one => ok'}]});
+    acceptance_checks: [{ac: 'ac:foreign', check: 'Run one => ok'}]});
   const selected = (await nextTask(f.run.config)).candidate;
   assert.notEqual(selected?.tasks?.[0]?.address, 'task:t1');
+});
+
+test('the fixture applies the native data.acceptance rule; acceptance_checks and covers saves pass', async t => {
+  const f = await covering(t);
+  f.run.tasks = [{address: 'task:t1', revision: 3}];
+  Object.assign(f.objects.get('task:t1').document.data, {checks: ['own check'],
+    acceptance_checks: [{ac: 'ac:a1', check: 'own check'}], acceptance: [{ac: 'ac:a1', check: 'own check'}]});
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /operation 1: use process commands for acceptance/);
+  const fresh = await covering(t);
+  Object.assign(fresh.objects.get('task:t1').document.data, {checks: ['own check'],
+    acceptance_checks: [{ac: 'ac:a1', check: 'own check'}]});
+  await claimTask(fresh.run, fresh.persist, fresh.runId);
+  assert.deepEqual(fresh.objects.get('task:t1').document.data.covers, ['a2']);
+  assert.equal(fresh.objects.get('task:t1').document.data.assignee, fresh.run.claim.assignee);
 });

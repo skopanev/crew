@@ -123,10 +123,11 @@ New nodes and the AC assignee release and `assess` go in the same atomic batch.
 
 ### Acceptance mapping and shared Tasks
 
-Publication writes `data.acceptance` on each saved implementation Task: `[{ac, check}]`.
+Publication writes `data.acceptance_checks` on each saved implementation Task: `[{ac, check}]`.
+Joppa reserves `data.acceptance` for process commands. `data.acceptance_checks` is authored contract context: a change invalidates contract snapshots and digests.
 `ac` is the full criterion address. `check` is the rendered acceptance check line that this Task carries.
 The list contains only criterion acceptance checks, in scenario or command form. Task-only checks, such as lint or build checks, stay outside.
-A lane binds at least one verified test to each entry. Tasks without `data.acceptance` keep their previous behavior.
+A lane binds at least one verified test to each entry. Tasks without `data.acceptance_checks` keep their previous behavior.
 
 Set `covers_reference` to the name of one Task schema reference field to let one Task cover several criteria of its Requirement:
 
@@ -135,6 +136,7 @@ Set `covers_reference` to the name of one Task schema reference field to let one
 ```
 
 - The reference must target the criterion type and allow several values. Crew does not change the schema.
+- It cannot be `acceptance` (reserved by Joppa for process commands), `acceptance_checks`, `test_bindings` or another Crew data field.
 - Without this key the feature is off. A plan with a nonempty `covers` list is then refused.
 - A plan Task can list other selected criteria of the same Requirement in `covers`. A covered criterion needs disposition `implement`.
 - Its acceptance checks must be in the checks of a covering Task. A covered criterion can then have no Task of its own.
@@ -143,7 +145,7 @@ Set `covers_reference` to the name of one Task schema reference field to let one
 - A covering Task makes its covered criteria owned for queue readiness: an active Task holds them, and a done Task waits for acceptance.
   The queue reads this from the raw Task data of all tones, including archived Tasks.
 - Only the parent criterion owns an update or retirement of the Task.
-- An unfinished Task under an unselected criterion can carry a covered check only when its `data.acceptance`
+- An unfinished Task under an unselected criterion can carry a covered check only when its `data.acceptance_checks`
   already lists that exact criterion and check. The plan never edits it. Otherwise select its parent criterion
   and update the Task through the normal plan.
 

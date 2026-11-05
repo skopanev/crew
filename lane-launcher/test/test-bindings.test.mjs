@@ -37,10 +37,10 @@ async function bound(t) {
   f.objects.get('ac:a1').document.data.owner = 'owner';
   f.objects.get('ac:a2').document.data.owner = 'owner';
   Object.assign(f.objects.get('task:t1').document.data, {checks: ['Run one => ok', 'Lint => clean'],
-    acceptance: [{ac: 'ac:a1', check: 'Run one => ok'}]});
+    acceptance_checks: [{ac: 'ac:a1', check: 'Run one => ok'}]});
   f.objects.get('task:t2').document.data.checks = ['Run two => ok'];
   // A bare criterion ID reads as an address of the parent type.
-  f.objects.get('task:t2').document.data.acceptance = [{ac: 'a2', check: 'Run two => ok'}];
+  f.objects.get('task:t2').document.data.acceptance_checks = [{ac: 'a2', check: 'Run two => ok'}];
   // A same-named node under another criterion does not bind this criterion.
   f.objects.set('check:old', {address: 'check:old', kind: 'check', historical: false, current_revision: 1,
     document: {present: true, parent: 'ac:a1', data: {title: ONE}, links: []}, process: {}, annotations: {}});
@@ -89,7 +89,7 @@ test('a binding file changed after review refuses completion without a write', a
 
 test('host recomputation refuses unknown, failing and incomplete bindings', () => {
   const run = {repository: {id: 'app', testReport}};
-  const objects = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance: [{ac: 'ac:a1', check: 'c'}]}}}];
+  const objects = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance_checks: [{ac: 'ac:a1', check: 'c'}]}}}];
   const row = {task: 'task:t1', ac: 'ac:a1', check: 'c', test: ONE};
   for (const [rows, outcomes, code] of [
     [[row], {[TWO]: 'pass'}, /BINDING_NOT_IN_REPORT/],
@@ -114,8 +114,8 @@ test('legacy Tasks and repositories without testReport keep completion with an e
   const legacy = [{address: 'task:t1', document: {parent: 'ac:a1', data: {}}}];
   const result = frozenBindings({repository: {id: 'app', testReport}}, null, legacy);
   assert.equal(result.status, 'legacy');
-  assert.match(result.gaps[0], /^BINDING_MISSING: task:t1 has no data.acceptance/);
-  const current = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance: [{ac: 'ac:a1', check: 'c'}]}}}];
+  assert.match(result.gaps[0], /^BINDING_MISSING: task:t1 has no data.acceptance_checks/);
+  const current = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance_checks: [{ac: 'ac:a1', check: 'c'}]}}}];
   assert.match(frozenBindings({repository: {id: 'app'}}, null, current).gaps[0], /^BINDING_NO_REPORT/);
 });
 
@@ -125,7 +125,7 @@ test('package budget counts the larger of the failure and completion batches', a
   assert.throws(() => packageBudget(34, 0), /PACKAGE_BUDGET/);
   const f = await bound(t);
   const checks = Array.from({length: 96}, (_, index) => `c${index}`);
-  Object.assign(f.objects.get('task:t1').document.data, {checks, acceptance: checks.map(check => ({ac: 'ac:a1', check}))});
+  Object.assign(f.objects.get('task:t1').document.data, {checks, acceptance_checks: checks.map(check => ({ac: 'ac:a1', check}))});
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /PACKAGE_BUDGET: .*no write was sent/);
   assert.equal(batches(f).length, 0);
 });
@@ -133,14 +133,14 @@ test('package budget counts the larger of the failure and completion batches', a
 test('an acceptance row outside the Task parent, covers or checks claims nothing and never binds', async t => {
   const f = await bound(t);
   const task = f.objects.get('task:t1');
-  task.document.data.acceptance = [{ac: 'ac:unrelated', check: 'Run one => ok'}];
+  task.document.data.acceptance_checks = [{ac: 'ac:unrelated', check: 'Run one => ok'}];
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /BINDING_INVALID: task:t1 acceptance names ac:unrelated/);
-  task.document.data.acceptance = [{ac: 'ac:a1', check: 'invented check'}];
+  task.document.data.acceptance_checks = [{ac: 'ac:a1', check: 'invented check'}];
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /BINDING_INVALID: task:t1 acceptance check is not a Task check/);
   assert.equal(batches(f).length, 0);
   // The host recomputes at completion. The reproduction returned bound before this check.
   const own = {address: 'task:x', document: {parent: 'ac:own', data: {checks: ['real check'],
-    acceptance: [{ac: 'ac:unrelated', check: 'invented check'}]}}};
+    acceptance_checks: [{ac: 'ac:unrelated', check: 'invented check'}]}}};
   const artifacts = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'crew-bindings-'));
   t.after(() => fs.rmSync(artifacts, {recursive: true, force: true}));
   freeze(artifacts, [{task: 'task:x', ac: 'ac:unrelated', check: 'invented check', test: ONE}]);
@@ -150,7 +150,7 @@ test('an acceptance row outside the Task parent, covers or checks claims nothing
 test('a binding record of an earlier receipt does not survive a newer current receipt', async t => {
   const artifacts = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'crew-bindings-'));
   t.after(() => fs.rmSync(artifacts, {recursive: true, force: true}));
-  const objects = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance: [{ac: 'ac:a1', check: 'c'}]}}}];
+  const objects = [{address: 'task:t1', document: {parent: 'ac:a1', data: {checks: ['c'], acceptance_checks: [{ac: 'ac:a1', check: 'c'}]}}}];
   const run = {repository: {id: 'app', testReport}};
   freeze(artifacts, [{task: 'task:t1', ac: 'ac:a1', check: 'c', test: ONE}]);
   assert.equal(frozenBindings(run, artifacts, objects).status, 'bound');
