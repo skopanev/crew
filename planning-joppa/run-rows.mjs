@@ -67,7 +67,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       } else if (status !== 'READY') {
         const failure = [...journal].reverse().find(row => ['failed', 'needs_human', '__exit_fail__'].includes(row.next)
           && !['failed', 'needs_human'].includes(row.node));
+        // The failed pass used the last automatic retry for this AC context. Only an AC edit or an operator restarts it.
         stage = recovery ? 'RECOVERY_REQUIRED' : status === 'HUMAN' ? 'HUMAN' :
+          released?.retry_exhausted?.length ? 'RETRY_EXHAUSTED' :
           failure?.signal || (released?.status === 'confirmed' && !result ? 'INTERRUPTED' : status);
       }
       const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})-(.+)$/.exec(entry.name);

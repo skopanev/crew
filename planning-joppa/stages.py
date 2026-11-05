@@ -14,6 +14,7 @@ import context
 import publication
 import planning_claims as claims
 import critic_notes
+import retry_marks
 from mcp import Rejected
 from joppa_reads import blocked
 
@@ -47,10 +48,13 @@ def prepare():
         publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], criterion["id"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", snapshot)
-    operations = claims.claim_operations(assignment, criteria, claims.marker(target))
+    # A due retry of Crew's own failure mark adds a fenced assess ready to the same claim batch.
+    retries = assignment["joppa"].get("retry", {})
+    operations = claims.claim_operations(assignment, criteria, claims.marker(target), retries)
     try:
         publication.mutate(api, target / "claim.json", "joppa_batch",
-                           {"workspace": config["workspace"], "operations": operations})
+                           {"workspace": config["workspace"], "operations": operations},
+                           extra={"retry": retries} if retries else None)
     except Rejected as error:
         # A stale revision refuses the whole batch. Read the holders again and stop without a retry.
         holders = claims.current_assignees(api, config["workspace"], [item["id"] for item in criteria])
@@ -59,11 +63,15 @@ def prepare():
     # Record the revision of each AC that this run wrote. Any later edit or reassignment stops the run.
     claim = {**claim, "revisions": claims.claimed_revisions(claim)}
     write(target / "claim.json", claim)
+    # Record the assessment position that each later fenced assess of this run expects.
+    claim["positions"] = retry_marks.claimed_positions(api, config["workspace"], claim, assignment["joppa"]["objects"],
+                                                       retries)
+    write(target / "claim.json", claim)
     holders = claims.owned(api, config["workspace"], claim)
     # Claiming changes only data.assignee. Check that no other writer changed authored context.
     fresh, current, current_ac = (context.load_requirement(api, config, requirement, [item["id"] for item in criteria])
                                   if requirement else context.load(api, config, ac["address"]))
-    context.unchanged(snapshot, current)
+    retry_marks.compare_claimed(snapshot, current, retries, target, context.unchanged)
     claims.planning_idle(api, config, fresh, holders)
     if not requirement and retry_startup(api, config, target, fresh, current_ac, advertised):
         return
@@ -131,7 +139,7 @@ def finish():
     # Read dependency targets last. A target that ends after this read makes Joppa refuse the whole batch.
     completed = publication.completed_dependencies(api, config["workspace"], plan,
                                                    current.get("schema", {}).get("types", {}))
-    operations = publication.operations(plan, fresh, completed)
+    operations = publication.operations(plan, fresh, completed, claim.get("positions", {}))
     held = any(blocked(task) for task in fresh["joppa"]["tasks"])
     criteria = {item["id"] for item in context.selected_criteria(fresh)}
     if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not held:
@@ -200,6 +208,7 @@ def fail(reason=None, code=None, critic=None):
     write(target / "result.json", {"status": "blocked", "scope": "planned_tasks", "reason": reason, "failure_code": code,
           "claim_released": released, "release_error": release_error,
           "skipped_claims": receipt.get("skipped_claims", []),
+          **({"retry_exhausted": receipt["retry_exhausted"]} if receipt.get("retry_exhausted") else {}),
           "needs_recovery": needs_recovery,
           "acceptance_verified": False})
     signal("BLOCKED", reason + ("; inspect mutation receipts before another run" if needs_recovery else ""))

@@ -6,6 +6,7 @@ from context_snapshot import source, current_pin, remote_satisfied, snapshot_sou
 from test_nodes import identities, read_nodes, tone
 from joppa_reads import assignee, blocked, done, ended
 import coverage
+import planning_retry
 
 
 def json_key(value):
@@ -51,7 +52,7 @@ def load_requirement(api, config, req_id, selected=None):
             specs[task["kind"]] = coverage.reference(config, types, task["kind"])
         return [address for address in coverage.covered(task["document"]["data"], specs[task["kind"]])
                 if address in addresses and address != task["document"]["parent"]]
-    candidates = []
+    candidates, retries = [], {}
     for address in addresses:
         # Admission needs live ownership. Authored snapshots exclude data.assignee.
         ac = object_read(api, workspace, address)
@@ -65,12 +66,17 @@ def load_requirement(api, config, req_id, selected=None):
         failures = [item for item in work if blocked(item) and not assignee(item)]
         # Landed work without a live failure waits for acceptance. Planning again would repeat it.
         completed = any(done(item) for item in own) and not failures
+        waiting = (ac["process"].get("assessment") or {}).get("state") == "waiting"
+        # A waiting AC is a candidate only for a due retry of Crew's own confirmed failure mark.
+        retry = (planning_retry.eligible(config["runs_folder"], config.get("url"), workspace, ac)[0]
+                 if waiting and selected is None and config.get("runs_folder") else None)
         if ((not config.get("ac_ids") or address in config["ac_ids"])
-                and ac.get("work_ready") is True and not completed
-                and (ac["process"].get("assessment") or {}).get("state") != "waiting"
+                and (ac.get("work_ready") is True and not waiting or retry) and not completed
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
                 and len(failures) == len(work)):
             candidates.append(address)
+            if retry:
+                retries[address] = retry
     def ready(address):
         """Joppa work_ready decides local ordering. Check only remote blockers and authored link input."""
         object, seen = get(address), set()
@@ -115,6 +121,8 @@ def load_requirement(api, config, req_id, selected=None):
         tasks=[item for item in tasks if item["document"]["parent"] in candidates])
     if covers_spec:
         assignment["joppa"]["covers"] = covers_spec
+    if any(address in retries for address in candidates):
+        assignment["joppa"]["retry"] = {address: retries[address] for address in candidates if address in retries}
     snapshot["objects"] = {address: snapshot_source(item, types, candidates) for address, item in objects.items()}
     snapshot["tests"] = {address: identities(tests[address]) for address in candidates}
     snapshot["criteria"] = candidates
