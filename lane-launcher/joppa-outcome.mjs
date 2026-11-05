@@ -6,7 +6,7 @@ import {quote, save} from './runtime.mjs';
 import {api, batchRequest, claimTasks, contractDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
-import {heldBy, released, contextLive, taskQuestions} from './joppa-claims.mjs';
+import {heldBy, released, contextLive, needsReadiness, taskQuestions} from './joppa-claims.mjs';
 import {saveNode} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
 import {missingTestNodes, nodeResult} from './test-nodes.mjs';
@@ -48,11 +48,12 @@ export async function finishTask(run, stateFile, result, artifacts) {
         'Task parent context needs review; completion refused');
       require(contractDigest(parent) === context.digest, 'Task parent context changed during execution; package completion refused');
     }
+    const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
     for (const context of run.claim.contexts || []) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: context.address});
       verifyRemoteDependencies(parent);
       require(parent.address === context.address && contextLive(parent) &&
-        (context.criterion !== true || parent.work_ready === true) &&
+        (!needsReadiness(context, parent, types) || parent.work_ready === true) &&
         contractDigest(parent) === context.digest, 'Package acceptance context changed during execution; completion refused');
     }
   };
