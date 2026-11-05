@@ -5,14 +5,16 @@ Crew writes full criterion addresses. A bare ID that Joppa stored as sent reads 
 """
 from common import require
 
+# Data fields with another meaning. Joppa reserves acceptance; Crew writes the others.
+RESERVED = ("projects", "assignee", "commit", "acceptance", "acceptance_checks", "test_bindings")
+
 
 def reference(config, types, task_kind):
     """Return {field, target} for the configured covers reference of task_kind, or None when it is off."""
     field = config.get("covers_reference")
     if field is None:
         return None
-    require(isinstance(field, str) and field.strip() and field not in ("projects", "assignee", "commit",
-                                                                       "acceptance", "test_bindings"),
+    require(isinstance(field, str) and field.strip() and field not in RESERVED,
             "config.covers_reference must name one Task reference field")
     definition = (types[task_kind].get("references") or {}).get(field)
     require(isinstance(definition, dict),

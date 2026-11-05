@@ -81,7 +81,7 @@ class ProviderTests(unittest.TestCase):
                     depends_on=['work:dependency'])
         old = data['joppa']['tasks'][0]['document']['data']
         old.update(title=task['title'], body=publication.contract(task, value), projects=['other', 'p'],
-                   acceptance=deepcopy(ACCEPTANCE))
+                   acceptance_checks=deepcopy(ACCEPTANCE))
         before = deepcopy(old)
         saved = publication.operations(value, data)[0]['command']['data']
         self.assertGreater(len(saved['body']), 1024)

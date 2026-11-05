@@ -66,12 +66,23 @@ def plan():
 ACCEPTANCE = [{"ac": "criterion:a", "check": "Reject invalid input => No mutation"}]
 
 
+def native_field_rule(name, args):
+    """Joppa reserves data.acceptance for process commands (objects_validate_links.rs). Earlier fakes accepted it."""
+    if name not in ("joppa_batch", "joppa_command"):
+        return
+    commands = [args["command"]] if "command" in args else [item["command"] for item in args.get("operations", [])]
+    for number, command in enumerate(commands, 1):
+        if command.get("op") == "save_object" and "acceptance" in (command.get("data") or {}):
+            raise Rejected(f"operation {number}: use process commands for acceptance")
+
+
 class Fake:
     def __init__(self, result=None, error=None):
         self.result, self.error, self.calls = result, error, []
 
     def call(self, name, args):
         self.calls.append((name, deepcopy(args)))
+        native_field_rule(name, args)
         if self.error:
             raise self.error
         return self.result

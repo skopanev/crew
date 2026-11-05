@@ -1,7 +1,7 @@
 """Bind the coder's test names to the reviewed gate receipt.
 
 The coder writes artifacts/test-bindings.json: [{task, ac, check, test}].
-Each (task, ac, check) of the package data.acceptance needs at least one test with outcome pass
+Each (task, ac, check) of the package data.acceptance_checks needs at least one test with outcome pass
 in the test report of the receipt that this run produced. The record binds the file digest to that
 exact receipt and tree. The host recomputes every check at completion. Each refusal is an evidence gap.
 """
@@ -30,7 +30,7 @@ def digest(path):
 
 
 def required(ticket):
-    """The (task, ac, check) rows of every package Task with data.acceptance, in ticket order."""
+    """The (task, ac, check) rows of every package Task with data.acceptance_checks, in ticket order."""
     rows = []
     for task in ticket.get("tasks") or [ticket]:
         for row in task.get("testAcceptance") or []:
@@ -61,7 +61,7 @@ def check(rows, expected, report, limit):
     pairs = {(row["task"], row["ac"], row["check"]) for row in rows}
     missing, extra = set(expected) - pairs, pairs - set(expected)
     if missing or extra:
-        raise Refused("BINDING_INVALID", f"bindings differ from data.acceptance: missing {sorted(missing)}; "
+        raise Refused("BINDING_INVALID", f"bindings differ from data.acceptance_checks: missing {sorted(missing)}; "
                                          f"extra {sorted(extra)}")
     if not isinstance(report, dict) or report.get("error") or not isinstance(report.get("results"), list):
         detail = report.get("error") if isinstance(report, dict) else None
@@ -101,7 +101,7 @@ def bind(gates, receipt_path=None):
     ticket = json.loads(ticket_file.read_text()) if ticket_file.is_file() else {}
     expected = required(ticket) if ticket else []
     if not expected:
-        print("bindings: no Task data.acceptance; nothing to bind")
+        print("bindings: no Task data.acceptance_checks; nothing to bind")
         return
     if receipt_path is None:
         pointer = json.loads((gates / "current.json").read_text())

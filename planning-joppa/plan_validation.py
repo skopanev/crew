@@ -135,7 +135,7 @@ def validate_one(plan, assignment, elsewhere=(), covering=(), carriers=()):
                 checks = body.partition("\nChecks:\n")[2].splitlines()
                 assigned |= (re.findall(r"^Repository:[ \t]*([^\r\n]+)$", body, re.M) == [check["repository"]]
                              and check_line(check) in checks)
-            # A carrier is never edited. It counts only when its data.acceptance already lists this exact check.
+            # A carrier is never edited. It counts only when its data.acceptance_checks already lists this exact check.
             assigned |= any(carries(task, assignment["ac"]["id"], check) for task in carriers)
             if not assigned:
                 raise ValueError(missing_check(check, assignment["ac"]["id"], elsewhere))

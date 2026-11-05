@@ -183,7 +183,7 @@ class ProviderTests(unittest.TestCase):
                 task.update(action="update", target="work:old", revision=3)
                 existing = data["joppa"]["tasks"][0]
                 existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
-                                                     projects=["other", "p"], acceptance=deepcopy(ACCEPTANCE))
+                                                     projects=["other", "p"], acceptance_checks=deepcopy(ACCEPTANCE))
                 if blocked:
                     hold(existing, "Failed")
                 if terminal:

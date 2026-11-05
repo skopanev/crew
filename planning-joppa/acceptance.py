@@ -85,7 +85,7 @@ def carries(task, address, check):
     if check_line(check) not in body.partition("\nChecks:\n")[2].splitlines():
         return False
     kind = address.split(":", 1)[0]
-    rows = data.get("acceptance") if isinstance(data.get("acceptance"), list) else []
+    rows = data.get("acceptance_checks") if isinstance(data.get("acceptance_checks"), list) else []
     return any(isinstance(row, dict) and row.get("check") == check_line(check)
                and (row.get("ac") if ":" in str(row.get("ac")) else kind + ":" + str(row.get("ac"))) == address
                for row in rows)

@@ -99,7 +99,7 @@ class ProviderTests(unittest.TestCase):
         first.update(action="update", target="work:old", revision=3)
         original = data["joppa"]["tasks"][0]
         original["document"]["data"].update(title=first["title"], body=publication.contract(first, value),
-                                             projects=["other", "p"], acceptance=deepcopy(ACCEPTANCE))
+                                             projects=["other", "p"], acceptance_checks=deepcopy(ACCEPTANCE))
         second = deepcopy(first)
         second.update(id="consumer", action="create", title="Consume existing work", depends_on=["first"])
         del second["target"], second["revision"]

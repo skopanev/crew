@@ -12,7 +12,8 @@ import context
 import coverage
 import publication
 
-from provider_fixture import item, assignment, plan, CHECK_TYPE, end
+from provider_fixture import item, assignment, plan, CHECK_TYPE, end, Fake
+from mcp import Rejected
 
 SPEC = {"field": "covers", "target": "criterion"}
 CHECK_B = {"scenario": "Show the saved value", "expected": "The value is visible"}
@@ -44,8 +45,8 @@ class CoversTests(unittest.TestCase):
         save = operations[0]["command"]
         self.assertEqual(save["parent"], "criterion:a")
         self.assertEqual(save["data"]["covers"], ["criterion:b"])
-        # The lint check is a Task-only check. It does not enter data.acceptance.
-        self.assertEqual(save["data"]["acceptance"], [
+        # The lint check is a Task-only check. It does not enter data.acceptance_checks.
+        self.assertEqual(save["data"]["acceptance_checks"], [
             {"ac": "criterion:a", "check": "Reject invalid input => No mutation"},
             {"ac": "criterion:b", "check": "Show the saved value => The value is visible"}])
         # The covered criterion is released and marked ready in the same batch. It has no Task of its own.
@@ -53,10 +54,23 @@ class CoversTests(unittest.TestCase):
         self.assertEqual(assessed, ["criterion:a", "criterion:b"])
         self.assertEqual(sum(operation["command"].get("kind") == "work" for operation in operations), 1)
 
+    def test_native_field_rule_accepts_the_planner_save_and_refuses_data_acceptance(self):
+        data, value = requirement()
+        operations = publication.operations(value, data)
+        saved = operations[0]["command"]["data"]
+        self.assertIn("acceptance_checks", saved)
+        self.assertEqual(saved["covers"], ["criterion:b"])
+        saved["test_bindings"] = [{"ac": "criterion:a", "check": "c", "test": "a.test.ts > one"}]
+        api = Fake({"results": []})
+        api.call("joppa_batch", {"workspace": "example", "operations": operations})
+        operations[0]["command"]["data"]["acceptance"] = saved["acceptance_checks"]
+        with self.assertRaisesRegex(Rejected, "^operation 1: use process commands for acceptance$"):
+            api.call("joppa_batch", {"workspace": "example", "operations": operations})
+
     def test_command_acceptance_check_is_mapped_too(self):
         data, value = requirement()
         value["acceptance_checks"].append({"repository": "service", "ac": "criterion:b", **LINT})
-        rows = publication.operations(value, data)[0]["command"]["data"]["acceptance"]
+        rows = publication.operations(value, data)[0]["command"]["data"]["acceptance_checks"]
         self.assertIn({"ac": "criterion:b", "check": "npm run lint (cwd: .) => exit 0"}, rows)
 
     def test_covers_are_refused_without_configuration_or_outside_the_selection(self):
@@ -98,13 +112,13 @@ class CoversTests(unittest.TestCase):
         original = deepcopy(carrier)
         value["tasks"][0]["covers"] = []
         value["tasks"][0]["checks"] = value["tasks"][0]["checks"][:1]
-        # A matching body check alone is not enough: the lane could not bind a test without data.acceptance.
+        # A matching body check alone is not enough: the lane could not bind a test without data.acceptance_checks.
         with self.assertRaisesRegex(ValueError, "AC criterion:b: acceptance check"):
             publication.operations(value, data)
-        carrier["document"]["data"]["acceptance"] = [{"ac": "criterion:b", "check": "Other => check"}]
+        carrier["document"]["data"]["acceptance_checks"] = [{"ac": "criterion:b", "check": "Other => check"}]
         with self.assertRaisesRegex(ValueError, "AC criterion:b: acceptance check"):
             publication.operations(value, data)
-        carrier["document"]["data"]["acceptance"] = [
+        carrier["document"]["data"]["acceptance_checks"] = [
             {"ac": "b", "check": "Show the saved value => The value is visible"}]
         original = deepcopy(carrier)
         operations = publication.operations(value, data)
@@ -128,7 +142,8 @@ class CoversTests(unittest.TestCase):
                                                          "projects": {"multiple": True, "target": "project"}}}}
         self.assertIsNone(coverage.reference({}, types, "work"))
         self.assertEqual(coverage.reference({"covers_reference": "covers"}, types, "work"), SPEC)
-        for field, message in (("one", "allow several"), ("missing", "is not a reference"), ("projects", "one Task")):
+        for field, message in (("one", "allow several"), ("missing", "is not a reference"), ("projects", "one Task"),
+                               ("acceptance", "one Task"), ("acceptance_checks", "one Task"), ("test_bindings", "one Task")):
             with self.assertRaisesRegex(ValueError, message):
                 coverage.reference({"covers_reference": field}, types, "work")
         types["work"]["references"]["other"] = {"multiple": True, "target": "project"}

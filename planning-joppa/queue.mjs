@@ -15,7 +15,10 @@ export function criterionIds(config) {
 export function coversReference(config, schema, taskKinds) {
   const field = config.covers_reference;
   if (field === undefined || field === null) return null;
-  if (typeof field !== 'string' || !field.trim()) throw new Error('covers_reference must name one Task reference field');
+  if (typeof field !== 'string' || !field.trim() ||
+      ['acceptance', 'acceptance_checks', 'test_bindings', 'projects', 'assignee', 'commit'].includes(field)) {
+    throw new Error('covers_reference must name one Task reference field other than a reserved data field');
+  }
   let target;
   for (const kind of taskKinds) {
     const reference = schema[kind]?.references?.[field];

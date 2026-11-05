@@ -73,11 +73,12 @@ export function taskChecks(data) {
 // Each row must name the Task parent or a covered criterion, and one of the Task checks. Otherwise a row could
 // create a test node under an unrelated criterion that no claim guards.
 export function testAcceptance(object, covers = []) {
-  const rows = object.document?.data?.acceptance;
+  // Joppa reserves data.acceptance for process commands. The planner writes data.acceptance_checks.
+  const rows = object.document?.data?.acceptance_checks;
   if (rows === undefined || rows === null) return null;
   const parent = String(object.document.parent || ''), kind = parent.slice(0, parent.indexOf(':'));
   require(Array.isArray(rows) && rows.every(row => row && text(row.ac) && text(row.check)),
-    `BINDING_INVALID: ${object.address} data.acceptance needs [{ac, check}]`);
+    `BINDING_INVALID: ${object.address} data.acceptance_checks needs [{ac, check}]`);
   const checks = new Set(taskChecks(object.document.data)), scope = new Set([parent, ...covers]);
   const result = [];
   for (const row of rows) {
