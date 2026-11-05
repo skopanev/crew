@@ -18,7 +18,7 @@ function run(root, name, receipts) {
 const claim = (status = 'confirmed') => ({status, server: config.url, arguments: {workspace: 'example',
   operations: [{command: {op: 'save_object', kind: 'criterion', id: 'a', revision: 3}}]}});
 const mark = (extra = {}) => ({position: 941, code: 'PLANNING_FAILED', revision: 5, marked_at: '2026-11-05T10:00:00+00:00',
-  retry_after: '2026-11-05T10:01:00+00:00', retry_exhausted: false, ...extra});
+  retry_after: '2026-11-05T10:01:00+00:00', retry_exhausted: false, retry_class: 'AGENT_INCOMPLETE', ...extra});
 const row = (position = 941, revision = 5, reason = 'PLANNING_FAILED') =>
   ({address: AC, revision, 'process.assessment': {state: 'waiting', reason, position}});
 const at = text => Date.parse(text);
@@ -46,10 +46,13 @@ test('a retry is due only for the exact own mark after its delay', () => {
   assert.equal(retryDue(row(941, 5, 'OWNER_HOLD'), mark(), at('2026-11-05T11:00:00Z')), false);
   assert.equal(retryDue(row(), mark({code: 'NEEDS_HUMAN', retry_after: null}), at('2026-11-05T11:00:00Z')), false);
   assert.equal(retryDue(row(), null, at('2026-11-05T11:00:00Z')), false);
+  // A critic rejection or another unlisted failure has no retry class and no retry time.
+  assert.equal(retryDue(row(), mark({retry_class: null, retry_after: null}), at('2026-11-05T11:00:00Z')), false);
 });
 
 test('an exhausted mark returns to the queue only after an AC edit', () => {
   const exhausted = mark({retry_exhausted: true, retry_after: null});
   assert.equal(retryDue(row(941, 5), exhausted, at('2026-11-05T11:00:00Z')), false);
   assert.equal(retryDue(row(941, 6), exhausted, at('2026-11-05T11:00:00Z')), true);
+  assert.equal(retryDue(row(941, 6), {...exhausted, retry_class: null}, at('2026-11-05T11:00:00Z')), false);
 });

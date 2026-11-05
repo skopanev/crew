@@ -264,13 +264,18 @@ The queue stays read-only. It reads the existing run receipts and creates no sto
 - Fences: each Crew `assess` sends `expected_position` when Crew knows the exact assessment position.
   `0` means that the AC has no assessment. A stale position refuses the whole batch, and an operator assessment stays.
 - `claim.json` records `positions`: the position that each later fenced `assess` of the run expects.
-  A plain claim keeps the position read before the claim. A retry claim reads the AC again after its batch.
+  A plain claim keeps the position read before the claim. A retry claim takes the position from its batch reply.
+  `prepare` writes `positions` before any read. Then a read of each retry AC must show the same position.
+  A different position removes it from `positions` and stops the run.
 - The failure release fences each `assess` not ready on `claim.json` `positions`.
   A refused release keeps the claim for recovery. An older claim without `positions` releases unfenced.
+  A retry run never sends an unfenced `assess`: an AC without a recorded position keeps its claim for recovery.
 - The publication `assess` ready of each AC and of each reopened Task uses the same fence.
 - `release.json` records `marks` for each AC with a confirmed fenced failure `assess`:
-  `position`, `code`, `context`, `revision`, `marked_at`, `mark_source`, `attempts`, `retry_exhausted` and `retry_after`.
-  The position comes from the batch reply (`results[i].position` of the `assess`).
+  `position`, `code`, `context`, `revision`, `marked_at`, `mark_source` (`reply`), `retry_class`, `attempts`,
+  `retry_exhausted` and `retry_after`.
+  The position comes only from the confirmed batch reply (`results[i].position` of the `assess`).
+  It equals `process.assessment.position`. A reply without a positive position records no mark.
   A read after the batch must show the same position, reason, revision and no planning assignee. Otherwise
   `marks_skipped` gives the reason and the AC gets no mark.
 - `context` is the digest of the authored AC document: data without `assignee`, `commit` and `test_bindings`,
@@ -286,12 +291,24 @@ The queue stays read-only. It reads the existing run receipts and creates no sto
 - The claim keeps `MAX_CLAIMED_CRITERIA`. A retry adds one operation for each AC, so the batch stays below 100 operations.
 - The retried pass runs the full graph with the two-round critic limit. It reads critic notes as AC context, as before.
 
+Only an allowlisted failure retries. `retry_rules.py` classifies Crew's own failure reason at release.
+The code must be `PLANNING_FAILED`, and the pass must not end with a critic rejection.
+A reason with a structural part (critic rejection, research block, owner decision, validation, Joppa batch refusal,
+refused claim, blocked Task contract) gets no class. An unknown reason gets no class and stays manual.
+
+| `retry_class` | Reason pattern | Why the same input can pass again |
+|---|---|---|
+| `AGENT_INCOMPLETE` | `agent did not complete successfully` | An agent process exited before its report, so a researcher or reviewer gave no report. |
+| `CBM_UNAVAILABLE` | `codebase-memory-mcp`, `source changed during the CBM refresh` | The shared code index was busy, or the source moved during its refresh. |
+| `MCP_STARTUP` | `post hook vetoed the attempt` with MCP `initialize` output | The reader MCP connector failed during its startup handshake. |
+
 Crew never retries automatically:
 
+- A failure without an allowlisted `retry_class`, such as a critic rejection or a plan validation failure.
 - `NEEDS_HUMAN` and `OUT_OF_MODULE`. Lane receipts do not give complete path evidence for `OUT_OF_MODULE`.
 - An AC whose assessment position differs from the last Crew mark, such as any operator assessment.
 - A mark from a run with a pending or uncertain receipt or an unknown skipped claim.
-- An AC without a mark, such as each receipt written before this feature.
+- An AC without a mark from a reply position, such as each receipt written before this feature.
 - An AC that a later run claimed. A rejected later claim applied nothing and does not count.
 
 The dispatcher selects a waiting AC only for a due retry. `planning_retry.py` checks again before the claim.

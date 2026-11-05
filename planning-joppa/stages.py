@@ -15,6 +15,7 @@ import publication
 import planning_claims as claims
 import critic_notes
 import retry_marks
+import retry_rules
 from mcp import Rejected
 from joppa_reads import blocked
 
@@ -63,10 +64,10 @@ def prepare():
     # Record the revision of each AC that this run wrote. Any later edit or reassignment stops the run.
     claim = {**claim, "revisions": claims.claimed_revisions(claim)}
     write(target / "claim.json", claim)
-    # Record the assessment position that each later fenced assess of this run expects.
-    claim["positions"] = retry_marks.claimed_positions(api, config["workspace"], claim, assignment["joppa"]["objects"],
-                                                       retries)
+    # Record the positions that later fenced assess commands expect before any read, then verify retry positions.
+    claim["positions"] = retry_marks.reply_positions(claim, assignment["joppa"]["objects"], retries)
     write(target / "claim.json", claim)
+    retry_marks.verify_positions(api, config["workspace"], target / "claim.json", claim, retries)
     holders = claims.owned(api, config["workspace"], claim)
     # Claiming changes only data.assignee. Check that no other writer changed authored context.
     fresh, current, current_ac = (context.load_requirement(api, config, requirement, [item["id"] for item in criteria])
@@ -194,7 +195,7 @@ def fail(reason=None, code=None, critic=None):
             notes = critic_notes.build(target, critic, (assignment.get("joppa") or {}).get("scope") == "requirement") \
                 if critic else None
             released = publication.release(context.client(config), target, config["workspace"], assignment["ac"]["id"], reason,
-                                           code, notes)
+                                           code, notes, retry_rules.classify(reason, code, critic))
     except Exception as error:
         release_error = str(error)
     uncertain = any(path.exists() and read(path)["status"] in ("pending", "uncertain")

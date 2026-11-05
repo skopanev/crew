@@ -7,6 +7,7 @@ from pathlib import Path
 
 from common import digest, read
 from context_snapshot import authored_document
+from retry_rules import ALLOWLIST
 
 # Seconds after the failure mark before retry 1 and retry 2. Then the AC context is exhausted.
 DELAYS = (60, 300)
@@ -79,11 +80,12 @@ def attempts(root, server, workspace, address, context):
                .get("context") == context)
 
 
-def budget(root, server, workspace, address, context, code, marked_at):
-    """The retry fields of a new failure mark."""
+def budget(root, server, workspace, address, context, retry_class, marked_at):
+    """The retry fields of a new failure mark. Only an allowlisted failure class gets a retry time."""
     done = attempts(root, server, workspace, address, context)
     exhausted = done >= MAX_RETRIES
-    after = None if exhausted or code in INELIGIBLE else stamp(marked_at + timedelta(seconds=DELAYS[done]))
+    after = (None if exhausted or retry_class not in ALLOWLIST
+             else stamp(marked_at + timedelta(seconds=DELAYS[done])))
     return {"attempts": done, "retry_exhausted": exhausted, "retry_after": after}
 
 
@@ -121,6 +123,8 @@ def eligible(root, server, workspace, object, moment=None):
     if uncertain(target, address):
         return None, "failed run has an uncertain receipt"
     entry = read(target / "release.json")["marks"][address]
+    if entry.get("retry_class") not in ALLOWLIST or entry.get("mark_source") != "reply":
+        return None, "failure is not retryable"
     context = context_digest(object)
     done = attempts(root, server, workspace, address, context)
     if done >= MAX_RETRIES:

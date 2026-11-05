@@ -194,7 +194,7 @@ def planning_idle(api, config, assignment, expected=None):
             require(not assignee, f"Requirement already has an active planning run on {address}")
 
 
-def release(api, target, workspace, ac, reason, code=None, notes=None):
+def release(api, target, workspace, ac, reason, code=None, notes=None, retry_class=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
     With a failure code, also assess each AC not ready in the same batch. Leave an AC that changed after this run
     wrote it untouched for recovery. Never split the batch and never omit an assess.
@@ -240,6 +240,11 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
         if assignee_of(object) != assignee:
             skipped.append({"ac": address, "reason": "planning claim is missing or replaced"})
             continue
+        if code and receipt.get("retry") and address not in positions:
+            # An automatic retry run never writes an assess without expected_position.
+            skipped.append({"ac": address, "unknown": True, "reason": "retry claim has no recorded assessment "
+                            "position; claim retained for recovery"})
+            continue
         if code and object["current_revision"] != expected.get(address):
             skipped.append({"ac": address, "unknown": True, "reason": f"criterion changed after this run claimed it: "
                             f"revision {object['current_revision']}, expected {expected.get(address)}"})
@@ -273,7 +278,8 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
                           **({"critic_notes": noted if confirmed else []} if noted else {})})
     if code and reply is not None:
         import retry_marks
-        write(prior, {**read(prior), **retry_marks.record(api, workspace, target, receipt, operations, reply)})
+        write(prior, {**read(prior), **retry_marks.record(api, workspace, target, receipt, operations, reply,
+                                                                 retry_class)})
     return not any(item.get("unknown") for item in skipped)
 
 
