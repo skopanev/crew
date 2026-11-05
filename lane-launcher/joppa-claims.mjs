@@ -127,7 +127,9 @@ export async function claimTask(run, persist, runId) {
       const context = {use: 'Acceptance reference. Execute only this Task contract.',
         address: parent.address, item_id: parent.item_id, revision: parent.current_revision, data: parent.document.data,
         ...(parent.remote_links?.length ? {remote_links: parent.remote_links} : {})};
-      const snapshot = {address: parent.address, revision: parent.current_revision, digest: contractDigest(parent)};
+      // Only a criterion carries readiness; a Requirement or group ancestor reports work_ready false by design.
+      const snapshot = {address: parent.address, revision: parent.current_revision, digest: contractDigest(parent),
+        ...(schema.schema.types[parent.kind]?.role === 'ac' ? {criterion: true} : {})};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
       if (address === object.document.parent) {
@@ -152,7 +154,7 @@ export async function claimTask(run, persist, runId) {
         await releaseTaskClaims(run, persist, `Covered criterion is not ready: ${problem}. Lane did not start.`);
         throw new Error(`COVERED_CONTEXT_NOT_READY: ${problem}; this run released its own Tasks before startup`);
       }
-      const snapshot = {address, revision: criterion.current_revision, digest: contractDigest(criterion)};
+      const snapshot = {address, revision: criterion.current_revision, digest: contractDigest(criterion), criterion: true};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
       coveredContexts.push({use: 'Covered acceptance reference. Execute only this Task contract.',
@@ -196,7 +198,8 @@ export async function guardTaskClaims(run, persist) {
   for (const context of run.claim.contexts || []) {
     const object = await reader.object(context.address);
     verifyRemoteDependencies(object);
-    require(contextLive(object) && object.work_ready === true && contractDigest(object) === context.digest,
+    require(contextLive(object) && (context.criterion !== true || object.work_ready === true) &&
+      contractDigest(object) === context.digest,
       'Acceptance context changed before lane startup');
   }
   let conflict;
