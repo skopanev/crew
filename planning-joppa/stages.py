@@ -140,7 +140,9 @@ def finish():
     # Read dependency targets last. A target that ends after this read makes Joppa refuse the whole batch.
     completed = publication.completed_dependencies(api, config["workspace"], plan,
                                                    current.get("schema", {}).get("types", {}))
-    operations = publication.operations(plan, fresh, completed, claim.get("positions", {}))
+    # An automatic retry run publishes only with a known position for every selected AC.
+    positions = retry_marks.required_positions(claim, [item["id"] for item in context.selected_criteria(fresh)])
+    operations = publication.operations(plan, fresh, completed, positions)
     held = any(blocked(task) for task in fresh["joppa"]["tasks"])
     criteria = {item["id"] for item in context.selected_criteria(fresh)}
     if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not held:

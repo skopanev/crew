@@ -9,17 +9,20 @@ import planning_retry as retry
 LOG = "planning-joppa"
 
 
-def reply_position(result):
-    """The assessment position that one batch result reports, or None.
-    A live assess result is {"command", "object": null, "position"}: position equals process.assessment.position."""
+def reply_position(result, target):
+    """The native position of one assess result in a batch reply, or None.
+    A live assess result is {"command": {"op": "assess", "target", ...}, "object": null, "position"}, and its position
+    equals process.assessment.position. Another operation, another target or a contradictory nested value is refused."""
     if not isinstance(result, dict):
         return None
-    for value in ((result.get("assessment") or {}).get("position"),
-                  (((result.get("object") or {}).get("process") or {}).get("assessment") or {}).get("position"),
-                  result.get("position")):
-        if type(value) is int and value > 0:
-            return value
-    return None
+    echoed, value = result.get("command"), result.get("position")
+    if not isinstance(echoed, dict) or echoed.get("op") != "assess" or echoed.get("target", target) != target:
+        return None
+    nested = ((result.get("assessment") or {}).get("position"),
+              (((result.get("object") or {}).get("process") or {}).get("assessment") or {}).get("position"))
+    if any(item is not None and item != value for item in nested):
+        return None
+    return value if type(value) is int and value > 0 else None
 
 
 def results_of(reply, operations):
@@ -44,22 +47,35 @@ def reply_positions(claim, objects, retries):
             mark = retry.position(objects[target])
             if mark is not None:
                 positions[target] = mark
-        elif command["op"] == "assess" and target in retries and reply_position(result):
-            positions[target] = reply_position(result)
+        elif command["op"] == "assess" and target in retries and reply_position(result, target):
+            positions[target] = reply_position(result, target)
     return positions
 
 
 def verify_positions(api, workspace, target, claim, retries):
-    """Read each retry AC again. A different position drops it from claim.json and stops the run.
+    """Stop a retry run before agents unless each claimed AC has a known position. Then read each retry AC again:
+    a different position drops it from claim.json and stops the run. The release keeps such a claim for recovery.
     The positions are already in claim.json, so a failed read never leads to an unfenced release."""
+    if retries:
+        required_positions(claim)
     for ac in retries:
-        if ac not in claim["positions"]:
-            continue
         current = object_read(api, workspace, ac)
         if retry.position(current) != claim["positions"][ac] or retry.assessment(current).get("state") == "waiting":
             del claim["positions"][ac]
             write(target, claim)
             require(False, f"retry claim of {ac} does not show its own assessment position; claim retained")
+
+
+def required_positions(claim, criteria=None):
+    """claim.json positions. An automatic retry run requires a known position for each claimed or selected AC."""
+    positions = claim.get("positions") or {}
+    if claim.get("retry"):
+        addresses = set(criteria) if criteria is not None else {
+            address(item["command"]) for item in claim["arguments"].get("operations", [])}
+        missing = sorted(addresses - set(positions))
+        require(not missing, f"retry run has no recorded assessment position for {', '.join(missing)}; "
+                "claim retained for recovery, no unfenced assess")
+    return positions
 
 
 def record(api, workspace, target, receipt, operations, reply, retry_class=None):
@@ -85,7 +101,8 @@ def marks(api, workspace, target, receipt, operations, reply, retry_class):
             continue
         if command["op"] != "assess" or "expected_position" not in command:
             continue
-        ac, code, replied = command["target"], command["reason"], reply_position(reported)
+        ac, code = command["target"], command["reason"]
+        replied = reply_position(reported, ac)
         if not replied:
             skipped[ac] = "the confirmed reply has no assessment position"
             continue

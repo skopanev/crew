@@ -270,11 +270,14 @@ The queue stays read-only. It reads the existing run receipts and creates no sto
 - The failure release fences each `assess` not ready on `claim.json` `positions`.
   A refused release keeps the claim for recovery. An older claim without `positions` releases unfenced.
   A retry run never sends an unfenced `assess`: an AC without a recorded position keeps its claim for recovery.
+- A retry claim without a positive reply position for each claimed AC stops `prepare` before any reader or agent.
+  `finish` of a retry run refuses publication unless every selected AC has a recorded position.
 - The publication `assess` ready of each AC and of each reopened Task uses the same fence.
 - `release.json` records `marks` for each AC with a confirmed fenced failure `assess`:
   `position`, `code`, `context`, `revision`, `marked_at`, `mark_source` (`reply`), `retry_class`, `attempts`,
   `retry_exhausted` and `retry_after`.
-  The position comes only from the confirmed batch reply (`results[i].position` of the `assess`).
+  The position comes only from the native top-level `position` of the `assess` result in the confirmed batch reply.
+  That result must echo `command.op` `assess` and the same target. A nested position that differs refuses it.
   It equals `process.assessment.position`. A reply without a positive position records no mark.
   A read after the batch must show the same position, reason, revision and no planning assignee. Otherwise
   `marks_skipped` gives the reason and the AC gets no mark.
@@ -299,7 +302,7 @@ refused claim, blocked Task contract) gets no class. An unknown reason gets no c
 | `retry_class` | Reason pattern | Why the same input can pass again |
 |---|---|---|
 | `AGENT_INCOMPLETE` | `agent did not complete successfully` | An agent process exited before its report, so a researcher or reviewer gave no report. |
-| `CBM_UNAVAILABLE` | `codebase-memory-mcp`, `source changed during the CBM refresh` | The shared code index was busy, or the source moved during its refresh. |
+| `CBM_UNAVAILABLE` | `CBM daemon is active or starting but could not accept this client`, `another index operation for this project is active`, a `codebase-memory-mcp` command that `timed out after N seconds`, `source changed during the CBM refresh` | The shared code index daemon was busy or slow, or the source moved during its refresh. A missing executable, a bad project, invalid arguments or a config error stays manual. |
 | `MCP_STARTUP` | `post hook vetoed the attempt` with MCP `initialize` output | The reader MCP connector failed during its startup handshake. |
 
 Crew never retries automatically:
