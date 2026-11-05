@@ -129,7 +129,7 @@ export async function claimTask(run, persist, runId) {
         ...(parent.remote_links?.length ? {remote_links: parent.remote_links} : {})};
       // Only a criterion carries readiness; a Requirement or group ancestor reports work_ready false by design.
       const snapshot = {address: parent.address, revision: parent.current_revision, digest: contractDigest(parent),
-        ...(schema.schema.types[parent.kind]?.role === 'ac' ? {criterion: true} : {})};
+        criterion: schema.schema.types[parent.kind]?.role === 'ac'};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
       if (address === object.document.parent) {
@@ -182,6 +182,10 @@ export async function claimTask(run, persist, runId) {
   return run.claim;
 }
 
+// A context recorded before the criterion flag existed takes its readiness rule from the node's current schema role.
+export const needsReadiness = (context, object, types) =>
+  typeof context.criterion === 'boolean' ? context.criterion : types?.[object.kind]?.role === 'ac';
+
 export async function guardTaskClaims(run, persist) {
   require(run.releaseConfirmed !== true, 'PACKAGE_CLAIMS_RELEASED: This run no longer holds its Tasks');
   require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Inspect the saved release request before retrying');
@@ -195,10 +199,11 @@ export async function guardTaskClaims(run, persist) {
     verifyRemoteDependencies(object);
     require(contractDigest(object) === claim.digest, 'Task contract changed before lane startup');
   }
+  const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   for (const context of run.claim.contexts || []) {
     const object = await reader.object(context.address);
     verifyRemoteDependencies(object);
-    require(contextLive(object) && (context.criterion !== true || object.work_ready === true) &&
+    require(contextLive(object) && (!needsReadiness(context, object, types) || object.work_ready === true) &&
       contractDigest(object) === context.digest,
       'Acceptance context changed before lane startup');
   }
