@@ -14,6 +14,7 @@ import context
 import planning_claims as claims
 import publication
 import retry_marks
+import retry_rules
 
 SERVER = "https://example.invalid/mcp"
 AC = "criterion:a"
@@ -28,6 +29,8 @@ class Joppa:
     """Live ACs as {address: {revision, data, assessment}}. A stale revision or position refuses the whole batch."""
     def __init__(self, revision=3, assessment=None):
         self.url, self.calls, self.journal = SERVER, [], 900
+        # False: an assess result without its position, as an older server could answer.
+        self.reply_positions = True
         self.acs = {AC: {"revision": revision, "data": {"title": AC, "owner": "owner"}, "assessment": assessment}}
 
     def read(self, address):
@@ -71,7 +74,8 @@ class Joppa:
                 if "expected_position" in command and command["expected_position"] != current:
                     raise Rejected("stale assessment position")
                 position = self.assess(staged, command["target"], command["ready"], command["reason"], "crew")
-                results.append({"command": {"op": "assess"}, "object": None, "position": position})
+                results.append({"command": {"op": "assess"}, "object": None,
+                                **({"position": position} if self.reply_positions else {})})
             else:
                 self.journal += 1
                 results.append({"command": {"op": command["op"]}, "position": self.journal})
@@ -99,14 +103,18 @@ def claim(api, root, number, retries=None):
                        extra={"retry": retries} if retries else None)
     receipt = json.loads((target / "claim.json").read_text())
     receipt["revisions"] = claims.claimed_revisions(receipt)
-    receipt["positions"] = retry_marks.claimed_positions(api, "example", receipt, assignment["joppa"]["objects"],
-                                                         retries or {})
+    receipt["positions"] = retry_marks.reply_positions(receipt, assignment["joppa"]["objects"], retries or {})
     write(target / "claim.json", receipt)
+    retry_marks.verify_positions(api, "example", target / "claim.json", receipt, retries or {})
     return target
 
 
-def fail(api, target, code="PLANNING_FAILED"):
-    return publication.release(api, target, "example", AC, "planning failed", code)
+TRANSIENT = "1/2 inputs ok (min_success=2); failures: rc x1; agent did not complete successfully"
+
+
+def fail(api, target, code="PLANNING_FAILED", reason=TRANSIENT, critic=None):
+    """The stages.fail release: Crew classifies its own reason against the allowlist."""
+    return publication.release(api, target, "example", AC, reason, code, None, retry_rules.classify(reason, code, critic))
 
 
 def release_receipt(target):

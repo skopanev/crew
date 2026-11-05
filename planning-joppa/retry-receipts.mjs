@@ -46,6 +46,7 @@ const assessment = row => row.process?.assessment ?? row['process.assessment'] ?
 export function retryDue(row, mark, now = Date.now()) {
   const value = assessment(row);
   if (!mark || value.state !== 'waiting' || value.position !== mark.position || value.reason !== mark.code) return false;
+  if (!mark.retry_class) return false;
   if (mark.retry_exhausted) return row.revision !== mark.revision && Date.parse(mark.marked_at) + FIRST_DELAY_MS <= now;
   return typeof mark.retry_after === 'string' && Date.parse(mark.retry_after) <= now;
 }
