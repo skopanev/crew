@@ -70,7 +70,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const env = {...process.env, GIT_SSH_COMMAND: `ssh -F /dev/null -i ${quote(path.join(run.config.sshDir, 'id_ed25519'))} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${quote(path.join(run.config.sshDir, 'known_hosts'))}`};
     const remote = await new Promise((resolve, reject) => execFile('git', ['-C', run.repository.path, 'ls-remote', 'origin', `refs/heads/${target}`],
       {env, encoding: 'utf8', timeout: 120_000}, (error, output) => error ? reject(new Error('Cannot confirm published SHA')) : resolve(output.trim().split(/\s/)[0])));
-    if (remote !== sha && remote && expected === run.repository.targetBranch) {
+    if (remote !== sha && remote &&
+        (expected === run.repository.targetBranch || expected === run.requirementDelivery?.branch)) {
       const git = args => new Promise((resolve, reject) => execFile('git', ['-C', run.repository.path, ...args],
         {env, encoding: 'utf8', timeout: 120_000}, error => error ? reject(new Error('Remote branch does not contain the checked SHA; Task remains held')) : resolve()));
       await git(['fetch', '--no-write-fetch-head', 'origin', remote]);

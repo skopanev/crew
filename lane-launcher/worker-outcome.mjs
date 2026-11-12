@@ -4,7 +4,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {save, read, runDirectories} from './runtime.mjs';
 import {api, finishTask, noteHeldTask} from './joppa.mjs';
-import {parsePublication} from './requirement-delivery.mjs';
+import {parsePublication, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
 
 // Announce the latest failure report and its failed checks. Returns its artifacts folder.
@@ -133,6 +133,14 @@ export async function checkRequirementHead({run, stateFile, result, announce}) {
     const head = (await repositoryGit(run.config, run.repository,
       ['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0] || '';
     if (head && head !== before) {
+      try {
+        const plan = await requirementPlan({...run, claim: undefined, tasks: [], finalizeOnly: true},
+          (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
+        assertRequirementHead(plan, head);
+        return;
+      } catch (error) {
+        if (error.code !== 'REQUIREMENT_HEAD_UNCONFIRMED') throw error;
+      }
       const diagnosis = `REQUIREMENT_HEAD_UNCONFIRMED: ${branch} moved from ${before || '<absent>'} to ${head} during failed Task ${run.task}. Completion was not confirmed. Inspect the saved completion request. Retry it only if the Task contract is unchanged. Otherwise, the operator must restore the prior Requirement head.`;
       announce(`[lane] ${diagnosis}`);
       run.publicationFailureRequest ||= {workspace: run.workspace, request_id: randomUUID(),
