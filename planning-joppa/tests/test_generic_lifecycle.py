@@ -184,7 +184,9 @@ class GenericLifecycleTests(unittest.TestCase):
     def test_task_list_paginates_and_reports_unfinished_states(self):
         data = assignment()
         fields = publication.contract_fields(plan()["tasks"][0])
-        rows = [{"address": f"work:t{index}", "data.projects": ["p"] if index != 3 else ["elsewhere"]} for index in range(5)]
+        # work:t3 declares a repository that this planner does not configure.
+        rows = [{"address": f"work:t{index}", "body": fields["body"], "steps": fields["steps"],
+                 "repository": "service" if index != 3 else "elsewhere"} for index in range(5)]
         details = {"work:t0": raw("work:t0", {"title": "Open", **fields}),
                    "work:t1": raw("work:t1", {"title": "Mine", "assignee": "lane-1", **fields}),
                    "work:t2": raw("work:t2", {"title": "Held", "hold": "LANE_FAILED", **fields}),

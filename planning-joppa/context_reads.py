@@ -144,6 +144,15 @@ def task_contract(data):
                  for number, step in enumerate(steps, 1))
     return "\n".join([*lines, "", "Checks:", *checks])
 
+def repository_declarations(data):
+    """The Repository: lines of a Task, read without validating the rest of its contract."""
+    body = data.get("body", data.get("contract"))
+    lines = [body if isinstance(body, str) else ""]
+    if data.get("steps") is not None:
+        lines.append(f"Repository: {data.get('repository')}")
+    return [value.strip() for value in re.findall(r"^Repository:[ \t]*(\S[^\r\n]*)$", "\n".join(lines), re.M)]
+
+
 def pending_work(api, config, assignment):
     for attempt in range(3):
         try:
@@ -156,18 +165,19 @@ def pending_work_page(api, config, assignment):
     """Locate unfinished work across Requirements. Full reads still bind reuse and dependencies."""
     from joppa_reads import task_state
     visible = set(assignment["joppa"]["objects"])
-    projects = {name for repo in config["repositories"] for name in (repo["project"], repo["project"].split(":", 1)[1])}
+    repositories = {repo["id"] for repo in config["repositories"]}
     result, cursor, seen = [], None, set()
     while True:
         # Lists give current Tasks only. Archived Tasks are done or retired.
         args = {"workspace": config["workspace"], "kind": assignment["joppa"]["task_type"], "parent": "*",
-                "limit": 25, "fields": ["title", "parent", "revision", "data.projects"]}
+                "limit": 25, "fields": ["title", "parent", "revision", "body", "repository", "steps"]}
         if cursor:
             args["cursor"] = cursor
         page = api.call("joppa_objects", args)
         for task in page["items"]:
             address = task["address"]
-            if address in visible or not projects.intersection(task.get("data.projects") or []):
+            # The Task declares its repository. Only Tasks of a configured repository are this planner's work.
+            if address in visible or not repositories.intersection(repository_declarations(task)):
                 continue
             document = object_read(api, config["workspace"], address, allow_archived=True)
             status = task_state(document)

@@ -14,7 +14,6 @@
   "repositories": [
     {
       "id": "service",
-      "project": "project:service-project-id",
       "path": "/path/to/source-root/service",
       "cbm_project": "service-index",
       "modules": [{"name": "feature", "path": "src/feature"}]

@@ -118,8 +118,6 @@ def load_once(api, config, ac_id):
     require(len(task_types) == 1, "criterion needs exactly one direct Task type")
     task_kind = task_types[0]
     require(types[task_kind].get("question"), "Task type needs a configured question")
-    project_ref = types[task_kind].get("references", {}).get("projects")
-    require(project_ref and project_ref.get("multiple") is True, "Task type needs a projects reference list")
     tasks = [get(address, True) for address in task_addresses(api, workspace, ac_id, task_kind)]
     # Read explicit references. Do not traverse unrelated tickets or infer ownership.
     for item in [ac, *parents, *tasks]:
@@ -129,9 +127,6 @@ def load_once(api, config, ac_id):
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
                 get(reference["target"])
-    for repo in config["repositories"]:
-        project = get(repo["project"])
-        require(project["kind"] == project_ref["target"], "repository project type differs from Task schema")
     # Current verification decisions belong to the Requirement, not the AC document revision.
     meaning = requirement_meaning(api, workspace, req, types, get)
     revision = meaning
@@ -248,12 +243,9 @@ def configuration(path, raw=None):
     elif folders:
         config["lane_runs_folder"] = cleanup_path(folders[0], "lane_runs_folder")
     for repo in config["repositories"]:
-        text(repo.get("project"), "repository.project address")
-        require(":" in repo["project"], "repository.project must be a full object address")
         value = Path(text(repo.get("path"), "repository.path")).expanduser()
         repo["path"] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
     require(len({r["id"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate repository ID")
-    require(len({r["project"] for r in config["repositories"]}) == len(config["repositories"]), "duplicate project mapping")
     if "ac_ids" in config:
         require(isinstance(config["ac_ids"], list) and bool(config["ac_ids"])
                 and all(isinstance(address, str) and ":" in address for address in config["ac_ids"])

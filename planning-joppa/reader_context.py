@@ -153,9 +153,6 @@ def retry_startup(api, config, target, assignment, ac, advertised):
         require(repo is not None, "Task repository is not configured")
         module = next((module for module in repo["modules"] if module["name"] == field("Module")), None)
         require(module is not None, "Task module is not configured")
-        require(any(project in data.get("projects", [])
-                    for project in (repo["project"], repo["project"].split(":", 1)[1])),
-                "Task projects do not include its configured repository")
         require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
         # A save at the read revision of the same Task only clears its hold.
         reason = "Retry startup after removing the retained worktree."

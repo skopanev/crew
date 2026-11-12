@@ -108,7 +108,6 @@ def operations(plan, assignment, completed=frozenset()):
         if blocked(existing):
             require(existing["address"] in targets,
                     f"blocked Task {existing['address']} needs a new contract or retirement")
-    repositories = {item["id"]: item for item in assignment["repositories"]}
     objects = assignment["joppa"]["objects"]
     grouped = assignment["joppa"].get("scope") == "requirement"
     result, refs = [], {}
@@ -152,13 +151,6 @@ def operations(plan, assignment, completed=frozenset()):
             data.pop(spec["field"], None)
             if task.get("covers"):
                 data[spec["field"]] = list(task["covers"])
-        project = repositories[task["repository"]]["project"]
-        project_id = project.split(":", 1)[1]
-        projects = list(data.get("projects") or [])
-        if project_id not in projects:
-            if project not in projects:
-                projects.append(project_id)
-        data["projects"] = projects
         links = deepcopy(existing["document"].get("links", [])) if existing else []
         links = [link for link in links if not (link.get("blocking") and link.get("relation") == "depends_on"
                                                 and link.get("target") in retired)]

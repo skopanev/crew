@@ -101,10 +101,6 @@ def load_requirement(api, config, req_id, selected=None):
         require(len(task_types) == 1, "criterion needs exactly one direct Task type")
         kind = task_types[0]
         require(types[kind].get("question"), "Task type needs a configured question")
-        reference = types[kind].get("references", {}).get("projects")
-        require(reference and reference.get("multiple") is True, "Task type needs a projects reference list")
-        require(all(get(repo["project"])["kind"] == reference["target"] for repo in config["repositories"]),
-                "repository project type differs from Task schema")
         schemas[address] = {"task_type": kind, "task_schema": types[kind], "test_nodes": tests[address]}
         specs.setdefault(kind, coverage.reference(config, types, kind))
     spec = {json_key(specs[schemas[address]["task_type"]]) for address in candidates}
