@@ -143,10 +143,10 @@ class GenericLifecycleTests(unittest.TestCase):
         hold(data["joppa"]["tasks"][0], "Lane failed")
         operations = publication.operations(value, data)
         self.assertEqual([entry["command"]["op"] for entry in operations], ["save_object", "save_object"])
-        # The revised contract save clears the Task hold. clean replaces the data whole.
+        # The revised contract save clears the Task hold. An update sends only changed fields, null removes one.
         task_save = operations[0]["command"]
-        self.assertEqual((task_save["id"], task_save.get("clean")), ("old", True))
-        self.assertNotIn("hold", task_save["data"])
+        self.assertEqual((task_save["id"], task_save.get("clean")), ("old", None))
+        self.assertIsNone(task_save["data"]["hold"])
         release = operations[1]["command"]
         self.assertEqual((release["kind"], release["id"], release["revision"]), ("criterion", "a", 3))
         self.assertEqual(release["data"], {"assignee": None, "hold": None})

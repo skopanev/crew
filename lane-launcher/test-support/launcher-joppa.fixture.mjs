@@ -201,9 +201,15 @@ function served(object) {
     historical: object.historical, parent: object.document.parent, present: object.document.present,
     data: structuredClone(object.document.data), relations, work_ready: object.work_ready,
     ...(object.waits_for ? {waits_for: object.waits_for} : {}), status: object.status,
-    annotations: structuredClone(object.annotations), ...(object.remote_links ? {remote_links: object.remote_links} : {}),
+    // Live detail reads give comments as one page {items, total, next_cursor}, not annotations.
+    comments: comments(object), ...(object.remote_links ? {remote_links: object.remote_links} : {}),
     ...(object.remote_links_revision ? {remote_links_revision: object.remote_links_revision} : {}),
     ...(object.workspace_key ? {workspace_key: object.workspace_key} : {}), ...(object.item_id ? {item_id: object.item_id} : {})};
+}
+
+function comments(object) {
+  const items = Object.entries(object.annotations?.comments || {}).map(([id, comment]) => ({id, ...structuredClone(comment)}));
+  return {items, total: items.length, next_cursor: null};
 }
 
 function applyData(target, data) {

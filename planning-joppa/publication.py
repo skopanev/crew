@@ -23,6 +23,12 @@ from planning_claims import address_of, closing_operations, release, owned, requ
 
 
 
+def authored(data, schema):
+    """The data fields the planner may write: a typed field with a source other than own is computed."""
+    computed = {name for name, field in (schema.get("fields") or {}).items() if field.get("from", "own") != "own"}
+    return {key: value for key, value in data.items() if key not in computed}
+
+
 def depends_edges(links):
     """The depends_on edges of a link list in the Joppa relations form. A pin stays only when the link has one."""
     return [{"to": link["target"], **({"revision": link["revision"]} if link.get("revision") is not None else {})}
@@ -176,11 +182,16 @@ def operations(plan, assignment, completed=frozenset()):
         if reopen:
             # The revised contract answers the block. The same save clears the hold.
             data.pop("hold", None)
-        # clean replaces the whole data, so a removed field does not survive the merge.
+        # Joppa computes the fields whose source is not own and refuses them in a save.
+        data = authored(data, schema)
+        stored = authored(existing["document"]["data"], schema) if existing else {}
+        # An update sends only the changed authored fields. null removes a field, Joppa keeps the rest.
+        patch = {key: value for key, value in data.items() if stored.get(key) != value or key not in stored}
+        patch.update({key: None for key in stored if key not in data})
         # Only the depends_on key is sent. Joppa keeps the other relation keys.
         command = {"op": "save_object", "kind": scope["joppa"]["task_type"],
                    "revision": existing["current_revision"] if existing else 0,
-                   "parent": ac, "data": data, **({"clean": True} if existing else {}),
+                   "parent": ac, "data": patch if existing else data,
                    "reason": "Publish the reviewed mechanism for this criterion."}
         edges = depends_edges(links)
         if edges or existing:
@@ -191,7 +202,7 @@ def operations(plan, assignment, completed=frozenset()):
             if reopen:
                 require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
-            if (data == document["data"] and edges == depends_edges(document["links"])
+            if (not patch and edges == depends_edges(document["links"])
                     and ac == document["parent"]):
                 continue
         ref = "task" + str(number)

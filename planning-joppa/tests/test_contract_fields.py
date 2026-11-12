@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, ACCEPTANCE
+from provider_fixture import item, assignment, plan, Fake, ACCEPTANCE, merged
 
 
 class ProviderTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class ProviderTests(unittest.TestCase):
         data, value = assignment(), plan()
         task = value['tasks'][0]
         task['steps'] = ['Preserve the required behavior. ' + '🙂' * 240] * 5
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertEqual(saved['body'], 'Goal: ' + task['outcome'])
         self.assertNotIn('contract', saved)
         self.assertNotIn('purpose', saved)
@@ -83,7 +83,7 @@ class ProviderTests(unittest.TestCase):
         old.update(title=task['title'], body=publication.contract(task, value), projects=['other', 'p'],
                    acceptance_checks=deepcopy(ACCEPTANCE))
         before = deepcopy(old)
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertGreater(len(saved['body']), 1024)
         self.assertEqual(saved, before)
         self.assertNotIn('steps', saved)
@@ -97,7 +97,7 @@ class ProviderTests(unittest.TestCase):
         old['document']['data'].update(publication.contract_fields(task))
         old['process']['blocked'] = {'reason': 'Failed', 'position': 19}
         task['steps'].append('Handle the recorded failure in the same mechanism.')
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertEqual(saved['body'], old['document']['data']['body'])
         self.assertNotEqual(saved['steps'], old['document']['data']['steps'])
 
@@ -109,7 +109,7 @@ class ProviderTests(unittest.TestCase):
         old = data['joppa']['tasks'][0]['document']['data']
         old.update(publication.contract_fields(task))
         task['steps'].append('Handle the remaining failure within this module.')
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertEqual(saved['steps'][0], old['steps'][0])
         self.assertEqual(context.task_contract(saved).count('\n0. Resume'), 1)
         old['module'] = 'other'
@@ -124,7 +124,7 @@ class ProviderTests(unittest.TestCase):
         old.pop('body')
         old.update(title=task['title'], contract=publication.contract(task, value), projects=['other', 'p'])
         before = deepcopy(old)
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertEqual(saved['body'], before['contract'])
         self.assertNotIn('contract', saved)
         self.assertEqual(old, before)
@@ -143,9 +143,9 @@ class ProviderTests(unittest.TestCase):
         task.update(action='update', target='work:old', revision=3)
         old = data['joppa']['tasks'][0]['document']['data']
         old['purpose'] = 'Keep the approved constraint.'
-        saved = publication.operations(value, data)[0]['command']['data']
+        saved = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertEqual(saved['purpose'], old['purpose'])
         old.pop('purpose')
         old['body'] += '\n\nKeep the approved constraint.'
-        migrated = publication.operations(value, data)[0]['command']['data']
+        migrated = merged(data['joppa']['tasks'][0]['document']['data'], publication.operations(value, data)[0]['command'])
         self.assertNotIn('purpose', migrated)

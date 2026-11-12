@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE, links
+from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE, links, merged
 
 
 class ProviderTests(unittest.TestCase):
@@ -61,6 +61,23 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contain a cycle"):
             publication.operations(value, assignment())
 
+    def test_task_update_sends_authored_changes_and_never_computed_fields(self):
+        data, value = assignment(), plan()
+        data["joppa"]["task_schema"]["fields"] = {"inherited": {"type": "text", "from": "parent"},
+                                                 "custom": {"type": "text", "from": "own"}}
+        old = data["joppa"]["tasks"][0]["document"]["data"]
+        old["inherited"] = "computed parent value"
+        value["tasks"][0].update(action="update", target="work:old", revision=3)
+        save = publication.operations(value, data)[0]["command"]
+        self.assertEqual((save["id"], save["revision"], save.get("clean")), ("old", 3, None))
+        self.assertNotIn("inherited", save["data"])
+        # Unchanged authored fields stay out of the patch. Joppa keeps them.
+        self.assertNotIn("owner", save["data"])
+        self.assertNotIn("custom", save["data"])
+        self.assertEqual(merged(old, save)["custom"], "preserve")
+        old.pop("custom")
+        self.assertNotIn("custom", publication.operations(value, data)[0]["command"]["data"])
+
     def test_atomic_references_and_worker_preservation(self):
         data = assignment()
         original = deepcopy(data)
@@ -72,9 +89,10 @@ class ProviderTests(unittest.TestCase):
         ops = publication.operations(value, data)
         self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "save_object"])
         saved = ops[1]["command"]
-        self.assertEqual(saved["data"]["owner"], "document-owner")
-        self.assertEqual(saved["data"]["custom"], "preserve")
-        self.assertEqual(saved["data"]["projects"], ["other", "p"])
+        kept = merged(data["joppa"]["tasks"][0]["document"]["data"], saved)
+        self.assertEqual(kept["owner"], "document-owner")
+        self.assertEqual(kept["custom"], "preserve")
+        self.assertEqual(kept["projects"], ["other", "p"])
         self.assertNotIn("assignee", saved)
         self.assertNotIn("status", saved)
         self.assertNotIn("question_checked", saved)

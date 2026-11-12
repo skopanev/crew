@@ -144,6 +144,19 @@ def raw_ac(address, assignee=None, revision=4):
             "status": {"tone": "orange", "label": "No tests"}}
 
 
+def merged(stored, command):
+    """The data Joppa keeps after a save: a create stores its data, an update merges it and null removes a field."""
+    if not command["revision"]:
+        return command["data"]
+    result = deepcopy(stored)
+    for key, value in command["data"].items():
+        if value is None:
+            result.pop(key, None)
+        else:
+            result[key] = value
+    return result
+
+
 def links(command):
     """The depends_on edges of a save command as authored links. Joppa keeps the other relation keys."""
     return [{"target": edge["to"], "relation": "depends_on", "blocking": True,

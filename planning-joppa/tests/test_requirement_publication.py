@@ -61,7 +61,7 @@ class ProviderTests(unittest.TestCase):
         value["tasks"].append(new)
         commands = publication.operations(value, data)
         # The revised blocked Task clears its hold in the same save.
-        self.assertNotIn("hold", commands[0]["command"]["data"])
+        self.assertIsNone(commands[0]["command"]["data"]["hold"])
         self.assertTrue(commands[1]["command"]["data"]["title"].startswith("[08] "))
 
     def test_cross_criterion_retirement_cannot_become_a_dependency(self):

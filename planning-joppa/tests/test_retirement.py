@@ -67,7 +67,7 @@ class ProviderTests(unittest.TestCase):
         # The blocked consumer gets a new contract, so the same save clears its hold.
         self.assertEqual([item["command"]["op"] for item in commands],
                          ["archive_object", "save_object", "save_object"])
-        self.assertNotIn("hold", commands[1]["command"]["data"])
+        self.assertIsNone(commands[1]["command"]["data"]["hold"])
         self.assertEqual(commands[2]["command"]["kind"] + ":" + commands[2]["command"]["id"], "criterion:a")
         saved = links(commands[1]["command"])
         self.assertFalse(any(link["target"] == "work:old" for link in saved))
