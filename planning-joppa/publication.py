@@ -180,13 +180,15 @@ def operations(plan, assignment, completed=frozenset()):
         # An update sends only the changed authored fields. null removes a field, Joppa keeps the rest.
         patch = {key: value for key, value in data.items() if stored.get(key) != value or key not in stored}
         patch.update({key: None for key in stored if key not in data})
-        # Only the depends_on key is sent. Joppa keeps the other relation keys.
+        # Only the depends_on key can be sent. Joppa keeps the other relation keys.
         command = {"op": "save_object", "kind": scope["joppa"]["task_type"],
                    "revision": existing["current_revision"] if existing else 0,
                    "parent": ac, "data": patch if existing else data,
                    "reason": "Publish the reviewed mechanism for this criterion."}
         edges = depends_edges(links)
-        if edges or existing:
+        stored_edges = depends_edges(existing["document"]["links"]) if existing else []
+        # A save sends depends_on only when its edges change. Joppa keeps an omitted key.
+        if edges != stored_edges:
             command["relations"] = {"depends_on": {"edges": edges}}
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
@@ -194,8 +196,7 @@ def operations(plan, assignment, completed=frozenset()):
             if reopen:
                 require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
-            if (not patch and edges == depends_edges(document["links"])
-                    and ac == document["parent"]):
+            if not patch and "relations" not in command and ac == document["parent"]:
                 continue
         ref = "task" + str(number)
         result.append({"ref": ref, "command": command})

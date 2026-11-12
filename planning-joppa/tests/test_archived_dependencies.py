@@ -62,9 +62,12 @@ def scenario(links=()):
 
 
 def saved_links(data, value, server):
-    """The depends_on edges the save sends. Joppa keeps the other relation keys."""
+    """The depends_on edges after the save. Joppa keeps a relation key that the save omits."""
     completed = publication.completed_dependencies(server, "example", value, TYPES)
-    return links(publication.operations(value, data, completed)[0]["command"])
+    command = publication.operations(value, data, completed)[0]["command"]
+    if "depends_on" not in command.get("relations", {}):
+        return depends(deepcopy(data["joppa"]["tasks"][0]["document"]["links"]))
+    return links(command)
 
 
 def depends(values):
