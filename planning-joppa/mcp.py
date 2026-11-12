@@ -7,8 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import (DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail,
-                         relation_links)
+from joppa_reads import DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -165,12 +164,24 @@ class Reader:
         if address and ":" not in address:
             raise MCPError("Use a full kind:id object address")
         raw_call = getattr(self.api, "raw_call", self.api.call)
+        fenced = self.target is not None and address and not args.get("revision") and not args.get("history")
+        # A selected read gets the revision from the same server snapshot. Joppa advances it on every
+        # change of the node's own document, so it fences the selection. The caller's shape stays.
+        injected = fenced and isinstance(args.get("fields"), list) and "revision" not in args["fields"]
+        if injected:
+            args["fields"] = [*args["fields"], "revision"]
         result = raw_call(name, args)
-        if self.target is not None and address and not args.get("revision") and not args.get("history"):
+        if fenced:
             import context
             obj = context.object_read(self.api, args["workspace"], address)
-            if snapshot_drift(result, obj):
-                raise MCPError("Joppa object changed before its planning snapshot")
+            if isinstance(args.get("fields"), list):
+                if result.get("revision") != obj.get("current_revision"):
+                    raise MCPError("Joppa object changed before its planning snapshot")
+            elif "document" in result or "data" in result:
+                observed = normalize_detail(args, result)
+                if (obj.get("document") != observed.get("document")
+                        or obj.get("current_revision") != observed.get("current_revision")):
+                    raise MCPError("Joppa object changed before its planning snapshot")
             if isinstance(result.get("comments"), dict):
                 comments = obj.get("annotations", {}).get("comments", {})
                 if (result["comments"].get("total", len(comments)) != len(comments)
@@ -181,53 +192,9 @@ class Reader:
                   and obj.get("annotations", {}).get("comments")):
                 raise MCPError("Joppa comments changed before their planning snapshot")
             context.capture_object(self.target, args["workspace"], obj, self.api)
+        if injected:
+            result = {key: value for key, value in result.items() if key != "revision"}
         return result
-
-
-# Keys a selected reply can carry that are derived or process state, not the authored document.
-DERIVED_KEYS = frozenset(("address", "kind", "item_id", "workspace", "workspace_key", "historical", "current_revision",
-                          "position", "status", "status.label", "work_ready", "waits_for", "process", "references",
-                          "comments", "files", "remote_links", "remote_review_required", "remote_links_revision",
-                          "result", "relation_groups", "child_counts", "children", "exact_id"))
-_ABSENT = object()
-
-
-def data_path(data, key):
-    """A selected name reads data.<name>; a dotted path walks the data. A missing path is absent."""
-    value = data
-    for part in (key[len("data."):] if key.startswith("data.") else key).split("."):
-        if not isinstance(value, dict) or part not in value:
-            return _ABSENT
-        value = value[part]
-    return value
-
-
-def snapshot_drift(result, obj):
-    """Compare every authored path a reply returned with the fresh snapshot. An omitted field is not invented."""
-    if "document" in result:
-        observed = normalize_detail({"address": obj["address"]}, result)
-        return obj.get("document") != observed.get("document") or obj.get("current_revision") != observed.get("current_revision")
-    document = obj["document"]
-    for key, value in result.items():
-        if key in DERIVED_KEYS:
-            continue
-        if key == "revision":
-            same = value == obj.get("current_revision")
-        elif key == "parent":
-            same = value == document.get("parent")
-        elif key == "present":
-            same = value is None or value == document.get("present")
-        elif key == "relations":
-            same = relation_links(value) == document.get("links", [])
-        elif key == "data":
-            same = value == document.get("data")
-        else:
-            # A selected authored path: null in the reply means absent in Joppa.
-            current = data_path(document.get("data") or {}, key)
-            same = (value is None and current is _ABSENT) or value == current
-        if not same:
-            return True
-    return False
 
 
 def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
