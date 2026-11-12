@@ -62,6 +62,20 @@ test('held Tasks count only configured repositories regardless of project member
   assert.equal(selected.candidate, null);
 });
 
+test('unrelated structured contracts do not need executable steps or checks', async t => {
+  const f = await packageFixture(t), task = f.objects.get('task:t1');
+  Object.assign(task.document.data, {body: 'External work', repository: 'unknown', steps: [], checks: []});
+  task.document.parent = 'ac:unavailable';
+  for (const assignee of [undefined, 'another-run']) {
+    task.document.data.assignee = assignee;
+    const selected = await nextTask(f.run.config);
+    assert.equal(selected.candidate.id, 'task:t2');
+    assert.equal(selected.held, 0);
+  }
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+  assert.equal(f.calls.some(call => call.args.address === 'ac:unavailable'), false);
+});
+
 test('one token worker claims independent Tasks with separate run assignees', async t => {
   const f = await packageFixture(t), config = f.run.config;
   const requirement = structuredClone(f.objects.get('req:r'));

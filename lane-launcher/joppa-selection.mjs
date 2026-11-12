@@ -3,7 +3,7 @@ import path from 'node:path';
 import {api, claimTasks, runTasks, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {taskContract, taskBody} from './task-contract.mjs';
+import {taskBody} from './task-contract.mjs';
 import {taskInput} from './joppa-input.mjs';
 import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
@@ -38,10 +38,10 @@ export async function occupancyReader(config, worker) {
   };
   const group = async (address, allowArchived = false) => {
     const current = await object(address, {allowArchived});
-    let contract = '';
-    try { if (taskBody(current.document.data)) contract = taskContract(current.document.data); }
-    catch (error) { check(false, error.message); }
-    const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
+    const data = current.document.data, body = taskBody(data);
+    const contract = [typeof body === 'string' ? body : '',
+      ...(Object.hasOwn(data, 'steps') ? [`Repository: ${data.repository}`] : [])].join('\n');
+    const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
     const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
     if (!configured.length) return null;
     check(declarations.length === 1, 'Held Task repository declaration is ambiguous');
