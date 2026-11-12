@@ -67,16 +67,14 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("criterion:archived", snapshot["objects"])
         objects["criterion:outside"]["current_revision"] = 4
         objects["criterion:outside"]["status"] = {"tone": "green", "label": "Children checks passed"}
-        # A green target completes the dependency. A pin below the advanced target revision stays valid.
-        ready, _, _ = context.load_requirement(Server(), config, "r")
-        self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
-        objects["criterion:b"]["document"]["links"][0]["revision"] = None
-        unpinned, _, _ = context.load_requirement(Server(), config, "r")
-        self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
-        for revision in (0, 5):
+        # A green target completes the dependency. The planner does not compare a valid pin with the target revision.
+        for revision in (3, 5, None):
             objects["criterion:b"]["document"]["links"][0]["revision"] = revision
-            with self.assertRaisesRegex(ValueError, "invalid linked revision"):
-                context.load_requirement(Server(), config, "r")
+            ready, _, _ = context.load_requirement(Server(), config, "r")
+            self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
+        objects["criterion:b"]["document"]["links"][0]["revision"] = 0
+        with self.assertRaisesRegex(ValueError, "invalid linked revision"):
+            context.load_requirement(Server(), config, "r")
         objects["criterion:b"]["document"]["links"][0]["revision"] = 3
         objects["criterion:outside"]["status"] = {"tone": "orange", "label": "No tests"}
         objects["criterion:outside"]["current_revision"] = 3
@@ -90,6 +88,11 @@ class ProviderTests(unittest.TestCase):
         objects["criterion:c"]["document"]["links"][0].update(target="work:done", revision=None)
         filtered, _, _ = context.load_requirement(Server(), config, "r")
         self.assertEqual([entry["id"] for entry in filtered["joppa"]["criteria"]], ["criterion:c"])
+        # A green live Task without the done stage holds the consumer.
+        objects["work:done"]["document"]["data"]["stage"] = "review"
+        objects["work:done"]["status"] = {"tone": "green", "label": "Passed"}
+        with self.assertRaisesRegex(ValueError, "no ready criteria"):
+            context.load_requirement(Server(), config, "r")
         # The stage counts only on a schema Task.
         objects["criterion:a"]["document"]["data"]["stage"] = "done"
         objects["criterion:c"]["document"]["links"][0]["target"] = "criterion:a"

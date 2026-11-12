@@ -18,13 +18,13 @@ def object_read(api, workspace, address, allow_archived=False):
     return result
 
 def target_completed(target, types):
-    """An archived target, a done Task or a green target meets a blocking depends_on."""
+    """An archived target meets a blocking depends_on. A live Task needs data.stage done, any other target green."""
     if target["document"].get("present") is False:
         return True
+    if types.get(target["kind"], {}).get("role") == "task":
+        return target["document"]["data"].get("stage") == "done"
     status = target.get("status")
-    tone = status.get("tone") if isinstance(status, dict) else status
-    return (types.get(target["kind"], {}).get("role") == "task"
-            and target["document"]["data"].get("stage") == "done") or tone == "green"
+    return (status.get("tone") if isinstance(status, dict) else status) == "green"
 
 
 def dependency_ready(api, workspace, types, address, objects):
@@ -44,13 +44,12 @@ def dependency_ready(api, workspace, types, address, objects):
             return False
         links = [link for link in node["document"].get("links", [])
                  if link.get("relation") == "depends_on" and link.get("blocking") is True]
-        targets = [full(link["target"]) for link in links]
-        # A completion or metadata write advances the target revision. A pin only has to stay within it.
-        for link, target in zip(links, targets):
+        # A completion or metadata write advances the target revision. A pin is only a positive revision.
+        for link in links:
             revision = link.get("revision")
-            require(revision is None or current_pin(revision, target["current_revision"], 1),
+            require(revision is None or current_pin(revision, revision, 1),
                     f"invalid linked revision on {node['address']}: {link['target']}")
-        if not all(target_completed(target, types) for target in targets):
+        if not all(target_completed(full(link["target"]), types) for link in links):
             return False
         parent = node["document"].get("parent")
         node = full(parent) if parent else None
