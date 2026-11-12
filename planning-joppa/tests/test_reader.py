@@ -130,6 +130,70 @@ class ProviderTests(unittest.TestCase):
                     reader.call('joppa_objects', {'address': 'work:a'})
                 self.assertFalse((Path(directory) / 'joppa-snapshot.json').exists())
 
+    def test_selected_agent_reads_are_fenced_by_the_injected_revision(self):
+        full = item('work:a', 'criterion:a', {'title': 'Current', 'body': 'New contract', 'spec': {'step': 'one'}},
+                    process={'verification': 'pass'})
+        current, calls, revision = full['current_revision'], [], [full['current_revision']]
+        class Server(Fake):
+            def raw_call(self, name, args):
+                calls.append(deepcopy(args))
+                # Joppa answers each selected path from one snapshot; the test serves the caller's selection.
+                values = {'body': 'New contract', 'title': 'Current', 'data.spec.step': 'one',
+                          'process.verification': 'pass', 'revision': revision[-1]}
+                return {key: values.get(key) for key in args['fields']}
+        reader = Reader(Server(result=full), 'example', Path('/unused'))
+        with patch.object(context, 'capture_object') as capture:
+            for fields in (['body'], ['title'], ['data.spec.step'], ['process.verification']):
+                reply = reader.call('joppa_objects', {'address': 'work:a', 'fields': fields})
+                # The fence asks for the revision; the caller gets only what it selected.
+                self.assertEqual(calls[-1]['fields'], [*fields, 'revision'])
+                self.assertEqual(list(reply), fields)
+            asked = reader.call('joppa_objects', {'address': 'work:a', 'fields': ['revision', 'body']})
+            self.assertEqual((calls[-1]['fields'], asked['revision']), (['revision', 'body'], current))
+            self.assertEqual(capture.call_count, 5)
+            # Any own change advances the revision, so a stale selection refuses capture.
+            revision.append(current - 1)
+            with self.assertRaisesRegex(MCPError, 'changed before its planning snapshot'):
+                reader.call('joppa_objects', {'address': 'work:a', 'fields': ['body']})
+            self.assertEqual(capture.call_count, 5)
+
+    def test_comment_only_pages_keep_their_evidence_check(self):
+        full = item('work:a')
+        full['annotations']['comments'] = {'c1': {'id': 'c1', 'text': 'Kept', 'actor': 'owner'}}
+        replies = []
+        class Server(Fake):
+            def raw_call(self, name, args):
+                return deepcopy(replies[-1])
+        reader = Reader(Server(result=full), 'example', Path('/unused'))
+        with patch.object(context, 'capture_object') as capture:
+            replies.append({'comments': {'items': [{'id': 'c1', 'text': 'Kept', 'actor': 'owner'}], 'total': 1}})
+            self.assertEqual(reader.call('joppa_objects', {'address': 'work:a', 'comments_cursor': '25'}), replies[-1])
+            replies.append({'comments': {'items': [{'id': 'c1', 'text': 'Edited', 'actor': 'owner'}], 'total': 1}})
+            with self.assertRaisesRegex(MCPError, 'comments changed before their planning snapshot'):
+                reader.call('joppa_objects', {'address': 'work:a', 'comments_cursor': '25'})
+            self.assertEqual(capture.call_count, 1)
+
+    def test_current_detail_names_fields_and_a_revision_read_stays_historical(self):
+        calls = []
+        api = Joppa.__new__(Joppa)
+        def raw_call(name, args):
+            calls.append(deepcopy(args))
+            if args.get('revision'):
+                return {'revision': 1, 'current_revision': 5, 'parent': 'ac:a', 'data': {'title': 'Old'}}
+            return {'revision': 5, 'parent': 'ac:a', 'data': {'title': 'New'}, 'present': True, 'status': 'green',
+                    'status.label': 'Done', 'files': None, 'references': None, 'process': None, 'result': None}
+        api.raw_call = raw_call
+        old = api.call('joppa_objects', {'workspace': 'w', 'address': 'work:a', 'revision': 1})
+        self.assertNotIn('fields', calls[-1])
+        self.assertEqual((old['current_revision'], old['historical'], old['document']['data']['title']), (5, True, 'Old'))
+        current = api.call('joppa_objects', {'workspace': 'w', 'address': 'work:a'})
+        self.assertIn('present', calls[-1]['fields'])
+        self.assertNotIn('current_revision', calls[-1]['fields'])
+        self.assertEqual((current['current_revision'], current['historical']), (5, False))
+        self.assertEqual(current['status'], {'tone': 'green', 'label': 'Done'})
+        self.assertEqual((current['files'], current['references'], current['process']), ([], [], {}))
+        self.assertNotIn('result', current)
+
     def test_unrelated_workspace_write_does_not_invalidate_an_agent_read(self):
         compact = item('work:a')
         compact.update(position=3, comments={'items': [], 'total': 0})

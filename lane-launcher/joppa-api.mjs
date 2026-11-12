@@ -58,7 +58,23 @@ async function responseMessage(response, id) {
   }
 }
 
+// A detail read names its fields: a sparse default omits comments, files and references.
+// With fields, status is a tone string, status.label is separate and an absent optional key is null.
+// current_revision is not a detail key. present keeps an archived node archived.
+export const DETAIL_FIELDS = Object.freeze(['revision', 'parent', 'data', 'present', 'status', 'status.label', 'work_ready',
+  'process', 'relations', 'references', 'comments', 'files', 'remote_links', 'remote_review_required',
+  'remote_links_revision', 'result']);
+
+// A revision read keeps the native historical detail: it carries current_revision, which the selection omits.
+const detailRead = args => args.address && !args.address.includes(',') && !args.history && !args.relations_of &&
+  !args.in_relation && !args.fields && !args.revision;
+
 export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
+  if (tool === 'joppa_objects' && detailRead(arguments_)) {
+    const args = {...arguments_, fields: DETAIL_FIELDS};
+    const result = await rawCall(url, tokenFile, tool, args, options);
+    return completeDetail(args, result, next => rawCall(url, tokenFile, tool, next, options));
+  }
   const result = await rawCall(url, tokenFile, tool, arguments_, options);
   if (tool === 'joppa_objects' && arguments_.address && !arguments_.history) {
     return completeDetail(arguments_, result, args => rawCall(url, tokenFile, tool, args, options));
@@ -153,6 +169,12 @@ const relationLinks = relations => Object.entries(relations || {}).filter(([rela
 
 function normalizeDetail(args, value) {
   const result = {...value};
+  if (typeof result.status === 'string') result.status = {tone: result.status, label: result['status.label'] ?? null};
+  delete result['status.label'];
+  for (const key of ['process', 'result', 'remote_links', 'remote_review_required', 'current_revision', 'work_ready',
+    'present', 'files', 'references', 'remote_links_revision']) {
+    if (result[key] === null) delete result[key];
+  }
   if (!object(result.document)) {
     if (!object(result.data) || !Number.isSafeInteger(result.revision) || result.revision < 1) {
       throw new Error('Joppa object detail is incomplete');
@@ -195,7 +217,10 @@ async function completeDetail(args, value, readPage) {
     if (!cursor) break;
     if (seen.has(cursor)) throw new Error('Joppa comment pagination did not advance');
     seen.add(cursor);
-    page = normalizeDetail(args, await readPage({...args, comments_cursor: cursor}));
+    // A cursor reply can hold only the comment page. Its object fields, when present, must match.
+    const next = await readPage({...args, comments_cursor: cursor});
+    page = object(next) && Object.keys(next).every(key => key === 'comments') ? {...result, comments: next.comments}
+      : normalizeDetail(args, next);
     paged = true;
   }
   if (Number.isInteger(total) && Object.keys(comments).length !== total) throw new Error('Joppa comment list is incomplete');

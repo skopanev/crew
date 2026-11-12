@@ -21,8 +21,30 @@ def relation_links(relations):
             for edge in (group or {}).get("edges", [])]
 
 
+# With fields, status is a tone string, status.label is separate and an absent optional key is null.
+# current_revision is not a detail key. present keeps an archived node archived.
+DETAIL_FIELDS = ("revision", "parent", "data", "present", "status", "status.label", "work_ready", "process",
+                 "relations", "references", "comments", "files", "remote_links", "remote_review_required",
+                 "remote_links_revision", "result")
+OPTIONAL_KEYS = ("process", "result", "remote_links", "remote_review_required", "current_revision", "work_ready",
+                 "present", "files", "references", "remote_links_revision")
+
+
+def detail_read(args):
+    """A current single detail. A revision read keeps the native historical detail with its current_revision."""
+    address = args.get("address")
+    return (isinstance(address, str) and "," not in address and not args.get("history") and not args.get("relations_of")
+            and not args.get("in_relation") and not args.get("fields") and not args.get("revision"))
+
+
 def normalize_detail(args, value):
     result = dict(value)
+    if isinstance(result.get("status"), str):
+        result["status"] = {"tone": result["status"], "label": result.get("status.label")}
+    result.pop("status.label", None)
+    for key in OPTIONAL_KEYS:
+        if key in result and result[key] is None:
+            del result[key]
     if "document" not in result:
         if not isinstance(result.get("data"), dict) or type(result.get("revision")) is not int or result["revision"] < 1:
             raise MCPError("Joppa object detail is incomplete")
@@ -104,7 +126,10 @@ def complete_object(read_page, args, value):
         if cursor in seen:
             raise MCPError("Joppa comment pagination did not advance")
         seen.add(cursor)
-        page = normalize_detail(args, read_page("joppa_objects", {**args, "comments_cursor": cursor}))
+        # A cursor reply can hold only the comment page. Its object fields, when present, must match.
+        following = read_page("joppa_objects", {**args, "comments_cursor": cursor})
+        page = ({**result, "comments": following["comments"]} if isinstance(following, dict) and set(following) == {"comments"}
+                else normalize_detail(args, following))
         paged = True
     if isinstance(total, int) and len(comments) != total:
         raise MCPError("Joppa comment list is incomplete")
