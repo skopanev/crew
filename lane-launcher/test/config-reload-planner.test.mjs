@@ -20,6 +20,7 @@ test('planner picks up new ac_ids between passes and stays quiet while the confi
   await run.until(() => f.passes().includes('end'));
   assert.match(run.since(mark), /config reloaded · Planning req:r · Requirement/);
   assert.match(f.passes()[0], /"ac:a1"/);
+  await run.until(output => /Requirements: 1 ready · no unattempted/.test(output.slice(mark)));
   const quiet = run.mark();
   await run.until(output => count(output.slice(quiet), /Requirements: 1 ready · no unattempted/g) >= 2);
   assert.doesNotMatch(run.since(quiet), /config reloaded/);
