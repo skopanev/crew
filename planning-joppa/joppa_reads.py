@@ -23,10 +23,10 @@ def relation_links(relations):
 
 # With fields, status is a tone string, status.label is separate and an absent optional key is null.
 # current_revision is not a detail key. present keeps an archived node archived.
-DETAIL_FIELDS = ("revision", "parent", "data", "present", "status", "status.label", "work_ready", "process",
+DETAIL_FIELDS = ("revision", "parent", "data", "present", "status", "status.label", "process",
                  "relations", "references", "comments", "files", "remote_links", "remote_review_required",
                  "remote_links_revision", "result")
-OPTIONAL_KEYS = ("process", "result", "remote_links", "remote_review_required", "current_revision", "work_ready",
+OPTIONAL_KEYS = ("process", "result", "remote_links", "remote_review_required", "current_revision",
                  "present", "files", "references", "remote_links_revision")
 
 
@@ -53,8 +53,6 @@ def normalize_detail(args, value):
                               "present": present, "data": result["data"],
                               "links": relation_links(result.get("relations"))}
         result.setdefault("current_revision", result["revision"])
-        if not args.get("revision"):
-            result.setdefault("work_ready", True)
     result.setdefault("address", args.get("address"))
     if not isinstance(result["address"], str):
         raise MCPError("Joppa object address is missing")

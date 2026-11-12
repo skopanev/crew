@@ -33,11 +33,9 @@ class ProviderTests(unittest.TestCase):
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
-        # A criterion with a Crew hold or not work_ready is excluded.
+        # A criterion with a Crew hold is excluded.
         objects["criterion:waiting"] = item("criterion:waiting", "rule:r",
                                             {"title": "criterion:waiting", "owner": "owner", "hold": "NEEDS_HUMAN"})
-        objects["criterion:unready"] = item("criterion:unready", "rule:r")
-        objects["criterion:unready"]["work_ready"] = False
         objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
                         "criterion:outside": item("criterion:outside", "rule:outside"),
                         "rule:outside": item("rule:outside")})
@@ -45,9 +43,8 @@ class ProviderTests(unittest.TestCase):
             {"target": "criterion:outside", "revision": 3, "relation": "depends_on", "blocking": True}]
         objects["criterion:c"]["document"]["links"] = [
             {"target": "criterion:a", "revision": 3, "relation": "depends_on", "blocking": True}]
-        # Joppa computes local ordering. Both consumers wait for an unfinished target.
-        objects["criterion:b"]["work_ready"] = objects["criterion:c"]["work_ready"] = False
-        roster = ["criterion:archived", "criterion:a", "criterion:b", "criterion:c", "criterion:waiting", "criterion:unready"]
+        # Both consumers wait for an unfinished target.
+        roster = ["criterion:archived", "criterion:a", "criterion:b", "criterion:c", "criterion:waiting"]
         objects["criterion:archived"] = item("criterion:archived", "rule:r")
         objects["criterion:archived"]["document"]["present"] = False
         class Server:
@@ -70,22 +67,17 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("criterion:archived", snapshot["objects"])
         objects["criterion:outside"]["current_revision"] = 4
         objects["criterion:outside"]["status"] = {"tone": "green", "label": "Children checks passed"}
-        # A green target tone alone does not make the consumer ready. Server work_ready is authoritative.
-        green, _, _ = context.load_requirement(Server(), config, "r")
-        self.assertNotIn("criterion:b", [entry["id"] for entry in green["joppa"]["criteria"]])
-        objects["criterion:b"]["work_ready"] = True
+        # A green target completes the dependency. A pin below the advanced target revision stays valid.
         ready, _, _ = context.load_requirement(Server(), config, "r")
         self.assertIn("criterion:b", [entry["id"] for entry in ready["joppa"]["criteria"]])
-        # The planner does not compare a valid pin with the target revision. Joppa already did.
-        for revision in (5, None):
+        objects["criterion:b"]["document"]["links"][0]["revision"] = None
+        unpinned, _, _ = context.load_requirement(Server(), config, "r")
+        self.assertIn("criterion:b", [entry["id"] for entry in unpinned["joppa"]["criteria"]])
+        for revision in (0, 5):
             objects["criterion:b"]["document"]["links"][0]["revision"] = revision
-            pinned, _, _ = context.load_requirement(Server(), config, "r")
-            self.assertIn("criterion:b", [entry["id"] for entry in pinned["joppa"]["criteria"]])
-        objects["criterion:b"]["document"]["links"][0]["revision"] = 0
-        with self.assertRaisesRegex(ValueError, "invalid linked revision"):
-            context.load_requirement(Server(), config, "r")
+            with self.assertRaisesRegex(ValueError, "invalid linked revision"):
+                context.load_requirement(Server(), config, "r")
         objects["criterion:b"]["document"]["links"][0]["revision"] = 3
-        objects["criterion:b"]["work_ready"] = False
         objects["criterion:outside"]["status"] = {"tone": "orange", "label": "No tests"}
         objects["criterion:outside"]["current_revision"] = 3
         with self.assertRaisesRegex(ValueError, "object is absent"):
@@ -93,11 +85,19 @@ class ProviderTests(unittest.TestCase):
         config["ac_ids"] = ["criterion:c"]
         with self.assertRaisesRegex(ValueError, "no ready criteria"):
             context.load_requirement(Server(), config, "r")
-        objects["criterion:c"]["work_ready"] = True
+        # A done Task completes the dependency whatever its tone.
+        objects["work:done"] = item("work:done", "criterion:a", {"title": "Done", "owner": "owner", "stage": "done"})
+        objects["criterion:c"]["document"]["links"][0].update(target="work:done", revision=None)
         filtered, _, _ = context.load_requirement(Server(), config, "r")
         self.assertEqual([entry["id"] for entry in filtered["joppa"]["criteria"]], ["criterion:c"])
+        # The stage counts only on a schema Task.
+        objects["criterion:a"]["document"]["data"]["stage"] = "done"
+        objects["criterion:c"]["document"]["links"][0]["target"] = "criterion:a"
+        with self.assertRaisesRegex(ValueError, "no ready criteria"):
+            context.load_requirement(Server(), config, "r")
+        objects["criterion:a"]["document"]["data"].pop("stage")
+        objects["criterion:c"]["document"]["links"][0]["revision"] = 3
         config.pop("ac_ids")
-        objects["criterion:c"]["work_ready"] = False
         objects["criterion:a"]["document"]["data"]["assignee"] = "crew-planning:host:run"
         with self.assertRaisesRegex(ValueError, "no ready criteria"):
             context.load_requirement(Server(), config, "r")

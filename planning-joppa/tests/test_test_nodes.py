@@ -136,7 +136,7 @@ class TestNodeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another criterion"):
             node_results(api, "example", nodes[1:], "criterion:b")
 
-    def test_dependency_readiness_comes_from_server_work_ready(self):
+    def test_dependency_readiness_comes_from_target_completion(self):
         api = Workspace()
         config = {"workspace": "example", "repositories": assignment()["repositories"]}
         api.add("check:proof", "criterion:outside", "o.rs > proof", revision=1, ancestor="rule:outside")
@@ -148,15 +148,13 @@ class TestNodeTests(unittest.TestCase):
                 api.objects["criterion:b"]["document"]["links"] = [
                     {"target": target, "revision": 1 if target.startswith("check") else 3,
                      "relation": "depends_on", "blocking": True}]
-                # A green target tone alone does not make the consumer ready. Joppa work_ready decides.
-                api.nodes["check:proof"]["status"] = "green"
-                api.objects["rule:outside"]["status"] = {"tone": "green", "label": "Passed"}
-                api.objects["criterion:b"]["work_ready"] = False
-                self.assertEqual(selected(), ["criterion:a"])
-                # An unfinished target tone does not block a consumer that Joppa reports as ready.
+                # An unfinished target holds the consumer.
                 api.nodes["check:proof"]["status"] = "orange"
                 api.objects["rule:outside"]["status"] = {"tone": "orange", "label": "Unset"}
-                api.objects["criterion:b"]["work_ready"] = True
+                self.assertEqual(selected(), ["criterion:a"])
+                # A green target releases it. Only the target detail is read, not its subtree.
+                api.nodes["check:proof"]["status"] = "green"
+                api.objects["rule:outside"]["status"] = {"tone": "green", "label": "Passed"}
                 api.calls.clear()
                 self.assertEqual(selected(), ["criterion:a", "criterion:b"])
                 self.assertFalse(any(args.get("parent") in ("rule:outside", "check:proof") and not args.get("kind")

@@ -8,6 +8,7 @@ import stages as shared
 import context
 import publication
 import planning_claims as claims
+from context_reads import dependency_ready
 from joppa_reads import block_reason, ended, task_state
 
 
@@ -135,7 +136,8 @@ def retry_startup(api, config, target, assignment, ac, advertised):
         return False
     require(len(tasks) <= 49, "Startup retry supports at most 49 Tasks in one atomic batch")
     # The hold code holds the Tasks. The AC itself must be ready for work.
-    require(ac.get("work_ready") is True, "Startup retry requires a ready AC")
+    types = api.call("joppa_tree", {"workspace": config["workspace"]})["schema"]["types"]
+    require(dependency_ready(api, config["workspace"], types, ac["address"], {}), "Startup retry requires a ready AC")
     for item in [ac, *tasks]:
         require(item["document"].get("present") is True,
                 "Startup retry requires live objects")
