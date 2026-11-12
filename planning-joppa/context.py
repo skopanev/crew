@@ -93,14 +93,16 @@ def load_once(api, config, ac_id):
         require(len(ac_types) == 1, "use a full criterion address when the schema has multiple criterion types")
         ac_id = ac_types[0] + ":" + ac_id
     objects, remote = {}, {}
-    def get(address, archived=False):
+    def get(address, archived=False, dependency=False):
         # A done or retired Task is archived. Its document still decides readiness.
+        # An archived depends_on target of any kind completes the dependency.
         if address not in objects:
-            object = object_read(api, workspace, address, allow_archived=archived)
-            require(object["document"]["present"] or types[object["kind"]].get("role") == "task",
-                    f"object is absent: {address}")
-            objects[address] = object
-        return objects[address]
+            objects[address] = object_read(api, workspace, address, allow_archived=True)
+        object = objects[address]
+        require(object["document"]["present"] is True
+                or archived and (dependency or types[object["kind"]].get("role") == "task"),
+                f"object is absent: {address}")
+        return object
     ac = get(ac_id)
     require(types[ac["kind"]]["role"] == "ac", "input must be a criterion")
     parents, seen = [], {ac_id}
@@ -122,7 +124,7 @@ def load_once(api, config, ac_id):
     # Read explicit references. Do not traverse unrelated tickets or infer ownership.
     for item in [ac, *parents, *tasks]:
         for link in item["document"].get("links", []):
-            get(link["target"], True)
+            get(link["target"], True, link.get("relation") == "depends_on" and link.get("blocking") is True)
         read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
@@ -144,7 +146,7 @@ def load_once(api, config, ac_id):
             siblings.extend(get(task, True) for task in task_addresses(api, workspace, address, kind))
     for item in siblings:
         for link in item["document"].get("links", []):
-            get(link["target"], True)
+            get(link["target"], True, link.get("relation") == "depends_on" and link.get("blocking") is True)
         read_remote_links(api, remote, item)
         for reference in item.get("references", []):
             if isinstance(reference, dict) and reference.get("target"):
