@@ -150,6 +150,11 @@ class Reader:
             raise MCPError("Tool arguments must be an object")
         args = dict(arguments)
         args.pop("verbose", None)
+        if name == "joppa_objects" and args.get("address") is not None:
+            address = args["address"]
+            if (not isinstance(address, str) or
+                    any(not part.strip() or ":" not in part for part in address.split(","))):
+                raise MCPError("Use full kind:id object addresses")
         if name == "joppa_search" or name == "joppa_objects" and not args.get("address"):
             limit = args.get("limit", 25)
             if type(limit) is not int or limit < 1:
@@ -161,8 +166,8 @@ class Reader:
             raise MCPError("Use workspace and a full object address instead of item_id")
         args.setdefault("workspace", self.workspace)
         address = args.get("address") if name == "joppa_objects" else None
-        if address and ":" not in address:
-            raise MCPError("Use a full kind:id object address")
+        if isinstance(address, str) and "," in address:
+            return {"items": [self.call(name, {**args, "address": part.strip()}) for part in address.split(",")]}
         raw_call = getattr(self.api, "raw_call", self.api.call)
         fenced = self.target is not None and address and not args.get("revision") and not args.get("history")
         # A selected read gets the revision from the same server snapshot. Joppa advances it on every

@@ -1,7 +1,6 @@
 // Read live delivery state for one run. Keep public imports stable.
 import {createHash} from 'node:crypto';
 import {remoteDependencyBlocker} from './dependencies.mjs';
-import {taskBody} from './task-contract.mjs';
 import {require, validAddress, requirementBranch,
   collectRequirementCriteria, taskRepository, taskStatus, taskRecord} from './requirement-state.mjs';
 import {nodeAssignee, taskPages, NODE_TONES} from './joppa-nodes.mjs';
@@ -105,14 +104,9 @@ export async function requirementPlan(run, read) {
       }
       const current = await object(item.address);
       require(current.current_revision === item.revision, `Task changed while reading delivery state: ${item.address}`);
+      if (taskRepository(current, types, repository) !== repository) continue;
       if (await requirementAncestor(current, false) !== requirement) continue;
       const status = taskStatus(current);
-      if (status === 'retired' && (!taskBody(current.document.data) ||
-          !Object.hasOwn(current.document.data, 'steps') &&
-          [...String(taskBody(current.document.data)).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].length !== 1)) {
-        continue;
-      }
-      if (taskRepository(current, types) !== repository) continue;
       requirementTasksByAddress.set(current.address, taskRecord(current, status, false));
       if (status === 'retired') continue;
       await remember(current);
