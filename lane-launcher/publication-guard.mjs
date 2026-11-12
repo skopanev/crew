@@ -81,7 +81,7 @@ export async function guardPublications(run, read, ancestor) {
       if (link.relation !== 'depends_on' || link.blocking !== true) continue;
       const target = await object(link.target, true);
       if (schema[target.kind]?.role === 'task') {
-        if (target.document.present === true) pending(`${target.address} is not completed`);
+        if (target.document.present === true && target.document.data?.stage !== 'done') pending(`${target.address} is not completed`);
         const sha = target.document.data.commit;
         if (!sha) continue;
         if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) invalid(`Dependency commit is invalid: ${target.address}`);

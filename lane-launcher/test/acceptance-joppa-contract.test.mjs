@@ -47,7 +47,7 @@ const taskDetail = relations => ({
   address: 'task:t1', kind: 'task', revision: 4, current_revision: 4, historical: false,
   parent: 'ac:a1', present: true,
   data: {title: '[01] Add export', owner: 'owner', body: 'Goal: export 3 rows', projects: ['app']},
-  relations, work_ready: true, status: {tone: 'blue'}, comments: {items: [], total: 0, next_cursor: null},
+  relations, status: {tone: 'blue'}, comments: {items: [], total: 0, next_cursor: null},
 });
 
 async function digestOf(t, relations) {

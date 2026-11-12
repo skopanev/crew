@@ -101,7 +101,7 @@ export async function nextTask(config) {
       'joppa.priorities must contain priority values');
     let coversOf;
     for (const task of inventory) {
-      if (task.present !== true || reserved.has(task.address) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
+      if (task.present !== true || reserved.has(task.address) || nodeAssignee(task) || nodeWaiting(task) ||
           priorities && !priorities.includes(task['data.priority'])) continue;
         try {
           const context = await group(task.address);

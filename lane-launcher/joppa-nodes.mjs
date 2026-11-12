@@ -4,7 +4,7 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 export const NODE_TONES = ['red', 'yellow', 'orange', 'blue', 'grey', 'green', 'purple'];
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
-// Crew holds a node with its own data.hold reason code. Native work_ready covers only dependencies.
+// Crew holds a node with its own data.hold reason code.
 export const nodeHold = node => node.document?.data?.hold ?? node.data?.hold ?? node['data.hold'] ?? null;
 export const nodeWaiting = node => Boolean(nodeHold(node));
 
@@ -48,7 +48,7 @@ export async function* nodePages(read, filters) {
 export async function* taskPages(read, filters = {}, extraFields = []) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
     fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority',
-      'work_ready', 'data.hold', ...extraFields],
+      'data.hold', ...extraFields],
     ...filters});
 }
 

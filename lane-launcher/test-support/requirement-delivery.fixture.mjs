@@ -17,7 +17,7 @@ function fixture() {
     const value = {address, kind: address.split(':')[0], historical: false, current_revision: 1,
       document: {present: true, parent, links: [], data: {title: address,
         ...(status ? {body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
-      process: {}, work_ready: true};
+      process: {}};
     if (status === 'in_progress') value.document.data.assignee = 'crew-lane:host:run';
     if (status === 'blocked') value.document.data.hold = 'GATE_FAIL';
     if (status === 'done' || status === 'retired') value.document.present = false;
@@ -47,7 +47,7 @@ function fixture() {
       const rows = [...objects.values()].filter(x => descendant(x) && (!kinds || kinds.includes(x.kind)))
         .map(x => ({address: x.address, kind: x.kind, parent: x.document.parent,
           present: x.document.present, revision: x.current_revision, title: x.document.data.title,
-          status: x.document.present ? x.status?.tone || 'grey' : 'purple', work_ready: x.work_ready,
+          status: x.document.present ? x.status?.tone || 'grey' : 'purple',
           'data.assignee': x.document.data.assignee ?? null, 'data.commit': x.document.data.commit ?? null,
           'data.hold': x.document.data.hold ?? null}))
         .filter(x => tones ? tones.includes(x.status) : x.present)

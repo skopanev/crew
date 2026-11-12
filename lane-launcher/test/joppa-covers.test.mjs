@@ -29,14 +29,14 @@ test('covering Task records each covered criterion as acceptance context', async
   assert.deepEqual(f.run.claim.contexts.map(context => context.address), ['ac:a1', 'req:r', 'ac:a2']);
   assert.equal(f.run.claim.ticket.coveredContexts[0].address, 'ac:a2');
   await guardTaskClaims(f.run, f.persist);
-  f.objects.get('ac:a2').work_ready = false;
+  f.objects.get('ac:a2').document.links = [{relation: 'depends_on', blocking: true, target: 'ac:a1'}];
   await assert.rejects(guardTaskClaims(f.run, f.persist), /Acceptance context changed/);
 });
 
 for (const [name, change] of [
   ['held by a planner', ac => { ac.document.data.assignee = 'crew-planning:host:run'; }],
   ['waiting', ac => { ac.document.data.hold = 'NEEDS_HUMAN'; }],
-  ['not work ready', ac => { ac.work_ready = false; }],
+  ['waiting for a dependency', ac => { ac.document.links = [{relation: 'depends_on', blocking: true, target: 'ac:a1'}]; }],
   ['in another Requirement', ac => { ac.document.parent = 'req:other'; }],
 ]) test(`covering Task is not claimed when the covered criterion is ${name}`, async t => {
   const f = await covering(t);
@@ -49,9 +49,9 @@ for (const [name, change] of [
 test('a covered criterion that changes during the claim releases the claimed Tasks', async t => {
   const f = await covering(t);
   const task = f.objects.get('task:t1'), ac = f.objects.get('ac:a2');
-  delete ac.work_ready;
-  Object.defineProperty(ac, 'work_ready', {enumerable: true, get: () => !task.document.data.assignee});
-  await assert.rejects(claimTask(f.run, f.persist, f.runId), /COVERED_CONTEXT_NOT_READY: ac:a2 is not work ready; this run released/);
+  Object.defineProperty(ac.document.data, 'hold', {enumerable: true,
+    get: () => task.document.data.assignee ? 'WAITING' : undefined});
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /COVERED_CONTEXT_NOT_READY: ac:a2 is waiting; this run released/);
   assert.equal(batches(f).length, 2);
   assert.equal(f.run.releaseConfirmed, true);
   assert.equal(task.document.data.assignee, undefined);

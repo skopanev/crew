@@ -61,7 +61,7 @@ async function responseMessage(response, id) {
 // A detail read names its fields: a sparse default omits comments, files and references.
 // With fields, status is a tone string, status.label is separate and an absent optional key is null.
 // current_revision is not a detail key. present keeps an archived node archived.
-export const DETAIL_FIELDS = Object.freeze(['revision', 'parent', 'data', 'present', 'status', 'status.label', 'work_ready',
+export const DETAIL_FIELDS = Object.freeze(['revision', 'parent', 'data', 'present', 'status', 'status.label',
   'process', 'relations', 'references', 'comments', 'files', 'remote_links', 'remote_review_required',
   'remote_links_revision', 'result']);
 
@@ -171,7 +171,7 @@ function normalizeDetail(args, value) {
   const result = {...value};
   if (typeof result.status === 'string') result.status = {tone: result.status, label: result['status.label'] ?? null};
   delete result['status.label'];
-  for (const key of ['process', 'result', 'remote_links', 'remote_review_required', 'current_revision', 'work_ready',
+  for (const key of ['process', 'result', 'remote_links', 'remote_review_required', 'current_revision',
     'present', 'files', 'references', 'remote_links_revision']) {
     if (result[key] === null) delete result[key];
   }
@@ -182,9 +182,6 @@ function normalizeDetail(args, value) {
     result.document = {revision: result.revision, parent: result.parent ?? null, present: result.present ?? true,
       data: result.data, links: relationLinks(result.relations)};
     result.current_revision ??= result.revision;
-    if (!args.revision) {
-      result.work_ready ??= true;
-    }
   }
   result.address ??= args.address;
   result.kind ??= result.address.split(':', 1)[0];

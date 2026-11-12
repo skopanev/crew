@@ -23,7 +23,7 @@ export function taskCovers(spec, object) {
     .filter(address => address !== parent);
 }
 
-// A covered criterion must be current, present, not waiting, unassigned, work ready and free of unmet dependencies.
+// A covered criterion must be current, present, not waiting, unassigned and free of unmet dependencies.
 export function coveredProblem(object, address, dependency, requirement) {
   if (object?.address !== address || object.historical !== false || object.document?.present !== true ||
       !Number.isSafeInteger(object.current_revision)) return `${address} is absent or historical`;
@@ -32,7 +32,6 @@ export function coveredProblem(object, address, dependency, requirement) {
   }
   if (nodeWaiting(object)) return `${address} is waiting`;
   if (nodeAssignee(object)) return `${address} is held by ${nodeAssignee(object)}`;
-  if (object.work_ready !== true) return `${address} is not work ready`;
   if (!dependency?.ready) return `${address} waits for ${dependency?.blocker}`;
   return null;
 }

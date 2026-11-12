@@ -7,7 +7,7 @@ import {createDashboard} from '../dashboard.mjs';
 import {fixture} from '../test-support/requirement-delivery.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 
-test('local ordering uses consumer readiness without reinterpreting dependency state', async () => {
+test('local ordering reads dependency targets and accepts only completed state', async () => {
   const f = fixture(), target = f.add('spec:before', null);
   f.objects.get('work:one').document.links = [{relation: 'depends_on', blocking: true, target: target.address}];
   const calls = [];
@@ -17,14 +17,26 @@ test('local ordering uses consumer readiness without reinterpreting dependency s
   };
   for (const tone of ['green', 'orange', 'yellow', 'grey', 'red', undefined]) {
     target.status = {tone};
-    target.work_ready = false;
     target.document.data.hold = 'WAITING';
-    assert.equal((await dependencyCheck(read)('work:one')).ready, true);
+    assert.equal((await dependencyCheck(read)('work:one')).ready, tone === 'green');
   }
-  assert(calls.every(({tool, args}) => tool === 'joppa_objects' && args.address !== target.address));
-  f.objects.get('work:one').work_ready = false;
-  f.objects.get('work:one').waits_for = {address: target.address};
+  assert(calls.some(({tool, args}) => tool === 'joppa_objects' && args.address === target.address));
   assert.deepEqual(await dependencyCheck(read)('work:one'), {ready: false, blocker: target.address});
+  target.document.present = false;
+  assert.equal((await dependencyCheck(read)('work:one')).ready, true);
+  target.document.present = true;
+  target.kind = 'work';
+  target.status = {tone: 'green'};
+  assert.equal((await dependencyCheck(read)('work:one')).ready, false);
+  target.document.data.stage = 'done';
+  assert.equal((await dependencyCheck(read)('work:one')).ready, true);
+  f.objects.get('work:one').document.links.push({...f.objects.get('work:one').document.links[0]});
+  calls.length = 0;
+  const check = dependencyCheck(read);
+  await check('work:one');
+  await check('work:one');
+  assert.equal(calls.filter(({args}) => args.address === target.address).length, 1);
+  assert.equal(calls.filter(({tool}) => tool === 'joppa_tree').length, 1);
 });
 
 test('local ordering survives completion metadata revisions without changing documents', async () => {
@@ -44,8 +56,6 @@ test('local ordering survives completion metadata revisions without changing doc
   assert.equal(inherited.ready, true);
   target.document.present = true;
   target.document.data.assignee = 'another-run';
-  f.objects.get('work:one').work_ready = false;
-  f.objects.get('work:one').waits_for = {address: target.address};
   assert.deepEqual(await dependencyCheck(f.read)('work:one'), {ready: false, blocker: 'work:two'});
 });
 
@@ -56,8 +66,6 @@ test('the CLI and dashboard leave unfinished dependencies unchanged', async t =>
   target.current_revision = 11;
   const task = f.joppa.objects.get('task:t1');
   task.document.links = [{relation: 'depends_on', blocking: true, target: target.address, revision: 1}];
-  task.work_ready = false;
-  task.waits_for = {address: target.address};
   const before = structuredClone(f.joppa.objects);
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);

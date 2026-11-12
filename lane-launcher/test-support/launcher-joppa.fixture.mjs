@@ -24,7 +24,7 @@ async function packageFixture(t, mode = 'success') {
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
-    work_ready: true, status: {tone: 'blue'}, document: {present: true, parent, data, links: []},
+    status: {tone: 'blue'}, document: {present: true, parent, data, links: []},
     process: {}, annotations: {comments: {}}});
   objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
   for (let index = 1; index <= 2; index++) {
@@ -73,7 +73,7 @@ async function packageFixture(t, mode = 'success') {
         .map(object => ({address: object.address, revision: object.current_revision,
           kind: object.kind, parent: object.document.parent, present: object.document.present,
           status: object.document.present ? object.status?.tone || 'blue' : 'purple',
-          title: object.document.data.title, work_ready: object.work_ready,
+          title: object.document.data.title,
           'data.assignee': object.document.data.assignee ?? null, 'data.commit': object.document.data.commit ?? null,
           'data.projects': object.document.data.projects ?? null, 'data.priority': object.document.data.priority ?? null,
           'data.hold': object.document.data.hold ?? null,
@@ -98,7 +98,7 @@ async function packageFixture(t, mode = 'success') {
       for (const command of commands) if (command.op === 'save_object' && command.revision === 0 && !command.id) {
         command.id = `n${++created}`;
         objects.set(`${command.kind}:${command.id}`, {address: `${command.kind}:${command.id}`, kind: command.kind,
-          historical: false, current_revision: 0, work_ready: true, status: {tone: 'orange'},
+          historical: false, current_revision: 0, status: {tone: 'orange'},
           document: {present: true, parent: command.parent, data: {}, links: []}, process: {}, annotations: {comments: {}}});
       }
       const target = command => objects.get(command.target || `${command.kind}:${command.id}`);
@@ -188,8 +188,7 @@ function served(object) {
   }
   return {address: object.address, kind: object.kind, revision: object.current_revision, current_revision: object.current_revision,
     historical: object.historical, parent: object.document.parent, present: object.document.present,
-    data: structuredClone(object.document.data), relations, work_ready: object.work_ready,
-    ...(object.waits_for ? {waits_for: object.waits_for} : {}), status: object.status,
+    data: structuredClone(object.document.data), relations, status: object.status,
     // Live detail reads give comments as one page {items, total, next_cursor}, not annotations.
     comments: comments(object), ...(object.remote_links ? {remote_links: object.remote_links} : {}),
     ...(object.remote_links_revision ? {remote_links_revision: object.remote_links_revision} : {}),

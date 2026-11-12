@@ -57,6 +57,7 @@ try {
           ? [{address: claim.address, revision: claim.revision, digest: claim.digest, parent: claim.parent}]
           : []);
     require(tasks.length > 0, 'Captured Task claim is missing tasks');
+    const dependencies = dependencyCheck(read);
     for (const task of tasks) {
       require(task && text(task.address) && text(task.digest), 'Captured Task claim entry is invalid');
       const current = await read('joppa_objects', {address: task.address});
@@ -65,7 +66,8 @@ try {
         current.document?.present === true,
         `Claimed Task is absent or historical: ${task.address}`);
       require(nodeAssignee(current) === assignee && !nodeWaiting(current), `Task holder changed: ${task.address}`);
-      require(current.work_ready === true, `Claimed Task is not work_ready: ${task.address}`);
+      const dependency = await dependencies(task.address);
+      require(dependency.ready, `Task dependency changed: ${dependency.blocker}`);
       require(contractDigest(current) === task.digest, `Task contract changed after claim: ${task.address}`);
       if (task.parent) {
         require(text(task.parent.address) && text(task.parent.digest), `Captured Task parent context is invalid: ${task.address}`);
@@ -74,7 +76,7 @@ try {
         require(parent && parent.address === task.parent.address && parent.historical === false &&
           parent.document?.present === true &&
           Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 &&
-          parent.work_ready === true && live(parent),
+          live(parent),
           `Task parent context needs review or has active planning: ${task.parent.address}`);
         require(contractDigest(parent) === task.parent.digest, `Task parent context changed after claim: ${task.parent.address}`);
       }
@@ -89,13 +91,8 @@ try {
         live(parent),
         `Acceptance context is invalid, needs review, or has active planning: ${context.address}`);
       require(contractDigest(parent) === context.digest, `Acceptance context changed after claim: ${context.address}`);
-    }
-    if (tasksMode) {
-      const ready = dependencyCheck(read);
-      for (const task of tasks) {
-        const dependency = await ready(task.address);
-        require(dependency.ready, `Task dependency changed: ${dependency.blocker}`);
-      }
+      const dependency = await dependencies(context.address);
+      require(dependency.ready, `Acceptance dependency changed: ${dependency.blocker}`);
     }
   }
 

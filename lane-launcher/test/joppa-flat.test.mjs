@@ -9,7 +9,7 @@ import {contractDigest} from '../joppa.mjs';
 test('flat reads preserve authored links and native test evidence', async t => {
   const f = fixture(t), stateFile = path.join(f.root, 'state.json');
   const object = {address: 'work:one', kind: 'work', current_revision: 3,
-    work_ready: true, remote_links_revision: 0,
+    remote_links_revision: 0,
     document: {revision: 3, parent: 'criterion:a', present: true,
       data: {body: 'Goal: Example', note: null, projects: [], title: 'Example'},
       links: [{blocking: true, relation: 'depends_on', revision: 2, target: 'work:before'}]},
@@ -26,7 +26,6 @@ test('flat reads preserve authored links and native test evidence', async t => {
   assert.equal(contractDigest(detail), contractDigest(object));
   assert.deepEqual(detail.document, object.document);
   assert.equal(detail.review_required, undefined);
-  assert.equal(detail.work_ready, true);
   assert.equal(detail.process.assignee, undefined);
   assert.equal(detail.contract_revision, undefined);
   const testDetail = await call('joppa_objects', {address: testNode.address});

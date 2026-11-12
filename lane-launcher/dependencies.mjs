@@ -43,7 +43,7 @@ export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace
 
 export function dependencyCheck(read) {
   const objects = new Map();
-  let workspaceKey;
+  let workspaceKey, schema;
   const object = async address => {
     if (!objects.has(address)) objects.set(address, read('joppa_objects', {address}));
     const value = await objects.get(address);
@@ -57,11 +57,11 @@ export function dependencyCheck(read) {
     return value;
   };
   return async address => {
+    schema ||= read('joppa_tree', {});
+    const types = (await schema)?.schema?.types;
+    if (!types || typeof types !== 'object') throw invalid('Dependency schema types are missing');
     const start = await object(address);
-    // Joppa computes local ordering. Do not reinterpret the target's tone or readiness.
-    if (start.work_ready === false || nodeWaiting(start)) {
-      return {ready: false, blocker: start.waits_for?.address || start.address};
-    }
+    if (nodeWaiting(start)) return {ready: false, blocker: start.address};
     const seen = new Set();
     let node = start;
     while (node) {
@@ -70,8 +70,13 @@ export function dependencyCheck(read) {
       for (const link of node.document.links || []) {
         if (link.relation !== 'depends_on' || link.blocking !== true) continue;
         if (link.workspace !== undefined) throw invalid('Dependency workspace link must use remote_links');
+        const target = await object(link.target);
         if (link.revision != null && !currentPin(link.revision, Number.MAX_SAFE_INTEGER, 1)) {
           throw invalid(`Invalid linked revision on ${node.address}: ${link.target}`);
+        }
+        if (!(target.document.present === false || (types[target.kind]?.role === 'task'
+          ? target.document.data?.stage === 'done' : target.status?.tone === 'green'))) {
+          return {ready: false, blocker: target.address};
         }
       }
       const blocker = remoteDependencyBlocker(node, workspaceKey);

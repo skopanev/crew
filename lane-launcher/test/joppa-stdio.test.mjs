@@ -200,7 +200,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   const f = fixture(t), stateFile = path.join(f.root, 'state.json');
   const command = [...f.command, stateFile];
   const make = (address, parent) => ({address, kind: address.split(':')[0], historical: false,
-    workspace_key: 'local', current_revision: 1, work_ready: true, review_required: false,
+    workspace_key: 'local', current_revision: 1, review_required: false,
     document: {present: true, parent, links: [], data: {title: address}}, process: {}});
   const parent = make('measure:a', null), task = make('work:one', parent.address);
   const assignee = 'crew-lane:host:11111111-1111-4111-8111-111111111111';
@@ -234,7 +234,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
     Object.assign(link.status, status);
     const result = check();
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stderr, /unmet remote dependency/);
+    assert.match(result.stderr, /Task dependency changed: @remote\/measure:a/);
     link.status = before;
   }
   parent.remote_links_revision++;
@@ -274,7 +274,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   const refused = spawnSync('bash', [path.join(lane, 'bin/land.sh'), 'develop'],
     {cwd: repo, env, encoding: 'utf8', timeout: 10_000});
   assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
-  assert.match(refused.stderr, /unmet remote dependency/);
+  assert.match(refused.stderr, /Task dependency changed: @remote\/measure:a/);
   assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], before);
   link.status.satisfied = true;
   fs.writeFileSync(stateFile, JSON.stringify(state));

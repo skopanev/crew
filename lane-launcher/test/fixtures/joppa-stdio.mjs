@@ -52,7 +52,6 @@ for await(const line of createInterface({input:process.stdin})) {
         {lead_flow:{color:'#bc5d52',edges:[{to:'criterion:flow',title:'Flow neighbour'}]}})};
     for(const key of ['address','document','current_revision','position','workspace','workspace_key']) delete value[key];
     if(value.review_required===false) delete value.review_required;
-    if(value.work_ready===true) delete value.work_ready;
     if(value.remote_links_revision===0) delete value.remote_links_revision;
     if(value.annotations) delete value.annotations;
    }

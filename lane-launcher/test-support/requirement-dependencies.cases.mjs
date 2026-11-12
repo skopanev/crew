@@ -32,6 +32,9 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   const config = {delivery: 'requirement', repositories: [{id: 'repo', path: repo, targetBranch: 'develop'}]};
   const run = {...f.run, repository: config.repositories[0], config, requirementDelivery: {branch: f.branch}};
   await publicationReader(config, f.read)(run);
+  f.objects.get('work:two').document.present = true;
+  f.objects.get('work:two').document.data.stage = 'done';
+  await publicationReader(config, f.read)(run);
   f.add('spec:other', null); f.add('measure:b', 'spec:other');
   f.objects.get('work:two').document.parent = 'measure:b';
   await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_NOT_LANDED'});
