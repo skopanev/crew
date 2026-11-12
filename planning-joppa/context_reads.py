@@ -180,18 +180,28 @@ def pending_work_page(api, config, assignment):
             if address in visible or not repositories.intersection(repository_declarations(task)):
                 continue
             document = object_read(api, config["workspace"], address, allow_archived=True)
+            data = document["document"]["data"]
+            # A list row can be stale. The current detail decides the repository.
+            declared = [value for value in repository_declarations(data) if value in repositories]
+            if not declared:
+                continue
             status = task_state(document)
             if status in ("done", "retired"):
                 continue
-            contract = task_contract(document["document"]["data"])
-            def field(name):
-                match = re.search(r"^" + name + r":[ \t]*([^\r\n]+)$", contract, re.M)
-                return match[1].strip() if match else None
+            entry = {"address": address, "revision": document["current_revision"], "title": data.get("title"),
+                     "ac": document["document"].get("parent"), "status": status, "repository": declared[0],
+                     "module": None, "how": None}
+            try:
+                contract = task_contract(data)
+            except ValueError as error:
+                # A malformed contract stays visible to planning. Its address allows a full read.
+                entry["contract_error"] = str(error)
+                result.append(entry)
+                continue
+            match = re.search(r"^Module:[ \t]*([^\r\n]+)$", contract, re.M)
             how = re.search(r"^How:\s*\n(.*?)(?:\nChecks:|\Z)", contract, re.M | re.S)
-            result.append({"address": address, "revision": document["current_revision"],
-                "title": document["document"]["data"].get("title"), "ac": document["document"].get("parent"),
-                "status": status, "repository": field("Repository"), "module": field("Module"),
-                "how": " ".join(how[1].split()) if how else None})
+            entry.update(module=match[1].strip() if match else None, how=" ".join(how[1].split()) if how else None)
+            result.append(entry)
         cursor = page.get("next_cursor")
         if not cursor:
             return result
