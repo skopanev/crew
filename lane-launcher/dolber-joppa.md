@@ -22,10 +22,10 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
-The queue reports `DEPENDENCY_STALE_PIN` when a pinned dependency no longer matches its current contract.
-The detail shows the Task, dependency, saved pin, contract revision and current revision.
-The dashboard keeps the first detail visible. The queue count includes all detected stale pins.
-Review the consumer contract before changing its dependency pin.
+The queue checks blocking `depends_on` targets on each Task and its ancestors.
+Archived targets satisfy a dependency. A live Task needs `data.stage: done`; other live targets need a green status.
+The queue skips completed Tasks. The claim also refuses them.
+Local revision pins must be positive integers. Remote dependencies retain their access and revision checks.
 
 The Task contract must declare exactly one `Repository:` line and one `Module:` line.
 These names select entries in the config. Module paths remain inside the selected repository.
@@ -37,7 +37,7 @@ The existing lane runs discovery, implementation or verification, configured che
 `delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
 `delivery: "target"` lands the candidate on the configured `targetBranch`.
 `delivery: "requirement"` keeps one branch for each Requirement and repository.
-Tasks use that branch in sequence and merge the current target before implementation.
+Each Task uses that branch and merges the current target before implementation.
 Each Task runs `reviewCommands` and expert review before publication.
 Set `reviewCommands` to lint and focused tests for the Task change.
 Intermediate Tasks complete on the Requirement branch. They do not run full gates or `afterLand`.

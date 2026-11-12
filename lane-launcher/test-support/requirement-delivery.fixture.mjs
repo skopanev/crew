@@ -49,6 +49,7 @@ function fixture() {
           present: x.document.present, revision: x.current_revision, title: x.document.data.title,
           status: x.document.present ? x.status?.tone || 'grey' : 'purple',
           'data.assignee': x.document.data.assignee ?? null, 'data.commit': x.document.data.commit ?? null,
+          'data.stage': x.document.data.stage ?? null,
           'data.hold': x.document.data.hold ?? null}))
         .filter(x => tones ? tones.includes(x.status) : x.present)
         .sort((a, b) => a.address.localeCompare(b.address));

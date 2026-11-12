@@ -1,6 +1,6 @@
 import os from 'node:os';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, verifyRemoteDependencies} from './joppa-common.mjs';
-import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, nodeStageDone, saveNode} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -58,6 +58,7 @@ export async function claimTask(run, persist, runId) {
         (task.revision === undefined || object.current_revision === task.revision), 'Task changed after selection; no Tasks claimed');
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
       require(!nodeWaiting(object), `TASK_WAITING: ${task.address} is waiting; no Tasks claimed`);
+      require(!nodeStageDone(object), `TASK_COMPLETED: ${task.address} is done; no Tasks claimed`);
       selected.push(object);
     }
     const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));

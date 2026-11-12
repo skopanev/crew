@@ -23,6 +23,10 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert.equal(selected.candidate.requirement, 'req:r');
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+  f.objects.get('task:t1').document.data.stage = 'done';
+  assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t2');
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /TASK_COMPLETED: task:t1/);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
 test('Joppa planner reads all compact pages and uses native criterion tones', async t => {

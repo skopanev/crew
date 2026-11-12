@@ -8,7 +8,7 @@ import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
-import {nodeAssignee, nodeWaiting, taskPages, coversFields} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, nodeStageDone, taskPages, coversFields} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -101,7 +101,7 @@ export async function nextTask(config) {
       'joppa.priorities must contain priority values');
     let coversOf;
     for (const task of inventory) {
-      if (task.present !== true || reserved.has(task.address) || nodeAssignee(task) || nodeWaiting(task) ||
+      if (task.present !== true || reserved.has(task.address) || nodeStageDone(task) || nodeAssignee(task) || nodeWaiting(task) ||
           priorities && !priorities.includes(task['data.priority'])) continue;
         try {
           const context = await group(task.address);

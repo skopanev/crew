@@ -7,6 +7,7 @@ export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.
 // Crew holds a node with its own data.hold reason code.
 export const nodeHold = node => node.document?.data?.hold ?? node.data?.hold ?? node['data.hold'] ?? null;
 export const nodeWaiting = node => Boolean(nodeHold(node));
+export const nodeStageDone = node => (node.document?.data?.stage ?? node.data?.stage ?? node['data.stage']) === 'done';
 
 // A partial save: Joppa merges data, keeps the parent and keeps every relation that is not sent.
 // An undefined change removes the field.
@@ -48,7 +49,7 @@ export async function* nodePages(read, filters) {
 export async function* taskPages(read, filters = {}, extraFields = []) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
     fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority',
-      'data.hold', ...extraFields],
+      'data.hold', 'data.stage', ...extraFields],
     ...filters});
 }
 
