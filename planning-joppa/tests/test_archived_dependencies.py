@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import read
 from mcp import MCPError, Rejected
 import publication
-from provider_fixture import Fake, MARK, assignment, claim_receipt, hold, plan, raw_ac
+from provider_fixture import Fake, MARK, assignment, claim_receipt, hold, plan, raw_ac, links
 
 TYPES = {"work": {"role": "task"}, "criterion": {"role": "ac"}, "record": {"role": "note"}}
 COMMIT = "a" * 40
@@ -62,14 +62,19 @@ def scenario(links=()):
 
 
 def saved_links(data, value, server):
+    """The depends_on edges the save sends. Joppa keeps the other relation keys."""
     completed = publication.completed_dependencies(server, "example", value, TYPES)
-    return publication.operations(value, data, completed)[0]["command"]["links"]
+    return links(publication.operations(value, data, completed)[0]["command"])
+
+
+def depends(values):
+    return [value for value in values if value["relation"] == "depends_on"]
 
 
 class DependencyLinkTests(unittest.TestCase):
     def test_retained_pinned_link_to_done_target_stays_identical(self):
         data, value = scenario([PINNED])
-        existing = deepcopy(data["joppa"]["tasks"][0]["document"]["links"])
+        existing = depends(deepcopy(data["joppa"]["tasks"][0]["document"]["links"]))
         server = Server("done")
         self.assertEqual(saved_links(data, value, server), existing)
         self.assertIn(PINNED, existing)
@@ -77,23 +82,21 @@ class DependencyLinkTests(unittest.TestCase):
 
     def test_new_link_to_done_target_is_omitted(self):
         data, value = scenario()
-        links = saved_links(data, value, Server("done"))
-        self.assertEqual(links, data["joppa"]["tasks"][0]["document"]["links"])
-        self.assertFalse(any(link["relation"] == "depends_on" for link in links))
+        saved = saved_links(data, value, Server("done"))
+        self.assertEqual(saved, [])
 
     def test_live_target_link_is_replaced_as_before(self):
         data, value = scenario([PINNED])
-        links = saved_links(data, value, Server("live"))
-        self.assertEqual([link for link in links if link["relation"] == "depends_on"],
-                         [{"target": "work:dependency", "relation": "depends_on", "blocking": True}])
-        self.assertEqual(links, publication.operations(value, data)[0]["command"]["links"])
+        saved = saved_links(data, value, Server("live"))
+        self.assertEqual(saved, [{"target": "work:dependency", "relation": "depends_on", "blocking": True}])
+        self.assertEqual(saved, links(publication.operations(value, data)[0]["command"]))
 
     def test_inherited_links_to_ended_targets_are_kept_without_reads(self):
         inherited = [{"target": "work:done", "relation": "depends_on", "blocking": True, "revision": 2},
                      {"target": "work:retired", "relation": "depends_on", "blocking": True}]
         data, value = scenario(inherited)
         value["tasks"][0]["depends_on"] = []
-        existing = deepcopy(data["joppa"]["tasks"][0]["document"]["links"])
+        existing = depends(deepcopy(data["joppa"]["tasks"][0]["document"]["links"]))
         server = Server("done")
         self.assertEqual(saved_links(data, value, server), existing)
         self.assertEqual(server.calls, [])
@@ -151,7 +154,7 @@ class PublicationFailureTests(unittest.TestCase):
                 self.assertFalse((target / "publication.json").exists())
                 # Only the failure release writes: it holds the AC not ready.
                 self.assertEqual([[entry["command"]["op"] for entry in batch] for batch in server.batches()],
-                                 [["save_object", "assess"]])
+                                 [["save_object"]])
                 self.assertTrue(result["claim_released"])
 
     def test_target_done_after_final_read_rejects_once_and_releases(self):
@@ -164,11 +167,10 @@ class PublicationFailureTests(unittest.TestCase):
             self.assertEqual((receipt["status"], receipt["error"], receipt["retain_claim"]), ("rejected", REFUSAL, True))
             publication_batch, release_batch = server.batches()
             self.assertIn({"target": "work:dependency", "relation": "depends_on", "blocking": True},
-                          publication_batch[0]["command"]["links"])
-            self.assertEqual([entry["command"]["op"] for entry in release_batch], ["save_object", "assess"])
+                          links(publication_batch[0]["command"]))
+            self.assertEqual([entry["command"]["op"] for entry in release_batch], ["save_object"])
             self.assertEqual(release_batch[0]["command"]["revision"], 4)
-            self.assertEqual(release_batch[1]["command"], {"op": "assess", "target": "criterion:a", "ready": False,
-                                                           "reason": "PLANNING_FAILED"})
+            self.assertEqual(release_batch[0]["command"]["data"], {"assignee": None, "hold": "PLANNING_FAILED"})
             self.assertEqual((result["claim_released"], result["needs_recovery"]), (True, False))
             self.assertEqual(read(target / "publication.json"), receipt)
 

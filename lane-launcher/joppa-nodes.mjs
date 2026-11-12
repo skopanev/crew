@@ -1,25 +1,24 @@
 // Generic Joppa node reads and revision-checked document saves.
 const require = (condition, message) => { if (!condition) throw new Error(message); };
-export const NODE_TONES = ['red', 'yellow', 'orange', 'grey', 'green', 'purple'];
+// Joppa renamed grey to blue. grey stays a read alias.
+export const NODE_TONES = ['red', 'yellow', 'orange', 'blue', 'grey', 'green', 'purple'];
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
-export const nodeWaiting = node => (node.process?.assessment ?? node['process.assessment'])?.state === 'waiting';
+// Crew holds a node with its own data.hold reason code. Native work_ready covers only dependencies.
+export const nodeHold = node => node.document?.data?.hold ?? node.data?.hold ?? node['data.hold'] ?? null;
+export const nodeWaiting = node => Boolean(nodeHold(node));
 
-export function saveNode(node, changes, reason, question) {
+// A partial save: Joppa merges data, keeps the parent and keeps every relation that is not sent.
+// An undefined change removes the field.
+export function saveNode(node, changes, reason) {
   require(node.historical === false && node.document?.present === true &&
     Number.isSafeInteger(node.current_revision) && node.current_revision > 0,
   'A node save requires a current, present document');
   const separator = node.address?.indexOf(':');
   require(separator > 0, 'A node save requires its full address');
-  const data = structuredClone(node.document.data);
-  for (const [key, value] of Object.entries(changes)) {
-    if (value === undefined) delete data[key];
-    else data[key] = value;
-  }
+  const data = Object.fromEntries(Object.entries(changes).map(([key, value]) => [key, value === undefined ? null : value]));
   return {op: 'save_object', kind: node.address.slice(0, separator), id: node.address.slice(separator + 1),
-    revision: node.current_revision, parent: node.document.parent, data,
-    links: structuredClone(node.document.links || []), reason,
-    ...(question ? {question_checked: question} : {})};
+    revision: node.current_revision, data, reason};
 }
 
 export async function roleKinds(read, role) {
@@ -49,7 +48,7 @@ export async function* nodePages(read, filters) {
 export async function* taskPages(read, filters = {}, extraFields = []) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
     fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority', 'data.projects',
-      'work_ready', 'process.assessment', ...extraFields],
+      'work_ready', 'data.hold', ...extraFields],
     ...filters});
 }
 

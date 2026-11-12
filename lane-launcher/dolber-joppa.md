@@ -68,7 +68,7 @@ Joppa `done` records execution. It does not accept the AC or Requirement.
 ### Covered criteria
 
 With `joppa.coversReference`, a claimed Task can cover other criteria of its Requirement.
-Before the claim, each covered criterion must be present, not waiting, without assignee, `work_ready` and without unmet dependencies.
+Before the claim, each covered criterion must be present, without a `data.hold` code, without assignee, `work_ready` and without unmet dependencies.
 Otherwise Dolber claims nothing and reports `COVERED_CONTEXT_NOT_READY`.
 After the claim, Dolber reads each covered criterion again and stores its revision and digest as acceptance context.
 A change in this window releases the claimed Tasks before startup with the same code.

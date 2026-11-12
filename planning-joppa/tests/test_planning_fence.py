@@ -1,4 +1,4 @@
-"""Planning fences: exact ownership revision, saves before assess and exact reason codes. No network."""
+"""Planning fences: exact ownership revision, saves before notes and exact hold codes. No network."""
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -37,17 +37,17 @@ class PlanningFenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed after"):
             planning_claims.owned(server, "example", {**receipt, "revisions": {"criterion:a": 6}})
 
-    def test_every_assess_is_fenced_by_an_earlier_save_of_the_same_target(self):
+    def test_every_note_is_fenced_by_an_earlier_save_of_the_same_target(self):
         import planning_claims
         save = {"command": {"op": "save_object", "kind": "work", "id": "t", "revision": 2, "data": {}}}
-        assess = {"command": planning_claims.assess("work:t", "WORKTREE_PREEXISTED")}
-        planning_claims.require_fenced([save, assess])
-        for operations in ([assess], [assess, save], [{"command": {**save["command"], "revision": 0}}, assess],
-                           [{"command": {**save["command"], "id": "other"}}, assess]):
+        note = {"command": {"op": "note", "target": "work:t", "id": "n", "text": "Failed"}}
+        planning_claims.require_fenced([save, note])
+        for operations in ([note], [note, save], [{"command": {**save["command"], "revision": 0}}, note],
+                           [{"command": {**save["command"], "id": "other"}}, note]):
             with self.assertRaisesRegex(ValueError, "needs an earlier save"):
                 planning_claims.require_fenced(operations)
 
-    def test_startup_retry_saves_each_task_before_its_assess_and_matches_the_code_exactly(self):
+    def test_startup_retry_clears_each_task_hold_and_matches_the_code_exactly(self):
         import reader_context
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
@@ -79,19 +79,23 @@ class PlanningFenceTests(unittest.TestCase):
                 self.assertTrue(reader_context.retry_startup(None, config, target, data, ac, '"assess"'))
             operations = [entry["command"] for entry in sent[0]]
             self.assertEqual([(entry["op"], entry.get("target") or entry["kind"] + ":" + entry["id"]) for entry in operations],
-                             [("save_object", "work:old"), ("assess", "work:old"),
-                              ("save_object", "criterion:a"), ("assess", "criterion:a")])
-            self.assertEqual((operations[0]["revision"], operations[0]["data"]), (3, task["document"]["data"]))
-            self.assertNotIn("assignee", operations[2]["data"])
+                             [("save_object", "work:old"), ("save_object", "criterion:a")])
+            # Partial saves: the Task only clears its hold. The AC releases its assignee and clears its hold.
+            self.assertEqual((operations[0]["revision"], operations[0]["data"]), (3, {"hold": None}))
+            self.assertEqual(operations[1]["data"], {"assignee": None, "hold": None})
 
-    def test_detail_reads_keep_the_native_process_and_add_no_task_fields(self):
+    def test_detail_reads_keep_the_native_process_and_read_the_hold_from_data(self):
         from joppa_reads import normalize_detail, task_state
-        process = {"annotation_address": "work:t", "verification": {"state": "pass"}, "acceptance": {"by": "owner"},
-                   "assessment": {"state": "waiting", "reason": "WORKTREE_PREEXISTED"}}
-        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "assignee": "lane-1"},
+        process = {"annotation_address": "work:t", "verification": {"state": "pass"}, "acceptance": {"by": "owner"}}
+        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "hold": "WORKTREE_PREEXISTED"},
                                                            process=deepcopy(process)))
         self.assertEqual(value["process"], process)
         self.assertEqual(task_state(value), "blocked")
+        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "assignee": "lane-1"},
+                                                           links=[{"target": "work:u", "relation": "depends_on", "revision": 2}]))
+        self.assertEqual(task_state(value), "active")
+        self.assertEqual(value["document"]["links"],
+                         [{"blocking": True, "relation": "depends_on", "revision": 2, "target": "work:u"}])
 
     def test_parent_requirement_revision_bump_from_a_claim_keeps_the_snapshot(self):
         import context
@@ -108,7 +112,7 @@ class PlanningFenceTests(unittest.TestCase):
         self.assertEqual(context.authored_meaning(meaning),
                          context.authored_meaning({**meaning, "number": 4, "reason": after["reason"]}))
         for change in (lambda value: value["data"].update(body="Changed rule"),
-                       lambda value: value["links"].append({"target": "note:m", "relation": "related"}),
+                       lambda value: value["relations"]["related"]["edges"].append({"to": "note:m"}),
                        lambda value: value.update(parent="group:other")):
             changed = deepcopy(after)
             change(changed)
@@ -126,8 +130,8 @@ class PlanningFenceTests(unittest.TestCase):
         self.assertFalse(context.current_pin(0, 4, 1))
         value = plan()
         value["tasks"][0]["depends_on"] = ["work:dependency"]
-        links = publication.operations(value, assignment())[0]["command"]["links"]
-        self.assertEqual(links, [{"target": "work:dependency", "relation": "depends_on", "blocking": True}])
+        relations = publication.operations(value, assignment())[0]["command"]["relations"]
+        self.assertEqual(relations, {"depends_on": {"edges": [{"to": "work:dependency"}]}})
 
 
 if __name__ == "__main__":

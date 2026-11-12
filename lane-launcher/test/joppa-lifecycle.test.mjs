@@ -7,7 +7,6 @@ import {claimTask, finishTask, releaseTaskClaims} from '../joppa.mjs';
 import {packageFixture, packageLanding} from '../test-support/launcher-joppa.fixture.mjs';
 
 const batches = f => f.calls.filter(call => call.name === 'joppa_batch').map(call => call.args.operations.map(({command}) => command));
-const question = 'Which change does this Task make?';
 
 test('claim refuses an assigned Task before any write', async t => {
   const f = await packageFixture(t);
@@ -21,7 +20,7 @@ test('claim refuses an assigned Task before any write', async t => {
 test('claim refuses a waiting Task and a run without a launch UUID', async t => {
   const f = await packageFixture(t);
   await assert.rejects(claimTask(f.run, f.persist, 'not-a-run'), /launch UUID/);
-  f.objects.get('task:t1').process = {assessment: {state: 'waiting', reason: 'GATE_FAIL'}};
+  f.objects.get('task:t1').document.data.hold = 'GATE_FAIL';
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /TASK_WAITING: task:t1/);
   assert.deepEqual(batches(f), []);
 });
@@ -31,28 +30,30 @@ test('claim saves the run-specific assignee at the read revision and keeps the a
   await claimTask(f.run, f.persist, f.runId);
   const assignee = `crew-lane:${os.hostname()}:${f.runId}`;
   const [claim] = batches(f);
-  assert.deepEqual(claim[0], {op: 'save_object', kind: 'task', id: 't1', revision: 3, parent: before.parent,
-    data: {...before.data, assignee}, links: before.links, reason: 'Take this Task for a Crew lane run.', question_checked: question});
+  assert.deepEqual(claim[0], {op: 'save_object', kind: 'task', id: 't1', revision: 3,
+    data: {assignee}, reason: 'Take this Task for a Crew lane run.'});
+  assert.deepEqual(f.objects.get('task:t1').document.data, {...before.data, assignee});
   assert.equal(f.run.claim.assignee, assignee);
   assert.equal(f.run.claim.actor, 'lane-1');
   assert.equal(f.run.claim.runId, f.runId);
   assert.deepEqual(f.run.claim.tasks.map(task => task.revision), [4, 4]);
 });
 
-test('release removes only the assignee with a revision-checked save', async t => {
+test('release clears only the assignee with a revision-checked partial save', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);
   await releaseTaskClaims(f.run, f.persist, 'Lane did not start.');
   const release = batches(f).at(-1);
-  assert.deepEqual(release.map(command => [command.op, command.id, command.revision, Object.hasOwn(command.data, 'assignee')]),
-    [['save_object', 't1', 4, false], ['save_object', 't2', 4, false]]);
-  assert(release.every(command => command.reason === 'Lane did not start.' && command.question_checked === question));
+  assert.deepEqual(release.map(command => [command.op, command.id, command.revision, command.data]),
+    [['save_object', 't1', 4, {assignee: null}], ['save_object', 't2', 4, {assignee: null}]]);
+  assert(release.every(command => command.reason === 'Lane did not start.'));
+  assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
   assert.equal(f.objects.get('task:t1').document.data.title, '[01] Task 1');
   assert.equal(f.run.releaseConfirmed, true);
   assert.deepEqual(f.run.releaseResults.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
 });
 
-test('failure releases, assesses and notes every Task in one batch', async t => {
+test('failure releases, holds and notes every Task in one batch', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = path.join(f.root, 'artifacts');
@@ -60,18 +61,18 @@ test('failure releases, assesses and notes every Task in one batch', async t => 
   fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed\n');
   const result = {code: 1, status: 'failed'};
   await finishTask(f.run, f.stateFile, result, artifacts);
-  const block = batches(f).at(-1), reason = block[1].reason;
+  const block = batches(f).at(-1), reason = block[0].data.hold;
   assert.equal(batches(f).length, 2);
   assert.match(reason, /^[A-Z0-9_]+$/);
   for (const [index, address] of ['task:t1', 'task:t2'].entries()) {
-    const [save, assess, note] = block.slice(index * 3, index * 3 + 3);
-    assert.deepEqual([save.op, `${save.kind}:${save.id}`, save.revision, Object.hasOwn(save.data, 'assignee')],
-      ['save_object', address, 4, false]);
-    assert.deepEqual(assess, {op: 'assess', target: address, ready: false, reason});
+    const [save, note] = block.slice(index * 2, index * 2 + 2);
+    assert.deepEqual([save.op, `${save.kind}:${save.id}`, save.revision, save.data],
+      ['save_object', address, 4, {assignee: null, hold: reason}]);
+    assert.equal(f.objects.get(address).document.data.hold, reason);
     assert.equal(note.op, 'note');
     assert.equal(note.target, address);
     assert.equal(note.text, `CREW_FAILURE\nTask: ${address}\nRun: ${f.runId}\nReason: ${reason}\nRequired check failed`);
-    assert.equal(f.run.blockRequest.operations[index * 3 + 2].command.id, note.id);
+    assert.equal(f.run.blockRequest.operations[index * 2 + 1].command.id, note.id);
     assert.equal(f.objects.get(address).annotations.comments[note.id].text, note.text);
   }
   assert.equal(result.blockConfirmed, true);
@@ -93,7 +94,7 @@ test('success saves the commit and archives at the saved revision in one batch',
   assert.deepEqual(done.map(({ref, command}) => [ref, command.op]),
     [['done0', 'save_object'], [undefined, 'archive_object'], ['done1', 'save_object'], [undefined, 'archive_object']]);
   assert.deepEqual(done[1].command.revision, {$ref: 'done0/saved_revision'});
-  assert(done.every(({command}) => command.op !== 'save_object' || command.question_checked === question));
+  assert(done.every(({command}) => command.op !== 'save_object' || !Object.hasOwn(command, 'question_checked')));
   assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 6], ['task:t2', 6]]);
   for (const address of ['task:t1', 'task:t2']) {
     assert.equal(f.objects.get(address).document.present, false);
@@ -119,8 +120,8 @@ for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-p
   });
 }
 
-test('failure is not confirmed when another actor owns the assessment', async t => {
-  const f = await packageFixture(t, 'wrong-assessor');
+test('failure is not confirmed when the read hold differs from the written code', async t => {
+  const f = await packageFixture(t, 'wrong-hold');
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = path.join(f.root, 'artifacts');
   fs.mkdirSync(artifacts);
@@ -134,7 +135,7 @@ test('a saved completion request without a saved-revision reference is not sent'
   const {f, sha, finish} = await complete(t);
   const sent = batches(f).length;
   f.run.completionRequest = {workspace: 'fixture', request_id: 'saved', operations: ['t1', 't2'].flatMap((id, index) => [
-    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4, data: {commit: sha}, question_checked: question}},
+    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4, data: {commit: sha}, reason: 'Done'}},
     {command: {op: 'archive_object', target: `task:${id}`, revision: 5}}])};
   await assert.rejects(finish(), /Saved completion request/);
   assert.equal(batches(f).length, sent);
@@ -142,7 +143,7 @@ test('a saved completion request without a saved-revision reference is not sent'
 
 test('a package whose failure batch exceeds 100 operations is refused before API calls', async t => {
   const f = await packageFixture(t);
-  f.run.tasks = Array.from({length: 34}, (_, index) => ({address: `task:t${index}`, revision: 3}));
+  f.run.tasks = Array.from({length: 51}, (_, index) => ({address: `task:t${index}`, revision: 3}));
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /100-operation/);
   assert.equal(f.calls.length, 0);
 });

@@ -34,8 +34,8 @@ test('Joppa package completes every Task atomically with the same checked landin
     assert.match(save.reason, new RegExp(`Task: task:t${index}`));
     assert.equal(save.reason.startsWith(landing), true);
     assert.equal(save.data.commit, sha);
-    assert.equal(Object.hasOwn(save.data, 'assignee'), false);
-    assert.equal(save.question_checked, 'Which change does this Task make?');
+    assert.equal(save.data.assignee, null);
+    assert.equal(Object.hasOwn(save, 'question_checked'), false);
     assert.deepEqual(archive, {op: 'archive_object', target: `task:t${index}`,
       revision: {$ref: `done${index - 1}/saved_revision`}, reason: `Crew lane landed ${sha}.`});
   });

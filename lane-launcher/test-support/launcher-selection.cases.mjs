@@ -30,7 +30,7 @@ test('Joppa planner reads all compact pages and uses native criterion tones', as
   f.queue.length = 0;
   for (let i = 0; i < 28; i++) f.objects.set(`ac:extra${i}`, {...structuredClone(sample), address: `ac:extra${i}`});
   f.objects.get('ac:extra27').document.data.assignee = 'crew-planning:another:run';
-  f.objects.get('ac:extra4').process.assessment = {state: 'waiting', reason: 'NEEDS_HUMAN'};
+  f.objects.get('ac:extra4').document.data.hold = 'NEEDS_HUMAN';
   f.objects.get('ac:extra1').status.tone = 'green';
   f.objects.get('ac:extra2').status.tone = 'orange';
   f.objects.get('ac:extra3').status.tone = 'red';
@@ -44,7 +44,7 @@ test('Joppa planner reads all compact pages and uses native criterion tones', as
   assert.equal(rows[0].address, 'ac:extra3');
   const lists = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
   assert(lists.some(call => call.args.cursor === '25'));
-  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('process.assessment')));
+  assert(lists.every(call => call.args.limit === 25 && call.args.fields.includes('data.hold')));
   assert(lists.filter(call => call.args.kind.includes('ac')).every(call => call.args.fields.includes('status')));
   assert(f.calls.every(call => ['joppa_objects', 'joppa_tree'].includes(call.name)));
 });
@@ -74,7 +74,7 @@ test('Joppa planner excludes completed criteria but selects their failed remaini
   assert.deepEqual((await read()).map(row => row.address), ['ac:a2']);
   const failed = f.objects.get('task:t2');
   failed.document.present = true;
-  failed.process.assessment = {state: 'waiting', reason: 'GATE_FAIL', actor: 'lane-1'};
+  failed.document.data.hold = 'GATE_FAIL';
   const rows = await read();
   assert.equal(rows[0].address, 'ac:a1');
   assert.equal(rows[0].failedTaskCount, 1);

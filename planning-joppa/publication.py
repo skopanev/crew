@@ -22,6 +22,12 @@ from context_reads import object_read
 from planning_claims import address_of, closing_operations, release, owned, require_fenced
 
 
+
+def depends_edges(links):
+    """The depends_on edges of a link list in the Joppa relations form. A pin stays only when the link has one."""
+    return [{"to": link["target"], **({"revision": link["revision"]} if link.get("revision") is not None else {})}
+            for link in links if link.get("relation") == "depends_on"]
+
 def ensure_recovered(root, current, server, workspace, ac):
     """Refuse another claim while an earlier run needs receipt recovery."""
     for claim_file in Path(root).glob("*/artifacts/claim.json"):
@@ -166,26 +172,30 @@ def operations(plan, assignment, completed=frozenset()):
             links = [link for link in links if not (link.get("relation") == "depends_on"
                                                    and link.get("target") in (canonical, target))]
             links.append(candidate)
+        reopen = bool(existing) and blocked(existing)
+        if reopen:
+            # The revised contract answers the block. The same save clears the hold.
+            data.pop("hold", None)
+        # clean replaces the whole data, so a removed field does not survive the merge.
+        # Only the depends_on key is sent. Joppa keeps the other relation keys.
         command = {"op": "save_object", "kind": scope["joppa"]["task_type"],
                    "revision": existing["current_revision"] if existing else 0,
-                   "parent": ac, "data": data, "links": links,
-                   "reason": "Publish the reviewed mechanism for this criterion.", "question_checked": schema["question"]}
-        reopen = False
+                   "parent": ac, "data": data, **({"clean": True} if existing else {}),
+                   "reason": "Publish the reviewed mechanism for this criterion."}
+        edges = depends_edges(links)
+        if edges or existing:
+            command["relations"] = {"depends_on": {"edges": edges}}
         if existing:
             command["id"] = existing["address"].split(":", 1)[1]
             document = existing["document"]
-            reopen = blocked(existing)
             if reopen:
                 require(context.task_contract(data) != context.task_contract(document["data"]),
                         f"blocked Task {existing['address']} needs a new contract or retirement")
-            if data == document["data"] and links == document["links"] and ac == document["parent"]:
+            if (data == document["data"] and edges == depends_edges(document["links"])
+                    and ac == document["parent"]):
                 continue
         ref = "task" + str(number)
         result.append({"ref": ref, "command": command})
-        if reopen:
-            # The revised contract answers the block. Mark the same Task ready in this transaction.
-            result.append({"command": {"op": "assess", "target": existing["address"], "ready": True,
-                                       "reason": "The reviewed plan replaces the blocked contract."}})
         changed.add(ac)
         changed.update(task.get("covers", []))
         refs[task["id"]] = ref
@@ -210,8 +220,7 @@ def operations(plan, assignment, completed=frozenset()):
         result.extend(closing_operations(objects[ac], not grouped or ac in changed or held,
             "Publish the reviewed Requirement plan." if grouped
             else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"
-            else "Publish reviewed Tasks. The criterion still requires verification.",
-            assignment["joppa"].get("questions", {}).get(objects[ac]["kind"])))
+            else "Publish reviewed Tasks. The criterion still requires verification."))
     require(len(result) <= MAX_PUBLICATION_OPERATIONS, f"one publication supports at most {MAX_PUBLICATION_OPERATIONS} operations")
     return require_fenced(result)
 

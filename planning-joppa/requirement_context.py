@@ -67,7 +67,7 @@ def load_requirement(api, config, req_id, selected=None):
         completed = any(done(item) for item in own) and not failures
         if ((not config.get("ac_ids") or address in config["ac_ids"])
                 and ac.get("work_ready") is True and not completed
-                and (ac["process"].get("assessment") or {}).get("state") != "waiting"
+                and not ac["document"]["data"].get("hold")
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
                 and len(failures) == len(work)):
             candidates.append(address)

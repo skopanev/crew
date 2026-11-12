@@ -8,8 +8,8 @@ import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// A failure writes a release save, an assessment and a note for each Task in one batch.
-const FAILURE_OPERATIONS = 3;
+// A failure writes one release save with the hold code and one note for each Task in one batch.
+const FAILURE_OPERATIONS = 2;
 
 export const laneAssignee = runId => {
   require(uuid.test(runId || ''), 'Task claim needs the launch UUID');
@@ -26,22 +26,10 @@ export const contextLive = object => current(object) && !nodeWaiting(object) && 
 const kindOf = object => object.address.slice(0, object.address.indexOf(':'));
 const read = (run, address) => api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address});
 
-export async function taskQuestions(run) {
-  const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
-  require(types && typeof types === 'object', 'Joppa tree schema is missing');
-  // Answer the type question when the schema defines one.
-  return object => {
-    const type = types[kindOf(object)];
-    require(type && typeof type === 'object', `Joppa type ${kindOf(object)} is missing`);
-    return type.question;
-  };
-}
-
 // Release saves remove only data.assignee at the read revision. Joppa must then show every Task unassigned.
 export async function releaseTasks(run, persist, objects, reason, code) {
   if (objects.length) {
-    const question = await taskQuestions(run);
-    run.releaseRequest = batchRequest(run, objects.map(object => saveNode(object, {assignee: undefined}, reason, question(object))));
+    run.releaseRequest = batchRequest(run, objects.map(object => saveNode(object, {assignee: undefined}, reason)));
     persist();
     try { await mutateTasks(run, run.releaseRequest); }
     catch (error) { throw new Error(`${code}: ${error.message}`); }
@@ -64,7 +52,7 @@ export async function claimTask(run, persist, runId) {
   require(new Set(tasks.map(task => task.address)).size === tasks.length, 'Repository package contains duplicate Tasks');
   const assignee = laneAssignee(runId);
   if (!run.claimRequest) {
-    const question = await taskQuestions(run), selected = [];
+    const selected = [];
     for (const task of tasks) {
       const object = await read(run, task.address);
       require(object?.address === task.address && current(object) &&
@@ -94,7 +82,7 @@ export async function claimTask(run, persist, runId) {
     for (const object of selected) testAcceptance(object, coversOf(object));
     packageBudget(selected.length, estimatedNodes(selected, coversOf));
     run.claimRequest = batchRequest(run, selected.map(object =>
-      saveNode(object, {assignee}, 'Take this Task for a Crew lane run.', question(object))));
+      saveNode(object, {assignee}, 'Take this Task for a Crew lane run.')));
   }
   persist();
   try { await mutateTasks(run, run.claimRequest); }

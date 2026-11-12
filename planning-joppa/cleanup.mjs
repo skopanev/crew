@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {executionId, runHoldsTasks} from '../lane-launcher/joppa.mjs';
 import {readRun} from '../lane-launcher/runtime.mjs';
-import {nodeAssignee, nodeWaiting} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeHold, nodeWaiting} from '../lane-launcher/joppa-nodes.mjs';
 import {isDeepStrictEqual} from 'node:util';
 
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -71,15 +71,14 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     require(operation, 'Every blocked Task needs an unblock, contract update or retirement before cleanup');
     const cmd = operation.command;
     require(cmd.revision === task.current_revision, 'Cleanup operation uses a different Task revision');
-    const retry = cmd.op === 'save_object' && isDeepStrictEqual(cmd.data, task.document.data) &&
-      isDeepStrictEqual(cmd.links, task.document.links) && cmd.parent === task.document.parent;
+    // A partial save that only clears the hold retries the unchanged contract.
+    const retry = cmd.op === 'save_object' && isDeepStrictEqual(cmd.data, {hold: null}) &&
+      cmd.relations === undefined && cmd.parent === undefined;
     if (cmd.op === 'save_object') {
       require(!cmd.data.assignee, 'Cleanup cannot assign a Task');
-      require(operations.slice(operations.indexOf(operation) + 1).some(({command}) =>
-        command.op === 'assess' && command.target === task.address && command.ready === true),
-      'Task contract save must precede its ready assessment');
+      require(cmd.data.hold === null, 'Task contract save must clear its hold');
     }
-    require(!retry || task.process.assessment.reason === 'WORKTREE_PREEXISTED',
+    require(!retry || nodeHold(task) === 'WORKTREE_PREEXISTED',
       'Only worktree startup failures can use unchanged contract cleanup');
     return {operation, retry};
   };
@@ -88,7 +87,7 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     for (const [id, note] of comments.reverse()) {
       if (note.withdrawn || !note.text?.startsWith('CREW_FAILURE\n')) continue;
       const field = name => new RegExp(`^${name}: ([^\\r\\n]+)$`, 'm').exec(note.text)?.[1];
-      if (field('Task') !== task.address || field('Reason') !== task.process.assessment.reason) continue;
+      if (field('Task') !== task.address || field('Reason') !== nodeHold(task)) continue;
       const runId = field('Run'), receipt = receipts.get(runId);
       if (!uuid.test(runId || '') || !receipt) continue;
       const requested = receipt.blockRequest?.operations?.find(({command}) =>

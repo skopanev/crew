@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE
+from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE, links
 
 
 class ProviderTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class ProviderTests(unittest.TestCase):
             provider.update(id="prerequisite", target="work:prerequisite", depends_on=[])
             value["tasks"] = [consumer, provider]
             commands = publication.operations(value, data)
-            dependencies = [link for link in commands[1]["command"]["links"] if link["relation"] == "depends_on"]
+            dependencies = [link for link in links(commands[1]["command"]) if link["relation"] == "depends_on"]
             self.assertEqual(len(dependencies), 1)
             self.assertEqual(dependencies[0]["target"], {"$ref": "task1/address"})
 
@@ -56,7 +56,7 @@ class ProviderTests(unittest.TestCase):
         operations = publication.operations(value, assignment())
         self.assertEqual(operations[0]["command"]["data"]["title"], "Create a mechanism")
         self.assertEqual(operations[1]["command"]["data"]["title"], "Consume the output")
-        self.assertEqual(operations[1]["command"]["links"][0]["target"], {"$ref": "task1/address"})
+        self.assertEqual(links(operations[1]["command"])[0]["target"], {"$ref": "task1/address"})
         first["depends_on"] = ["consumer"]
         with self.assertRaisesRegex(ValueError, "contain a cycle"):
             publication.operations(value, assignment())
@@ -70,17 +70,17 @@ class ProviderTests(unittest.TestCase):
                       depends_on=["first", "work:dependency"])
         value["tasks"].append(second)
         ops = publication.operations(value, data)
-        self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "save_object", "assess"])
+        self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "save_object"])
         saved = ops[1]["command"]
         self.assertEqual(saved["data"]["owner"], "document-owner")
         self.assertEqual(saved["data"]["custom"], "preserve")
         self.assertEqual(saved["data"]["projects"], ["other", "p"])
         self.assertNotIn("assignee", saved)
         self.assertNotIn("status", saved)
-        self.assertEqual(saved["question_checked"], "What work?")
+        self.assertNotIn("question_checked", saved)
         # New ordering links carry no revision pin.
-        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, saved["links"])
-        self.assertIn({"target": "work:dependency", "relation": "depends_on", "blocking": True}, saved["links"])
+        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, links(saved))
+        self.assertIn({"target": "work:dependency", "relation": "depends_on", "blocking": True}, links(saved))
         self.assertIn("1. Use the existing mechanism", context.task_contract(saved["data"]))
         self.assertEqual(data, original)
 
@@ -105,12 +105,12 @@ class ProviderTests(unittest.TestCase):
         del second["target"], second["revision"]
         value["tasks"].append(second)
         commands = publication.operations(value, data)
-        self.assertEqual(len(commands), 3)
+        self.assertEqual(len(commands), 2)
         self.assertEqual(commands[0]["command"]["data"]["title"], "Consume existing work")
         self.assertIn({"target": "work:old", "relation": "depends_on", "blocking": True},
-                      commands[0]["command"]["links"])
+                      links(commands[0]["command"]))
         value["tasks"] = [first]
-        self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["save_object", "assess"])
+        self.assertEqual([x["command"]["op"] for x in publication.operations(value, data)], ["save_object"])
 
     def test_rejects_stale_and_completed_updates_and_unknown_dependencies(self):
         value = plan()

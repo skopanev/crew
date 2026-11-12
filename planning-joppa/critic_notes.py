@@ -26,7 +26,7 @@ def build(target, rejection, grouped=False):
     except (OSError, ValueError) as error:
         return {"dropped": clip(f"critic verdicts unusable: {error}", 200)}
     except Exception as error:
-        # A defect here must not block the save and assess. Report it and record it in release.json.
+        # A defect here must not block the save with the hold code. Report it and record it in release.json.
         print(f"critic note construction failed: {type(error).__name__}: {error}", file=sys.stderr)
         return {"dropped": clip(f"note construction failed: {type(error).__name__}: {error}", 200)}
 

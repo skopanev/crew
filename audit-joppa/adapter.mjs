@@ -142,10 +142,9 @@ export async function publish(config, findings, input, artifacts) {
     operations.push({command: {op: 'save_object', kind: config.inbox.kind, id, revision: 0,
       parent: config.inbox.parent || null,
       data,
-      links: [...new Map(finding.spec.map(item => [item.address,
-        {target: item.address, revision: item.revision, relation: 'related', blocking: false}])).values()],
-      reason: 'Record an independently verified code and specification discrepancy.',
-      ...(input.schema.types[config.inbox.kind].question ? {question_checked: input.schema.types[config.inbox.kind].question} : {})}});
+      relations: {related: {edges: [...new Map(finding.spec.map(item => [item.address,
+        {to: item.address, revision: item.revision}])).values()]}},
+      reason: 'Record an independently verified code and specification discrepancy.'}});
     operations.push({command: {op: 'note', target: address, id: `evidence-${key.slice(0, 32)}`,
       text: body, reply_to: null}});
     published.push(address);

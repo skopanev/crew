@@ -54,8 +54,7 @@ export async function missingTestNodes(read, schema, rows) {
         fail('BINDING_INVALID', `test name ${JSON.stringify(name)} does not fit the test node rules${problem ? `: ${problem}` : ''}`);
       }
       commands.push({op: 'save_object', kind, revision: 0, parent: ac, data: {title: name, ...(owner ? {owner} : {})},
-        reason: 'Bind a test that the lane verified for this criterion check.',
-        ...(definition.question ? {question_checked: definition.question} : {})});
+        reason: 'Bind a test that the lane verified for this criterion check.'});
     }
   }
   return commands;

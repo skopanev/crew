@@ -66,17 +66,16 @@ class CriticNoteTests(unittest.TestCase):
         [batch] = api.batches()
         return [command for command in batch if command["op"] == "note"], batch
 
-    def test_final_rejection_saves_assesses_and_notes_each_released_criterion(self):
+    def test_final_rejection_saves_holds_and_notes_each_released_criterion(self):
         with tempfile.TemporaryDirectory() as directory:
             target = self.run_folder(directory, correctness=verdict(PLAN, claims=("A", "B", "C", "D")),
                                      simplicity=verdict(PLAN, claims=("S",)))
             api = Server({"criterion:a": (MARK, 4), "criterion:b": (MARK, 4)})
             result = self.run_main(target, api, self.rejection())
             notes, batch = self.notes(api)
-            self.assertEqual(shape(batch), [("save_object", "criterion:a"), ("assess", "criterion:a"),
-                                            ("note", "criterion:a"), ("save_object", "criterion:b"),
-                                            ("assess", "criterion:b"), ("note", "criterion:b")])
-            self.assertEqual([batch[1]["ready"], batch[4]["ready"]], [False, False])
+            self.assertEqual(shape(batch), [("save_object", "criterion:a"), ("note", "criterion:a"),
+                                            ("save_object", "criterion:b"), ("note", "criterion:b")])
+            self.assertTrue(paired(batch))
             note_id = f"crew-critic-run-7-{digest(PLAN)[:12]}"
             ids = [f"{note_id}-{suffix('criterion:a')}", f"{note_id}-{suffix('criterion:b')}"]
             self.assertEqual([note["id"] for note in notes], ids)
@@ -158,8 +157,7 @@ class CriticNoteTests(unittest.TestCase):
                           "criterion:c": (MARK, 4)})
             self.run_main(target, api, self.rejection())
             notes, batch = self.notes(api)
-            self.assertEqual(shape(batch), [("save_object", "criterion:c"), ("assess", "criterion:c"),
-                                            ("note", "criterion:c")])
+            self.assertEqual(shape(batch), [("save_object", "criterion:c"), ("note", "criterion:c")])
             self.assertEqual(len(read(target / "release.json")["critic_notes"]), 1)
 
     def test_uncertain_publication_or_earlier_release_sends_no_note(self):

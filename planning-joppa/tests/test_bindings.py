@@ -52,23 +52,22 @@ class ProviderTests(unittest.TestCase):
             nodes.append({"address": "check:other", "title": "checks/checks.rs > other", "revision": 4, "status": "green"})
             data["joppa"]["test_schema"]["question"] = "Which test proves the criterion?"
             ops = publication.operations(value, data)
-            self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object", "assess"])
+            self.assertEqual([op["command"]["op"] for op in ops], ["save_object", "save_object"])
             self.assertEqual(ops[0]["command"], {"op": "save_object", "kind": "check", "revision": 0,
                 "parent": "criterion:a", "data": {"title": "checks/checks.rs > required_behavior", "owner": "owner"},
-                "reason": "Bind an existing test after review of every criterion assertion.",
-                "question_checked": "Which test proves the criterion?"})
+                "reason": "Bind an existing test after review of every criterion assertion."})
             self.assertFalse(any(op["command"].get("id") and op["command"]["kind"] != "criterion"
-                                 or op["command"]["op"] not in ("save_object", "assess") for op in ops))
+                                 or op["command"]["op"] != "save_object" for op in ops))
             nodes.append({"address": "check:bound", "title": "checks/checks.rs > required_behavior",
                           "revision": 1, "status": "red"})
-            self.assertEqual(len(publication.operations(value, data)), 2)
+            self.assertEqual(len(publication.operations(value, data)), 1)
             retire = deepcopy(plan()["tasks"][0])
             retire.update(action="retire", target="work:old", revision=3)
             hold(data["joppa"]["tasks"][0], "Failed")
             value["tasks"] = [retire]
             nodes.pop()
             self.assertEqual([op["command"]["op"] for op in publication.operations(value, data)],
-                             ["archive_object", "save_object", "save_object", "assess"])
+                             ["archive_object", "save_object", "save_object"])
 
     def test_binding_honours_schema_limits_and_owner(self):
         data, value = assignment(), plan()
@@ -101,8 +100,8 @@ class ProviderTests(unittest.TestCase):
                  "evidence": f"service:checks.rs:{number + 1}; service:implementation.rs:1"} for number in range(100)])
             with self.assertRaisesRegex(ValueError, "at most 100 operations"):
                 publication.operations(value, data)
-            del value["acceptance_checks"][98:]
-            # 98 test nodes, the AC assignee release and the AC assessment fill one batch.
+            del value["acceptance_checks"][99:]
+            # 99 test nodes and the AC release save, which also clears the hold, fill one batch.
             self.assertEqual(len(publication.operations(value, data)), 100)
 
     def test_binding_requires_execution_evidence_and_unchanged_cited_source(self):

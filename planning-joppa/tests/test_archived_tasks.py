@@ -14,7 +14,7 @@ from provider_fixture import item, assignment, end, hold, CHECK_TYPE
 TYPES = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
          "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
                   "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
-TONES = {"red", "yellow", "orange", "grey", "green", "purple"}
+TONES = {"red", "yellow", "orange", "blue", "grey", "green", "purple"}
 
 
 class Workspace:

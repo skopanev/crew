@@ -10,6 +10,8 @@ export const contractDigest = object => {
   delete data.commit;
   // Completion writes the bound test names next to the commit. They are lifecycle evidence, not contract.
   delete data.test_bindings;
+  // A hold is Crew lifecycle state, not contract.
+  delete data.hold;
   return createHash('sha256').update(JSON.stringify({
     parent: object.document.parent, data, links: object.document.links,
     ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
@@ -47,7 +49,9 @@ export async function mutateTasks(run, request) {
       const expected = request.operations[index].command;
       const matches = expected.op === 'save_object'
         ? item.object?.address === `${expected.kind}:${expected.id}` && Number.isSafeInteger(item.object.revision)
-        : Object.entries(expected).every(([key, value]) => JSON.stringify(item.command?.[key]) === JSON.stringify(value));
+        // Receipts trim long texts. Match the identity of the operation, not its echo.
+        : ['target', 'id', 'revision'].every(key => expected[key] === undefined ||
+          JSON.stringify(item.command?.[key]) === JSON.stringify(expected[key]));
       require(item.command?.op === expected.op && matches,
         'Joppa batch response does not map to the requested Task; inspect the saved request');
     }

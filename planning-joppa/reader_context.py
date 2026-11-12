@@ -87,12 +87,12 @@ def prompt_assignment(assignment):
         "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],
                    **({"remote_links": task["remote_links"]} if task.get("remote_links") else {}),
                    "data": prompt_data(task), "links": task["document"]["links"],
-                   "state": task_state(task), "assessment": task["process"].get("assessment")}
+                   "state": task_state(task), "hold": task["document"]["data"].get("hold")}
                   for task in tasks],
         "objects": {address: {"item_id": item.get("item_id"), "revision": item["current_revision"], "data": prompt_data(item),
                               **({"remote_links": item["remote_links"]} if item.get("remote_links") else {}),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
-                              "assessment": item["process"].get("assessment"),
+                              "hold": item["document"]["data"].get("hold"),
                               **({"state": task_state(item)} if item.get("kind") == assignment["joppa"]["task_type"] else {})}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
     if assignment["joppa"].get("remote"):
@@ -133,9 +133,8 @@ def retry_startup(api, config, target, assignment, ac, advertised):
     tasks = [task for task in assignment["joppa"]["tasks"] if not ended(task)]
     if not tasks or not all(block_reason(task) == "WORKTREE_PREEXISTED" for task in tasks):
         return False
-    require('"assess"' in advertised, "Startup retry requires deployed assess; no research was started")
     require(len(tasks) <= 49, "Startup retry supports at most 49 Tasks in one atomic batch")
-    # The block assessment holds the Tasks. The AC itself must be ready for work.
+    # The hold code holds the Tasks. The AC itself must be ready for work.
     require(ac.get("work_ready") is True, "Startup retry requires a ready AC")
     for item in [ac, *tasks]:
         require(item["document"].get("present") is True,
@@ -158,15 +157,12 @@ def retry_startup(api, config, target, assignment, ac, advertised):
                     for project in (repo["project"], repo["project"].split(":", 1)[1])),
                 "Task projects do not include its configured repository")
         require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
-        # Fence each assess with an unchanged save at the read revision of the same Task.
+        # A save at the read revision of the same Task only clears its hold.
         reason = "Retry startup after removing the retained worktree."
-        operations.append({"command": claims.save_command(task, claims.KEEP, reason,
-                                                          assignment["joppa"]["task_schema"].get("question"))})
-        operations.append({"command": claims.assess(task["address"], reason)})
+        operations.append({"command": claims.save_command(task, claims.KEEP, reason, None)})
     claim = read(target / "claim.json")
     claims.owned(api, config["workspace"], claim)
-    operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts.",
-                                                assignment["joppa"].get("questions", {}).get(ac["kind"])))
+    operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts."))
     claims.require_fenced(operations)
     print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
         "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")

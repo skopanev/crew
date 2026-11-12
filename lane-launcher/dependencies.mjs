@@ -1,4 +1,5 @@
 // Read live dependency state for one queue check. Store no persistent state.
+import {nodeWaiting} from './joppa-nodes.mjs';
 const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
 
 const validWorkspaceId = value => typeof value === 'string' && Boolean(value.trim()) &&
@@ -58,7 +59,7 @@ export function dependencyCheck(read) {
   return async address => {
     const start = await object(address);
     // Joppa computes local ordering. Do not reinterpret the target's tone or readiness.
-    if (start.work_ready === false || start.process?.assessment?.state === 'waiting') {
+    if (start.work_ready === false || nodeWaiting(start)) {
       return {ready: false, blocker: start.waits_for?.address || start.address};
     }
     const seen = new Set();

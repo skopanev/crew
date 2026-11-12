@@ -103,7 +103,5 @@ def bind_missing(ac, names, nodes, joppa, owner):
         data = {"title": name, **({"owner": owner} if owner else {})}
         command = {"op": "save_object", "kind": kind, "revision": 0, "parent": ac, "data": data,
                    "reason": "Bind an existing test after review of every criterion assertion."}
-        if definition.get("question"):
-            command["question_checked"] = definition["question"]
         commands.append({"command": command})
     return commands

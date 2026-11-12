@@ -18,7 +18,7 @@ test('local ordering uses consumer readiness without reinterpreting dependency s
   for (const tone of ['green', 'orange', 'yellow', 'grey', 'red', undefined]) {
     target.status = {tone};
     target.work_ready = false;
-    target.process.assessment = {state: 'waiting', reason: 'WAITING'};
+    target.document.data.hold = 'WAITING';
     assert.equal((await dependencyCheck(read)('work:one')).ready, true);
   }
   assert(calls.every(({tool, args}) => tool === 'joppa_objects' && args.address !== target.address));

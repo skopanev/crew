@@ -2,7 +2,8 @@
 
 Status: live publication and lane completion passed before native context reads were added.
 Native reads pass on four providers. Full native planning publication remains unverified.
-Whole-Requirement planning uses generic node operations: `save_object`, `archive_object` and `assess`.
+Whole-Requirement planning uses generic node operations: `save_object` and `archive_object`.
+Joppa removed `assess` and save `links`. Crew holds a node with its own `data.hold` code and reads edges from `relations`.
 Its provider checks pass. A live grouped run has not passed yet.
 Task completion does not confirm criterion acceptance.
 
@@ -79,8 +80,7 @@ Independent Tasks have no ordering dependency. Title order does not replace depe
 Every selected AC has its own implementation or existing-test-binding disposition and observable acceptance checks.
 Claims use one atomic batch. Publication saves Tasks, binds proven tests and finishes changed ACs in one atomic batch.
 Unchanged AC contracts release their claims. The Joppa batch limit remains 100 operations.
-A new claim holds at most 33 ACs: a failure release needs a save, an `assess` and a critic note for each AC.
-An older claim of 34 to 50 ACs still releases with a save and an `assess` for each AC, without notes.
+A claim holds at most 50 ACs: a failure release needs one save with the hold code and one critic note for each AC.
 The explicit `--ac-id` input preserves the one-AC path.
 It also lists unfinished Tasks across Requirements in the configured repository projects, with their module and mechanism.
 This list locates possible overlap. A full current object read still verifies reuse and dependencies.
@@ -103,7 +103,8 @@ Two independent critics review the plan. Publication saves Tasks and finishes th
 Each Task contract contains Goal, Repository, Module, How and Checks. How has at most five mechanism steps.
 New contracts store the goal in `data.body`, scope in `repository` and `module`, and mechanisms in `steps` and `checks` arrays.
 Each stored value has at most 1024 characters. Readers reconstruct the full contract and also accept the previous inline format.
-An unchanged existing contract keeps its stored format. Task links stay in native link arrays.
+An unchanged existing contract keeps its stored format. Task dependencies are sent as the `depends_on` key of `relations`.
+Joppa keeps the other relation keys. A changed Task save sends `clean: true`, so a removed field does not survive the merge.
 Research citations stay outside Task contracts. Missing tests or behavior require implementation Tasks.
 When existing passing tests cover every Then and Evidence item, critics inspect their actual assertions.
 The planner binds these tests without creating a verification Task. Each acceptance check supplies
@@ -119,7 +120,7 @@ The schema `test_results` rules supply the name rule and `max_tests`.
 The planner reads all test nodes in pages of 25 and groups them by criterion.
 Publication creates only the missing (AC, test name) nodes with `save_object` and revision 0.
 It never edits, deletes or recreates an existing node, so recorded results stay.
-New nodes and the AC assignee release and `assess` go in the same atomic batch.
+New nodes and the AC save that releases the assignee and clears the hold go in the same atomic batch.
 
 ### Acceptance mapping and shared Tasks
 
@@ -180,20 +181,21 @@ Joppa has no Task workflow commands. The planner uses generic node fields:
 - Ownership: the claim receipt records the revision that this run wrote for each AC.
   Before publication or release, the planner reads each AC again. It requires its own
   `data.assignee` value and that exact revision. A later edit or reassignment stops the run.
-- Every `assess` and `note` follows a revision-checked save of the same object in the same batch.
+- Every `note` follows a revision-checked save of the same object in the same batch.
+- Saves are partial: `data` holds only the changed fields, `null` removes a field. Joppa keeps the parent and every relation key that is not sent.
 - Lists exclude archived nodes. Ended Tasks are read only by a known address, such as a link target.
-- Release: save the AC without `data.assignee` at its current revision.
-- Finish: the publication batch saves Tasks, saves each AC without `data.assignee`
-  and sends `assess` with `ready: true` for each changed AC.
-- A revised blocked Task gets `assess` with `ready: true` in the same batch.
+- Release: save `data.assignee: null` on the AC at its current revision.
+- Finish: the publication batch saves Tasks and saves each AC with `data.assignee: null`.
+  A changed AC also gets `data.hold: null`.
+- A revised blocked Task drops `data.hold` in its contract save.
 - Retirement archives the Task with `archive_object` and no `data.commit`.
-- Task state: `data.assignee` on a live Task is active work. `process.assessment.state`
-  `waiting` is a block. Its reason is a short code, such as `WORKTREE_PREEXISTED`; the Task note keeps details. An archived Task with `data.commit` is done; without it, retired.
-- The contract digest excludes `data.assignee` and `data.commit`. Every other authored field stays.
+- Task state: `data.assignee` on a live Task is active work. A `data.hold` code is a block.
+  The code is short, such as `WORKTREE_PREEXISTED`; the Task note keeps details. An archived Task with `data.commit` is done; without it, retired.
+- The contract digest excludes `data.assignee`, `data.commit` and `data.hold`. Every other authored field stays.
   A child AC save gives its Requirement a new revision with the same authored fields. Ancestor
   snapshots compare authored fields, so that revision alone does not stop the run.
 
-The planner refuses before claiming if `save_object`, `archive_object` or `assess` is absent.
+The planner refuses before claiming if `save_object` or `archive_object` is absent.
 Refresh the canonical source before launch. Prepare checks every CBM project root first.
 Then it reindexes each shared CBM project and refuses if the source moves.
 It holds the lane `<repo>/.git/sync.lock` for one repository at a time and uses `mode: moderate`.
@@ -221,7 +223,7 @@ It deletes no checkout unless the publication updates or retires its blocked Tas
 For `WORKTREE_PREEXISTED` alone, prepare can retry the existing Tasks without agents.
 The AC and all live unfinished Tasks must have current owner-reviewed contracts and valid repository scopes.
 Each block must identify a finished lane with exit code 73. Active, held and successful lanes prevent deletion.
-This path sends `assess` with `ready: true` for each Task. It preserves Task contracts, IDs and dependencies.
+This path saves `data.hold: null` on each Task. It preserves Task contracts, IDs and dependencies.
 Cleanup precedes one atomic batch that marks the Tasks ready and finishes planning.
 An uncertain publication retains its receipt and claim for recovery. Other failures use the normal planning graph.
 It skips unchanged documents and pins dependencies from the fresh context.
@@ -230,7 +232,7 @@ Unresolved receipts block a new run. They require explicit recovery.
 Confirmed failures release this run's planning claim. Uncertain mutations retain their request receipts.
 The planner refuses publication when a blocked Task keeps its contract and is not retired.
 The refusal `blocked Task needs a new contract or retirement` retains the claim and reports `BLOCKED`.
-Any other rejected publication applied nothing. The failure release then saves and assesses each held AC not ready.
+Any other rejected publication applied nothing. The failure release then saves each held AC with its failure code in `data.hold`.
 When a critic rejects the plan after the last revision round, the same release batch adds one native Joppa `note`
 to each released AC. Its id has at most 120 ASCII bytes and ends with a digest of the AC address.
 The note has the run ID, the plan digest prefix and at most three blocking findings
@@ -247,7 +249,7 @@ save the AC without `data.assignee` at its current revision.
 Current limits:
 
 - A human can edit an unclaimed implementation Task. Crew can replace that contract if its reviewed revision still matches.
-- A plan with unchanged Task contracts releases the claim. It sends no `assess`, so another run can select the AC.
+- A plan with unchanged Task contracts releases the claim. It does not clear a hold, so another run can select the AC.
 - Receipt checks compare endpoint URLs exactly. Keep the same URL, including its trailing slash, across runs.
 
 Run the focused provider checks:

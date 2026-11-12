@@ -6,7 +6,7 @@ import {quote, save} from './runtime.mjs';
 import {api, batchRequest, claimTasks, contractDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
-import {heldBy, released, contextLive, needsReadiness, taskQuestions} from './joppa-claims.mjs';
+import {heldBy, released, contextLive, needsReadiness} from './joppa-claims.mjs';
 import {saveNode} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
 import {missingTestNodes, nodeResult} from './test-nodes.mjs';
@@ -79,7 +79,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const followups = path.join(artifacts, 'followups.txt');
     const findings = fs.existsSync(followups) ? fs.readFileSync(followups, 'utf8').trim() : '';
     await verifySavedContexts();
-    const current = await currentTasks(true), question = await taskQuestions(run), runId = path.basename(path.dirname(stateFile));
+    const current = await currentTasks(true), runId = path.basename(path.dirname(stateFile));
     // Recompute the frozen test bindings and the missing (AC, test) nodes, also for a saved request.
     const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
     const schema = (await read('joppa_tree', {})).schema;
@@ -93,7 +93,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     if (!run.completionRequest) {
       run.completionRequest = batchRequest(run, [...current.flatMap((object, index) => [
         saveNode(object, {assignee: undefined, commit: sha, ...(bound(object).length ? {test_bindings: bound(object)} : {})},
-          `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`, question(object)),
+          `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`),
         {op: 'archive_object', target: object.address, revision: {$ref: `done${index}/saved_revision`}, reason: `Crew lane landed ${sha}.`}]),
         ...nodes]);
       current.forEach((_, index) => { run.completionRequest.operations[index * 2].ref = `done${index}`; });
@@ -105,7 +105,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
         isDeepStrictEqual(save.data.test_bindings, bound(current[index]).length ? bound(current[index]) : undefined) &&
-        !save.data.assignee && save.question_checked === question(current[index]) && typeof ref === 'string' && archive.op === 'archive_object' &&
+        !save.data.assignee && typeof ref === 'string' && archive.op === 'archive_object' &&
         archive.target === claim.address && isDeepStrictEqual(archive.revision, {$ref: `${ref}/saved_revision`});
     }), 'Saved completion request does not name the checked SHA; inspect it before retrying');
     persist();

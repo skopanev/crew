@@ -35,7 +35,7 @@ test('covering Task records each covered criterion as acceptance context', async
 
 for (const [name, change] of [
   ['held by a planner', ac => { ac.document.data.assignee = 'crew-planning:host:run'; }],
-  ['waiting', ac => { ac.process.assessment = {state: 'waiting', reason: 'NEEDS_HUMAN'}; }],
+  ['waiting', ac => { ac.document.data.hold = 'NEEDS_HUMAN'; }],
   ['not work ready', ac => { ac.work_ready = false; }],
   ['in another Requirement', ac => { ac.document.parent = 'req:other'; }],
 ]) test(`covering Task is not claimed when the covered criterion is ${name}`, async t => {
@@ -102,12 +102,14 @@ test('selection skips a Task whose acceptance names a criterion outside its pare
   assert.notEqual(selected?.tasks?.[0]?.address, 'task:t1');
 });
 
-test('the fixture applies the native data.acceptance rule; acceptance_checks and covers saves pass', async t => {
+test('a partial claim save does not resend a stored data.acceptance field; covers saves pass', async t => {
   const f = await covering(t);
   f.run.tasks = [{address: 'task:t1', revision: 3}];
   Object.assign(f.objects.get('task:t1').document.data, {checks: ['own check'],
     acceptance_checks: [{ac: 'ac:a1', check: 'own check'}], acceptance: [{ac: 'ac:a1', check: 'own check'}]});
-  await assert.rejects(claimTask(f.run, f.persist, f.runId), /operation 1: use process commands for acceptance/);
+  await claimTask(f.run, f.persist, f.runId);
+  const [claim] = f.calls.filter(call => call.name === 'joppa_batch');
+  assert.equal(Object.hasOwn(claim.args.operations[0].command.data, 'acceptance'), false);
   const fresh = await covering(t);
   Object.assign(fresh.objects.get('task:t1').document.data, {checks: ['own check'],
     acceptance_checks: [{ac: 'ac:a1', check: 'own check'}]});

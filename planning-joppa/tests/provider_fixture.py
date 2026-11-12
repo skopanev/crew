@@ -67,11 +67,18 @@ ACCEPTANCE = [{"ac": "criterion:a", "check": "Reject invalid input => No mutatio
 
 
 def native_field_rule(name, args):
-    """Joppa reserves data.acceptance for process commands (objects_validate_links.rs). Earlier fakes accepted it."""
+    """Joppa reserves data.acceptance for process commands (objects_validate_links.rs). Earlier fakes accepted it.
+    Joppa 05e8b4a removed assess, save_object links and question_checked, and requires a reason on save_object."""
     if name not in ("joppa_batch", "joppa_command"):
         return
     commands = [args["command"]] if "command" in args else [item["command"] for item in args.get("operations", [])]
     for number, command in enumerate(commands, 1):
+        if command.get("op") == "assess":
+            raise Rejected(f"operation {number}: assess was removed; use save_object with a typed field")
+        if command.get("op") == "save_object" and "links" in command:
+            raise Rejected(f"operation {number}: links was removed; use relations")
+        if command.get("op") == "save_object" and not command.get("reason"):
+            raise Rejected(f"operation {number}: missing field `reason`")
         if command.get("op") == "save_object" and "acceptance" in (command.get("data") or {}):
             raise Rejected(f"operation {number}: use process commands for acceptance")
 
@@ -122,25 +129,31 @@ def claim_receipt(addresses, assignee=MARK):
     """A confirmed claim: one full AC save with data.assignee per criterion."""
     return {"status": "confirmed", "server": "https://example.invalid/mcp", "arguments": {"workspace": "example",
             "operations": [{"command": {"op": "save_object", "kind": address.split(":")[0], "id": address.split(":")[1],
-                "revision": 3, "parent": "rule:r", "data": {"title": address, "owner": "owner", "assignee": assignee},
-                "links": [], "reason": "Take this criterion for Crew planning.", "question_checked": "Which rule?"}}
+                "revision": 3, "data": {"assignee": assignee}, "reason": "Take this criterion for Crew planning."}}
                 for address in addresses]},
             "result": {"results": [{"position": 22 + index} for index, _ in enumerate(addresses)]}}
 
 
 def raw_ac(address, assignee=None, revision=4):
-    """A live joppa_objects detail: data, revision, parent and links. No claim process."""
+    """A live joppa_objects detail: data, revision, parent and relations. No claim process."""
     data = {"title": address, "owner": "owner", "custom": "keep"}
     if assignee:
         data["assignee"] = assignee
     return {"address": address, "data": data, "revision": revision, "parent": "rule:r",
-            "links": [{"target": "note:n", "relation": "related", "blocking": False}],
+            "relations": {"related": {"edges": [{"to": "note:n", "title": "Note"}]}},
             "status": {"tone": "orange", "label": "No tests"}}
 
 
+def links(command):
+    """The depends_on edges of a save command as authored links. Joppa keeps the other relation keys."""
+    return [{"target": edge["to"], "relation": "depends_on", "blocking": True,
+             **({"revision": edge["revision"]} if "revision" in edge else {})}
+            for edge in (command.get("relations") or {}).get("depends_on", {}).get("edges", [])]
+
+
 def hold(task, reason="Failed"):
-    """Joppa holds a live node with assessment state waiting and a short reason code."""
-    task["process"]["assessment"] = {"state": "waiting", "reason": reason}
+    """Crew holds a live node with a short reason code in data.hold."""
+    task["document"]["data"]["hold"] = reason
 
 
 def end(task, commit=None):

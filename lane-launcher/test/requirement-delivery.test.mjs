@@ -30,7 +30,7 @@ test('final requirement delivery waits for unfinished work and planning claims',
   const f = fixture();
   assert.equal((await requirementPlan(f.run, f.read)).final, true);
   f.objects.get('work:two').document.present = true;
-  f.objects.get('work:two').process.assessment = {state: 'waiting', reason: 'GATE_FAIL'};
+  f.objects.get('work:two').document.data.hold = 'GATE_FAIL';
   assert.equal((await requirementPlan(f.run, f.read)).final, false);
   f.objects.get('work:two').document.present = false;
   f.objects.get('measure:a').document.data.assignee = 'crew-planning:host:run';

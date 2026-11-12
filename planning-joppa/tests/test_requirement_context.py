@@ -33,11 +33,9 @@ class ProviderTests(unittest.TestCase):
                  "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
-        # Joppa treats an absent assessment as ready. A waiting or not work_ready criterion is excluded.
-        for address in ("criterion:b", "criterion:c"):
-            objects[address]["process"]["assessment"] = {"state": "ready"}
+        # A criterion with a Crew hold or not work_ready is excluded.
         objects["criterion:waiting"] = item("criterion:waiting", "rule:r",
-                                            process={"assessment": {"state": "waiting", "reason": "Owner"}})
+                                            {"title": "criterion:waiting", "owner": "owner", "hold": "NEEDS_HUMAN"})
         objects["criterion:unready"] = item("criterion:unready", "rule:r")
         objects["criterion:unready"]["work_ready"] = False
         objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
@@ -207,7 +205,7 @@ class ProviderTests(unittest.TestCase):
         stage = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(stage)
         data = assignment()
-        api = Fake(result={"ops": ["save_object", "archive_object", "assess"]})
+        api = Fake(result={"ops": ["save_object", "archive_object"]})
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"PLANNING_JOPPA_AC": "criterion:a"}, clear=False), \
              patch.object(stage, "settings", return_value={"workspace": "example", "ac_ids": ["criterion:b"]}), \
              patch.object(stage, "reader_servers"), patch.object(stage.context, "client", return_value=api), \

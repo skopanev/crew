@@ -19,7 +19,7 @@ function fixture() {
         ...(status ? {body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
       process: {}, work_ready: true};
     if (status === 'in_progress') value.document.data.assignee = 'crew-lane:host:run';
-    if (status === 'blocked') value.process.assessment = {state: 'waiting', reason: 'GATE_FAIL'};
+    if (status === 'blocked') value.document.data.hold = 'GATE_FAIL';
     if (status === 'done' || status === 'retired') value.document.present = false;
     if (status === 'done') value.document.data.commit = 'a'.repeat(40);
     objects.set(address, value);
@@ -49,7 +49,7 @@ function fixture() {
           present: x.document.present, revision: x.current_revision, title: x.document.data.title,
           status: x.document.present ? x.status?.tone || 'grey' : 'purple', work_ready: x.work_ready,
           'data.assignee': x.document.data.assignee ?? null, 'data.commit': x.document.data.commit ?? null,
-          'process.assessment': x.process.assessment ?? null}))
+          'data.hold': x.document.data.hold ?? null}))
         .filter(x => tones ? tones.includes(x.status) : x.present)
         .sort((a, b) => a.address.localeCompare(b.address));
       const after = rows.filter(row => !args.cursor || row.address > args.cursor), page = after.slice(0, args.limit || 25);

@@ -34,7 +34,7 @@ def prepare():
     api = context.client(config)
     help = api.call("joppa_help", {"workspace": config["workspace"]})
     advertised = json.dumps(help)
-    require(all(f'"{name}"' in advertised for name in ("save_object", "archive_object", "assess")),
+    require(all(f'"{name}"' in advertised for name in ("save_object", "archive_object")),
             "Joppa generic node operations are not deployed; no claim was attempted")
     requirement = os.environ.get("PLANNING_JOPPA_REQ")
     assignment, snapshot, ac = (context.load_requirement(api, config, requirement) if requirement
@@ -164,7 +164,7 @@ def finish():
 
 
 def failure_code(reason):
-    """A short code for the Joppa assess reason: a leading UPPER_CODE: prefix, or PLANNING_FAILED."""
+    """A short data.hold code: a leading UPPER_CODE: prefix, or PLANNING_FAILED."""
     match = re.match(r"([A-Z][A-Z0-9_]{2,63}):", reason)
     return match.group(1) if match else "PLANNING_FAILED"
 

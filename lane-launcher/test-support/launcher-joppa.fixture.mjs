@@ -24,7 +24,7 @@ async function packageFixture(t, mode = 'success') {
   fs.writeFileSync(tokenFile, 'fixture-token');
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
-    work_ready: true, status: {tone: 'grey'}, document: {present: true, parent, data, links: []},
+    work_ready: true, status: {tone: 'blue'}, document: {present: true, parent, data, links: []},
     process: {}, annotations: {comments: {}}});
   objects.set('req:r', make('req:r', 'req', null, {title: 'Requirement'}));
   for (let index = 1; index <= 2; index++) {
@@ -53,7 +53,8 @@ async function packageFixture(t, mode = 'success') {
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
     if (name === 'joppa_tree') value = {schema: structuredClone(schema)};
-    else if (name === 'joppa_objects' && args.address) value = objects.get(args.address);
+    // A detail read has the live server shape: no document, edges in relations.
+    else if (name === 'joppa_objects' && args.address) value = served(objects.get(args.address));
     else if (name === 'joppa_objects') {
       assert.equal(Object.hasOwn(args, 'work_filter'), false);
       const kinds = args.kind && [args.kind].flat(), tones = args.status && [args.status].flat();
@@ -71,11 +72,11 @@ async function packageFixture(t, mode = 'success') {
         (!kinds || kinds.includes(object.kind)) && (object.kind !== 'task' || queue.includes(object.address)))
         .map(object => ({address: object.address, revision: object.current_revision,
           kind: object.kind, parent: object.document.parent, present: object.document.present,
-          status: object.document.present ? object.status?.tone || 'grey' : 'purple',
+          status: object.document.present ? object.status?.tone || 'blue' : 'purple',
           title: object.document.data.title, work_ready: object.work_ready,
           'data.assignee': object.document.data.assignee ?? null, 'data.commit': object.document.data.commit ?? null,
           'data.projects': object.document.data.projects ?? null, 'data.priority': object.document.data.priority ?? null,
-          'process.assessment': object.process.assessment ?? null,
+          'data.hold': object.document.data.hold ?? null,
           ...Object.fromEntries((args.fields || []).filter(field => field.startsWith('data.') &&
             !['data.assignee', 'data.commit', 'data.projects', 'data.priority'].includes(field))
             .map(field => [field, object.document.data[field.slice(5)] ?? null]))}))
@@ -88,6 +89,8 @@ async function packageFixture(t, mode = 'success') {
     else if (name === 'joppa_tasks') throw new Error('The removed Task tool was called');
     else if (name === 'joppa_batch') {
       const commands = args.operations.map(({command}) => command);
+      const removed = commands.findIndex(command => command.op === 'assess' || Object.hasOwn(command, 'links') ||
+        Object.hasOwn(command, 'question_checked') || command.op === 'save_object' && !command.reason);
       // Joppa reserves data.acceptance for process commands. Earlier fixtures accepted it.
       const reserved = commands.findIndex(command => command.op === 'save_object' && Object.hasOwn(command.data || {}, 'acceptance'));
       const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
@@ -104,15 +107,19 @@ async function packageFixture(t, mode = 'success') {
       // Revision checks refuse the whole batch. A changed save advances the revision; batch refs read the saved one.
       const planned = new Map(), refs = new Map();
       for (const [index, command] of commands.entries()) if (command.op === 'save_object') {
-        const revision = JSON.stringify(target(command).document.data) === JSON.stringify(command.data)
-          ? command.revision : command.revision + 1;
+        const merged = mergedData(target(command).document.data, command);
+        const revision = JSON.stringify(target(command).document.data) === JSON.stringify(merged) &&
+          command.relations === undefined && command.parent === undefined ? command.revision : command.revision + 1;
         planned.set(target(command), revision);
         if (args.operations[index].ref) refs.set(`${args.operations[index].ref}/saved_revision`, revision);
       }
       const resolve = value => value?.$ref ? refs.get(value.$ref) : value;
       const stale = commands.some(command => command.op === 'save_object' ? target(command)?.current_revision !== command.revision
         : command.op === 'archive_object' && (planned.get(target(command)) ?? target(command)?.current_revision) !== resolve(command.revision));
-      if (reserved >= 0) {
+      if (removed >= 0) {
+        rejected = true; value = {error: `operation ${removed + 1}: links, assess and question_checked were removed; reason is required`};
+      }
+      else if (reserved >= 0) {
         rejected = true; value = {error: `operation ${reserved + 1}: use process commands for acceptance`};
       }
       else if (mode === 'reject' || mode === 'outcome-reject' && !claim || stale) {
@@ -123,12 +130,17 @@ async function packageFixture(t, mode = 'success') {
           const object = target(command);
           if (command.op === 'save_object') {
             const data = mode === 'wrong-commit' && command.data.commit ? {...command.data, commit: '0'.repeat(40)} : command.data;
-            applyData(object.document.data, data);
+            applyData(object.document.data, mergedData(object.document.data, {...command, data}));
+            if (mode === 'wrong-hold' && data.hold) object.document.data.hold = 'OTHER_CODE';
+            if (command.parent !== undefined) object.document.parent = command.parent;
+            for (const [relation, group] of Object.entries(command.relations || {})) {
+              object.document.links = object.document.links.filter(link => link.relation !== relation);
+              for (const edge of group?.edges || []) object.document.links.push({target: edge.to, relation,
+                blocking: relation === 'depends_on', revision: edge.revision ?? null});
+            }
             object.current_revision = planned.get(object);
             return {command: {op: command.op}, object: {address: object.address, revision: object.current_revision}};
           }
-          if (command.op === 'assess') object.process = command.ready ? {assessment: {state: 'ready', actor: 'lane-1'}} :
-            {assessment: {state: 'waiting', reason: command.reason, actor: mode === 'wrong-assessor' ? 'other' : 'lane-1'}};
           if (command.op === 'note') object.annotations.comments[command.id] = {actor: 'lane-1', text: command.text, withdrawn: false};
           if (command.op === 'archive_object' && mode !== 'archive-present') {
             object.document.present = false;
@@ -168,6 +180,32 @@ async function packageFixture(t, mode = 'success') {
 }
 
 // Update a document in place so test getters on unchanged fields keep working.
+// Joppa merges data: a sent field replaces its value and null removes it. clean replaces data whole.
+function mergedData(current, command) {
+  const data = command.clean ? {} : structuredClone(current);
+  for (const [key, value] of Object.entries(command.data || {})) {
+    if (value === null) delete data[key];
+    else data[key] = value;
+  }
+  return data;
+}
+
+// The live detail shape. Crew rebuilds document and links from it.
+function served(object) {
+  if (!object) return object;
+  const relations = {};
+  for (const link of object.document.links || []) {
+    (relations[link.relation] ||= {edges: []}).edges.push({to: link.target, ...(link.revision != null ? {revision: link.revision} : {})});
+  }
+  return {address: object.address, kind: object.kind, revision: object.current_revision, current_revision: object.current_revision,
+    historical: object.historical, parent: object.document.parent, present: object.document.present,
+    data: structuredClone(object.document.data), relations, work_ready: object.work_ready,
+    ...(object.waits_for ? {waits_for: object.waits_for} : {}), status: object.status,
+    annotations: structuredClone(object.annotations), ...(object.remote_links ? {remote_links: object.remote_links} : {}),
+    ...(object.remote_links_revision ? {remote_links_revision: object.remote_links_revision} : {}),
+    ...(object.workspace_key ? {workspace_key: object.workspace_key} : {}), ...(object.item_id ? {item_id: object.item_id} : {})};
+}
+
 function applyData(target, data) {
   for (const key of Object.keys(target)) if (!Object.hasOwn(data, key)) delete target[key];
   for (const [key, value] of Object.entries(data)) {
@@ -191,8 +229,7 @@ function blockedPackage(f) {
     const text = `CREW_FAILURE\nTask: ${address}\nRun: ${runId}\nReason: GATE_FAIL\nGate failed.`;
     run.blockRequest.operations.push({command: {op: 'note', target: address, id, text}});
     return {address, kind: 'task', current_revision: 3, historical: false,
-      document: {present: true, data: {title: address}, links: [], parent: 'ac:a1'},
-      process: {assessment: {state: 'waiting', reason: 'GATE_FAIL'}},
+      document: {present: true, data: {title: address, hold: 'GATE_FAIL'}, links: [], parent: 'ac:a1'},
       annotations: {comments: {[id]: {actor: run.joppaWorker.actor, text}}}};
   });
   save(path.join(runs, runId, 'launch.json'), run);

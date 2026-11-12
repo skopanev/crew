@@ -1,7 +1,7 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
 import {taskContract, taskBody} from './task-contract.mjs';
-import {nodeAssignee, nodeWaiting} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeHold, nodeWaiting} from './joppa-nodes.mjs';
 
 export const require = (condition, message) => {
   if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
@@ -138,7 +138,7 @@ export const taskRecord = (value, status, finishing) => ({
   revision: value.current_revision,
   status,
   assignee: nodeAssignee(value),
-  assessment: value.process?.assessment ?? null,
+  hold: nodeHold(value),
   commit: value.document.data.commit ?? null,
   finishing,
 });

@@ -10,15 +10,15 @@ const object = () => ({address: 'work:one', historical: false, current_revision:
   document: {present: true, parent: 'criterion:a', links: [{target: 'work:before', relation: 'depends_on', blocking: true}],
     data: {title: 'Implement one change', body: 'Keep the approved scope.', owner: 'owner', custom: {keep: true}}}});
 
-test('assignment saves preserve the full document and require a current revision', () => {
+test('assignment saves send only the changed fields and require a current revision', () => {
   const node = object(), before = structuredClone(node);
-  const command = saveNode(node, {assignee: 'crew-lane:host:run'}, 'Claim', 'Which work?');
+  const command = saveNode(node, {assignee: 'crew-lane:host:run'}, 'Claim');
+  // Joppa merges data and keeps the parent and relations, so a save sends no document echo.
   assert.deepEqual(command, {op: 'save_object', kind: 'work', id: 'one', revision: 7,
-    parent: 'criterion:a', data: {...node.document.data, assignee: 'crew-lane:host:run'},
-    links: node.document.links, reason: 'Claim', question_checked: 'Which work?'});
+    data: {assignee: 'crew-lane:host:run'}, reason: 'Claim'});
   assert.deepEqual(node, before);
   node.document.data.assignee = 'crew-lane:host:run';
-  assert.equal(Object.hasOwn(saveNode(node, {assignee: undefined}, 'Release').data, 'assignee'), false);
+  assert.deepEqual(saveNode(node, {assignee: undefined, hold: 'GATE_FAIL'}, 'Release').data, {assignee: null, hold: 'GATE_FAIL'});
   node.document.present = false;
   assert.throws(() => saveNode(node, {}, 'Claim'), /current, present/);
 });
@@ -28,6 +28,7 @@ test('execution metadata does not alter authored content checks', () => {
   node.current_revision++;
   node.document.data.assignee = 'crew-lane:host:run';
   node.document.data.commit = 'a'.repeat(40);
+  node.document.data.hold = 'GATE_FAIL';
   assert.equal(contractDigest(node), original);
   node.document.data.body = 'Changed scope';
   assert.notEqual(contractDigest(node), original);
@@ -35,8 +36,9 @@ test('execution metadata does not alter authored content checks', () => {
 
 test('native fields work in detail reads and named list fields', async () => {
   assert.equal(nodeAssignee({'data.assignee': 'worker'}), 'worker');
-  assert.equal(nodeWaiting({'process.assessment': {state: 'waiting'}}), true);
-  assert.equal(nodeWaiting({process: {assessment: {state: 'ready'}}}), false);
+  assert.equal(nodeWaiting({'data.hold': 'GATE_FAIL'}), true);
+  assert.equal(nodeWaiting({document: {data: {hold: 'NEEDS_HUMAN'}}}), true);
+  assert.equal(nodeWaiting({'data.hold': null}), false);
   const config = {joppa: {project: 'project:one'}};
   assert.equal(taskMatchesProject(config, {'data.projects': ['one']}), true);
   assert.equal(taskMatchesProject(config, {data: {projects: ['project:one']}}), true);

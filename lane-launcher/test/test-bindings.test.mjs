@@ -68,8 +68,8 @@ test('completion saves the bound names and creates only the missing criterion te
   assert.deepEqual(operations[0].data.test_bindings, [{ac: 'ac:a1', check: 'Run one => ok', test: ONE}]);
   assert.equal(operations[2].data.test_bindings.length, 2);
   assert.deepEqual(operations.slice(4).map(command => [command.kind, command.revision, command.parent, command.data.title,
-    command.data.owner, command.question_checked, command.id]),
-  [['check', 0, 'ac:a2', ONE, 'owner', 'Which test?', undefined], ['check', 0, 'ac:a2', TWO, 'owner', 'Which test?', undefined]]);
+    command.data.owner, Object.hasOwn(command, 'question_checked'), command.id]),
+  [['check', 0, 'ac:a2', ONE, 'owner', false, undefined], ['check', 0, 'ac:a2', TWO, 'owner', false, undefined]]);
   assert.deepEqual(result.testBindings, {status: 'bound', gaps: [], nodes: 2});
   assert.equal(f.objects.get('task:t1').document.data.test_bindings[0].test, ONE);
 });

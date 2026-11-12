@@ -12,7 +12,7 @@ const key = (...parts) => JSON.stringify(parts);
 export const MAX_BATCH = 100;
 // Joppa limits each changed scalar data value, also inside lists and objects. The default is 1024 characters.
 export const MAX_VALUE = 1024;
-// A failure writes release, assess and note per Task. A completion writes save and archive per Task and one save per node.
+// A failure writes one save with the hold code and a note per Task. A completion writes save and archive per Task and one save per node.
 export const FAILURE_OPERATIONS = 3, COMPLETION_OPERATIONS = 2;
 export const RECORD = 'test-bindings-receipt.json', BINDINGS = 'test-bindings.json';
 

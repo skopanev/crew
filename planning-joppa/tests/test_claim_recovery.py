@@ -63,12 +63,10 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             name, arguments = api.calls[-1]
             self.assertEqual(name, "joppa_batch")
-            # Each release saves the full current document at its current revision without data.assignee.
+            # Each release is a partial save at the current revision. Joppa keeps every other field and relation.
             self.assertEqual([entry["command"] for entry in arguments["operations"]], [
-                {"op": "save_object", "kind": "criterion", "id": key, "revision": 4, "parent": "rule:r",
-                 "data": {"title": "criterion:" + key, "owner": "owner", "custom": "keep"},
-                 "links": [{"blocking": False, "relation": "related", "revision": None, "target": "note:n"}],
-                 "reason": "Failure", "question_checked": "Which rule?"} for key in ("a", "b")])
+                {"op": "save_object", "kind": "criterion", "id": key, "revision": 4,
+                 "data": {"assignee": None}, "reason": "Failure"} for key in ("a", "b")])
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
             (target / "release.json").unlink()
             holders["criterion:b"] = "crew-planning:other:run-2"
@@ -165,7 +163,7 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(publication.release(api, target, "example", "criterion:a", "Failure"))
             command = api.calls[-1][1]["operations"][0]["command"]
             self.assertEqual((command["op"], command["revision"], command["data"]),
-                             ("save_object", 4, {"title": "criterion:a", "owner": "owner", "custom": "keep"}))
+                             ("save_object", 4, {"assignee": None}))
             self.assertEqual(read(target / "release.json")["status"], "confirmed")
 
     def test_rejected_blocked_task_update_keeps_the_planning_claim(self):
@@ -191,7 +189,7 @@ class ProviderTests(unittest.TestCase):
                     finished["address"] = "work:finished"
                     end(finished, "a" * 40 if terminal == "done" else None)
                     data["joppa"]["tasks"].append(finished)
-                    existing["process"].pop("assessment")
+                    existing["document"]["data"].pop("hold")
                 active_blocked = blocked and terminal is None
                 if active_blocked:
                     task["steps"].append("Record the exact remaining failure.")
@@ -234,8 +232,8 @@ class ProviderTests(unittest.TestCase):
                     self.assertFalse(result["needs_recovery"])
                     self.assertTrue(read(target / "publication.json")["retain_claim"])
                     released = read(target / "release.json")["arguments"]["operations"]
-                    self.assertEqual([op["command"]["op"] for op in released], ["save_object", "assess"])
-                    self.assertIs(released[1]["command"]["ready"], False)
+                    self.assertEqual([op["command"]["op"] for op in released], ["save_object"])
+                    self.assertEqual(released[0]["command"]["data"], {"assignee": None, "hold": "PLANNING_FAILED"})
                 if kept:
                     self.assertTrue(result["needs_recovery"])
                     self.assertTrue(read(target / "publication.json")["retain_claim"])

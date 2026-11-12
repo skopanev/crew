@@ -49,9 +49,10 @@ class CoversTests(unittest.TestCase):
         self.assertEqual(save["data"]["acceptance_checks"], [
             {"ac": "criterion:a", "check": "Reject invalid input => No mutation"},
             {"ac": "criterion:b", "check": "Show the saved value => The value is visible"}])
-        # The covered criterion is released and marked ready in the same batch. It has no Task of its own.
-        assessed = [operation["command"]["target"] for operation in operations if operation["command"]["op"] == "assess"]
-        self.assertEqual(assessed, ["criterion:a", "criterion:b"])
+        # The covered criterion is released and its hold cleared in the same batch. It has no Task of its own.
+        cleared = [operation["command"]["kind"] + ":" + operation["command"]["id"] for operation in operations
+                   if operation["command"]["op"] == "save_object" and operation["command"]["data"].get("hold", 0) is None]
+        self.assertEqual(cleared, ["criterion:a", "criterion:b"])
         self.assertEqual(sum(operation["command"].get("kind") == "work" for operation in operations), 1)
 
     def test_native_field_rule_accepts_the_planner_save_and_refuses_data_acceptance(self):

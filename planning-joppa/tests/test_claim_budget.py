@@ -19,13 +19,13 @@ from provider_fixture import Fake, MARK, assignment, claim_receipt, item, raw_ac
 class ClaimBudgetTests(unittest.TestCase):
     def test_new_claim_over_the_note_budget_is_refused(self):
         data = assignment()
-        criteria = [{"id": f"criterion:c{number}", "revision": 3} for number in range(34)]
+        criteria = [{"id": f"criterion:c{number}", "revision": 3} for number in range(51)]
         data["joppa"]["objects"].update({entry["id"]: context.source(item(entry["id"], "rule:r")) for entry in criteria})
-        with self.assertRaisesRegex(ValueError, "Requirement has 34 criteria.*claim at most 33; no claim was sent"):
+        with self.assertRaisesRegex(ValueError, "Requirement has 51 criteria.*claim at most 50; no claim was sent"):
             planning_claims.claim_operations(data, criteria, MARK)
-        self.assertEqual(len(planning_claims.claim_operations(data, criteria[:33], MARK)), 33)
+        self.assertEqual(len(planning_claims.claim_operations(data, criteria[:50], MARK)), 50)
 
-    def test_old_fifty_criterion_claim_releases_without_notes_and_records_the_drop(self):
+    def test_fifty_criterion_claim_releases_with_notes_in_one_batch(self):
         addresses = [f"criterion:c{number}" for number in range(50)]
         class Server(Fake):
             def call(self, name, args):
@@ -40,11 +40,12 @@ class ClaimBudgetTests(unittest.TestCase):
             self.assertTrue(planning_claims.release(api, target, "example", addresses[0], "critic rejected",
                                                     "PLANNING_FAILED", {"id": "crew-critic-run-1-0", "text": "x"}))
             [operations] = [args["operations"] for name, args in api.calls if name == "joppa_batch"]
+            # One save with the hold and one note per criterion: 100 operations.
             self.assertEqual(len(operations), 100)
-            self.assertNotIn("note", {entry["command"]["op"] for entry in operations})
+            self.assertEqual([entry["command"]["op"] for entry in operations[:2]], ["save_object", "note"])
             receipt = read(target / "release.json")
-            self.assertEqual(receipt["critic_notes_dropped"], "batch")
-            self.assertNotIn("critic_notes", receipt)
+            self.assertNotIn("critic_notes_dropped", receipt)
+            self.assertEqual(len(receipt["critic_notes"]), 50)
             self.assertEqual(len(receipt["released"]), 50)
 
 

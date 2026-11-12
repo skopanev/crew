@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end
+from provider_fixture import item, assignment, plan, Fake, hold, end, links
 
 
 class ProviderTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class ProviderTests(unittest.TestCase):
         original = deepcopy(retained)
         command = publication.operations(value, data)[0]["command"]
         self.assertTrue(command["data"]["title"].startswith("[08] "))
-        self.assertEqual(command["links"][0]["target"], "work:retained")
+        self.assertEqual(links(command)[0]["target"], "work:retained")
         self.assertEqual(retained, original)
         retained["document"]["data"]["title"] = "Legacy approved work"
         self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
@@ -60,10 +60,9 @@ class ProviderTests(unittest.TestCase):
         new.update(id="new", depends_on=["first"])
         value["tasks"].append(new)
         commands = publication.operations(value, data)
-        # The revised blocked Task is marked ready right after its save.
-        self.assertEqual(commands[1]["command"], {"op": "assess", "target": "work:old", "ready": True,
-                                                  "reason": "The reviewed plan replaces the blocked contract."})
-        self.assertTrue(commands[2]["command"]["data"]["title"].startswith("[08] "))
+        # The revised blocked Task clears its hold in the same save.
+        self.assertNotIn("hold", commands[0]["command"]["data"])
+        self.assertTrue(commands[1]["command"]["data"]["title"].startswith("[08] "))
 
     def test_cross_criterion_retirement_cannot_become_a_dependency(self):
         data, value = assignment(), plan()
@@ -114,14 +113,14 @@ class ProviderTests(unittest.TestCase):
                  if operation["command"]["op"] == "save_object" and operation["command"]["kind"] == "work"]
         self.assertEqual([command["parent"] for command in saves], ["criterion:a", "criterion:b", "criterion:c"])
         self.assertEqual([command["data"]["title"][:4] for command in saves], ["[01]", "[02]", "[01]"])
-        self.assertEqual(saves[0]["links"][0]["target"], "work:dependency")
-        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, saves[1]["links"])
-        self.assertEqual(saves[2]["links"][0]["target"], {"$ref": "task2/address"})
-        # Each changed AC loses this run's assignee and is marked ready in the same batch.
-        self.assertEqual([(operation["command"]["op"], operation["command"].get("target") or operation["command"]["id"])
-                          for operation in commands[-6:]],
-                         [(op, address if op == "assess" else address.split(":")[1])
-                          for address in ("criterion:a", "criterion:b", "criterion:c") for op in ("save_object", "assess")])
+        self.assertEqual(links(saves[0])[0]["target"], "work:dependency")
+        self.assertIn({"target": {"$ref": "task1/address"}, "relation": "depends_on", "blocking": True}, links(saves[1]))
+        self.assertEqual(links(saves[2])[0]["target"], {"$ref": "task2/address"})
+        # Each changed AC loses this run's assignee and its hold in the same batch.
+        self.assertEqual([(operation["command"]["op"], operation["command"]["id"], operation["command"]["data"])
+                          for operation in commands[-3:]],
+                         [("save_object", address.split(":")[1], {"assignee": None, "hold": None})
+                          for address in ("criterion:a", "criterion:b", "criterion:c")])
         value["tasks"][0]["ac"] = "criterion:outside"
         with self.assertRaisesRegex(ValueError, "selected Requirement criterion"):
             publication.operations(value, data)
@@ -197,8 +196,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in saves], ["provider", "old"])
         self.assertEqual([entry["data"]["title"][:4] for entry in saves], ["[01]", "[02]"])
         self.assertFalse(any(link["relation"] == "depends_on" and link["target"] == "work:provider"
-                             for entry in saves for link in entry["links"]))
-        self.assertTrue(any(link["target"] == "work:dependency" for link in saves[-1]["links"]))
+                             for entry in saves for link in links(entry)))
+        self.assertTrue(any(link["target"] == "work:dependency" for link in links(saves[-1])))
         provider["document"]["data"]["assignee"] = "worker"
         with self.assertRaisesRegex(ValueError, "claimed Tasks"):
             publication.operations(value, data)
@@ -226,10 +225,9 @@ class ProviderTests(unittest.TestCase):
             bindings = [operation["command"] for operation in ops if operation["command"].get("revision") == 0]
             self.assertEqual([(command["kind"], command["parent"], command["revision"], command["data"]["title"])
                               for command in bindings], [("check", "criterion:b", 0, "checks.rs > required_behavior")])
-            # The unchanged AC only loses the assignee. The bound AC is also marked ready.
-            self.assertEqual([(op["command"]["op"], op["command"].get("target") or op["command"]["id"]) for op in ops[-3:]],
-                             [("save_object", "a"), ("save_object", "b"), ("assess", "criterion:b")])
-            self.assertNotIn("assignee", ops[-3]["command"]["data"])
+            # The unchanged AC only loses the assignee. The bound AC also clears its hold.
+            self.assertEqual([(op["command"]["op"], op["command"]["id"], op["command"]["data"]) for op in ops[-2:]],
+                             [("save_object", "a", {"assignee": None}), ("save_object", "b", {"assignee": None, "hold": None})])
 
     def test_requirement_mixes_implementation_and_existing_test_bindings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -249,6 +247,6 @@ class ProviderTests(unittest.TestCase):
                 "evidence": "service:checks.rs:1; service:implementation.rs:1"})
             ops = publication.operations(value, data)
             self.assertEqual([op["command"]["op"] for op in ops],
-                             ["save_object", "save_object", "save_object", "assess", "save_object", "assess"])
+                             ["save_object", "save_object", "save_object", "save_object"])
             self.assertEqual((ops[1]["command"]["kind"], ops[1]["command"]["parent"]), ("check", "criterion:b"))
             self.assertEqual(ops[0]["command"]["parent"], "criterion:a")

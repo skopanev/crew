@@ -66,7 +66,8 @@ def load(api, config, ac_id):
 
 
 # All six tones list present and archived objects. A done Task is archived with the purple tone.
-TONES = ["red", "yellow", "orange", "grey", "green", "purple"]
+# Joppa renamed grey to blue. grey stays a read alias.
+TONES = ["red", "yellow", "orange", "blue", "grey", "green", "purple"]
 
 
 def task_addresses(api, workspace, parent, kind):

@@ -93,7 +93,9 @@ test('Joppa package blocks all held Tasks with one atomic outcome', async t => {
   assert.equal(result.blockConfirmed, true);
   assert.deepEqual(result.tasks.map(task => [task.address, task.status]), [['task:t1', 'blocked'], ['task:t2', 'blocked']]);
   const batch = f.calls.filter(call => call.name === 'joppa_batch').at(-1);
-  assert.deepEqual(batch.args.operations.map(item => item.command.op), ['save_object', 'assess', 'note', 'save_object', 'assess', 'note']);
+  assert.deepEqual(batch.args.operations.map(item => item.command.op), ['save_object', 'note', 'save_object', 'note']);
+  assert(batch.args.operations.filter(item => item.command.op === 'save_object')
+    .every(({command}) => command.data.assignee === null && /^[A-Z0-9_]+$/.test(command.data.hold)));
 });
 
 test('Joppa package refuses more than 100 Tasks before API calls', async t => {

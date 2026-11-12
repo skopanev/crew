@@ -52,7 +52,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const covers = coversReference(config, schema, kinds('task'));
   const criteria = [];
   for await (const page of nodePages(read, {kind: kinds('ac'),
-    fields: ['title', 'kind', 'parent', 'revision', 'status', 'work_ready', 'data.assignee', 'process.assessment']})) {
+    fields: ['title', 'kind', 'parent', 'revision', 'status', 'work_ready', 'data.assignee', 'data.hold']})) {
     criteria.push(...page.items);
   }
   const requirementOf = new Map(criteria.map(row => [row.address, row.parent]));
@@ -61,7 +61,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     .filter(address => address !== task.parent && requirementOf.has(address) &&
       requirementOf.get(address) === requirementOf.get(task.parent))];
   for await (const page of nodePages(read, {kind: kinds('task'), status: NODE_TONES,
-    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'process.assessment',
+    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'data.hold',
       ...(covers ? [`data.${covers.field}`] : [])]})) {
     for (const task of page.items) {
       if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {

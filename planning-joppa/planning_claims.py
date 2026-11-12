@@ -1,5 +1,4 @@
 """Hold criteria for planning with the generic data.assignee field of each AC."""
-from copy import deepcopy
 from pathlib import Path
 import hashlib
 import re
@@ -10,9 +9,9 @@ import context_reads
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
-# A failed release needs one save, one assess and one critic note per criterion in a single batch.
+# A failed release needs one save with the hold code and one critic note per criterion in a single batch.
 # The cap applies to new claims. An older claim of up to MAX_BATCH // 2 criteria still releases without notes.
-RELEASE_OPERATIONS = 3
+RELEASE_OPERATIONS = 2
 MAX_CLAIMED_CRITERIA = MAX_BATCH // RELEASE_OPERATIONS
 KEEP = object()
 # A Joppa identifier is ASCII [-_.A-Za-z0-9] of at most 120 bytes. note() appends "-" and 12 hex characters.
@@ -39,29 +38,17 @@ def assignee_of(object):
     return ((object.get("document") or object).get("data") or {}).get("assignee")
 
 
-def save_command(object, assignee, reason, question=None):
-    """Save the full current document at its read revision. Change only data.assignee, or nothing with KEEP."""
-    document = object["document"]
-    data = deepcopy(document["data"])
+def save_command(object, assignee, reason, hold=KEEP):
+    """A partial save at the read revision. Joppa merges data and keeps the parent and relations.
+    Change data.assignee unless KEEP. hold sets the Crew hold code, None clears it, KEEP leaves it.
+    A held node is not ready for Crew. The code is short. The detail stays in the save reason."""
+    data = {}
     if assignee is not KEEP:
-        data.pop("assignee", None)
-        if assignee:
-            data["assignee"] = assignee
-    command = {"op": "save_object", "kind": object["kind"], "id": object["address"].split(":", 1)[1],
-               "revision": object["current_revision"], "parent": document.get("parent"), "data": data,
-               "links": deepcopy(document.get("links", [])), "reason": reason}
-    if question:
-        command["question_checked"] = question
-    return command
-
-
-def assess(target, reason):
-    return {"op": "assess", "target": target, "ready": True, "reason": reason}
-
-
-def not_ready(target, code):
-    """Hold a criterion after failed planning. The code is short. The detail stays in the save reason."""
-    return {"op": "assess", "target": target, "ready": False, "reason": code}
+        data["assignee"] = assignee or None
+    if hold is not KEEP:
+        data["hold"] = hold
+    return {"op": "save_object", "kind": object["kind"], "id": object["address"].split(":", 1)[1],
+            "revision": object["current_revision"], "data": data, "reason": reason}
 
 
 def note(target, notes):
@@ -85,7 +72,7 @@ def note_problem(notes):
 
 def claim_operations(assignment, criteria, assignee):
     """One save per AC at the revision read for this plan. A stale write refuses the batch."""
-    objects, questions = assignment["joppa"]["objects"], assignment["joppa"].get("questions", {})
+    objects = assignment["joppa"]["objects"]
     require(len(criteria) <= MAX_CLAIMED_CRITERIA,
             f"Requirement has {len(criteria)} criteria; a failed release needs {RELEASE_OPERATIONS} operations per "
             f"criterion in one batch of at most {MAX_BATCH}, so claim at most {MAX_CLAIMED_CRITERIA}; no claim was sent")
@@ -94,19 +81,18 @@ def claim_operations(assignment, criteria, assignee):
         object = objects[item["id"]]
         require(object["current_revision"] == item["revision"], f"criterion changed before its claim: {item['id']}")
         require(not assignee_of(object), f"Requirement already has an active planning run on {item['id']}")
-        operations.append({"command": save_command(object, assignee, "Take this criterion for Crew planning.",
-                                                   questions.get(object["kind"]))})
+        operations.append({"command": save_command(object, assignee, "Take this criterion for Crew planning.")})
     return operations
 
 
 def require_fenced(operations):
-    """Each assess or note needs an earlier revision-checked save of the same target in the same batch."""
+    """Each note needs an earlier revision-checked save of the same target in the same batch."""
     saved = set()
     for operation in operations:
         command = operation["command"]
         if command["op"] == "save_object" and command.get("revision") and command.get("id"):
             saved.add(command["kind"] + ":" + command["id"])
-        elif command["op"] in ("assess", "note"):
+        elif command["op"] == "note":
             require(command["target"] in saved,
                     f"{command['op']} {command['target']} needs an earlier save in its batch")
     return operations
@@ -183,11 +169,11 @@ def planning_idle(api, config, assignment, expected=None):
 
 def release(api, target, workspace, ac, reason, code=None, notes=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
-    With a failure code, also assess each AC not ready in the same batch. Leave an AC that changed after this run
-    wrote it untouched for recovery. Never split the batch and never omit an assess.
+    With a failure code, the same save holds each AC with that code. Leave an AC that changed after this run
+    wrote it untouched for recovery. Never split the batch.
     notes is {"id", "text"} of a final critic rejection, or {"dropped": reason}. With a failure code, each released
     AC also gets that note when the note is valid and the batch fits RELEASE_OPERATIONS per held AC. Otherwise the
-    release omits the notes and records critic_notes_dropped. A note never stops the save and assess."""
+    release omits the notes and records critic_notes_dropped. A note never stops the save."""
     from publication import mutate
     claim_file = target / "claim.json"
     if not claim_file.exists():
@@ -230,10 +216,8 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
                             f"revision {object['current_revision']}, expected {expected.get(address)}"})
             continue
         operations.append({"command": save_command(object, None, reason[:1024] or "Release the planning claim.",
-                                                   command.get("question_checked"))})
+                                                   code if code else KEEP)})
         released.append(address)
-        if code:
-            operations.append({"command": not_ready(address, code)})
         if with_notes:
             operations.append({"command": note(address, notes)})
             noted.append(operations[-1]["command"]["id"])
@@ -258,15 +242,11 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
     return not any(item.get("unknown") for item in skipped)
 
 
-def closing_operations(object, finished, reason, question=None):
-    """Clear this run's assignee. A finished plan also marks the AC ready."""
-    operations = [{"command": save_command(object, None, reason, question)}]
-    if finished:
-        operations.append({"command": assess(object["address"], reason)})
-    return require_fenced(operations)
+def closing_operations(object, finished, reason):
+    """Clear this run's assignee. A finished plan also clears the hold of the AC."""
+    return [{"command": save_command(object, None, reason, None if finished else KEEP)}]
 
 
 def is_closing(operation, criteria):
     command = operation["command"]
-    return command["op"] in ("save_object", "assess") and command.get("revision") != 0 and (
-        command.get("target") if command["op"] == "assess" else address_of(command)) in criteria
+    return command["op"] == "save_object" and command.get("revision") != 0 and address_of(command) in criteria

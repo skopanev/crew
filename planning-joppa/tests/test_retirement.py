@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end
+from provider_fixture import item, assignment, plan, Fake, hold, end, links
 
 
 class ProviderTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class ProviderTests(unittest.TestCase):
                                  outcome="The approved outcome needs no further work.")
         original = deepcopy(data)
         commands = publication.operations(value, data)
-        self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object", "assess"])
+        self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object"])
         self.assertEqual(commands[0]["command"], {"op": "archive_object", "target": "work:old", "revision": 3,
                                                   "reason": value["tasks"][0]["outcome"]})
         self.assertNotIn("commit", json.dumps(commands[0]))
@@ -64,16 +64,16 @@ class ProviderTests(unittest.TestCase):
         changed.update(id="consumer", action="update", target="work:consumer", revision=3, depends_on=[])
         value["tasks"].append(changed)
         commands = publication.operations(value, data)
-        # The blocked consumer gets a new contract, so the same batch marks it ready again.
+        # The blocked consumer gets a new contract, so the same save clears its hold.
         self.assertEqual([item["command"]["op"] for item in commands],
-                         ["archive_object", "save_object", "assess", "save_object", "assess"])
-        self.assertEqual(commands[2]["command"], {"op": "assess", "target": "work:consumer", "ready": True,
-                                                  "reason": "The reviewed plan replaces the blocked contract."})
-        self.assertEqual(commands[4]["command"]["target"], "criterion:a")
-        links = commands[1]["command"]["links"]
-        self.assertFalse(any(link["target"] == "work:old" for link in links))
-        self.assertTrue(any(link["target"] == "work:dependency" for link in links))
-        self.assertTrue(any(link["target"] == "record:note" for link in links))
+                         ["archive_object", "save_object", "save_object"])
+        self.assertNotIn("hold", commands[1]["command"]["data"])
+        self.assertEqual(commands[2]["command"]["kind"] + ":" + commands[2]["command"]["id"], "criterion:a")
+        saved = links(commands[1]["command"])
+        self.assertFalse(any(link["target"] == "work:old" for link in saved))
+        self.assertTrue(any(link["target"] == "work:dependency" for link in saved))
+        # Only depends_on is sent. Joppa keeps the related edge to record:note.
+        self.assertEqual(set(commands[1]["command"]["relations"]), {"depends_on"})
 
     def test_retirement_preserves_finished_dependents(self):
         for field, setting in (("done", "a" * 40), ("retired", None)):
@@ -89,7 +89,7 @@ class ProviderTests(unittest.TestCase):
                 data["joppa"]["tasks"].append(consumer)
                 original = deepcopy(data)
                 commands = publication.operations(value, data)
-                self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object", "assess"])
+                self.assertEqual([item["command"]["op"] for item in commands], ["archive_object", "save_object"])
                 self.assertEqual(data, original)
 
     def test_retirement_refuses_unsafe_targets_and_dependency_use(self):
@@ -98,7 +98,7 @@ class ProviderTests(unittest.TestCase):
         task.update(action="retire", target="work:old", revision=3)
         blocked = data["joppa"]["tasks"][0]
         hold(blocked, "Failed")
-        def unblock(task): task["process"].pop("assessment")
+        def unblock(task): task["document"]["data"].pop("hold")
         def claim(task): task["document"]["data"]["assignee"] = "worker"
         for field, change in (("blocked", unblock), ("assignee", claim),
                               ("done", lambda task: end(task, "a" * 40)), ("retired", end)):

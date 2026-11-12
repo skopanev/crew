@@ -66,7 +66,7 @@ for (const mode of ['postclaim-race', 'sameactor-race', 'release-unknown']) test
   assert.equal(fs.existsSync(marker), false);
   const saved = read(f.stateFile), confirmed = mode !== 'release-unknown';
   assert.deepEqual(saved.releaseRequest.operations.map(({command}) => [`${command.kind}:${command.id}`, command.data.assignee]),
-    [['task:t1', undefined], ['task:t2', undefined]]);
+    [['task:t1', null], ['task:t2', null]]);
   assert.equal(saved.releaseConfirmed === true, confirmed);
   assert.equal(saved.result.released, confirmed);
   assert.equal(saved.result.held, !confirmed);

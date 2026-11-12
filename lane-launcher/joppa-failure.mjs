@@ -4,8 +4,8 @@ import {randomUUID} from 'node:crypto';
 import {command, save} from './runtime.mjs';
 import {api, batchRequest, mutateTasks, claimTasks, contractDigest} from './joppa-common.mjs';
 import {recoverTimeout} from './joppa-recovery.mjs';
-import {releaseTasks, taskQuestions} from './joppa-claims.mjs';
-import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
+import {releaseTasks} from './joppa-claims.mjs';
+import {nodeAssignee, nodeHold, saveNode} from './joppa-nodes.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -116,25 +116,24 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   }
   result.blocked = true;
   const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
-  const runId = path.basename(path.dirname(stateFile)), question = await taskQuestions(run);
+  const runId = path.basename(path.dirname(stateFile));
   const code = preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts));
-  // One batch per package: release save (the assess fence), waiting assessment, and the failure note.
+  // One batch per package: a save at the read revision releases the Task and holds it with the code, then the note.
   run.blockRequest ||= batchRequest(run, objects.flatMap(object => [
-    saveNode(object, {assignee: undefined}, `Crew lane failed: ${code}.`, question(object)),
-    {op: 'assess', target: object.address, ready: false, reason: code},
+    saveNode(object, {assignee: undefined, hold: code}, `Crew lane failed: ${code}.`),
     {op: 'note', target: object.address, id: randomUUID(), reply_to: null,
       text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${(failure || 'Lane failed').trim()}`}]));
   persist();
   await mutateTasks(run, run.blockRequest);
   result.tasks = [];
   for (const claim of claims) {
-    const requested = op => run.blockRequest.operations.find(({command}) => command.op === op && command.target === claim.address)?.command;
-    const assess = requested('assess'), note = requested('note');
+    const requested = op => run.blockRequest.operations.find(({command}) => command.op === op &&
+      (command.target ?? `${command.kind}:${command.id}`) === claim.address)?.command;
+    const hold = requested('save_object')?.data?.hold, note = requested('note');
     const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
     const comment = confirmed.annotations?.comments?.[note?.id];
     require(confirmed.address === claim.address && confirmed.historical === false && confirmed.document?.present === true &&
-      !nodeAssignee(confirmed) && nodeWaiting(confirmed) && assess && confirmed.process?.assessment?.reason === assess.reason &&
-      confirmed.process.assessment.actor === run.joppaWorker.actor &&
+      !nodeAssignee(confirmed) && typeof hold === 'string' && nodeHold(confirmed) === hold &&
       comment && comment.withdrawn !== true && comment.actor === run.joppaWorker.actor && comment.text === note.text,
       'Joppa did not confirm every Task block; outcome requires inspection');
     result.tasks.push({address: claim.address, status: 'blocked', revision: confirmed.current_revision});

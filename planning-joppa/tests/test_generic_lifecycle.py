@@ -1,4 +1,4 @@
-"""Planning on generic Joppa nodes: data.assignee claims, assess and archive. No network."""
+"""Planning on generic Joppa nodes: data.assignee claims, data.hold and archive. No network."""
 from copy import deepcopy
 import importlib.util
 import json
@@ -32,8 +32,14 @@ def stage_module():
     return stage
 
 
-def raw(address, data, revision=4, parent="rule:r", **extra):
-    return {"address": address, "data": data, "revision": revision, "parent": parent, "links": [], **extra}
+def raw(address, data, revision=4, parent="rule:r", links=(), **extra):
+    """A live detail read. Local edges arrive in relations, not links."""
+    relations = {}
+    for link in links:
+        edge = {"to": link["target"], **({"revision": link["revision"]} if link.get("revision") is not None else {})}
+        relations.setdefault(link.get("relation", "related"), {"edges": []})["edges"].append(edge)
+    return {"address": address, "data": data, "revision": revision, "parent": parent,
+            **({"relations": relations} if relations else {}), **extra}
 
 
 class Server:
@@ -44,7 +50,7 @@ class Server:
     def call(self, name, args):
         self.calls.append((name, deepcopy(args)))
         if name == "joppa_help":
-            return {"ops": ["save_object", "archive_object", "assess", "note"]}
+            return {"ops": ["save_object", "archive_object", "note"]}
         if name == "joppa_objects":
             return deepcopy(self.objects[args["address"]])
         if name == "joppa_batch":
@@ -75,7 +81,7 @@ class GenericLifecycleTests(unittest.TestCase):
             stage.prepare()
         return stage, target
 
-    def test_claim_batch_saves_full_documents_with_assignee_at_read_revisions(self):
+    def test_claim_batch_saves_only_the_assignee_at_read_revisions(self):
         with tempfile.TemporaryDirectory() as directory:
             data = self.claim_input()
             mark = stage_module().claims.marker(Path(directory) / "run-7" / "artifacts")
@@ -84,11 +90,9 @@ class GenericLifecycleTests(unittest.TestCase):
             self.prepare(server, data, directory)
             batches = [args for name, args in server.calls if name == "joppa_batch"]
             self.assertEqual(len(batches), 1)
-            document = data["joppa"]["objects"]["criterion:a"]["document"]
             self.assertEqual([entry["command"] for entry in batches[0]["operations"]], [{
-                "op": "save_object", "kind": "criterion", "id": "a", "revision": 3, "parent": "rule:r",
-                "data": {**document["data"], "assignee": mark}, "links": document["links"],
-                "reason": "Take this criterion for Crew planning.", "question_checked": "Which rule?"}])
+                "op": "save_object", "kind": "criterion", "id": "a", "revision": 3,
+                "data": {"assignee": mark}, "reason": "Take this criterion for Crew planning."}])
             self.assertFalse(any(name in json.dumps(server.calls) for name in REMOVED))
 
     def test_stale_claim_fails_the_batch_and_stops_without_retry(self):
@@ -131,20 +135,21 @@ class GenericLifecycleTests(unittest.TestCase):
                     stage.finish()
             self.assertNotIn("joppa_batch", [name for name, _ in server.calls])
 
-    def test_finish_batch_clears_assignee_assesses_ready_and_unblocks_revised_tasks(self):
+    def test_finish_batch_clears_assignee_and_hold_and_unblocks_revised_tasks(self):
         data, value = assignment(), plan()
         data["joppa"]["objects"]["criterion:a"]["document"]["data"]["assignee"] = "crew-planning:h:run-1"
         task = value["tasks"][0]
         task.update(action="update", target="work:old", revision=3)
         hold(data["joppa"]["tasks"][0], "Lane failed")
         operations = publication.operations(value, data)
-        self.assertEqual([entry["command"]["op"] for entry in operations], ["save_object", "assess", "save_object", "assess"])
-        self.assertEqual(operations[1]["command"], {"op": "assess", "target": "work:old", "ready": True,
-                                                    "reason": "The reviewed plan replaces the blocked contract."})
-        release, ready = operations[2]["command"], operations[3]["command"]
+        self.assertEqual([entry["command"]["op"] for entry in operations], ["save_object", "save_object"])
+        # The revised contract save clears the Task hold. clean replaces the data whole.
+        task_save = operations[0]["command"]
+        self.assertEqual((task_save["id"], task_save.get("clean")), ("old", True))
+        self.assertNotIn("hold", task_save["data"])
+        release = operations[1]["command"]
         self.assertEqual((release["kind"], release["id"], release["revision"]), ("criterion", "a", 3))
-        self.assertEqual(release["data"], {"title": "criterion:a", "owner": "owner"})
-        self.assertEqual(ready, {"op": "assess", "target": "criterion:a", "ready": True, "reason": release["reason"]})
+        self.assertEqual(release["data"], {"assignee": None, "hold": None})
         self.assertFalse(any(name in json.dumps(operations) for name in REMOVED))
 
     def test_retire_archives_without_commit(self):
@@ -161,8 +166,8 @@ class GenericLifecycleTests(unittest.TestCase):
             return task_state(normalize_detail({"address": "work:t"}, raw("work:t", data, **extra)))
         self.assertEqual(state(), "open")
         self.assertEqual(state(data={"assignee": "lane-1"}), "active")
-        self.assertEqual(state(process={"assessment": {"state": "waiting", "reason": "WORKTREE_PREEXISTED"}}), "blocked")
-        self.assertEqual(state(process={"assessment": {"state": "ready", "reason": "Owner"}}), "open")
+        self.assertEqual(state(data={"hold": "WORKTREE_PREEXISTED"}), "blocked")
+        self.assertEqual(state(data={"hold": None}), "open")
         self.assertEqual(state(data={"commit": "a" * 40}, present=False), "done")
         self.assertEqual(state(present=False), "retired")
         self.assertEqual(state(data={"archived": True}), "open")
@@ -173,7 +178,7 @@ class GenericLifecycleTests(unittest.TestCase):
         rows = [{"address": f"work:t{index}", "data.projects": ["p"] if index != 3 else ["elsewhere"]} for index in range(5)]
         details = {"work:t0": raw("work:t0", {"title": "Open", **fields}),
                    "work:t1": raw("work:t1", {"title": "Mine", "assignee": "lane-1", **fields}),
-                   "work:t2": raw("work:t2", {"title": "Held", **fields}, process={"assessment": {"state": "waiting", "reason": "LANE_FAILED"}}),
+                   "work:t2": raw("work:t2", {"title": "Held", "hold": "LANE_FAILED", **fields}),
                    "work:t4": raw("work:t4", {"title": "Landed", "commit": "b" * 40, **fields}, present=False)}
         calls = []
         class Lists:

@@ -143,8 +143,11 @@ async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = 
   }
 }
 
-const authoredLink = link => ({blocking: link.blocking ?? false, relation: link.relation ?? 'related',
-  revision: link.revision ?? null, target: link.target});
+// Local edges arrive as relations {key: {edges: [{to, revision?}]}}. Only depends_on blocks.
+// Remote links of set_remote_links keep their own payload and are not read here.
+const relationLinks = relations => Object.entries(relations || {}).flatMap(([relation, group]) =>
+  (group?.edges || []).map(edge => ({blocking: relation === 'depends_on', relation,
+    revision: edge.revision ?? null, target: edge.to})));
 
 function normalizeDetail(args, value) {
   const result = {...value};
@@ -153,7 +156,7 @@ function normalizeDetail(args, value) {
       throw new Error('Joppa object detail is incomplete');
     }
     result.document = {revision: result.revision, parent: result.parent ?? null, present: result.present ?? true,
-      data: result.data, links: (result.links || []).map(authoredLink)};
+      data: result.data, links: relationLinks(result.relations)};
     result.current_revision ??= result.revision;
     if (!args.revision) {
       result.work_ready ??= true;

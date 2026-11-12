@@ -8,9 +8,12 @@ class Rejected(MCPError):
     """The server confirmed that the tool operation failed."""
 
 
-def authored_link(link):
-    return {"blocking": link.get("blocking", False), "relation": link.get("relation", "related"),
-            "revision": link.get("revision"), "target": link["target"]}
+def relation_links(relations):
+    """Local edges arrive as relations {key: {edges: [{to, revision?}]}}. Only depends_on blocks.
+    Remote links of set_remote_links keep their own payload and are not read here."""
+    return [{"blocking": relation == "depends_on", "relation": relation,
+             "revision": edge.get("revision"), "target": edge["to"]}
+            for relation, group in (relations or {}).items() for edge in (group or {}).get("edges", [])]
 
 
 def normalize_detail(args, value):
@@ -21,7 +24,7 @@ def normalize_detail(args, value):
         present = result.get("present", True) is not False
         result["document"] = {"revision": result["revision"], "parent": result.get("parent"),
                               "present": present, "data": result["data"],
-                              "links": [authored_link(link) for link in result.get("links", [])]}
+                              "links": relation_links(result.get("relations"))}
         result.setdefault("current_revision", result["revision"])
         if not args.get("revision"):
             result.setdefault("work_ready", True)
@@ -52,11 +55,11 @@ def done(object):
 
 
 def block_reason(object):
-    """A live node with assessment state waiting is held. Return its short reason code."""
-    assessment = (object.get("process") or {}).get("assessment")
-    if ended(object) or not isinstance(assessment, dict) or assessment.get("state") != "waiting":
+    """A live node with a Crew data.hold code is held. Return the code."""
+    hold = object["document"]["data"].get("hold")
+    if ended(object) or not hold:
         return None
-    return assessment.get("reason") or ""
+    return hold
 
 
 def blocked(object):

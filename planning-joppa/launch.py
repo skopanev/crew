@@ -93,7 +93,7 @@ def main():
     if args.dry_run:
         print(("Requirement: " + args.req_id) if args.req_id else ("AC: " + args.ac_id))
         print("Graph: prepare → research → necessity → design → critics → finish")
-        print("Publication: Task saves, archives, AC assignee release and assess, one transaction")
+        print("Publication: Task saves, archives, AC assignee and hold release, one transaction")
         print("Command: " + " ".join(command))
         print("Dry run: no MCP calls, claims, agents, or writes")
         return 0
