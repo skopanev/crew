@@ -148,8 +148,8 @@ def repository_declarations(data):
     """The Repository: lines of a Task, read without validating the rest of its contract."""
     body = data.get("body", data.get("contract"))
     lines = [body if isinstance(body, str) else ""]
-    if data.get("steps") is not None:
-        lines.append(f"Repository: {data.get('repository')}")
+    if data.get("steps") is not None and isinstance(data.get("repository"), str):
+        lines.append(f"Repository: {data['repository']}")
     return [value.strip() for value in re.findall(r"^Repository:[ \t]*(\S[^\r\n]*)$", "\n".join(lines), re.M)]
 
 

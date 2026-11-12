@@ -67,7 +67,9 @@ class RepositoryScopeTests(unittest.TestCase):
                 {"address": "work:other", "body": "Goal: Other\n\nRepository: elsewhere", "repository": None, "steps": None},
                 # Invalid steps of another repository are not this planner's work and never throw.
                 {"address": "work:broken", "body": "Goal: Broken", "repository": "elsewhere", "steps": "not a list"},
-                {"address": "work:none", "body": "Goal: No repository", "repository": None, "steps": None}]
+                {"address": "work:none", "body": "Goal: No repository", "repository": None, "steps": None},
+                # Steps without a repository declare none, as in the lane.
+                {"address": "work:stepsonly", "body": "Goal: Steps only", "repository": None, "steps": ["Step"]}]
         details = {"work:structured": raw("work:structured", {"title": "Structured", **fields}),
                    "work:free": raw("work:free", {"title": "Free", "body": free})}
         calls = []
