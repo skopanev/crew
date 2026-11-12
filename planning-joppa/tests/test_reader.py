@@ -150,6 +150,29 @@ class ProviderTests(unittest.TestCase):
                     reader.call('joppa_objects', {'address': 'work:a', 'fields': list(reply)})
             self.assertEqual(capture.call_count, 2)
 
+    def test_selected_authored_paths_are_compared_with_the_fresh_snapshot(self):
+        full = item('work:a', 'criterion:a', {'title': 'Current', 'body': 'New contract', 'spec': {'step': 'one'}})
+        replies = []
+        class Server(Fake):
+            def raw_call(self, name, args):
+                return deepcopy(replies[-1])
+        reader = Reader(Server(result=full), 'example', Path('/unused'))
+        unchanged = ({'body': 'New contract'}, {'title': 'Current'}, {'data.body': 'New contract'},
+                     {'data.spec.step': 'one'}, {'removed': None}, {'status': 'red', 'work_ready': False},
+                     {'comments': {'items': [], 'total': 0}})
+        stale = ({'body': 'Old contract'}, {'title': 'Old'}, {'data.body': 'Old contract'}, {'data.spec.step': 'two'},
+                 {'removed': 'Deleted since'}, {'body': None})
+        with patch.object(context, 'capture_object') as capture:
+            for reply in unchanged:
+                replies.append(reply)
+                self.assertEqual(reader.call('joppa_objects', {'address': 'work:a', 'fields': list(reply)}), reply)
+            self.assertEqual(capture.call_count, len(unchanged))
+            for reply in stale:
+                replies.append(reply)
+                with self.assertRaisesRegex(MCPError, 'changed before its planning snapshot'):
+                    reader.call('joppa_objects', {'address': 'work:a', 'fields': list(reply)})
+            self.assertEqual(capture.call_count, len(unchanged))
+
     def test_current_detail_names_fields_and_a_revision_read_stays_historical(self):
         calls = []
         api = Joppa.__new__(Joppa)
