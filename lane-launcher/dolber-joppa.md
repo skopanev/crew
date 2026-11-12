@@ -80,7 +80,7 @@ The startup guard and completion require each saved acceptance context unchanged
 
 Dolber blocks confirmed failures with evidence and releases their claims.
 An uncertain claim or outcome stays held until inspection confirms the result.
-The reservation holds the affected Requirement and repository. The same worker can take independent work within the lane limit.
+The reservation holds only its Tasks. Other Tasks of the same Requirement and repository can run within the lane limit.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.
 A lost completion response requires inspection. Do not rerun code which was already published.
 Completion failures also write a Joppa note. Branch delivery uses a separate candidate branch for each retry.

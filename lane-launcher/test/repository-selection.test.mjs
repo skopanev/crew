@@ -59,7 +59,7 @@ test('held Tasks count only configured repositories regardless of project member
   task.document.data.body = 'Repository: app\nModule: absent';
   selected = await nextTask(f.run.config);
   assert.equal(selected.held, 1);
-  assert.equal(selected.candidate, null);
+  assert.equal(selected.candidate.id, 'task:t1');
 });
 
 test('unrelated structured contracts do not need executable steps or checks', async t => {
@@ -81,7 +81,7 @@ test('a missing structured repository does not invent a second declaration for a
   Object.assign(task.document.data, {steps: [], assignee: 'another-run'});
   const selected = await nextTask(f.run.config);
   assert.equal(selected.held, 1);
-  assert.equal(selected.candidate, null);
+  assert.equal(selected.candidate.id, 'task:t1');
 });
 
 for (const state of ['archived after list', 'without Requirement', 'archived parent']) {
@@ -97,7 +97,7 @@ for (const state of ['archived after list', 'without Requirement', 'archived par
     if (phase === 'selection') {
       const selected = await nextTask(f.run.config);
       assert.equal(selected.candidate.id, 'task:t1');
-      assert.equal(selected.held, 0);
+      assert.equal(selected.held, state === 'archived after list' ? 0 : 1);
       assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
     } else {
       f.run.tasks = [f.run.tasks[0]];

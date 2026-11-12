@@ -30,8 +30,7 @@ for (const state of ['retained', 'removed', 'other-repository']) test(`Joppa pac
   if (state !== 'removed') fs.mkdirSync(path.join(root, run.executionId));
   save(path.join(folder, 'launch.json'), run);
   const selected = await nextTask(f.run.config);
-  if (state === 'retained') assert.equal(selected.candidate, null);
-  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 

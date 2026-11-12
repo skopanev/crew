@@ -57,7 +57,7 @@ test('Joppa selects structured Tasks and detects their remote repository holders
   const before = contractDigest(f.objects.get('task:t1'));
   assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
   f.objects.get('task:t2').document.data.assignee = 'manual-worker';
-  assert.equal((await nextTask(f.run.config)).candidate, null);
+  assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
   assert.equal(contractDigest(f.objects.get('task:t1')), before);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
@@ -116,7 +116,8 @@ for await(const line of createInterface({input:process.stdin})) {
   delete config.joppa.workers[0].tokenFile;
   const reserved = path.join(f.root, 'runs', 'active');
   fs.mkdirSync(reserved, {recursive: true});
-  save(path.join(reserved, 'launch.json'), {...f.run, requirement: 'req:other', repositoryId: 'app'});
+  save(path.join(reserved, 'launch.json'), {...f.run, task: 'task:other', tasks: [{address: 'task:other'}],
+    requirement: 'req:other', repositoryId: 'app'});
   const selected = await nextTask(config);
   assert.equal(selected.candidate.id, 'task:t1');
   assert.equal(f.calls.some(call => call.name === 'joppa_tasks'), false);

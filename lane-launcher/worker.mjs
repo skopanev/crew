@@ -196,7 +196,7 @@ try {
     result.held = !result.released;
     result.blocked = false;
     if (result.released) result.tasks = run.releaseResults;
-    announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · ${run.claimConflict ? 'package ownership conflict' : 'startup failed'}; lane did not start`);
+    announce(`[lane] ${result.released ? 'RELEASED' : 'HELD'} ${run.task} · startup failed; lane did not start`);
   } else {
     ({result, artifacts} = await recordTaskOutcome({run, stateFile, result, artifacts, announce}));
   }

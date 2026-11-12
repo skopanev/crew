@@ -1,7 +1,6 @@
 import os from 'node:os';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeWaiting, saveNode} from './joppa-nodes.mjs';
-import {occupancyReader, heldTasks} from './joppa-selection.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -177,38 +176,23 @@ export const needsReadiness = (context, object, types) =>
 export async function guardTaskClaims(run, persist) {
   require(run.releaseConfirmed !== true, 'PACKAGE_CLAIMS_RELEASED: This run no longer holds its Tasks');
   require(!run.releaseRequest, 'PACKAGE_RELEASE_UNCONFIRMED: Inspect the saved release request before retrying');
-  const reader = await occupancyReader(run.config, run.joppaWorker), claims = claimTasks(run);
-  const ownAddresses = new Set(claims.map(claim => claim.address));
-  const context = await reader.group(claims[0].address);
-  require(context, 'Claimed Task repository is not configured');
+  const claims = claimTasks(run);
   for (const claim of claims) {
-    const object = await reader.object(claim.address);
-    require(heldBy(run, object), 'Task holder changed before lane startup; claims remain held for inspection');
+    const object = await read(run, claim.address);
+    require(object?.address === claim.address && heldBy(run, object),
+      'Task holder changed before lane startup; claims remain held for inspection');
     verifyRemoteDependencies(object);
     require(contractDigest(object) === claim.digest, 'Task contract changed before lane startup');
   }
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   for (const context of run.claim.contexts || []) {
-    const object = await reader.object(context.address);
+    const object = await read(run, context.address);
     verifyRemoteDependencies(object);
-    require(contextLive(object) && (!needsReadiness(context, object, types) || object.work_ready === true) &&
+    require(object?.address === context.address && contextLive(object) &&
+      (!needsReadiness(context, object, types) || object.work_ready === true) &&
       contractDigest(object) === context.digest,
       'Acceptance context changed before lane startup');
   }
-  let conflict;
-  await heldTasks(run.config, run.joppaWorker, async task => {
-    const other = await reader.group(task.address);
-    if (!other || other.requirement !== context.requirement || other.repository !== context.repository) return;
-    const object = await reader.object(task.address), actor = nodeAssignee(object);
-    if (actor && (actor !== run.claim.assignee || !ownAddresses.has(object.address))) {
-      conflict ||= {address: object.address, actor, ...other};
-    }
-  });
-  if (!conflict) return;
-  run.claimConflict = conflict;
-  await releaseTaskClaims(run, persist,
-    `Another assignee holds ${conflict.address} in this Requirement and repository. Lane did not start.`);
-  throw new Error(`PACKAGE_ALREADY_HELD: ${conflict.address} belongs to ${conflict.actor}; this run released its own Tasks before startup`);
 }
 
 export async function releaseTaskClaims(run, persist, reason) {

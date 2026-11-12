@@ -39,8 +39,7 @@ for (const sameRepository of [false, true]) test(`Joppa package detects remote h
     f.run.config.repositories.push({...f.run.config.repositories[0], id: 'other'});
   }
   const selected = await nextTask(f.run.config);
-  if (sameRepository) assert.equal(selected.candidate, null);
-  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
 });
 
 for (const configured of [false, true]) test(`Joppa package scans cross-project holders; configured repository=${configured}`, async t => {
@@ -49,59 +48,10 @@ for (const configured of [false, true]) test(`Joppa package scans cross-project 
   foreign.document.data.body = `Repository: ${configured ? 'app' : 'unconfigured'}\nModule: absent`;
   foreign.document.data.assignee = 'foreign-worker';
   const selected = await nextTask(f.run.config);
-  if (configured) assert.equal(selected.candidate, null);
-  else assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+  assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   const scans = f.calls.filter(call => call.name === 'joppa_objects' && call.args.kind?.includes('task'));
   assert(scans.length > 0);
   assert(scans.every(call => !Object.hasOwn(call.args, 'project') && !Object.hasOwn(call.args, 'view')));
-});
-
-for (const mode of ['postclaim-race', 'sameactor-race', 'release-unknown']) test(`Joppa package ${mode} stops its worker before shell startup`, async t => {
-  const f = await packageFixture(t, mode), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
-  fs.mkdirSync(bins);
-  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
-  f.persist();
-  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
-  assert.equal(result.code, 2, result.stderr);
-  assert.equal(fs.existsSync(marker), false);
-  const saved = read(f.stateFile), confirmed = mode !== 'release-unknown';
-  assert.deepEqual(saved.releaseRequest.operations.map(({command}) => [`${command.kind}:${command.id}`, command.data.assignee]),
-    [['task:t1', null], ['task:t2', null]]);
-  assert.equal(saved.releaseConfirmed === true, confirmed);
-  assert.equal(saved.result.released, confirmed);
-  assert.equal(saved.result.held, !confirmed);
-  assert.equal(saved.result.blocked, false);
-  assert.equal(runHoldsTasks(saved), !confirmed);
-  assert.equal(f.objects.get('task:foreign').document.data.assignee,
-    mode === 'sameactor-race' ? saved.claim.assignee : 'foreign-worker');
-  assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 2);
-  assert.equal(saved.completionRequest, undefined);
-  assert.equal(saved.blockRequest, undefined);
-  assert.equal(saved.failureRequest, undefined);
-});
-
-test('Joppa package legacy adopted claim runs the ownership guard before startup', async t => {
-  const f = await packageFixture(t);
-  f.run.tasks = [f.run.tasks[0]];
-  f.run.executionId = executionId(f.run.task);
-  await claimTask(f.run, f.persist, f.runId);
-  delete f.run.claimRequest;
-  delete f.run.claim.tasks;
-  delete f.run.requirement;
-  const foreign = f.objects.get('task:t2');
-  foreign.document.data.projects = ['project:other'];
-  foreign.document.data.assignee = 'foreign-worker';
-  const bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'started');
-  fs.mkdirSync(bins);
-  fs.writeFileSync(path.join(bins, 'bash'), '#!/bin/sh\ntouch "$START_MARKER"\nexit 99\n', {mode: 0o755});
-  f.persist();
-  const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`, START_MARKER: marker});
-  assert.equal(result.code, 2, result.stderr);
-  assert.equal(fs.existsSync(marker), false);
-  const saved = read(f.stateFile);
-  assert.equal(saved.releaseConfirmed, true);
-  assert.deepEqual(saved.releaseResults.map(task => task.address), ['task:t1']);
-  assert.equal(foreign.document.data.assignee, 'foreign-worker');
 });
 
 test('Joppa package ignores held Tasks without a repository contract', async t => {

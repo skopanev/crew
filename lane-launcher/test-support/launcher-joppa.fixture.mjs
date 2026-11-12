@@ -94,7 +94,6 @@ async function packageFixture(t, mode = 'success') {
       // Joppa reserves data.acceptance for process commands. Earlier fixtures accepted it.
       const reserved = commands.findIndex(command => command.op === 'save_object' && Object.hasOwn(command.data || {}, 'acceptance'));
       const claim = commands.every(command => command.op === 'save_object' && command.data.assignee);
-      const release = commands.every(command => command.op === 'save_object' && !command.data.assignee);
       // A new node save has revision 0 and no ID. The fixture gives it the next address of its type.
       for (const command of commands) if (command.op === 'save_object' && command.revision === 0 && !command.id) {
         command.id = `n${++created}`;
@@ -103,7 +102,6 @@ async function packageFixture(t, mode = 'success') {
           document: {present: true, parent: command.parent, data: {}, links: []}, process: {}, annotations: {comments: {}}});
       }
       const target = command => objects.get(command.target || `${command.kind}:${command.id}`);
-      if (mode === 'release-unknown' && release) { res.destroy(); return; }
       // Revision checks refuse the whole batch. A changed save advances the revision; batch refs read the saved one.
       const planned = new Map(), refs = new Map();
       for (const [index, command] of commands.entries()) if (command.op === 'save_object') {
@@ -151,15 +149,6 @@ async function packageFixture(t, mode = 'success') {
           }
           return {command: {...command, ...(command.op === 'archive_object' ? {revision: resolve(command.revision)} : {})}};
         })};
-        if (['postclaim-race', 'sameactor-race', 'release-unknown'].includes(mode) && claim) {
-          const foreign = structuredClone(objects.get('task:t1'));
-          foreign.address = 'task:foreign';
-          foreign.document.data.projects = ['project:other'];
-          foreign.document.data.body = 'Repository: app\nModule: unconfigured';
-          foreign.document.data.assignee = mode === 'sameactor-race' ? commands[0].data.assignee : 'foreign-worker';
-          objects.set(foreign.address, foreign);
-          queue.push(foreign.address);
-        }
         if (mode === 'incomplete') value.results.pop();
       }
     }
