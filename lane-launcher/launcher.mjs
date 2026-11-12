@@ -100,10 +100,10 @@ export async function tick(config, display = null) {
   if (display) display.counts = {open: selected.available, ready: String(selected.available), held: selected.held,
     blocked: candidate === null && selected.available > 0, dependencyIssues};
   else {
-    print(`Joppa Tasks [workspace=${config.workspace}, project=${config.joppa.project}]: ${selected.available} available · ${selected.held} held workers${dependencySummary}`);
+    print(`Joppa Tasks [workspace=${config.workspace}, repositories=${config.repositories.map(repo => repo.id).join(',')}]: ${selected.available} available · ${selected.held} held Tasks${dependencySummary}`);
     for (const issue of dependencyIssues.slice(0, 5)) print(formatDependencyIssue(issue));
     print('checking params:');
-    print(`  project: ${config.joppa.project}`);
+    print(`  repositories: ${config.repositories.map(repo => repo.id).join(', ')}`);
   }
   if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');

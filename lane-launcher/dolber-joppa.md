@@ -9,13 +9,15 @@ sh ./lane-launcher/dolber-joppa.sh ./lane-launcher/my-project.json
 ```
 
 Copy `dolber-joppa.example.json` to your local config. Local JSON configs are ignored by Git.
-Set the workspace, Joppa project address, repositories, modules, checks, mounts, image and lane limit there.
-Use one authenticated actor and one private token file per lane slot. Keep credentials outside every mounted directory.
+Set the workspace, repositories, modules, checks, mounts, image and lane limit there.
+One authenticated worker can serve all lane slots. Set their number with `limit`.
+Keep credentials outside every mounted directory.
 
 ## Execution
 
 Dolber and the planner queue use the same Node.js MCP client. Their queue calls do not start a Python process.
-Dolber selects an available implementation Task from the configured Joppa project.
+Dolber selects available Tasks whose `Repository:` declaration matches a configured repository ID.
+Joppa project membership does not filter Tasks. Dolber skips missing or unknown repository declarations without changing the Task.
 It opens a Herdr tab in the current workspace. Its worker claims that exact Task before preflight or Docker.
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
@@ -78,7 +80,7 @@ The startup guard and completion require each saved acceptance context unchanged
 
 Dolber blocks confirmed failures with evidence and releases their claims.
 An uncertain claim or outcome stays held until inspection confirms the result.
-That worker actor cannot take another Task while its claim remains held.
+The reservation holds the affected Requirement and repository. The same worker can take independent work within the lane limit.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.
 A lost completion response requires inspection. Do not rerun code which was already published.
 Completion failures also write a Joppa note. Branch delivery uses a separate candidate branch for each retry.
@@ -87,8 +89,8 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 
 | Field | Purpose |
 |---|---|
-| `joppa.project` | Select Tasks for one Joppa project address |
-| `joppa.workers` | Separate actors and host token files for parallel lanes |
+| `limit` | Maximum concurrent lanes, independent of the number of authenticated workers |
+| `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
 | `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |

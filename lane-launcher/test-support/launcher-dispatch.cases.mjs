@@ -34,14 +34,14 @@ test('an available Task launches once; the pending tab consumes the only slot', 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 1);
   assert(f.calls.some(call => call.name === 'joppa_objects' && call.args.kind?.includes('task') &&
-    call.args.fields.includes('data.projects')));
+    call.args.fields.includes('data.assignee')));
   assert.equal(f.calls.some(call => call.name === 'joppa_tasks'), false);
   const events = herdrEvents(f);
   const create = events.find(args => args[1] === 'create');
   assert.deepEqual(create.slice(0, 4), ['tab', 'create', '--workspace', 'workspace']);
   assert.ok(create.includes('--no-focus'));
   assert.ok(events.find(args => args[1] === 'run')[3].includes('worker.mjs'));
-  assert.match(result.stdout, /Joppa Tasks \[workspace=fixture, project=project:app\]: 2 available · 0 held workers/);
+  assert.match(result.stdout, /Joppa Tasks \[workspace=fixture, repositories=app\]: 2 available · 0 held Tasks/);
   assert.equal(claims(f), 0, 'the worker claims; the dispatcher only reserves');
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
@@ -66,8 +66,8 @@ test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
   assert.deepEqual(lines, ['Running lanes 0 of 1',
-    'Joppa Tasks [workspace=fixture, project=project:app]: 2 available · 0 held workers',
-    'checking params:', '  project: project:app',
+    'Joppa Tasks [workspace=fixture, repositories=app]: 2 available · 0 held Tasks',
+    'checking params:', '  repositories: app',
     'Starting new one with ticket: task:t1 (preview: запуск отключён)', '  [01] Task 1']);
   assert.equal(claims(f), 0);
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
@@ -119,8 +119,8 @@ test('terminal dashboard refreshes the countdown and Ctrl+C releases the lock', 
   const {code, output, errors} = await interrupted(t, child, output => /Next check in 00:0[4-6]/.test(output), 10000);
   assert.equal(code, 0, errors);
   assert.match(output, /Next check in 00:10/);
-  assert.match(output, /project: project:app/);
-  assert.match(output, /Tasks: 2 available · 0 held workers/);
+  assert.match(output, /repositories: app/);
+  assert.match(output, /Tasks: 2 available · 0 held Tasks/);
   assert.match(output, /Stopped/);
   assert.equal(queueReads(f), 1);
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
@@ -193,7 +193,7 @@ test('empty queue leaves Herdr tabs unchanged', async t => {
   const f = await setup(t, {empty: true});
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Joppa Tasks \[workspace=fixture, project=project:app\]: 0 available · 0 held workers/);
+  assert.match(result.stdout, /Joppa Tasks \[workspace=fixture, repositories=app\]: 0 available · 0 held Tasks/);
   assert.ok(!herdrEvents(f).some(args => args[1] === 'create'));
   assert.deepEqual(runDirectories(f.stateDir), []);
 });

@@ -10,16 +10,14 @@ const inside = (file, root) => file === root || file.startsWith(root + path.sep)
 
 export function validateJoppa(config) {
   const joppa = config.joppa;
-  require(joppa && text(joppa.url) && text(joppa.project), 'Config needs joppa.url and a full joppa.project address');
+  require(joppa && text(joppa.url), 'Config needs joppa.url');
   const url = new URL(joppa.url);
   require((url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
     !url.username && !url.password && !url.search && !url.hash, 'Joppa needs HTTPS or loopback HTTP without URL credentials');
-  require(joppa.project.includes(':'), 'joppa.project must be a full object address');
   const sharedLogin = joppa.mcpCommand !== undefined;
   if (sharedLogin) require(Array.isArray(joppa.mcpCommand) && joppa.mcpCommand.length &&
     joppa.mcpCommand.every(arg => text(arg) && !arg.includes('\0')), 'Joppa mcpCommand needs an executable and arguments');
-  require(Array.isArray(joppa.workers) && joppa.workers.length >= (sharedLogin ? 1 : config.limit),
-    sharedLogin ? 'Joppa needs the existing user actor' : 'Each lane slot needs a separate Joppa worker');
+  require(Array.isArray(joppa.workers) && joppa.workers.length >= 1, 'Joppa needs an authenticated worker');
   if (sharedLogin) require(joppa.workers.length === 1, 'A shared Joppa login uses exactly one existing user actor');
   if (sharedLogin) require(config.delivery !== 'requirement',
     'Shared Joppa login currently supports target or branch delivery');
@@ -40,7 +38,7 @@ export function validateJoppa(config) {
   require(joppa.coversReference == null || (text(joppa.coversReference) && joppa.coversReference === joppa.coversReference.trim() &&
     !['acceptance', 'acceptance_checks', 'test_bindings', 'projects', 'assignee', 'commit'].includes(joppa.coversReference)),
   'joppa.coversReference must name one Task reference field other than a reserved data field');
-  require(!config.tags?.length && !config.preferTags?.length, 'Joppa uses a project filter, not tags');
+  require(!config.tags?.length && !config.preferTags?.length, 'Joppa selects configured repositories, not tags');
   require(Array.isArray(config.repositories) && config.repositories.length, 'Config needs repositories');
   require(text(config.sourceRoot) && path.isAbsolute(config.sourceRoot), 'Config needs absolute sourceRoot');
   const root = fs.realpathSync(config.sourceRoot), ids = new Set(), paths = new Set();

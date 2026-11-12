@@ -92,7 +92,7 @@ console.log(JSON.stringify({result}));
   const docker = path.join(root, 'docker.jsonl');
   fs.writeFileSync(docker, '');
   const config = {id: 'test-project', workspace: 'fixture', launchLanes, sourceRoot: sources,
-    joppa: {url: joppa.run.config.joppa.url, project: 'project:app', workers: [{actor: 'lane-1', tokenFile}]},
+    joppa: {url: joppa.run.config.joppa.url, workers: [{actor: 'lane-1', tokenFile}]},
     repositories: [{id: 'app', path: repo, targetBranch: 'main', cbmProject: 'app', preflight: null,
       modules: joppa.run.config.repositories[0].modules, gateCommands: ['true'], testCommand: ['true']}],
     worktreeRoot: path.join(sources, 'worktrees'),

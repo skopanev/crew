@@ -17,11 +17,11 @@ async function dolber(t, options, values = {}) {
 
 test('Dolber uses a changed config at the next selection and stays quiet while it is unchanged', async t => {
   const {f, run} = await dolber(t, {launchLanes: false});
-  await run.until(output => count(output, /project=project:app\]/g) >= 2);
+  await run.until(output => count(output, /repositories=app\]/g) >= 2);
   assert.doesNotMatch(run.output(), /config reloaded/);
   const mark = run.mark();
-  save(f.configFile, {...f.config, joppa: {...f.config.joppa, project: 'project:other'}});
-  await run.until(output => count(output.slice(mark), /project=project:other\]/g) >= 3);
+  save(f.configFile, {...f.config, repositories: f.config.repositories.map(repo => ({...repo, id: 'other'}))});
+  await run.until(output => count(output.slice(mark), /repositories=other\]/g) >= 3);
   assert.equal(count(run.since(mark), /config reloaded/g), 1);
   assert.match(run.since(mark), /config reloaded\n[─]+\nRunning lanes/);
   assert.equal(await run.stop(), 0);

@@ -173,8 +173,8 @@ export function createDashboard(config, paint) {
     const issues = counts?.dependencyIssues || [];
     const header = `DOLBER ${config.id} · Running lanes `;
     const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
-      clip(`workspace: ${config.workspace} · project: ${config.joppa.project}`, width),
-      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held workers` +
+      clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
+      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tickets: —',
       clip(`Source: Joppa · delivery: ${config.delivery}`, width),
       '─'.repeat(width)];

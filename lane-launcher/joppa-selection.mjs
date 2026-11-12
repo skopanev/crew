@@ -9,7 +9,7 @@ import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
-import {nodeAssignee, nodeWaiting, taskPages, taskMatchesProject, coversFields} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, taskPages, coversFields} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -38,7 +38,9 @@ export async function occupancyReader(config, worker) {
   };
   const group = async (address, allowArchived = false) => {
     const current = await object(address, {allowArchived});
-    const contract = taskBody(current.document.data) ? taskContract(current.document.data) : '';
+    let contract = '';
+    try { if (taskBody(current.document.data)) contract = taskContract(current.document.data); }
+    catch (error) { check(false, error.message); }
     const declarations = typeof contract === 'string' ? [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)] : [];
     const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
     if (!configured.length) return null;
@@ -84,14 +86,10 @@ export async function nextTask(config) {
     try { fs.lstatSync(path.join(config.worktreeRoot, run.executionId)); return true; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   });
-  const busy = new Set(reservations.map(run => run.joppaWorker?.actor));
   const terminalRetained = new Map();
   const dependencyIssues = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
-    if (!config.joppa.mcpCommand) {
-      if (busy.has(worker.actor)) continue;
-    }
     const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
     const eligible = [], {object, group} = await occupancyReader(config, worker);
@@ -126,20 +124,26 @@ export async function nextTask(config) {
       const context = run.requirement && repository ? {requirement: run.requirement, repository} : await group(run.task);
       if (context) occupied.add(`${context.requirement}\n${context.repository}`);
     }
+    let workerHeld = 0;
     await heldTasks(config, worker, async task => {
       const context = await group(task.address);
-      if (context) occupied.add(`${context.requirement}\n${context.repository}`);
+      if (context) {
+        occupied.add(`${context.requirement}\n${context.repository}`);
+        workerHeld++;
+      }
     }, inventory);
-    held = Math.max(held, inventory.filter(task => task.present === true && nodeAssignee(task) && taskMatchesProject(config, task)).length);
+    held = Math.max(held, workerHeld);
     const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
     let coversOf;
     for (const task of inventory) {
-      if (task.present !== true || !taskMatchesProject(config, task) || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
+      if (task.present !== true || task.work_ready !== true || nodeAssignee(task) || nodeWaiting(task) ||
           priorities && !priorities.includes(task['data.priority'])) continue;
         try {
+          const context = await group(task.address);
+          if (!context || occupied.has(`${context.requirement}\n${context.repository}`)) continue;
           const dependency = await dependencies(task.address);
           if (!dependency.ready) {
             if (dependency.code) dependencyIssues.set(`${task.address}\n${dependency.consumer}\n${dependency.blocker}`,
@@ -153,8 +157,6 @@ export async function nextTask(config) {
           coversOf ||= coveredBy(config, (await read('joppa_tree', {})).schema.types);
           try { taskInput(config, current, undefined, coversOf(current)); }
           catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }
-          const context = await group(task.address);
-          if (!context || occupied.has(`${context.requirement}\n${context.repository}`)) continue;
           await publications({config, tasks: [{address: task.address}], requirement: context.requirement,
             repository: config.repositories.find(repo => repo.id === context.repository),
             requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}});

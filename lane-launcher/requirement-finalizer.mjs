@@ -1,13 +1,8 @@
 // Select a finalize-only candidate when all Tasks in a requirement unit are done on the requirement branch.
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
-import {taskMatchesProject} from './joppa-nodes.mjs';
 
 const text = value => typeof value === 'string' && value.trim();
-
-function matchesConfiguredProject(config, row, current) {
-  return !text(config?.joppa?.project) || taskMatchesProject(config, current || row);
-}
 
 function sameFailedFinalizer(runs, requirement, repository, head, targetHead, fingerprint) {
   for (const prior of runs || []) {
@@ -74,7 +69,7 @@ async function listRequirementBranches(config) {
 export async function finalizationCandidate({config, read, object, group, rows = [], occupied = new Set(), runs = []}) {
   if (!config || config.delivery !== 'requirement' || !Array.isArray(rows) || !rows.length) return null;
   const doneRows = rows.filter(row => row && text(row.address) && row.present === false &&
-    row['data.commit'] && matchesConfiguredProject(config, row, null));
+    row['data.commit']);
   if (!doneRows.length) return null;
 
   const {byRepo, allBranches} = await listRequirementBranches(config);
@@ -103,7 +98,6 @@ export async function finalizationCandidate({config, read, object, group, rows =
       current = await object(row.address, {allowArchived: true});
       if (!current || current.historical !== false || current.document?.present !== false ||
           !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(current.document.data.commit || '')) continue;
-      if (!matchesConfiguredProject(config, row, current)) continue;
       context = await group(row.address, true);
       if (!context || !text(context.requirement) || !text(context.repository)) continue;
       const {requirement, repository} = context;

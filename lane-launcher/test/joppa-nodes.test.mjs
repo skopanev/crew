@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {saveNode, nodeAssignee, nodeWaiting, nodePages, roleKinds, taskMatchesProject} from '../joppa-nodes.mjs';
+import {saveNode, nodeAssignee, nodeWaiting, nodePages, roleKinds} from '../joppa-nodes.mjs';
 import {contractDigest, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
@@ -39,11 +39,6 @@ test('native fields work in detail reads and named list fields', async () => {
   assert.equal(nodeWaiting({'data.hold': 'GATE_FAIL'}), true);
   assert.equal(nodeWaiting({document: {data: {hold: 'NEEDS_HUMAN'}}}), true);
   assert.equal(nodeWaiting({'data.hold': null}), false);
-  const config = {joppa: {project: 'project:one'}};
-  assert.equal(taskMatchesProject(config, {'data.projects': ['one']}), true);
-  assert.equal(taskMatchesProject(config, {data: {projects: ['project:one']}}), true);
-  assert.equal(taskMatchesProject(config, {'data.projects': ['another']}), false);
-  assert.equal(taskMatchesProject(config, {}), false);
   const calls = [];
   const read = async (tool, args) => {
     calls.push([tool, args]);

@@ -47,15 +47,9 @@ export async function* nodePages(read, filters) {
 // extraFields adds raw data paths, such as the configured covers reference or data.test_bindings.
 export async function* taskPages(read, filters = {}, extraFields = []) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
-    fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority', 'data.projects',
+    fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority',
       'work_ready', 'data.hold', ...extraFields],
     ...filters});
 }
 
 export const coversFields = config => config?.joppa?.coversReference ? [`data.${config.joppa.coversReference}`] : [];
-
-export function taskMatchesProject(config, node) {
-  const project = config.joppa.project, short = project.slice(project.indexOf(':') + 1);
-  const projects = node.document?.data?.projects ?? node.data?.projects ?? node['data.projects'];
-  return Array.isArray(projects) && projects.some(value => value === project || value === short);
-}
