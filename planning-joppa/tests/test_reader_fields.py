@@ -14,6 +14,15 @@ from provider_fixture import item, Fake
 
 
 class ReaderSelectionTests(unittest.TestCase):
+    def test_invalid_addresses_never_turn_into_workspace_lists(self):
+        for target in (None, Path('/unused')):
+            for address in ('', ' ', 'work:a,', ',work:a', 'work:a,,work:b', 'work:a,bad', 123, ['work:a']):
+                with self.subTest(target=target, address=address):
+                    api = Fake()
+                    with self.assertRaisesRegex(MCPError, 'kind:id object addresses'):
+                        Reader(api, 'example', target).call('joppa_objects', {'address': address})
+                    self.assertEqual(api.calls, [])
+
     def test_selected_agent_reads_are_fenced_by_the_injected_revision(self):
         full = item('work:a', 'criterion:a', {'title': 'Current', 'body': 'New contract', 'spec': {'step': 'one'}},
                     process={'verification': 'pass'})
