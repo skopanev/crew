@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import MCPError, Rejected, complete_object, normalize_detail
+from joppa_reads import DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -84,6 +84,9 @@ class Joppa:
 
     def call(self, name, arguments):
         args = dict(arguments)
+        if name == "joppa_objects" and detail_read(args):
+            # A sparse default detail omits comments, files and references. Name the fields.
+            args["fields"] = list(DETAIL_FIELDS)
         result = self.raw_call(name, args)
         if name == "joppa_objects" and args.get("address") and "," not in args["address"] and not args.get("history"):
             result = complete_object(self.raw_call, args, result)
@@ -165,15 +168,20 @@ class Reader:
         if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
             obj = context.object_read(self.api, args["workspace"], address)
-            observed = normalize_detail(args, result)
-            if obj.get("document") != observed.get("document") or obj.get("current_revision") != observed.get("current_revision"):
-                raise MCPError("Joppa object changed before its planning snapshot")
+            # A selected or cursor-only read can omit the document. Compare it when the reply carries it.
+            if "document" in result or "data" in result:
+                observed = normalize_detail(args, result)
+                if (obj.get("document") != observed.get("document")
+                        or obj.get("current_revision") != observed.get("current_revision")):
+                    raise MCPError("Joppa object changed before its planning snapshot")
             if isinstance(result.get("comments"), dict):
                 comments = obj.get("annotations", {}).get("comments", {})
                 if (result["comments"].get("total", len(comments)) != len(comments)
                         or any(comments.get(comment["id"]) != comment for comment in result["comments"].get("items", []))):
                     raise MCPError("Joppa comments changed before their planning snapshot")
-            elif not result.get("annotations", {}).get("comments") and obj.get("annotations", {}).get("comments"):
+            # A sparse read without comments says nothing about them. The snapshot reads them itself.
+            elif ("annotations" in result and not result["annotations"].get("comments")
+                  and obj.get("annotations", {}).get("comments")):
                 raise MCPError("Joppa comments changed before their planning snapshot")
             context.capture_object(self.target, args["workspace"], obj, self.api)
         return result

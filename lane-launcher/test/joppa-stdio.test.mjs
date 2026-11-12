@@ -55,7 +55,7 @@ test('host MCP reads need no bearer file and a lost write is never repeated', as
   assert.equal(calls.filter(call => call.name === 'lost_write').length, 1);
 });
 
-for (const flat of [false, true]) test(`native checkpoints and compact agent snapshots; flat=${flat}`, async t => {
+for (const [flat, sparse] of [[false, false], [true, false], [true, true]]) test(`native checkpoints and compact agent snapshots; flat=${flat} sparse=${sparse}`, async t => {
   const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
   const object = {address: 'work:one', kind: 'work', historical: false, current_revision: 3, position: 4,
     document: {revision: 3, present: true, parent: null, links: [{blocking: false, relation: 'related', revision: null, target: 'criterion:a'}],
@@ -68,7 +68,7 @@ for (const flat of [false, true]) test(`native checkpoints and compact agent sna
   Object.assign(object.annotations.comments.c26, {actor: 'worker', actor_type: 'agent', text: [
     'CREW_RECOVERY_CHECKPOINT', 'Task: work:one', `Digest: ${digest}`, 'Ref: refs/heads/recovery/checkpoint',
     `SHA: ${'a'.repeat(40)}`, `Tree: ${'b'.repeat(40)}`, `Base: ${'c'.repeat(40)}`, 'Node: implement_code'].join('\n')});
-  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, objects: {'work:one': object}}));
+  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat, sparse, objects: {'work:one': object}}));
   const result = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls});
   assert.equal(Object.keys(result.annotations.comments).length, 31);
@@ -95,6 +95,10 @@ args={'workspace':'sample','address':'work:one'}
 assert len(api.call('joppa_objects',args)['annotations']['comments'])==31
 reader=Reader(api,'sample',Path(sys.argv[3]))
 page=reader.call('joppa_objects',{**args,'verbose':True})
+if sys.argv[4]=='true':
+    # iter49: the agent's own default read has no comments. The planning snapshot still reads them.
+    assert 'comments' not in page
+    page=reader.call('joppa_objects',{**args,'fields':['comments']})
 assert len(page['comments']['items'])==25
 assert page['comments']['next_cursor']=='25'
 assert not page.get('annotations',{}).get('comments')
@@ -105,7 +109,7 @@ assert len(saved['annotations']['comments'])==30
 assert 'c30' in saved['annotations']['comments']
 api.stdio.close()
 `;
-  const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls), f.root],
+  const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls), f.root, String(sparse)],
     {encoding: 'utf8', timeout: 10_000});
   assert.equal(python.status, 0, python.stderr);
   const operations = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse);
@@ -118,6 +122,12 @@ api.stdio.close()
   const stable = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls});
   assert.equal(Object.keys(stable.annotations.comments).length, 31);
+  if (sparse) {
+    const reads = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse)
+      .filter(call => call.name === 'joppa_objects' && call.arguments.address === object.address && !call.arguments.revision);
+    assert(reads.at(-1).arguments.fields.includes('comments') && reads.at(-1).arguments.fields.includes('present'));
+    assert(!reads.at(-1).arguments.fields.includes('current_revision'));
+  }
   const historical = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address, revision: 3}, {mcpCommand: calls});
   assert.equal(historical.contract_revision, undefined);
@@ -125,6 +135,47 @@ api.stdio.close()
   fs.writeFileSync(stateFile, JSON.stringify(state));
   await assert.rejects(callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
     {workspace: 'sample', address: object.address}, {mcpCommand: calls}), /changed during comment read/);
+});
+
+test('sparse iter49 detail keeps archived state, remote links and test result evidence', async t => {
+  const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
+  const result = {status: 'passed', address: 'suite > case', commit: 'a'.repeat(40)};
+  const remote = [{workspace: 'other', target: 'ac:x', revision: 2, status: {access: true, present: true}}];
+  const object = {address: 'check:one', kind: 'check', historical: false, current_revision: 5,
+    document: {revision: 5, present: false, parent: 'criterion:a', links: [], data: {title: 'suite > case'}},
+    status: {tone: 'purple', label: 'Archived'}, result, remote_links: remote, remote_links_revision: 3,
+    process: {}, annotations: {comments: {n1: {actor: 'owner', text: 'Evidence', withdrawn: false}}}, files: [], references: []};
+  fs.writeFileSync(stateFile, JSON.stringify({compact: true, flat: true, sparse: true, objects: {'check:one': object}}));
+  const detail = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: object.address}, {mcpCommand: calls});
+  assert.equal(detail.document.present, false);
+  assert.deepEqual(detail.result, result);
+  assert.deepEqual(detail.remote_links, remote);
+  assert.equal(detail.remote_links_revision, 3);
+  assert.deepEqual(detail.status, {tone: 'purple', label: 'Archived'});
+  assert.deepEqual(detail.files, []);
+  assert.equal(detail.annotations.comments.n1.text, 'Evidence');
+  assert.equal(Object.hasOwn(detail, 'status.label'), false);
+  const folder = fileURLToPath(new URL('../../planning-joppa/', import.meta.url));
+  const code = `import sys,json
+sys.path.insert(0,sys.argv[1])
+from pathlib import Path
+sys.path.insert(0,str(Path(sys.argv[1]).parent/'planning'))
+from mcp import Joppa
+api=Joppa('https://service.invalid/mcp',mcp_command=json.loads(sys.argv[2]))
+detail=api.call('joppa_objects',{'workspace':'sample','address':'check:one'})
+assert detail['document']['present'] is False
+assert detail['result']['status']=='passed' and detail['result']['commit']=='a'*40
+assert detail['remote_links'][0]['target']=='ac:x' and detail['remote_links_revision']==3
+assert detail['status']=={'tone':'purple','label':'Archived'} and detail['files']==[] and detail['references']==[]
+assert detail['annotations']['comments']['n1']['text']=='Evidence'
+api.stdio.close()
+`;
+  const python = spawnSync(process.env.PLANNING_PYTHON || 'python3', ['-c', code, folder, JSON.stringify(calls)],
+    {encoding: 'utf8', timeout: 10_000});
+  assert.equal(python.status, 0, python.stderr);
+  const reads = fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse);
+  assert(reads.every(call => call.arguments.fields?.includes('present') && call.arguments.fields.includes('result')));
 });
 
 test('normal landing rechecks native MCP dependencies before pushing', t => {

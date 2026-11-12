@@ -56,6 +56,15 @@ for await(const line of createInterface({input:process.stdin})) {
     if(value.remote_links_revision===0) delete value.remote_links_revision;
     if(value.annotations) delete value.annotations;
    }
+   if(state.sparse && r.params.name==='joppa_objects' && value) {
+    // iter49: a default detail omits comments, files and references; a cursor alone gives only the comment page.
+    // fields selects only the named keys: status is the tone, an absent key is null.
+    const args=r.params.arguments;
+    if(args.fields) value=Object.fromEntries(args.fields.map(f=>[f,f==='status'?value.status?.tone??null:
+      f==='status.label'?value.status?.label??null:value[f]??null]));
+    else if(args.comments_cursor) value={comments:value.comments};
+    else for(const key of ['comments','files','references','child_counts']) delete value[key];
+   }
    result=value?{structuredContent:value}:{isError:true,structuredContent:{error:'Object unavailable'}};
   }
  }
