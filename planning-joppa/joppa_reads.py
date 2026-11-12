@@ -31,9 +31,10 @@ OPTIONAL_KEYS = ("process", "result", "remote_links", "remote_review_required", 
 
 
 def detail_read(args):
+    """A current single detail. A revision read keeps the native historical detail with its current_revision."""
     address = args.get("address")
     return (isinstance(address, str) and "," not in address and not args.get("history") and not args.get("relations_of")
-            and not args.get("in_relation") and not args.get("fields"))
+            and not args.get("in_relation") and not args.get("fields") and not args.get("revision"))
 
 
 def normalize_detail(args, value):

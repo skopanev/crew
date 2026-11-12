@@ -178,6 +178,24 @@ api.stdio.close()
   assert(reads.every(call => call.arguments.fields?.includes('present') && call.arguments.fields.includes('result')));
 });
 
+test('a revision read keeps the native historical detail; a current read names its fields', async t => {
+  const f = fixture(t), stateFile = path.join(f.root, 'state.json'), calls = [...f.command, stateFile];
+  fs.writeFileSync(stateFile, JSON.stringify({sparse: true, objects: {'work:a':
+    {revision: 1, current_revision: 5, parent: 'ac:a', data: {title: 'Old'}}}}));
+  const old = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: 'work:a', revision: 1}, {mcpCommand: calls});
+  assert.deepEqual([old.current_revision, old.historical, old.document.data.title], [5, true, 'Old']);
+  const reads = () => fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(Object.hasOwn(reads().at(-1).arguments, 'fields'), false);
+  fs.writeFileSync(stateFile, JSON.stringify({sparse: true, objects: {'work:a':
+    {revision: 5, parent: 'ac:a', data: {title: 'New'}, present: true}}}));
+  const current = await callJoppa('https://service.invalid/mcp', undefined, 'joppa_objects',
+    {workspace: 'sample', address: 'work:a'}, {mcpCommand: calls});
+  assert.deepEqual([current.current_revision, current.historical], [5, false]);
+  assert(reads().at(-1).arguments.fields.includes('present'));
+  assert(!reads().at(-1).arguments.fields.includes('current_revision'));
+});
+
 test('normal landing rechecks native MCP dependencies before pushing', t => {
   const f = fixture(t), stateFile = path.join(f.root, 'state.json');
   const command = [...f.command, stateFile];

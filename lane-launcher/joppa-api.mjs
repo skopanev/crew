@@ -65,8 +65,9 @@ export const DETAIL_FIELDS = Object.freeze(['revision', 'parent', 'data', 'prese
   'process', 'relations', 'references', 'comments', 'files', 'remote_links', 'remote_review_required',
   'remote_links_revision', 'result']);
 
+// A revision read keeps the native historical detail: it carries current_revision, which the selection omits.
 const detailRead = args => args.address && !args.address.includes(',') && !args.history && !args.relations_of &&
-  !args.in_relation && !args.fields;
+  !args.in_relation && !args.fields && !args.revision;
 
 export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
   if (tool === 'joppa_objects' && detailRead(arguments_)) {

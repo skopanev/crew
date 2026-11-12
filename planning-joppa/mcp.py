@@ -7,7 +7,8 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail
+from joppa_reads import (DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail,
+                         relation_links)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -168,12 +169,8 @@ class Reader:
         if self.target is not None and address and not args.get("revision") and not args.get("history"):
             import context
             obj = context.object_read(self.api, args["workspace"], address)
-            # A selected or cursor-only read can omit the document. Compare it when the reply carries it.
-            if "document" in result or "data" in result:
-                observed = normalize_detail(args, result)
-                if (obj.get("document") != observed.get("document")
-                        or obj.get("current_revision") != observed.get("current_revision")):
-                    raise MCPError("Joppa object changed before its planning snapshot")
+            if snapshot_drift(result, obj):
+                raise MCPError("Joppa object changed before its planning snapshot")
             if isinstance(result.get("comments"), dict):
                 comments = obj.get("annotations", {}).get("comments", {})
                 if (result["comments"].get("total", len(comments)) != len(comments)
@@ -185,6 +182,22 @@ class Reader:
                 raise MCPError("Joppa comments changed before their planning snapshot")
             context.capture_object(self.target, args["workspace"], obj, self.api)
         return result
+
+
+def snapshot_drift(result, obj):
+    """Compare only the fields a reply returned with the fresh snapshot. An omitted field is not invented."""
+    if "document" in result:
+        observed = normalize_detail({"address": obj["address"]}, result)
+        return obj.get("document") != observed.get("document") or obj.get("current_revision") != observed.get("current_revision")
+    document = obj["document"]
+    returned = {
+        "revision": lambda value: value == obj.get("current_revision"),
+        "parent": lambda value: value == document.get("parent"),
+        "data": lambda value: value == document.get("data"),
+        "present": lambda value: value is None or value == document.get("present"),
+        "relations": lambda value: relation_links(value) == document.get("links", []),
+    }
+    return any(key in result and not same(result[key]) for key, same in returned.items())
 
 
 def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
