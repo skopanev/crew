@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from provider_fixture import assignment, hold, hold, end
+from provider_fixture import assignment, hold, hold, end, item
 from test_generic_lifecycle import Server, raw
 
 
@@ -65,18 +65,32 @@ class PlanningFenceTests(unittest.TestCase):
                 sent.append(arguments["operations"])
                 return {"results": [{} for _ in arguments["operations"]]}
             (target / "claim.json").write_text("{}")
+            # The AC and its Requirement have no unmet dependency.
+            objects = {"criterion:a": deepcopy(ac), "rule:r": item("rule:r")}
+            class Dependencies:
+                def call(self, name, args):
+                    if name == "joppa_tree":
+                        return {"schema": {"types": {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}}}}
+                    return deepcopy(objects[args["address"]])
+            api = Dependencies()
             with patch.object(reader_context.claims, "owned"), patch.object(reader_context, "run", return_value=""), \
                  patch.object(reader_context.publication, "mutate", side_effect=mutate), \
                  patch.object(reader_context, "signal"):
                 hold(task, "WORKTREE_PREEXISTED: detail")
-                self.assertFalse(reader_context.retry_startup(None, config, target, data, ac, '"assess"'))
+                self.assertFalse(reader_context.retry_startup(api, config, target, data, ac, '"assess"'))
                 hold(task, "WORKTREE_PREEXISTED")
                 task["document"]["data"]["assignee"] = "lane-1"
                 with self.assertRaisesRegex(ValueError, "claimed Tasks"):
-                    reader_context.retry_startup(None, config, target, data, ac, '"assess"')
+                    reader_context.retry_startup(api, config, target, data, ac, '"assess"')
                 self.assertEqual(sent, [])
                 del task["document"]["data"]["assignee"]
-                self.assertTrue(reader_context.retry_startup(None, config, target, data, ac, '"assess"'))
+                objects["criterion:a"]["document"]["links"] = [
+                    {"target": "rule:r", "revision": 3, "relation": "depends_on", "blocking": True}]
+                with self.assertRaisesRegex(ValueError, "requires a ready AC"):
+                    reader_context.retry_startup(api, config, target, data, ac, '"assess"')
+                self.assertEqual(sent, [])
+                objects["criterion:a"]["document"]["links"] = []
+                self.assertTrue(reader_context.retry_startup(api, config, target, data, ac, '"assess"'))
             operations = [entry["command"] for entry in sent[0]]
             self.assertEqual([(entry["op"], entry.get("target") or entry["kind"] + ":" + entry["id"]) for entry in operations],
                              [("save_object", "work:old"), ("save_object", "criterion:a")])

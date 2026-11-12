@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from common import strings, read, require, text
 from mcp import Rejected, complete_object
-from context_snapshot import source, snapshot_source, selected_criteria, unchanged
+from context_snapshot import source, snapshot_source, selected_criteria, unchanged, current_pin, remote_satisfied
 
 
 def object_read(api, workspace, address, allow_archived=False):
@@ -16,6 +16,46 @@ def object_read(api, workspace, address, allow_archived=False):
     require(present is True or allow_archived and present is False, f"object is absent: {address}")
     require(result.get("historical") is False, f"current object required: {address}")
     return result
+
+def target_completed(target, types):
+    """An archived target, a done Task or a green target meets a blocking depends_on."""
+    if target["document"].get("present") is False:
+        return True
+    status = target.get("status")
+    tone = status.get("tone") if isinstance(status, dict) else status
+    return (types.get(target["kind"], {}).get("role") == "task"
+            and target["document"]["data"].get("stage") == "done") or tone == "green"
+
+
+def dependency_ready(api, workspace, types, address, objects):
+    """Joppa no longer reports readiness. Check the node and its ancestors: every blocking local depends_on needs
+    a completed target, every blocking remote link its satisfied Joppa status. objects memoizes current reads."""
+    def full(address):
+        if address not in objects:
+            objects[address] = object_read(api, workspace, address, allow_archived=True)
+        return objects[address]
+    node, seen = full(address), set()
+    while node:
+        require(node["address"] not in seen, "parent cycle in dependency check")
+        seen.add(node["address"])
+        if node["document"].get("present") is not True:
+            return False
+        if any(link.get("blocking") is True and not remote_satisfied(link) for link in node.get("remote_links", [])):
+            return False
+        links = [link for link in node["document"].get("links", [])
+                 if link.get("relation") == "depends_on" and link.get("blocking") is True]
+        targets = [full(link["target"]) for link in links]
+        # A completion or metadata write advances the target revision. A pin only has to stay within it.
+        for link, target in zip(links, targets):
+            revision = link.get("revision")
+            require(revision is None or current_pin(revision, target["current_revision"], 1),
+                    f"invalid linked revision on {node['address']}: {link['target']}")
+        if not all(target_completed(target, types) for target in targets):
+            return False
+        parent = node["document"].get("parent")
+        node = full(parent) if parent else None
+    return True
+
 
 def read_remote_links(api, remote, object):
     for link in object.get("remote_links", []):

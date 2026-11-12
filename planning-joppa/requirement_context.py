@@ -1,8 +1,8 @@
 """Planning context helpers."""
 import json
 from common import require
-from context_reads import object_read, read_remote_links, remote_snapshot
-from context_snapshot import source, current_pin, remote_satisfied, snapshot_source
+from context_reads import dependency_ready, object_read, read_remote_links, remote_snapshot
+from context_snapshot import source, snapshot_source
 from test_nodes import identities, read_nodes, tone
 from joppa_reads import assignee, blocked, done, ended
 import coverage
@@ -66,28 +66,13 @@ def load_requirement(api, config, req_id, selected=None):
         # Landed work without a live failure waits for acceptance. Planning again would repeat it.
         completed = any(done(item) for item in own) and not failures
         if ((not config.get("ac_ids") or address in config["ac_ids"])
-                and ac.get("work_ready") is True and not completed
+                and not completed
                 and not ac["document"]["data"].get("hold")
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
                 and len(failures) == len(work)):
             candidates.append(address)
-    def ready(address):
-        """Joppa work_ready decides local ordering. Check only remote blockers and authored link input."""
-        object, seen = get(address), set()
-        while object:
-            require(object["address"] not in seen, "parent cycle in Requirement context")
-            seen.add(object["address"])
-            if any(link.get("blocking") is True and not remote_satisfied(link)
-                   for link in object.get("remote_links", [])):
-                return False
-            for link in object["document"].get("links", []):
-                revision = link.get("revision")
-                require(link.get("relation") != "depends_on" or link.get("blocking") is not True or revision is None
-                        or current_pin(revision, revision, 1), f"invalid linked revision on {object['address']}")
-            parent = object["document"].get("parent")
-            object = get(parent) if parent else None
-        return True
-    candidates = [address for address in candidates if ready(address)]
+    reads = {}
+    candidates = [address for address in candidates if dependency_ready(api, workspace, types, address, reads)]
     if selected is not None:
         require(set(selected).issubset(candidates), "selected criterion is no longer ready for Requirement planning")
         candidates = list(selected)

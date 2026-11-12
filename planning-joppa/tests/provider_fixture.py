@@ -29,7 +29,7 @@ def item(address, parent=None, data=None, process=None, role=None):
             "current_revision": 3, "document": {"present": True, "data": data or {"title": address, "owner": "owner"},
              "parent": parent, "links": [], "revision": 3, "actor": "document-owner", "position": 10},
             "process": process or {}, "annotations": {"comments": []}, "files": [], "references": [],
-            "position": 20, "historical": False, "work_ready": True,
+            "position": 20, "historical": False,
             "status": {"tone": "orange", "label": "No tests"}}
 
 CHECK_TYPE = {"role": "test", "parents": ["criterion"], "title_max_length": 400}

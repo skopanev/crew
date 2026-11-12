@@ -6,7 +6,7 @@ def source(object):
     """Ignore journal position. Keep meaningful state."""
     process = dict(object.get("process", {}))
     value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
-                                            "files", "references", "work_ready")} | {"process": process}
+                                            "files", "references")} | {"process": process}
     if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
         value["remote_links"] = object.get("remote_links", [])
         value["remote_links_revision"] = object.get("remote_links_revision", 0)
@@ -57,7 +57,6 @@ def snapshot_source(object, types, selected_ac=None):
     if role == "task" or (role == "ac" and selected_ac is not None and object["address"] not in selected):
         # Sibling execution state does not change the authored planning context.
         current.pop("process")
-        current.pop("work_ready")
     if role == "task":
         annotations = dict(current.get("annotations") or {})
         comments = annotations.get("comments")

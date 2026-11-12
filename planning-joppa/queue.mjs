@@ -52,7 +52,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const covers = coversReference(config, schema, kinds('task'));
   const criteria = [];
   for await (const page of nodePages(read, {kind: kinds('ac'),
-    fields: ['title', 'kind', 'parent', 'revision', 'status', 'work_ready', 'data.assignee', 'data.hold']})) {
+    fields: ['title', 'kind', 'parent', 'revision', 'status', 'data.assignee', 'data.hold']})) {
     criteria.push(...page.items);
   }
   const requirementOf = new Map(criteria.map(row => [row.address, row.parent]));
@@ -82,7 +82,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     }
   }
   for (const row of criteria) {
-    if (ids && !ids.includes(row.address) || row.work_ready !== true || nodeAssignee(row) || nodeWaiting(row) ||
+    if (ids && !ids.includes(row.address) || nodeAssignee(row) || nodeWaiting(row) ||
         active.has(row.address)) continue;
     if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
     const failures = (blocked.get(row.address) || []).sort();
