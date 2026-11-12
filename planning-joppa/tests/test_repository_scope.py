@@ -76,6 +76,9 @@ class RepositoryScopeTests(unittest.TestCase):
                 {"address": "work:malformed", "body": "Goal: Malformed", "repository": "service", "steps": "not a list"},
                 # A stale row: the current detail moved this Task to another repository.
                 {"address": "work:moved", "body": "Repository: service", "repository": None, "steps": None},
+                # A list row gives absent keys as null. The detail decides: a steps key, even null, makes it structured.
+                {"address": "work:nullsteps", "body": "Goal: Null steps", "repository": "service", "steps": None},
+                {"address": "work:plain", "body": "Goal: Plain", "repository": "service", "steps": None},
                 {"address": "work:last", "body": free, "repository": None, "steps": None}]
         details = {"work:structured": raw("work:structured", {"title": "Structured", **fields}),
                    "work:free": raw("work:free", {"title": "Free", "body": free}),
@@ -83,6 +86,9 @@ class RepositoryScopeTests(unittest.TestCase):
                    "work:malformed": raw("work:malformed", {"title": "Malformed", "body": "Goal: Malformed",
                                                             "repository": "service", "steps": "not a list"}),
                    "work:moved": raw("work:moved", {"title": "Moved", "body": "Repository: elsewhere"}),
+                   "work:nullsteps": raw("work:nullsteps", {"title": "Null steps", "body": "Goal: Null steps",
+                                                            "repository": "service", "steps": None}),
+                   "work:plain": raw("work:plain", {"title": "Plain", "body": "Goal: Plain", "repository": "service"}),
                    "work:last": raw("work:last", {"title": "Last", "body": free})}
         calls = []
         class Lists:
@@ -95,12 +101,13 @@ class RepositoryScopeTests(unittest.TestCase):
         result = context.pending_work(Lists(), config, data)
         self.assertEqual([(entry["address"], entry["repository"]) for entry in result],
                          [("work:structured", "service"), ("work:free", "service"), ("work:both", "service"),
-                          ("work:malformed", "service"), ("work:last", "service")])
+                          ("work:malformed", "service"), ("work:nullsteps", "service"), ("work:last", "service")])
         malformed = next(entry for entry in result if entry["address"] == "work:malformed")
         self.assertIn("contract_error", malformed)
         self.assertNotIn("contract_error", result[0])
         self.assertEqual([args["address"] for args in calls if args.get("address")],
-                         ["work:structured", "work:free", "work:both", "work:malformed", "work:moved", "work:last"])
+                         ["work:structured", "work:free", "work:both", "work:malformed", "work:moved",
+                          "work:nullsteps", "work:plain", "work:last"])
         listed = [args for args in calls if not args.get("address")]
         self.assertTrue(all("data.projects" not in args["fields"] and "contract" not in args["fields"]
                             for args in listed))

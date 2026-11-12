@@ -144,11 +144,12 @@ def task_contract(data):
                  for number, step in enumerate(steps, 1))
     return "\n".join([*lines, "", "Checks:", *checks])
 
-def repository_declarations(data):
-    """The Repository: lines of a Task, read without validating the rest of its contract."""
+def repository_declarations(data, structured=None):
+    """The Repository: lines of a Task, read without validating the rest of its contract.
+    A structured Task has a steps key, as in the lane. A list row gives absent keys as null: pass structured=True."""
     body = data.get("body", data.get("contract"))
     lines = [body if isinstance(body, str) else ""]
-    if data.get("steps") is not None and isinstance(data.get("repository"), str):
+    if ("steps" in data if structured is None else structured) and isinstance(data.get("repository"), str):
         lines.append(f"Repository: {data['repository']}")
     return [value.strip() for value in re.findall(r"^Repository:[ \t]*(\S[^\r\n]*)$", "\n".join(lines), re.M)]
 
@@ -177,7 +178,7 @@ def pending_work_page(api, config, assignment):
         for task in page["items"]:
             address = task["address"]
             # The Task declares its repository. Only Tasks of a configured repository are this planner's work.
-            if address in visible or not repositories.intersection(repository_declarations(task)):
+            if address in visible or not repositories.intersection(repository_declarations(task, structured=True)):
                 continue
             document = object_read(api, config["workspace"], address, allow_archived=True)
             data = document["document"]["data"]
