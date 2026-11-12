@@ -92,7 +92,8 @@ class ProviderTests(unittest.TestCase):
         kept = merged(data["joppa"]["tasks"][0]["document"]["data"], saved)
         self.assertEqual(kept["owner"], "document-owner")
         self.assertEqual(kept["custom"], "preserve")
-        self.assertEqual(kept["projects"], ["other", "p"])
+        # Crew keeps the existing project references and adds none.
+        self.assertEqual(kept["projects"], ["other"])
         self.assertNotIn("assignee", saved)
         self.assertNotIn("status", saved)
         self.assertNotIn("question_checked", saved)
