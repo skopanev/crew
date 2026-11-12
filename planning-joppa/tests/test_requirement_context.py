@@ -106,8 +106,13 @@ class ProviderTests(unittest.TestCase):
             context.load_requirement(Server(), config, "r")
         resumed, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a"])
         self.assertEqual([entry["id"] for entry in resumed["joppa"]["criteria"]], ["criterion:a"])
+        # An archived depends_on target of any kind completes the dependency.
         objects["criterion:a"]["document"]["links"] = [
             {"target": "criterion:archived", "revision": 3, "relation": "depends_on", "blocking": True}]
+        archived, _, _ = context.load_requirement(Server(), config, "r", ["criterion:a"])
+        self.assertEqual([entry["id"] for entry in archived["joppa"]["criteria"]], ["criterion:a"])
+        # Another relation to an archived non-Task stays refused.
+        objects["criterion:a"]["document"]["links"][0].update(relation="related", blocking=False)
         with self.assertRaisesRegex(ValueError, "object is absent"):
             context.load_requirement(Server(), config, "r", ["criterion:a"])
 
