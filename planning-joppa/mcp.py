@@ -161,6 +161,8 @@ class Reader:
             raise MCPError("Use workspace and a full object address instead of item_id")
         args.setdefault("workspace", self.workspace)
         address = args.get("address") if name == "joppa_objects" else None
+        if isinstance(address, str) and "," in address:
+            return {"items": [self.call(name, {**args, "address": part.strip()}) for part in address.split(",")]}
         if address and ":" not in address:
             raise MCPError("Use a full kind:id object address")
         raw_call = getattr(self.api, "raw_call", self.api.call)

@@ -50,6 +50,28 @@ test('requirement delivery groups mixed inline and structured Task contracts wit
   assert.equal(JSON.stringify(data), before);
 });
 
+for (const data of [{body: 'Record a decision.'},
+  {body: 'External work', repository: 'unknown', steps: [], checks: []},
+  {body: 'Repository: unknown\nRepository: elsewhere'}]) {
+  test(`Requirement delivery skips unrelated sibling scope: ${JSON.stringify(data)}`, async () => {
+    const f = fixture(), sibling = f.add('work:unrelated', 'measure:a', 'open');
+    Object.assign(sibling.document.data, data);
+    const before = structuredClone(sibling);
+    const plan = await requirementPlan(f.run, f.read);
+    assert.equal(plan.final, true);
+    assert.equal(plan.manifest.some(task => task.address === sibling.address), false);
+    assert.deepEqual(sibling, before);
+  });
+}
+
+test('Requirement delivery refuses ambiguity that includes its repository', async () => {
+  const f = fixture(), sibling = f.add('work:ambiguous', 'measure:a', 'open');
+  sibling.document.data.body = 'Repository: repo\nRepository: elsewhere';
+  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous Repository/);
+  f.objects.get('work:one').document.data.body = 'Goal: missing own repository';
+  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous Repository/);
+});
+
 test('compact traversal checks an archived container through its full detail', async () => {
   const f = fixture();
   f.add('group:hidden', 'spec:r').document.present = false;

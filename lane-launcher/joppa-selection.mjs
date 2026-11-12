@@ -3,7 +3,7 @@ import path from 'node:path';
 import {api, claimTasks, runTasks, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {taskBody} from './task-contract.mjs';
+import {repositoryDeclarations} from './task-contract.mjs';
 import {taskInput} from './joppa-input.mjs';
 import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
@@ -37,24 +37,23 @@ export async function occupancyReader(config, worker) {
     return current;
   };
   const group = async (address, allowArchived = false) => {
-    const current = await object(address, {allowArchived});
-    const data = current.document.data, body = taskBody(data);
-    const contract = [typeof body === 'string' ? body : '',
-      ...(Object.hasOwn(data, 'steps') ? [`Repository: ${data.repository}`] : [])].join('\n');
-    const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
-    const configured = declarations.filter(match => config.repositories.some(repo => repo.id === match[1].trim()));
+    const current = await object(address, {allowArchived: true});
+    if (!allowArchived && current.document.present !== true) return null;
+    const declarations = repositoryDeclarations(current.document.data);
+    const configured = declarations.filter(id => config.repositories.some(repo => repo.id === id));
     if (!configured.length) return null;
     check(declarations.length === 1, 'Held Task repository declaration is ambiguous');
-    const repository = configured[0][1].trim(), seen = new Set();
+    const repository = configured[0], seen = new Set();
     let parent = current.document.parent;
     while (parent) {
       check(!seen.has(parent), 'Task parent context contains a cycle');
       seen.add(parent);
-      const context = await object(parent);
+      const context = await object(parent, {allowArchived: true});
+      if (context.document.present !== true) return null;
       if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
       parent = context.document.parent;
     }
-    throw Object.assign(new Error('Task needs a requirement ancestor'), {code: 'CANDIDATE_INVALID'});
+    return null;
   };
   return {object, group};
 }

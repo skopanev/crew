@@ -76,6 +76,38 @@ test('unrelated structured contracts do not need executable steps or checks', as
   assert.equal(f.calls.some(call => call.args.address === 'ac:unavailable'), false);
 });
 
+test('a missing structured repository does not invent a second declaration for an assigned Task', async t => {
+  const f = await packageFixture(t), task = f.objects.get('task:t2');
+  Object.assign(task.document.data, {steps: [], assignee: 'another-run'});
+  const selected = await nextTask(f.run.config);
+  assert.equal(selected.held, 1);
+  assert.equal(selected.candidate, null);
+});
+
+for (const state of ['archived after list', 'without Requirement', 'archived parent']) {
+  for (const phase of ['selection', 'claim guard']) test(`${phase} ignores an assigned Task ${state}`, async t => {
+    const f = await packageFixture(t), task = f.objects.get('task:t2');
+    task.document.data.assignee = 'another-run';
+    if (state === 'archived after list') {
+      let reads = 0;
+      Object.defineProperty(task.document, 'present', {get: () => ++reads === 1});
+    }
+    if (state === 'without Requirement') task.document.parent = null;
+    if (state === 'archived parent') f.objects.get('ac:a2').document.present = false;
+    if (phase === 'selection') {
+      const selected = await nextTask(f.run.config);
+      assert.equal(selected.candidate.id, 'task:t1');
+      assert.equal(selected.held, 0);
+      assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+    } else {
+      f.run.tasks = [f.run.tasks[0]];
+      await claimTask(f.run, f.persist, f.runId);
+      assert.equal(f.run.releaseRequest, undefined);
+      assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 1);
+    }
+  });
+}
+
 test('one token worker claims independent Tasks with separate run assignees', async t => {
   const f = await packageFixture(t), config = f.run.config;
   const requirement = structuredClone(f.objects.get('req:r'));

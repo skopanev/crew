@@ -16,7 +16,7 @@ export async function boundNodes({run, call, report}) {
     for (const item of page.items) {
       if (item.present !== false || !item['data.commit'] || !Array.isArray(item['data.test_bindings'])) continue;
       const task = await read('joppa_objects', {address: item.address});
-      if (taskRepository(task, schema.types) !== run.repository.id) continue;
+      if (taskRepository(task, schema.types, run.repository.id) !== run.repository.id) continue;
       for (const row of task.document.data.test_bindings || []) pairs.set(JSON.stringify([row.ac, row.test]), row);
     }
   }

@@ -1,6 +1,6 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
-import {taskContract, taskBody} from './task-contract.mjs';
+import {repositoryDeclarations} from './task-contract.mjs';
 import {nodeAssignee, nodeHold, nodeWaiting} from './joppa-nodes.mjs';
 
 export const require = (condition, message) => {
@@ -113,11 +113,10 @@ export async function collectRequirementCriteria(requirement, requirementKind, t
   return criteriaByAddress;
 }
 
-export function taskRepository(value, types) {
+export function taskRepository(value, types, expected) {
   require(types[value.kind]?.role === 'task', `Object is not a Task: ${value.address}`);
-  const data = value.document.data;
-  require(data && typeof taskBody(data) === 'string' && taskBody(data).trim(), `Task contract is missing: ${value.address}`);
-  const declarations = [...taskContract(data).matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)].map(match => match[1].trim());
+  const declarations = repositoryDeclarations(value.document.data);
+  if (expected && !declarations.includes(expected)) return null;
   require(declarations.length === 1 && Boolean(declarations[0]) && !/\s/.test(declarations[0]),
     `Task needs an unambiguous Repository line: ${value.address}`);
   return declarations[0];
