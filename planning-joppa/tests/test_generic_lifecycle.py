@@ -172,6 +172,15 @@ class GenericLifecycleTests(unittest.TestCase):
         self.assertEqual(state(present=False), "retired")
         self.assertEqual(state(data={"archived": True}), "open")
 
+    def test_flow_relations_stay_out_of_semantic_links(self):
+        value = raw("work:t", {"title": "t"}, links=[{"target": "work:d", "relation": "depends_on"},
+                                                     {"target": "criterion:a", "relation": "related"}])
+        value["relations"]["lead_flow"] = {"edges": [{"to": "criterion:flow", "title": "Flow neighbour"}]}
+        detail = normalize_detail({"address": "work:t"}, value)
+        self.assertEqual([(link["relation"], link["target"]) for link in detail["document"]["links"]],
+                         [("depends_on", "work:d"), ("related", "criterion:a")])
+        self.assertIn("lead_flow", detail["relations"])
+
     def test_task_list_paginates_and_reports_unfinished_states(self):
         data = assignment()
         fields = publication.contract_fields(plan()["tasks"][0])

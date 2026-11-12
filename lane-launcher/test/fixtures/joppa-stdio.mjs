@@ -47,7 +47,9 @@ for await(const line of createInterface({input:process.stdin})) {
     value={...value,revision:doc.revision,parent:doc.parent,data:doc.data,
       ...(doc.present===false?{present:false}:{}),
       relations:doc.links.reduce((groups,link)=>{(groups[link.relation]||={edges:[]}).edges.push({to:link.target,
-        title:'Current target title',...(link.revision!=null?{revision:link.revision,current_revision:99}:{})});return groups;},{})};
+        title:'Current target title',...(link.revision!=null?{revision:link.revision,current_revision:99}:{})});return groups;},
+        // A display-only flow key. It must not reach links or the contract digest.
+        {lead_flow:{color:'#bc5d52',edges:[{to:'criterion:flow',title:'Flow neighbour'}]}})};
     for(const key of ['address','document','current_revision','position','workspace','workspace_key']) delete value[key];
     if(value.review_required===false) delete value.review_required;
     if(value.work_ready===true) delete value.work_ready;

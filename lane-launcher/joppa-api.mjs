@@ -144,9 +144,11 @@ async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = 
 }
 
 // Local edges arrive as relations {key: {edges: [{to, revision?}]}}. Only depends_on blocks.
+// Only the system keys depends_on and related carry meaning. Flow keys are display only and stay in relations.
 // Remote links of set_remote_links keep their own payload and are not read here.
-const relationLinks = relations => Object.entries(relations || {}).flatMap(([relation, group]) =>
-  (group?.edges || []).map(edge => ({blocking: relation === 'depends_on', relation,
+const SYSTEM_RELATIONS = new Set(['depends_on', 'related']);
+const relationLinks = relations => Object.entries(relations || {}).filter(([relation]) => SYSTEM_RELATIONS.has(relation))
+  .flatMap(([relation, group]) => (group?.edges || []).map(edge => ({blocking: relation === 'depends_on', relation,
     revision: edge.revision ?? null, target: edge.to})));
 
 function normalizeDetail(args, value) {

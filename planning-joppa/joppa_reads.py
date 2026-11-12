@@ -8,12 +8,17 @@ class Rejected(MCPError):
     """The server confirmed that the tool operation failed."""
 
 
+SYSTEM_RELATIONS = ("depends_on", "related")
+
+
 def relation_links(relations):
     """Local edges arrive as relations {key: {edges: [{to, revision?}]}}. Only depends_on blocks.
+    Only the system keys depends_on and related carry meaning. Flow keys are display only and stay in relations.
     Remote links of set_remote_links keep their own payload and are not read here."""
     return [{"blocking": relation == "depends_on", "relation": relation,
              "revision": edge.get("revision"), "target": edge["to"]}
-            for relation, group in (relations or {}).items() for edge in (group or {}).get("edges", [])]
+            for relation, group in (relations or {}).items() if relation in SYSTEM_RELATIONS
+            for edge in (group or {}).get("edges", [])]
 
 
 def normalize_detail(args, value):
