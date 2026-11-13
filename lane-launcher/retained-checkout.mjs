@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {command, readRun, runDirectories} from './runtime.mjs';
-import {api, claimTasks} from './joppa-common.mjs';
+import {api, claimTasks, contractDigest} from './joppa-common.mjs';
+import {heldBy} from './joppa-claims.mjs';
 import {runHoldsTasks} from './joppa-selection.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const sha = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -147,7 +148,10 @@ export async function retainedCheckout(run, dir) {
     const note = prior.run.blockRequest?.operations?.map(({command}) => command)
       .find(command => command.op === 'note' && command.target === run.task);
     const comment = note && object.annotations?.comments?.[note.id];
-    require(object.address === run.task && comment && comment.withdrawn !== true &&
+    // The live Task is current, held by this run's claim and unchanged since that claim.
+    require(object.address === run.task && heldBy(run, object) && contractDigest(object) === claimTasks(run)[0].digest,
+      'the live Task is not held by this claim or changed after it');
+    require(comment && comment.withdrawn !== true &&
       comment.actor === prior.run.joppaWorker?.actor && comment.text === note.text &&
       note.text.includes(`\nRun: ${path.basename(prior.dir)}\n`) && note.text.includes(retainedLine(retained)),
       'Joppa shows no matching failure note for the retained checkout');
@@ -169,6 +173,9 @@ export async function retainedCheckout(run, dir) {
 // Copy the prior reports for prepare. Gate receipts, reviewed snapshots and bindings receipts are never copied.
 export function copyResumeInputs(artifacts, runFolder) {
   const target = path.join(runFolder, 'resume-inputs'), prior = path.join(target, 'prior');
+  // The coder always reads the scout report. No report, no resume.
+  const scout = path.join(artifacts, 'scout.txt');
+  require(exists(scout) && fs.lstatSync(scout).isFile() && fs.statSync(scout).size > 0, 'prior scout.txt is missing or empty');
   fs.mkdirSync(prior, {recursive: true, mode: 0o700});
   const copy = (name, folder) => {
     const source = path.join(artifacts, name);
