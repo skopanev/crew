@@ -38,13 +38,13 @@ case "$mode" in session|stop|query) ;; *) fail "unknown mode: $mode" ;; esac
 
 # Filter values come from the environment through configured names. Nothing is evaluated,
 # and an unset name is an error: a missing filter would widen the read without a word.
-# A mode's filter_env overrides the root map key by key.
+# A mode's filter_env replaces the root map whole; its static filter still merges.
 body="$("$jq_bin" -c --arg mode "$mode" --arg query "$query" '
   def need($key): if (.[$key] | type) == "string" and (.[$key] | length) > 0 then .[$key]
                   else error("config \($key) is missing") end;
   . as $config
   | ($config[$mode] // error("config \($mode) is missing")) as $block
-  | (($config.filter_env // {}) + ($block.filter_env // {})
+  | (($block.filter_env // $config.filter_env // {})
      | to_entries
      | map(.value as $name | (env[$name] // "") as $value
            | if $value == "" then error("filter variable \($name) is unset")
@@ -69,8 +69,8 @@ token_file="$("$jq_bin" -r '.token_file // empty' "$config")"
 token=""
 IFS= read -r token < "$token_file" || true
 # The key goes into curl's config on stdin. It never appears in argv or the environment,
-# and a key that could escape the quoted value is refused instead of sent.
-[[ "$token" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "token_file does not hold one API key"
+# Only a workspace read key is accepted, whoever the caller is.
+[[ "$token" =~ ^jpr_[0-9a-f]{64}$ ]] || fail "token_file does not hold one Joppa read key"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lane-memory.XXXXXX")"
 trap 'rm -rf -- "$tmp"' EXIT
