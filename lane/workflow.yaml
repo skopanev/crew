@@ -1026,18 +1026,12 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
+      Follow your Joppa contract.
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
-      1. In {{var:LANE_WORKTREE}}, read the target with
-         bash /workspace/lane/bin/target.sh {{var:project_dir}}. The failed rebase was aborted;
-         restart git rebase onto origin/<target_branch>.
-      2. Resolve conflicts preserving the ticket's AC and target-branch changes,
-         stage resolved files and complete the rebase.
-      3. Confirm a clean Git status, no unmerged paths, and no rebase state.
-         Run git diff --check origin/<target_branch>...HEAD.
-      4. Write {{var:RUN_ARTIFACTS}}/git-fix-report.txt with resolved files and blockers.
-         Emit OK when the rebase and Git checks pass. Otherwise emit GATE_FAIL.
-         prepare_review runs the tests and lint checks.
+      Worktree: {{var:LANE_WORKTREE}}.
+      Read the target with bash /workspace/lane/bin/target.sh {{var:project_dir}}.
+      Write {{var:RUN_ARTIFACTS}}/git-fix-report.txt.
 
   reject_gate:
     env:

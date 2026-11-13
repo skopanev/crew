@@ -101,19 +101,6 @@
     "stop": {
       "kind": "process",
       "field": "ends_when"
-    },
-    "query": {
-      "kind": "lesson",
-      "filter": {"role": "lane"},
-      "filter_env": {
-        "project": "LANE_MEMORY_PROJECT"
-      },
-      "fields": [
-        "title",
-        "body"
-      ],
-      "limit": 10,
-      "max_chars": 32768
     }
   }
 }
