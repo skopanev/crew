@@ -111,6 +111,20 @@ class PlanningFenceTests(unittest.TestCase):
         self.assertEqual(value["document"]["links"],
                          [{"blocking": True, "relation": "depends_on", "revision": 2, "target": "work:u"}])
 
+    def test_a_fresh_file_download_url_keeps_the_snapshot(self):
+        import context
+        from joppa_reads import normalize_detail
+        types = {"source": {"role": "document"}}
+        def snapshot(url):
+            value = raw("source:s", {"title": "S", "body": "Spec"})
+            value["files"] = [{"id": "f", "hash": "a" * 64, "name": "spec.json", "url": url}]
+            return context.snapshot_source(normalize_detail({"address": "source:s"}, value), types, ["criterion:a"])
+        context.unchanged(snapshot("https://store.invalid/a?X-Amz-Date=1"), snapshot("https://store.invalid/a?X-Amz-Date=2"))
+        changed = snapshot("https://store.invalid/a")
+        changed["files"][0]["hash"] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "context changed"):
+            context.unchanged(snapshot("https://store.invalid/a"), changed)
+
     def test_parent_requirement_revision_bump_from_a_claim_keeps_the_snapshot(self):
         import context
         from joppa_reads import normalize_detail
