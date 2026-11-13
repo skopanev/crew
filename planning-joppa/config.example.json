@@ -15,6 +15,8 @@
     "workspace": "crew",
     "token_file": "/path/to/private/joppa-read-key",
     "root": "requirement:crew-roles",
+    "roles": {"researcher": "crew-planning-researcher", "designer": "crew-planning-designer",
+              "critic": "crew-planning-critic"},
     "filter_env": {"role": "LANE_MEMORY_ROLE", "process": "LANE_MEMORY_PROCESS", "project": "LANE_MEMORY_PROJECT"},
     "session": {"kind": ["process", "rule"], "fields": ["title", "body"]},
     "query": {"kind": "lesson", "fields": ["title", "body"], "limit": 8, "max_chars": 6000,

@@ -32,7 +32,7 @@ def validated(root, repositories):
         (root / repo["path"]).mkdir(parents=True)
     raw_config = {"workspace": "product", "url": "https://joppa.example.invalid/mcp",
                   "mcp_command": ["node", "/opt/broker-joppa-host.cjs"], "runs_folder": str(root / "runs"),
-                  "cbm_store": str(root / "cbm"), "cbm_root": str(root), "context": {"token_file": "key", "session": {}, "query": {}},
+                  "cbm_store": str(root / "cbm"), "cbm_root": str(root), "context": {"token_file": "key", "session": {}, "query": {}, "roles": {"researcher": "r", "designer": "d", "critic": "c"}},
                   "repositories": repositories}
     path = root / "planner.json"
     path.write_text(json.dumps(raw_config))

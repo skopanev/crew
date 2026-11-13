@@ -39,6 +39,7 @@ class ContractTests(unittest.TestCase):
         (folder / "context.json").write_text(json.dumps({
             "url": f"http://127.0.0.1:{self.server.server_port}/api/data", "workspace": "crew",
             "token_file": str(folder / "key"), "root": "requirement:roles",
+            "roles": {"researcher": "crew-planning-researcher", "critic": "crew-planning-critic"},
             "filter_env": {"role": "LANE_MEMORY_ROLE", "process": "LANE_MEMORY_PROCESS", "project": "LANE_MEMORY_PROJECT"},
             "session": {"kind": ["process", "rule"], "fields": ["title", "body"]},
             "query": {"kind": "lesson", "fields": ["title", "body"], "limit": 8,
@@ -60,10 +61,15 @@ class ContractTests(unittest.TestCase):
     def test_a_contract_without_text_or_receipt_is_refused(self):
         self.server.replies.append({"items": [{"address": "process:p", "title": "P", "body": "Text."}]})
         with self.assertRaisesRegex(ValueError, "without address or revision"):
-            contracts.load_contract("designer", "life")
+            contracts.load_contract("researcher", "life")
         self.server.replies.append({"items": [{"address": "process:p", "revision": 2, "title": "P"}]})
         with self.assertRaisesRegex(ValueError, "without text: process:p"):
+            contracts.load_contract("researcher", "life")
+
+    def test_a_role_without_a_configured_process_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "config.context.roles.designer is missing"):
             contracts.load_contract("designer", "life")
+        self.assertEqual(self.server.requests, [])
 
     def test_lessons_may_be_empty(self):
         self.server.replies.append({"workspace": "crew", "position": 7, "items": []})

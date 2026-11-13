@@ -219,6 +219,9 @@ def configuration(path, raw=None):
     require(isinstance(memory, dict) and all(isinstance(memory.get(key), dict) for key in ("session", "query")),
             "config.context needs the session and query blocks")
     text(memory.get("token_file"), "config.context.token_file")
+    from contracts import ROLES
+    for role in ROLES:
+        text((memory.get("roles") or {}).get(role), "config.context.roles." + role)
     if config.get("covers_reference") is not None:
         from coverage import RESERVED
         require(text(config["covers_reference"], "config.covers_reference") not in RESERVED,
