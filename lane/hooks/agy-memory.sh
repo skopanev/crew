@@ -9,13 +9,17 @@ set -uo pipefail
 #                  that starts with "Joppa memory:", because each lesson is delivered once.
 #   Stop           removes the record and lets the agent stop.
 #
-# Every other reply is {}: the hook makes no permission decision.
+# PreToolUse returns decision=allow to continue through AGY's default policy.
+# Other events return {} when they add no context.
 # memory-hook.sh keeps the query, the Joppa read and the lesson deduplication.
 event="${1:-}"
 jq_bin="${JQ_BIN:-jq}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 input="$(cat 2>/dev/null || true)"
-reply() { echo '{}'; }
+reply() {
+  if [[ "$event" = PreToolUse ]]; then echo '{"decision":"allow"}';
+  else echo '{}'; fi
+}
 
 conversation="$("$jq_bin" -r '.conversationId // empty' <<<"$input" 2>/dev/null || true)"
 [[ -n "$conversation" ]] || { reply; exit 0; }

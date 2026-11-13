@@ -233,14 +233,15 @@ class MemoryHookTests(unittest.TestCase):
     def agy(self, event, payload):
         (self.folder / "config.json").write_text(json.dumps(self.config))
         self.env["LANE_MEMORY_CONFIG"] = str(self.folder / "config.json")
-        result = subprocess.run(["bash", str(HOOKS / "agy-memory.sh"), event], input=json.dumps(payload),
+        result = subprocess.run(["bash", str(HOOKS / "agy-memory.sh"), event],
+                                input=payload if isinstance(payload, str) else json.dumps(payload),
                                 env=self.env, capture_output=True, text=True, timeout=30, check=True)
         return json.loads(result.stdout)
 
     def test_agy_records_calls_and_retrieves_once_at_the_next_model_call(self):
         call = lambda command: {"conversationId": "c1", "transcriptPath": "/t",
                                 "toolCall": {"name": "run_command", "args": {"CommandLine": command, "toolSummary": "Run"}}}
-        self.assertEqual(self.agy("PreToolUse", call("bun test life")), {})
+        self.assertEqual(self.agy("PreToolUse", call("bun test life")), {"decision": "allow"})
         self.assertEqual(self.server.requests, [])
         [record] = self.folder.glob("lane-agy-calls.*")
         self.assertEqual(record.stat().st_mode & 0o777, 0o600)
@@ -263,12 +264,16 @@ class MemoryHookTests(unittest.TestCase):
                          [f"step {number}" for number in range(2, 12)])
         self.assertEqual(self.agy("Stop", {"conversationId": "c1"}), {})
         self.assertFalse(record.exists())
-        # A failed retrieval reaches the model as a warning; no conversation stays neutral.
+        # A failed retrieval reaches the model as a warning.
         self.agy("PreToolUse", call("gate"))
         self.server.replies.append((503, {}))
         out = self.agy("PreInvocation", {"conversationId": "c1"})
         self.assertIn("Joppa memory:\nlane memory: retrieval failed: HTTP 503", out["injectSteps"][0]["userMessage"])
-        self.assertEqual(self.agy("PreToolUse", {}), {})
+        self.assertEqual(self.agy("PreToolUse", {}), {"decision": "allow"})
+        self.assertEqual(self.agy("PreToolUse", "{"), {"decision": "allow"})
+        self.assertEqual(self.agy("PreToolUse", {"conversationId": "c1", "toolCall": {
+            "name": "read_file", "args": {"AbsolutePath": "/workspace/reviewer-contract.txt"}}}),
+            {"decision": "allow"})
         self.assertEqual(self.agy("SessionStart", {"conversationId": "c1"}), {})
 
     def test_agy_home_prepares_sign_in_and_wires_hooks_only_for_selected_memory_queries(self):

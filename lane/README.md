@@ -105,7 +105,8 @@ Commands must resolve inside the container. Include the context-loader events wh
 AGY reads its hooks from `$HOME/.gemini/config/hooks.json` in the private container home.
 `agy-home.sh` runs only under `medulla --docker` as a non-root user, so a host run writes nothing.
 It writes that file only when the selected settings run Crew's `lane/hooks/memory-hook.sh` at PreToolUse.
-AGY tool hooks cannot add context. PreToolUse records the last 10 calls of the conversation and makes no permission decision.
+AGY tool hooks cannot add context. PreToolUse records the last 10 calls and returns `decision: allow`.
+This required response continues through AGY's default policy. It does not auto-approve the tool.
 The next PreInvocation runs one memory query for them. Each lesson is delivered once, so it stays in the conversation as a message that starts with `Joppa memory:`.
 Stop removes the record. Other custom commands are not translated for AGY.
 The lane requires AGY. A missing AGY token is prepared once with `broker-agy` in the same home.
