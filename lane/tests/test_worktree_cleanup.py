@@ -15,6 +15,31 @@ WORKTREE = (RUN.parent / 'startup/worktree.sh').read_text()
 
 
 class WorktreeCleanupTests(unittest.TestCase):
+    def test_host_prepared_checkout_requires_the_same_empty_directory_at_both_guards(self):
+        for case in ('owned', 'wrong-owner', 'changed', 'symlink'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                wt = root / 'ticket'
+                wt.mkdir()
+                info = wt.stat()
+                identity = f'{info.st_dev}:{info.st_ino}'
+                if case == 'wrong-owner':
+                    identity = '0:0'
+                if case == 'symlink':
+                    wt.rename(root / 'actual')
+                    wt.symlink_to(root / 'actual', target_is_directory=True)
+                script = 'set -euo pipefail\nsay() { printf "%s\\n" "$*"; }\n' + WORKTREE
+                script += '\ncheck_worktree_directory\n'
+                if case == 'changed':
+                    script += 'printf new > "$worktree/new.txt"\n'
+                script += 'if prepare_worktree_directory; then exit 0; else exit 73; fi\n'
+                result = subprocess.run(['bash', '-c', script], env=dict(os.environ, worktree=str(wt),
+                    worktree_root=str(root), LANE_OWNED_CHECKOUT=identity, LANE_REUSE_HEAD=''),
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0 if case == 'owned' else 2 if case == 'symlink' else 73,
+                                 result.stdout + result.stderr)
+                self.assertTrue(wt.exists())
+
     def test_retained_candidate_refresh_keeps_cache_and_restores_commit_hooks(self):
         for route in ('coder', 'review', 'changed-head', 'dirty'):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:

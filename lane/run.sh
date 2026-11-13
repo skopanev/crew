@@ -131,11 +131,7 @@ else project_dir="$source_root_in/${repo#"$source_root/"}"; fi
 worktree="$worktree_root/$ticket"
 source "$WORKFLOW_DIR/startup/worktree.sh"
 # Retained or foreign work must never be reset by a fresh dispatch.
-[[ ! -L "$worktree_root" && ! -L "$worktree" ]] || {
-  say "run.sh: worktree path is a symlink; startup refused"; exit 2; }
-if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
-  retained_worktree || { say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73; }
-fi
+check_worktree_directory
 LANE_WORKTREE="/workspace/$ticket"
 
 # Docker's medulla.runs_under label carries the stable dispatcher identity,

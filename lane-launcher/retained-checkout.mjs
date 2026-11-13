@@ -67,7 +67,7 @@ export function writerGone(run, checkout) {
 // Record the retained checkout in the failed launch state. Null when it cannot be proven.
 export function recordRetained(run, artifacts) {
   try {
-    if (run.finalizeOnly || run.requirementDelivery || !['target', 'branch'].includes(run.config.delivery) ||
+    if (run.config.discardFailedWorktree === true || run.finalizeOnly || run.requirementDelivery || !['target', 'branch'].includes(run.config.delivery) ||
         !workflowUnchanged(run)) return null;
     const checkout = checkoutPath(run);
     if (!artifacts || !inside(artifacts, run.runFolder) || !exists(checkout) || !writerGone(run, checkout)) return null;
@@ -185,6 +185,7 @@ export function copyResumeInputs(artifacts, runFolder) {
 
 // Put the validated record in the claim and copy the prior reports. Returns LANE_REUSE_HEAD, or '' for no reuse.
 export async function prepareReuse(run, dir, announce, persist) {
+  if (run.config.discardFailedWorktree === true) return '';
   const reuse = await retainedCheckout(run, dir);
   if (reuse.reason) announce(`[lane] RETAINED checkout not reused: ${reuse.reason}`);
   if (!reuse.retained) return '';

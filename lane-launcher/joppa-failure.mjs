@@ -105,7 +105,7 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     return;
   }
   require(objects.every(owned), 'Task holder changed; package outcome not written');
-  if (!preexisting && claims.length === 1 && isImplementTimeout(artifacts)) {
+  if (!preexisting && run.config.discardFailedWorktree !== true && claims.length === 1 && isImplementTimeout(artifacts)) {
     await recoverTimeout(run, stateFile, result, artifacts,
       {claims, currentTasks, verifySavedContexts, checkout, output, persist});
     return;
@@ -116,7 +116,14 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     return;
   }
   result.blocked = true;
-  const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
+  let failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
+  if (!preexisting && run.config.discardFailedWorktree === true) {
+    const panel = path.join(artifacts, 'panel-findings.txt');
+    const review = fs.existsSync(panel) && fs.lstatSync(panel).isFile() &&
+      fs.realpathSync(panel).startsWith(fs.realpathSync(run.runFolder) + path.sep) ? fs.readFileSync(panel, 'utf8') : '';
+    failure += '\nFailed checkout cleanup is configured after Joppa confirms this outcome.' +
+      (review ? '\nReview findings:\n' + review : '');
+  }
   const runId = path.basename(path.dirname(stateFile));
   const code = preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts));
   // Record a clean retained checkout once its writer is gone. A later claim of this Task may reuse it.

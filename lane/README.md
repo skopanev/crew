@@ -29,6 +29,12 @@ Keep custom resume logic in `workflow.yaml`. A sibling script change does not ch
 
 After success, the host removes the private checkout. Reports and logs remain in the run directory.
 Failed runs retain code changes. Empty or unchanged checkouts are removed.
+Set `discardFailedWorktree: true` in the dispatcher config to discard this run's failed checkout after Joppa confirms its outcome.
+The worker creates and records its private directory before launch. A pre-existing directory still gives refusal 73.
+Cleanup removes the checkout and its private local branch. It preserves the run logs, failure notes and review findings.
+This option disables retained reuse and timeout checkpoints. The next claim starts from current inputs and the configured target.
+An uncertain Joppa outcome or an active writer keeps the checkout. A failed removal reports `CHECKOUT_DISCARD_FAILED`.
+Source repositories and remote branches stay unchanged. The default is `false`.
 An eligible retry preserves ignored dependencies and build output, then refreshes the target and runs repository setup.
 It stages only the retained Task changes for a new commit through native hooks.
 Known blockers return to the coder. A missing reviewer without known blockers returns to `prepare_review`.

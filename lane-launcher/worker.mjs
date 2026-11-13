@@ -18,6 +18,7 @@ import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
 import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.mjs';
 import {prepareReuse} from './retained-checkout.mjs';
+import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -136,6 +137,7 @@ try {
   fs.mkdirSync(run.runFolder, {recursive: true});
   // A retained checkout of this Task runs only after validation. Otherwise run.sh refuses it with exit 73.
   const reuseHead = run.finalizeOnly ? '' : await prepareReuse(run, dir, announce, () => save(stateFile, run));
+  const ownedCheckout = prepareDiscardCheckout(run, () => save(stateFile, run));
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
   const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
     input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,
@@ -172,7 +174,7 @@ try {
       LANE_MEMORY_DIR: contextDir || '',
       LANE_HOOKS_DIR: hooksDir || '',
       LANE_WORKFLOW_FILE: laneWorkflow,
-      LANE_CLAIM_FILE: claimFile, LANE_REUSE_HEAD: reuseHead}, detached: true,
+      LANE_CLAIM_FILE: claimFile, LANE_REUSE_HEAD: reuseHead, LANE_OWNED_CHECKOUT: ownedCheckout}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   run.launchPgid = child.pid;
   save(stateFile, run);
@@ -230,6 +232,7 @@ try {
   process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);
   save(stateFile, run);
   // Opt-in test evidence after the completed result is durable. It never changes that result.
+  discardFailedCheckout(run, stateFile, announce);
   if (result.completed) {
     await publishLandedResults({run, stateFile, result, artifacts, announce});
     run.result.testResults = result.testResults;

@@ -6,6 +6,7 @@ import {save, read, runDirectories} from './runtime.mjs';
 import {api, finishTask, noteHeldTask} from './joppa.mjs';
 import {parsePublication, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
+import {removeEmptyDiscardCheckout} from './failed-checkout.mjs';
 
 // Announce the latest failure report and its failed checks. Returns its artifacts folder.
 export function failureDetails(run, announce) {
@@ -92,6 +93,7 @@ export async function finishFinalization({run, dir, stateFile, result, artifacts
 
 // Record the Joppa outcome of claimed Tasks. Returns the final result and artifacts folder.
 export async function recordTaskOutcome({run, stateFile, result, artifacts, announce}) {
+  removeEmptyDiscardCheckout(run, announce);
   try {
     artifacts ||= fs.existsSync(run.runFolder) ? fs.readdirSync(run.runFolder).sort().reverse()
       .map(name => path.join(run.runFolder, name, 'artifacts'))

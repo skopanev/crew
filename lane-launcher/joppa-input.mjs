@@ -112,7 +112,7 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   const modulePath = configuredModule?.path;
   require(modulePath, 'Task module is not configured');
   const modulePaths = configuredModule.paths || [modulePath];
-  const recovery = latestRecovery(config, object, contractDigest(object), contexts);
+  const recovery = config.discardFailedWorktree === true ? null : latestRecovery(config, object, contractDigest(object), contexts);
   return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,
     body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',

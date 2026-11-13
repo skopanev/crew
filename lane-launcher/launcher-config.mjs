@@ -11,6 +11,7 @@ import {defaultWorkflow, validateWorkflow} from './workflow-config.mjs';
 
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
+    discardFailedWorktree: false,
     readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
@@ -30,6 +31,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   }
   if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');
   if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
+  if (typeof config.discardFailedWorktree !== 'boolean') throw new Error('discardFailedWorktree must be true or false');
   if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
   if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
     throw new Error('image must be a Docker image reference');

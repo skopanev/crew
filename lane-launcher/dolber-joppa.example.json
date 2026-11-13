@@ -18,6 +18,7 @@
   "intervalSeconds": 60,
   "launchLanes": false,
   "closeTabOnExit": true,
+  "discardFailedWorktree": false,
   "delivery": "branch",
   "sourceRoot": "/absolute/source-workspace",
   "worktreeRoot": "/absolute/source-workspace/.worktrees",
