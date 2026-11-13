@@ -23,6 +23,7 @@ vars:
   JOPPA_READER_COMMAND_JSON: ''
   FINALIZE_ONLY: 'false'
   LANE_MEMORY_CONFIG: ''
+  LANE_HOOKS_CONFIG: ''
   LANE_MEMORY_scout_ROLE: ''
   LANE_MEMORY_coder_ROLE: ''
   LANE_MEMORY_qa_ROLE: ''
@@ -40,6 +41,7 @@ nodes:
   prepare:
     env:
       LANE_MEMORY_SESSION: 'on'
+      LANE_HOOKS_CONFIG: '{{var:LANE_HOOKS_CONFIG}}'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
       LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_scout_ROLE}}'
       LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'

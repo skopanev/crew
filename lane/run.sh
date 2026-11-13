@@ -220,10 +220,10 @@ if [[ -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
 fi
 unset LANE_JOPPA_MCP_COMMAND_JSON
 cbm_connector="" cbm_project=""
-context_vars=()
 if [[ "${LANE_FINALIZE_ONLY:-false}" != true ]]; then
   source "$WORKFLOW_DIR/startup/cbm.sh"
   source "$WORKFLOW_DIR/startup/context.sh"
+  source "$WORKFLOW_DIR/startup/hooks.sh"
 fi
 
 # Code and Git writes use this ticket directory. Clone happens after claim.
@@ -275,5 +275,5 @@ medulla \
   --var "LANE_SHARED_LOCK_DIR=${shared_lock_dir:+/workspace/$(basename "$shared_lock_dir")}" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
-  ${context_vars[@]+"${context_vars[@]}"} \
+  ${context_vars[@]+"${context_vars[@]}"} ${hooks_vars[@]+"${hooks_vars[@]}"} \
   ${passthrough[@]+"${passthrough[@]}"}

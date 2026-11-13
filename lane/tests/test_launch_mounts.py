@@ -19,7 +19,8 @@ class LaunchMountTests(unittest.TestCase):
             sources = root / 'sources'
             bins = root / 'bin'
             context = root / 'crew-context-fixture'
-            for folder in (tooling / 'lane/bridge', tooling / 'lane-launcher', bins, context,
+            hooks = root / 'crew-hooks-fixture'
+            for folder in (tooling / 'lane/bridge', tooling / 'lane-launcher', bins, context, hooks,
                            sources / 'app/.git', sources / 'infra/.git', sources / 'locks', root / 'cache'):
                 folder.mkdir(parents=True)
             shutil.copy(CREW / 'lane/run.sh', tooling / 'lane/run.sh')
@@ -38,6 +39,7 @@ class LaunchMountTests(unittest.TestCase):
             (context / 'token').chmod(0o600)
             (context / 'config.json').write_text(json.dumps({
                 'roles': {role: f'fixture-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}}))
+            (hooks / 'settings.json').write_text('{"hooks":{}}')
             for name, script in {
                 'docker': '#!/bin/sh\nexit 0\n',
                 'medulla': '#!/usr/bin/env python3\nimport json,os,sys\n'
@@ -51,6 +53,7 @@ class LaunchMountTests(unittest.TestCase):
             env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'],
                        MEDULLA_BRIDGE=str(root / 'bridge'), LANE_RUNS_FOLDER=str(root / 'runs'),
                        LANE_MEMORY_DIR=str(context),
+                       LANE_HOOKS_DIR=str(hooks),
                        LANE_CLAIM_FILE=str(root / 'claim.json'), LANE_SOURCE='joppa',
                        LANE_WORKTREE_ROOT=str(sources / '.worktrees'),
                        TEST_ARGS=str(output), TEST_SYNC=str(root / 'sync.json'))
@@ -82,8 +85,10 @@ class LaunchMountTests(unittest.TestCase):
                     self.assertEqual(mounts, [('--mount', str(sources)),
                                              ('--mount-rw', str(sources / 'locks')),
                                              ('--mount', str(context)),
+                                             ('--mount', str(hooks)),
                                              ('--mount-rw', str(sources / '.worktrees' / ticket))])
                     self.assertIn(f'LANE_MEMORY_CONFIG=/workspace/{context.name}/config.json', launch)
+                    self.assertIn(f'LANE_HOOKS_CONFIG=/workspace/{hooks.name}/settings.json', launch)
                     self.assertIn('LANE_MEMORY_scout_ROLE=fixture-scout', launch)
                     self.assertIn(f'project_dir=/workspace/sources/{repo}', launch)
                     self.assertIn(f'LANE_WORKTREE=/workspace/{ticket}', launch)
