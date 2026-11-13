@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {command, read, require, text, write} from '../audit/common.mjs';
 import {readTools, server} from '../audit/cbm.mjs';
+import {validateContext} from '../lane-launcher/context-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const freshnessRefusal = /(?:^|\n|\[err\]\s+|stderr:\s+)audit: (?:(?:Source|Specification|Cited specification or owner context) changed during audit|Audit rules changed); rerun it\s*$/;
@@ -117,6 +118,7 @@ try {
       repositories: config.repositories.map(({id, cbm_project}) => ({id, cbm_project})), cbm: 'existing shared index'}, null, 2));
     process.exit(0);
   }
+  validateContext(config.context);
   if (interval) {
     const {repeat} = await import('./repeat.mjs');
     await repeat(process.execPath, [fileURLToPath(import.meta.url), configFile, ...args], interval);

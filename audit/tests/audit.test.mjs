@@ -4,9 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import {Worker} from 'node:worker_threads';
+import {createHash} from 'node:crypto';
 import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {confirmed, corrected, findingKey, hash, parseReport, source, validate} from '../common.mjs';
+import {contract} from '../contracts.mjs';
 import {prepare, publish, recheck, verifySearches as verifySpecificationSearches} from '../../audit-joppa/adapter.mjs';
 import {preflight, verifySearches} from '../cbm.mjs';
 
@@ -32,71 +35,140 @@ async function fixture(t) {
     ['measure:private', object('measure:private', {title: 'Owner access', description: 'A non-owner receives refusal.', owner: 'person'}, 'outcome:access')]
   ]);
   const calls = [];
+  const readKey = 'jpr_' + 'c'.repeat(64);
+  const contextStateFile = path.join(root, 'context-state.json');
+  const contextCallsFile = path.join(root, 'context-calls.json');
+  fs.writeFileSync(contextStateFile, JSON.stringify({
+    position: 17,
+    items: [
+      {address: 'canon_note:shared-10', kind: 'canon_note', revision: 3, title: 'Shared Step 10',
+        body: 'Step 10 common rules for every pass.'},
+      {address: 'workflow_spec:inspector', kind: 'workflow_spec', revision: 5, title: 'Inspector Workflow',
+        body: 'Base text replaced per phase.', closing_gate: 'Return valid JSON.',
+        first_pass_text: 'Step 20 audit phase rules.', second_pass_text: 'Step 30 review phase rules.'}
+    ]
+  }));
+  fs.writeFileSync(contextCallsFile, '[]');
+  // A worker thread serves /api/data while contract() blocks the main thread in execFileSync.
+  const dataWorker = new Worker(`
+    const fs = require('node:fs');
+    const http = require('node:http');
+    const {parentPort, workerData} = require('node:worker_threads');
+    const server = http.createServer(async (req, res) => {
+      let body = '';
+      for await (const part of req) body += part;
+      if (req.method !== 'POST' || req.url !== '/api/data') {
+        res.writeHead(404).end();
+        return;
+      }
+      const payload = JSON.parse(body);
+      const recorded = JSON.parse(fs.readFileSync(workerData.callsFile, 'utf8'));
+      recorded.push({auth: req.headers.authorization, body: payload});
+      fs.writeFileSync(workerData.callsFile, JSON.stringify(recorded));
+      if (req.headers.authorization !== 'Bearer ' + workerData.readKey) {
+        res.writeHead(401, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({error: 'unauthorized'}));
+        return;
+      }
+      const state = JSON.parse(fs.readFileSync(workerData.stateFile, 'utf8'));
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({workspace: payload.workspace, position: state.position, items: state.items}));
+    });
+    server.listen(0, '127.0.0.1', () => parentPort.postMessage(server.address().port));
+    parentPort.on('message', () => { server.closeAllConnections?.(); server.close(() => process.exit(0)); });
+  `, {eval: true, workerData: {stateFile: contextStateFile, callsFile: contextCallsFile, readKey}});
+  const dataPort = await new Promise((resolve, reject) => {
+    dataWorker.once('message', resolve);
+    dataWorker.once('error', reject);
+  });
+  t.after(async () => {
+    dataWorker.postMessage('close');
+    await new Promise(resolve => dataWorker.once('exit', resolve));
+  });
   let loseReply = false, rejectBatch = false;
   const server = http.createServer(async (request, response) => {
-    if (request.method === 'DELETE') { response.end(); return; }
-    let body = ''; for await (const part of request) body += part;
-    const rpc = JSON.parse(body);
-    let result;
-    if (rpc.method === 'initialize') result = {protocolVersion: '2025-03-26', capabilities: {}, serverInfo: {name: 'fixture', version: '1'}};
-    else if (rpc.method === 'notifications/initialized') { response.end(); return; }
-    else {
-      const {name, arguments: args} = rpc.params;
-      calls.push({name, args});
-      let value;
-      if (name === 'joppa_tree') value = {schema};
-      else if (name === 'joppa_objects') {
-        if (args.address) value = objects.get(args.address);
-        else {
-          const rows = [...objects.values()].filter(item => !args.kind || item.kind === args.kind)
-            .map(item => ({address: item.address, kind: item.kind, parent: item.document.parent,
-              present: item.document.present, revision: item.current_revision}));
-          const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
-          value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
-            .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
-            ...(end < rows.length ? {next_cursor: String(end)} : {})};
-        }
-      } else if (name === 'joppa_batch') {
-        if (rejectBatch) {
-          response.setHeader('Content-Type', 'application/json');
-          response.end(JSON.stringify({jsonrpc: '2.0', id: rpc.id,
-            result: {isError: true, structuredContent: {error: 'Rejected fixture publication'}}}));
-          return;
-        }
-        value = {results: args.operations.map(({command: op}) => {
-          if (op.op === 'note') {
-            const object = objects.get(op.target);
-            assert(object, 'Evidence comment needs its saved inbox object');
-            assert(!object.annotations?.comments?.[op.id], 'Evidence comment already exists');
-            object.annotations = {comments: {...object.annotations?.comments,
-              [op.id]: {text: op.text, withdrawn: false, actor: 'person'}}};
-            return {command: {op: 'note'}, position: 2};
+    try {
+      if (request.method === 'DELETE') { response.end(); return; }
+      let body = ''; for await (const part of request) body += part;
+      const rpc = JSON.parse(body);
+      let result;
+      if (rpc.method === 'initialize') result = {protocolVersion: '2025-03-26', capabilities: {}, serverInfo: {name: 'fixture', version: '1'}};
+      else if (rpc.method === 'notifications/initialized') { response.end(); return; }
+      else {
+        const {name, arguments: args} = rpc.params;
+        calls.push({name, args});
+        let value;
+        if (name === 'joppa_tree') value = {schema};
+        else if (name === 'joppa_objects') {
+          if (args.address) value = objects.get(args.address);
+          else {
+            const rows = [...objects.values()].filter(item => !args.kind || item.kind === args.kind)
+              .map(item => ({address: item.address, kind: item.kind, parent: item.document.parent,
+                present: item.document.present, revision: item.current_revision}));
+            const start = Number(args.cursor || 0), end = start + Math.min(args.limit || 25, 25);
+            value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
+              .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
+              ...(end < rows.length ? {next_cursor: String(end)} : {})};
           }
-          assert.equal(op.op, 'save_object'); assert.equal(op.kind, 'incoming');
-          assert.equal(op.question_checked, schema.types.incoming.question);
-          assert.ok([...op.data.title].length <= (schema.types.incoming.title_preview_length ?? 64));
-          assert.equal(new Set(op.links.map(link => `${link.target}:${link.relation}`)).size, op.links.length);
-          const checkLimit = value => {
-            if (typeof value === 'string') assert([...value].length <= 1024);
-            else if (value && typeof value === 'object') Object.values(value).forEach(checkLimit);
-          };
-          checkLimit(op.data);
-          const address = `${op.kind}:${op.id}`;
-          objects.set(address, object(address, op.data, op.parent));
-          objects.get(address).document.links = op.links;
-          return {command: {op: 'save_object'}, address, saved_revision: 1};
-        })};
-        if (loseReply) { response.destroy(); return; }
-      } else throw new Error(`Unexpected mutation or tool: ${name}`);
-      result = {content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value};
+        } else if (name === 'joppa_batch') {
+          if (rejectBatch) {
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({jsonrpc: '2.0', id: rpc.id,
+              result: {isError: true, structuredContent: {error: 'Rejected fixture publication'}}}));
+            return;
+          }
+          value = {results: args.operations.map(({command: op}) => {
+            if (op.op === 'note') {
+              const object = objects.get(op.target);
+              assert(object, 'Evidence comment needs its saved inbox object');
+              assert(!object.annotations?.comments?.[op.id], 'Evidence comment already exists');
+              object.annotations = {comments: {...object.annotations?.comments,
+                [op.id]: {text: op.text, withdrawn: false, actor: 'person'}}};
+              return {command: {op: 'note'}, position: 2};
+            }
+            assert.equal(op.op, 'save_object'); assert.equal(op.kind, 'incoming');
+            assert.equal(Object.hasOwn(op, 'question_checked'), false);
+            assert.equal(Object.hasOwn(op, 'links'), false);
+            assert.ok(typeof op.reason === 'string' && op.reason.trim().length > 0);
+            assert.ok([...op.data.title].length <= (schema.types.incoming.title_max_length ?? schema.types.incoming.title_preview_length ?? 64));
+            const edges = op.relations?.related?.edges || [];
+            assert.equal(new Set(edges.map(edge => edge.to)).size, edges.length);
+            const checkLimit = value => {
+              if (typeof value === 'string') assert([...value].length <= 1024);
+              else if (value && typeof value === 'object') Object.values(value).forEach(checkLimit);
+            };
+            checkLimit(op.data);
+            const address = `${op.kind}:${op.id}`;
+            objects.set(address, object(address, op.data, op.parent));
+            objects.get(address).document.links = edges.map(edge => ({target: edge.to,
+              revision: edge.revision ?? null, relation: 'related', blocking: false}));
+            return {command: {op: 'save_object'}, object: {address, revision: 1}};
+          })};
+          if (loseReply) { response.destroy(); return; }
+        } else throw new Error(`Unexpected mutation or tool: ${name}`);
+        result = {content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value};
+      }
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({jsonrpc: '2.0', id: rpc.id, result}));
+    } catch (error) {
+      if (!response.headersSent) response.writeHead(500, {'Content-Type': 'application/json'});
+      response.end(JSON.stringify({error: error.message}));
     }
-    response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({jsonrpc: '2.0', id: rpc.id, result}));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => server.close(resolve)));
+  t.after(() => new Promise(resolve => { server.closeAllConnections?.(); server.close(resolve); }));
   const token = path.join(root, 'user-token'); fs.writeFileSync(token, 'fixture-only');
-  const config = {url: `http://127.0.0.1:${server.address().port}`, token_file: token, workspace: 'fixture', project: 'fixture',
+  const contextToken = path.join(root, 'context-read-key');
+  fs.writeFileSync(contextToken, `${readKey}\n`, {mode: 0o600});
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const context = {url: `http://127.0.0.1:${dataPort}/api/data`, workspace: 'ctx-space', root: 'canon_root:audit',
+    token_file: contextToken, roles: {auditor: 'custom-inspector-role'},
+    filter_env: {role: 'LANE_MEMORY_ROLE', name: 'LANE_MEMORY_PROCESS', project: 'LANE_MEMORY_PROJECT'},
+    session: {kind: ['canon_note', 'workflow_spec'],
+      fields: ['title', 'body', 'closing_gate', 'first_pass_text', 'second_pass_text'], max_chars: 16384},
+    stop: {kind: 'workflow_spec', field: 'closing_gate'},
+    phase_kind: 'workflow_spec', phase_fields: {audit: 'first_pass_text', review: 'second_pass_text'}};
+  const config = {url: baseUrl, token_file: token, workspace: 'fixture', project: 'fixture', context,
     repositories: [{id: 'backend', path: repo, cbm_project: 'backend-index'}], inbox: {kind: 'incoming', owner: 'person'}};
   const input = await prepare(config);
   input.repositories = config.repositories.map(repo => ({...repo, head: source(repo)}));
@@ -105,7 +177,12 @@ async function fixture(t) {
     code: [{repository: 'backend', path: 'access.js', line: 2, quote: '  return true;'}],
     spec: [{address: 'outcome:access', revision: 1, quote: 'Only the owner can read.'}]};
   const report = {inspected: [{repository: 'backend', path: 'access.js'}], limitations: [], findings: [finding]};
-  return {root, repo, config, input, finding, report, objects, calls, schema,
+  const readContextState = () => JSON.parse(fs.readFileSync(contextStateFile, 'utf8'));
+  return {root, repo, config, input, finding, report, objects, calls, readKey, schema,
+    get dataCalls() { return JSON.parse(fs.readFileSync(contextCallsFile, 'utf8')); },
+    contextItems: () => readContextState().items,
+    setContextItems: items => fs.writeFileSync(contextStateFile, JSON.stringify({...readContextState(), items})),
+    setContextPosition: position => fs.writeFileSync(contextStateFile, JSON.stringify({...readContextState(), position})),
     loseReply: () => { loseReply = true; }, rejectBatch: value => { rejectBatch = value; }};
 }
 
@@ -246,7 +323,7 @@ test('two quotations from one specification object produce one link', async t =>
   const finding = {...f.finding, spec: [...f.finding.spec, {...f.finding.spec[0], quote: 'owner can read.'}]};
   validate({...f.report, findings: [finding]}, f.input);
   await publish(f.config, [finding], f.input, path.join(f.root, 'run'));
-  assert.equal(f.calls.find(call => call.name === 'joppa_batch').args.operations[0].command.links.length, 1);
+  assert.equal(f.calls.find(call => call.name === 'joppa_batch').args.operations[0].command.relations.related.edges.length, 1);
 });
 
 test('inbox schema supplies the title limit in Unicode characters', async t => {
@@ -386,6 +463,51 @@ test('CBM preflight rejects an unavailable shared project before agents start', 
   assert.throws(() => preflight(config), /not ready/);
 });
 
+test('contract reads Joppa data with a Read key, splits phase views and ignores workspace position', async t => {
+  const f = await fixture(t);
+  const rules = contract(f.config);
+  assert.equal(f.dataCalls.length, 1);
+  assert.equal(f.dataCalls[0].auth, `Bearer ${f.readKey}`);
+  assert.deepEqual(f.dataCalls[0].body, {
+    root: 'canon_root:audit',
+    workspace: 'ctx-space',
+    kind: ['canon_note', 'workflow_spec'],
+    filter: {role: 'custom-inspector-role', name: 'custom-inspector-role', project: 'fixture'},
+    fields: ['title', 'body', 'closing_gate', 'first_pass_text', 'second_pass_text'],
+    max_chars: 16384
+  });
+  assert.match(rules.audit, /Step 10 common rules/);
+  assert.match(rules.audit, /Step 20 audit phase rules/);
+  assert.match(rules.audit, /closing_gate: Return valid JSON\./);
+  assert.doesNotMatch(rules.audit, /Step 30 review phase rules|Base text replaced|first_pass_text|second_pass_text/);
+  assert.match(rules.review, /Step 10 common rules/);
+  assert.match(rules.review, /Step 30 review phase rules/);
+  assert.match(rules.review, /closing_gate: Return valid JSON\./);
+  assert.doesNotMatch(rules.review, /Step 20 audit phase rules|Base text replaced|first_pass_text|second_pass_text/);
+  assert.deepEqual(rules.record_ids, ['canon_note:shared-10@3', 'workflow_spec:inspector@5']);
+  assert.equal(rules.digest, createHash('sha256').update(`${rules.audit}\n\n${rules.review}`).digest('hex'));
+
+  f.setContextPosition(99);
+  assert.equal(contract(f.config).digest, rules.digest);
+
+  const original = f.contextItems();
+  f.setContextItems(original.filter(item => item.kind !== 'workflow_spec'));
+  assert.throws(() => contract(f.config), /exactly one selected process/);
+  f.setContextItems([...original, {...original[1], address: 'workflow_spec:second'}]);
+  assert.throws(() => contract(f.config), /exactly one selected process/);
+  f.setContextItems([original[0], {...original[1], first_pass_text: '   '}]);
+  assert.throws(() => contract(f.config), /missing the configured first_pass_text/);
+  f.setContextItems([original[0], {...original[1], revision: 0}]);
+  assert.throws(() => contract(f.config), /Audit context is incomplete/);
+  f.setContextItems(original);
+  assert.throws(() => contract({...f.config, context: {...f.config.context,
+    session: {...f.config.context.session, fields: ['title', 'body', 'first_pass_text']}}}),
+  /session\.fields must include both phase fields/);
+  const badToken = path.join(f.root, 'bad-key');
+  fs.writeFileSync(badToken, 'not-a-read-key\n', {mode: 0o600});
+  assert.throws(() => contract({...f.config, context: {...f.config.context, token_file: badToken}}), /workspace Read key/);
+});
+
 test('real Medulla audits, reviews and publishes only confirmed findings', async t => {
   const medulla = execFileSync('which', ['medulla'], {encoding: 'utf8'}).trim();
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -396,18 +518,13 @@ test('real Medulla audits, reviews and publishes only confirmed findings', async
       fs.mkdirSync(bins);
       const report = {...f.report, findings: found ? [mode === 'uncovered' ? uncovered(f) : f.finding] : []};
       fs.writeFileSync(path.join(f.root, 'report.json'), JSON.stringify(report));
-      for (const name of ['codex', 'claude', 'equill', 'cbm']) {
+      for (const name of ['codex', 'claude', 'cbm']) {
         const script = path.join(bins, name);
         fs.writeFileSync(script, `#!${process.execPath}\n` + `
 const fs = require('node:fs');
 const name = require('node:path').basename(process.argv[1]);
 if (name === 'cbm') {
  console.log(JSON.stringify({structuredContent:{status:'ready',project:'backend-index',root_path:require('node:path').join(process.env.CBM_ALLOWED_ROOT,'source')}}));
-} else if (name === 'equill') {
- const role='crew-audit-auditor';
- const records=[{name:role,actor:role},...[10,20,30].map(step=>({process:role,step}))];
- console.log(JSON.stringify({ok:true,content:records.map(x=>JSON.stringify(x)).join('\\n\\n'),
- receipt:{projection:'ready',degraded:false,empty:false},bundle_digest:'fixture',selected_record_ids:['fixture']}));
 } else {
  let prompt=''; process.stdin.on('data', part=>{prompt+=part;});
  process.stdin.resume(); process.stdin.on('end',()=>{
@@ -435,7 +552,7 @@ if (name === 'cbm') {
 `);
         fs.chmodSync(script, 0o755);
       }
-      const configuration = {...f.config, equill_store: f.root, equill_actor: 'fixture',
+      const configuration = {...f.config,
         cbm_root: f.root, cbm_store: f.root, cbm_command: path.join(bins, 'cbm'),
         reader_toml: 'mcp_servers={}', reader_config: '{"mcpServers":{}}', reader_tools: 'Read,Grep,Glob'};
       const configFile = path.join(f.root, 'config.json'); fs.writeFileSync(configFile, JSON.stringify(configuration));
@@ -447,7 +564,7 @@ if (name === 'cbm') {
       const result = await new Promise(resolve => {
         const child = spawn(medulla, args, {cwd: f.root,
           env: {...process.env, PATH: bins + path.delimiter + process.env.PATH,
-            EQUILL_BIN: path.join(bins, 'equill'), MEDULLA_DOCKER: '1', MEDULLA_STREAM: '0',
+            MEDULLA_DOCKER: '1', MEDULLA_STREAM: '0',
             AUDIT_TEST_REPORT: path.join(f.root, 'report.json'), AUDIT_TEST_EVENTS: path.join(f.root, 'events'),
             AUDIT_TEST_PROMPTS: f.root},
           stdio: ['ignore', 'pipe', 'pipe']});
@@ -461,14 +578,18 @@ if (name === 'cbm') {
       assert.equal(outcome.status, 'audited'); assert.equal(outcome.acceptance_verified, false);
       assert.equal(outcome.published.length, found ? 1 : 0);
       assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, found ? 1 : 0);
+      assert.equal(f.dataCalls.length, 2);
+      assert.ok(f.dataCalls.every(call => call.auth === `Bearer ${f.readKey}`));
       assert.deepEqual(fs.readFileSync(path.join(f.root, 'events'), 'utf8').trim().split('\n'), found ? ['codex', 'claude'] : ['codex']);
       const auditPrompt = fs.readFileSync(path.join(f.root, 'codex'), 'utf8');
-      assert.match(auditPrompt, /"step":20/);
-      assert.doesNotMatch(auditPrompt, /"step":30/);
+      assert.match(auditPrompt, /Step 10 common rules/);
+      assert.match(auditPrompt, /Step 20 audit phase rules/);
+      assert.doesNotMatch(auditPrompt, /Step 30 review phase rules/);
       if (found) {
         const reviewPrompt = fs.readFileSync(path.join(f.root, 'claude'), 'utf8');
-        assert.match(reviewPrompt, /"step":30/);
-        assert.doesNotMatch(reviewPrompt, /"step":20/);
+        assert.match(reviewPrompt, /Step 10 common rules/);
+        assert.match(reviewPrompt, /Step 30 review phase rules/);
+        assert.doesNotMatch(reviewPrompt, /Step 20 audit phase rules/);
         assert.match(reviewPrompt, /Start with CBM search_graph or search_code.*backend-index/);
       }
     });
@@ -476,30 +597,30 @@ if (name === 'cbm') {
 });
 
 test('finish rejects stale inputs before any inbox write', async t => {
-  for (const changed of ['source', 'specification']) await t.test(changed, async t => {
+  for (const changed of ['source', 'specification', 'rules']) await t.test(changed, async t => {
     const f = await fixture(t), run = path.join(f.root, 'run'), artifacts = path.join(run, 'artifacts');
     fs.mkdirSync(artifacts, {recursive: true});
-    const equill = path.join(f.root, 'equill');
-    const role = 'crew-audit-auditor';
-    const records = [{name: role}, ...[10, 20, 30].map(step => ({process: role, step}))];
-    const reply = {ok: true, content: records.map(JSON.stringify).join('\n\n'), bundle_digest: 'fixture',
-      receipt: {projection: 'ready'}, selected_record_ids: ['fixture']};
-    fs.writeFileSync(equill, `#!${process.execPath}\nconsole.log(${JSON.stringify(JSON.stringify(reply))});\n`, {mode: 0o755});
-    const config = {...f.config, equill_store: f.root, equill_actor: 'fixture'};
     const configFile = path.join(f.root, 'config.json');
-    fs.writeFileSync(configFile, JSON.stringify(config));
-    for (const [name, value] of Object.entries({'input.json': f.input, 'config-digest.json': hash(config),
-      'contract.json': {digest: 'fixture'}, 'findings.json': f.report,
+    fs.writeFileSync(configFile, JSON.stringify(f.config));
+    const initialRules = contract(f.config);
+    for (const [name, value] of Object.entries({'input.json': f.input, 'config-digest.json': hash(f.config),
+      'contract.json': initialRules, 'findings.json': f.report,
       'review.json': {verdicts: [{id: f.finding.id, verdict: 'confirmed', reason: 'Verified'}]}})) {
       fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value));
     }
+    f.setContextPosition(88);
     if (changed === 'source') execFileSync('git', ['-C', f.repo, '-c', 'user.name=fixture',
       '-c', 'user.email=fixture@invalid', 'commit', '--allow-empty', '-qm', 'advance source']);
-    else f.objects.get('outcome:access').current_revision++;
+    else if (changed === 'specification') f.objects.get('outcome:access').current_revision++;
+    else {
+      const items = f.contextItems();
+      items[1].second_pass_text = 'Updated review phase rules.';
+      f.setContextItems(items);
+    }
     f.calls.length = 0;
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(new URL('../stages.mjs', import.meta.url)), 'finish'],
-        {env: {...process.env, MEDULLA_RUN_DIR: run, AUDIT_CONFIG: configFile, EQUILL_BIN: equill,
+        {env: {...process.env, MEDULLA_RUN_DIR: run, AUDIT_CONFIG: configFile,
           AUDIT_ADAPTER: fileURLToPath(new URL('../../audit-joppa/adapter.mjs', import.meta.url))},
         stdio: ['ignore', 'pipe', 'pipe']});
       let output = '';
@@ -509,7 +630,8 @@ test('finish rejects stale inputs before any inbox write', async t => {
       child.once('close', code => resolve({code, output}));
     });
     assert.equal(result.code, 2);
-    assert.match(result.output, changed === 'source' ? /Source changed during audit/ : /Specification changed during audit/);
+    assert.match(result.output, changed === 'source' ? /Source changed during audit/
+      : changed === 'specification' ? /Specification changed during audit/ : /Audit rules changed; rerun it/);
     assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
     assert.equal(fs.existsSync(path.join(artifacts, 'publication.json')), false);
   });
@@ -558,7 +680,7 @@ process.stderr.write((plan.stderr || 'ok') + '\\n');
 process.exit(plan.exitCode);
 `, {mode: 0o755});
   const configFile = path.join(f.root, 'runner-config.json');
-  fs.writeFileSync(configFile, JSON.stringify({...f.config, equill_store: f.root, equill_actor: 'fixture',
+  fs.writeFileSync(configFile, JSON.stringify({...f.config,
     runs_folder: runs, cbm_root: f.root, cbm_store: f.root}));
   const invoke = plans => {
     fs.writeFileSync(stateFile, JSON.stringify({calls: [], plans}));

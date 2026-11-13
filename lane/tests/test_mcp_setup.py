@@ -1,11 +1,9 @@
-"""Check MCP configuration and bridge identity without accounts or live services."""
+"""Check MCP configuration and Joppa context startup without accounts or live services."""
 import json
 import os
-import signal
 from pathlib import Path
 import subprocess
 import tempfile
-import time
 import tomllib
 import unittest
 
@@ -13,21 +11,52 @@ LANE = Path(__file__).resolve().parents[1]
 
 
 class McpSetupTests(unittest.TestCase):
-    def test_launcher_refuses_an_old_bridge_identity(self):
-        source = (LANE / 'startup/equill.sh').read_text()
-        start = source.index('# An already-running old bridge')
-        guard = source[start:source.index('\nequill_vars=(', start)]
+    def test_context_startup_requires_config_token_and_all_role_names(self):
+        script = (
+            'set -euo pipefail\n'
+            'say() { printf "%s\\n" "$*"; }\n'
+            'mounts=()\n'
+            'project="fixture-proj"\n'
+            'ticket="task-1"\n'
+            'module="core"\n'
+            f'source "{LANE / "startup/context.sh"}"\n'
+            'jq -cn --argjson mounts "$(printf "%s\\0" "${mounts[@]}" | jq -Rs "split(\\"\\u0000\\")[:-1]")" '
+            '--argjson vars "$(printf "%s\\0" "${context_vars[@]}" | jq -Rs "split(\\"\\u0000\\")[:-1]")" '
+            '"{mounts: \\$mounts, vars: \\$vars}"\n'
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'bridge.pid').write_text(str(os.getpid()))
-            for identity in ('', 'lane:wrong-pid', f'lane:{os.getpid()}'):
-                with self.subTest(identity=identity):
-                    (root / 'bridge.identity').write_text(identity)
-                    result = subprocess.run(['bash', '-c', 'say() { echo "$*"; };\n' + guard],
-                        env=dict(os.environ, bridge_dir=str(root)), capture_output=True, text=True)
-                    self.assertEqual(result.returncode, 0 if identity == f'lane:{os.getpid()}' else 2)
-                    if result.returncode:
-                        self.assertIn('startup refused', result.stdout)
+            missing = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=''),
+                                     capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn('Joppa context config and workspace Read key are required', missing.stdout)
+
+            (root / 'config.json').write_text(json.dumps({
+                'roles': {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa'}}))
+            no_token = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
+                                      capture_output=True, text=True)
+            self.assertEqual(no_token.returncode, 2)
+
+            (root / 'token').write_text('jpr_' + '0' * 64 + '\n')
+            for missing_role in ('scout', 'coder', 'qa'):
+                roles = {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa', missing_role: '   '}
+                (root / 'config.json').write_text(json.dumps({'roles': roles}))
+                bad_role = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
+                                          capture_output=True, text=True)
+                self.assertEqual(bad_role.returncode, 2)
+                self.assertIn(f'context.roles.{missing_role} is required', bad_role.stdout)
+
+            (root / 'config.json').write_text(json.dumps({
+                'roles': {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa'}}))
+            ready = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
+                                   capture_output=True, text=True)
+            self.assertEqual(ready.returncode, 0, ready.stderr)
+            parsed = json.loads(ready.stdout.splitlines()[-1])
+            self.assertEqual(parsed['mounts'], ['--mount', str(root)])
+            self.assertIn(f'LANE_MEMORY_CONFIG=/workspace/{root.name}/config.json', parsed['vars'])
+            self.assertIn('LANE_MEMORY_scout_ROLE=alpha-scout', parsed['vars'])
+            self.assertIn('LANE_MEMORY_coder_ROLE=alpha-coder', parsed['vars'])
+            self.assertIn('LANE_MEMORY_qa_ROLE=alpha-qa', parsed['vars'])
 
     def test_harnesses_share_cbm_connector_and_preserve_broker_auth(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -51,47 +80,23 @@ class McpSetupTests(unittest.TestCase):
                 'command': 'python3', 'args': [str(root / 'shared connector.py')]})
             self.assertEqual(auth.read_text(), 'fixture broker auth')
 
-    def test_bridge_uses_lane_identity_and_refuses_writes(self):
+    def test_injected_hooks_bind_joppa_memory_hook_for_both_harnesses(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            equill = root / 'equill-fixture'
-            equill.write_text('#!/bin/sh\nprintf "actor=%s verb=%s\\n" "$EQUILL_ACTOR" "$1"\n')
-            equill.chmod(0o755)
-            env = dict(os.environ, MEDULLA_BRIDGE=str(root), EQUILL_BIN=str(equill),
-                       EQUILL_ACTOR='host-admin-fixture', EQUILL_BRIDGE_POLL='0.01')
-            with subprocess.Popen(['bash', str(LANE / 'bridge/equill-bridge.sh')], env=env,
-                                  start_new_session=True,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True) as process:
-                try:
-                    bridge = root / 'equill'
-                    self.wait_for(bridge / 'bridge.pid', process)
-                    bridge_pid = int((bridge / 'bridge.pid').read_text())
-                    os.kill(bridge_pid, 0)
-                    self.assertEqual((bridge / 'bridge.identity').read_text().strip(), f'lane:{bridge_pid}')
-                    for index, verb in enumerate(('context', 'search', 'record', 'revoke')):
-                        key = f'fixture-{index}'
-                        request = bridge / 'req' / f'{key}.json'
-                        temp = request.with_suffix('.tmp')
-                        temp.write_text(json.dumps({'argv': [verb], 'env': {'EQUILL_ACTOR': 'gm'}}))
-                        temp.rename(request)
-                        rc = bridge / 'resp' / f'{key}.rc'
-                        self.wait_for(rc, process)
-                        if verb in ('context', 'search'):
-                            self.assertEqual(rc.read_text(), '0')
-                            self.assertEqual((bridge / 'resp' / f'{key}.out').read_text(),
-                                             f'actor=lane verb={verb}\n')
-                        else:
-                            self.assertEqual(rc.read_text(), '2')
-                finally:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=3)
-
-    @staticmethod
-    def wait_for(file, process):
-        deadline = time.monotonic() + 3
-        while not file.exists():
-            if process.poll() is not None:
-                raise AssertionError(process.stderr.read())
-            if time.monotonic() >= deadline:
-                raise AssertionError(f'Timed out waiting for {file}')
-            time.sleep(0.01)
+            tooling = root / 'custom-tooling'
+            injected = root / 'claude.json'
+            home = root / 'codex'
+            env = dict(os.environ, TOOLING_ROOT=str(tooling), CBM_MCP_COMMAND=str(root / 'cbm.py'))
+            subprocess.run(['bash', str(LANE / 'hooks/inject.sh'), str(injected),
+                            str(LANE / 'hooks/claude-settings.json')], env=env, check=True, capture_output=True)
+            subprocess.run(['bash', str(LANE / 'hooks/codex-home.sh'), str(home), str(injected)],
+                           env=env, check=True, capture_output=True)
+            claude_hooks = json.loads(injected.read_text())['hooks']
+            codex_hooks = json.loads((home / 'hooks.json').read_text())['hooks']
+            expected_cmd = f'bash {tooling}/lane/hooks/memory-hook.sh'
+            for event in ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolBatch', 'Stop'):
+                self.assertEqual(claude_hooks[event][0]['hooks'][0]['command'], expected_cmd)
+                self.assertEqual(codex_hooks[event][0]['hooks'][0]['command'], expected_cmd)
+            self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], 'Bash')
+            self.assertEqual(codex_hooks['PreToolUse'][0]['matcher'], '*')
+            self.assertEqual(codex_hooks['PreToolUse'][0]['hooks'][0]['command'], expected_cmd)

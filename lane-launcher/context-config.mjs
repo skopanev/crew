@@ -7,6 +7,7 @@ const text = value => typeof value === 'string' && Boolean(value.trim());
 
 export function validateContext(config) {
   require(config && typeof config === 'object' && !Array.isArray(config), 'Config needs context');
+  require(text(config.workspace), 'context.workspace is required');
   const url = new URL(config.url);
   require(['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash,
     'context.url needs an HTTP endpoint without URL credentials');

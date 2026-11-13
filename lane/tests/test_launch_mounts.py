@@ -18,8 +18,8 @@ class LaunchMountTests(unittest.TestCase):
             tooling = root / 'crew'
             sources = root / 'sources'
             bins = root / 'bin'
-            bridge = root / 'bridge/equill'
-            for folder in (tooling / 'lane/bridge', tooling / 'lane-launcher', bins, bridge,
+            context = root / 'crew-context-fixture'
+            for folder in (tooling / 'lane/bridge', tooling / 'lane-launcher', bins, context,
                            sources / 'app/.git', sources / 'infra/.git', sources / 'locks', root / 'cache'):
                 folder.mkdir(parents=True)
             shutil.copy(CREW / 'lane/run.sh', tooling / 'lane/run.sh')
@@ -34,8 +34,10 @@ class LaunchMountTests(unittest.TestCase):
                 'import json,os,sys\n'
                 'open(os.environ["TEST_SYNC"],"w").write(json.dumps(sys.argv[1:]))\n'
                 'sys.exit(int(os.environ.get("TEST_SYNC_FAILURE","0")))\n')
-            (bridge / 'bridge.pid').write_text(str(os.getpid()))
-            (bridge / 'bridge.identity').write_text(f'lane:{os.getpid()}')
+            (context / 'token').write_text('jpr_' + 'a' * 64 + '\n')
+            (context / 'token').chmod(0o600)
+            (context / 'config.json').write_text(json.dumps({
+                'roles': {'scout': 'fixture-scout', 'coder': 'fixture-coder', 'qa': 'fixture-qa'}}))
             for name, script in {
                 'docker': '#!/bin/sh\nexit 0\n',
                 'medulla': '#!/usr/bin/env python3\nimport json,os,sys\n'
@@ -48,6 +50,7 @@ class LaunchMountTests(unittest.TestCase):
             output = root / 'args.json'
             env = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ['PATH'],
                        MEDULLA_BRIDGE=str(root / 'bridge'), LANE_RUNS_FOLDER=str(root / 'runs'),
+                       LANE_MEMORY_DIR=str(context),
                        LANE_CLAIM_FILE=str(root / 'claim.json'), LANE_SOURCE='joppa',
                        LANE_WORKTREE_ROOT=str(sources / '.worktrees'),
                        TEST_ARGS=str(output), TEST_SYNC=str(root / 'sync.json'))
@@ -78,7 +81,10 @@ class LaunchMountTests(unittest.TestCase):
                               if launch[i] in ('--mount', '--mount-rw')]
                     self.assertEqual(mounts, [('--mount', str(sources)),
                                              ('--mount-rw', str(sources / 'locks')),
+                                             ('--mount', str(context)),
                                              ('--mount-rw', str(sources / '.worktrees' / ticket))])
+                    self.assertIn(f'LANE_MEMORY_CONFIG=/workspace/{context.name}/config.json', launch)
+                    self.assertIn('LANE_MEMORY_scout_ROLE=fixture-scout', launch)
                     self.assertIn(f'project_dir=/workspace/sources/{repo}', launch)
                     self.assertIn(f'LANE_WORKTREE=/workspace/{ticket}', launch)
                     self.assertIn(f'CBM_PROJECT={repo}-project', launch)

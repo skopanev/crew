@@ -22,6 +22,8 @@ async function packageFixture(t, mode = 'success') {
   fs.mkdirSync(root);
   const tokenFile = path.join(root, 'token');
   fs.writeFileSync(tokenFile, 'fixture-token');
+  const contextTokenFile = path.join(root, 'context-read-key');
+  fs.writeFileSync(contextTokenFile, `jpr_${'a'.repeat(64)}\n`, {mode: 0o600});
   const objects = new Map(), calls = [], queue = ['task:t2', 'task:t1'];
   const make = (address, kind, parent, data) => ({address, kind, historical: false, current_revision: 3,
     status: {tone: 'blue'}, document: {present: true, parent, data, links: []},
@@ -157,7 +159,14 @@ async function packageFixture(t, mode = 'success') {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, joppa: {url: `http://127.0.0.1:${server.address().port}`,
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const context = {url: `${baseUrl}/api/data`, workspace: 'fixture', root: 'req:r', token_file: contextTokenFile,
+    roles: {scout: 'fixture-scout', coder: 'fixture-coder', qa: 'fixture-qa'},
+    filter_env: {role: 'LANE_MEMORY_ROLE', name: 'LANE_MEMORY_PROCESS', project: 'LANE_MEMORY_PROJECT'},
+    session: {kind: ['guide', 'process', 'rule'], fields: ['title', 'body', 'ends_when'], max_chars: 32768},
+    stop: {kind: 'process', field: 'ends_when'},
+    query: {kind: 'lesson', filter_env: {project: 'LANE_MEMORY_PROJECT'}, fields: ['title', 'body'], limit: 10, max_chars: 32768}};
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, joppa: {url: baseUrl,
     workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
     modules: [{name: 'm1', path: 'src/a', paths: ['src/a', 'tests/a']}, {name: 'm2', path: 'src/b', paths: ['src/b', 'tests/b']}]}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',

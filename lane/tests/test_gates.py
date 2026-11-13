@@ -1,5 +1,6 @@
-"""Real Git fixtures; no network, queues, Docker, or agent harnesses."""
+"""Real Git fixtures. No network, queues, Docker, or agent harnesses."""
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import fcntl
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 from test_failure_outcome import shell_body
@@ -228,30 +230,76 @@ class GateTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("was removed; use --source-root", result.stderr)
 
-    def test_review_requires_nonempty_equill_contract(self):
-        bins = self.root / "bin"
-        bins.mkdir()
-        equill = bins / "equill"
-        equill.write_text('#!/bin/sh\nprintf "%s" "$QA_RESPONSE"\nexit "$QA_RC"\n')
-        equill.chmod(0o755)
+    def test_review_requires_nonempty_joppa_contract(self):
+        token = "jpr_" + "b" * 64
+
+        class DataHandler(BaseHTTPRequestHandler):
+            def do_POST(handler):
+                body = json.loads(handler.rfile.read(int(handler.headers.get("Content-Length", "0"))))
+                handler.server.requests.append({"path": handler.path, "auth": handler.headers.get("Authorization"), "body": body})
+                if handler.path != "/api/data" or handler.headers.get("Authorization") != f"Bearer {token}":
+                    status, reply = 401, {"error": "unauthorized"}
+                else:
+                    status, reply = handler.server.current_reply
+                payload = json.dumps(reply).encode()
+                handler.send_response(status)
+                handler.send_header("Content-Type", "application/json")
+                handler.send_header("Content-Length", str(len(payload)))
+                handler.end_headers()
+                handler.wfile.write(payload)
+
+            def log_message(handler, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), DataHandler)
+        server.requests = []
+        server.current_reply = (200, {"items": []})
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        token_file = self.root / "qa-read-key"
+        token_file.write_text(token + "\n")
+        token_file.chmod(0o600)
+        memory_config = self.root / "qa-memory-config.json"
+        memory_config.write_text(json.dumps({
+            "url": f"http://127.0.0.1:{server.server_port}/api/data",
+            "workspace": "fixture",
+            "root": "req:qa-root",
+            "token_file": str(token_file),
+            "filter_env": {"role": "LANE_MEMORY_ROLE", "project": "LANE_MEMORY_PROJECT"},
+            "session": {"kind": ["spec_item"], "fields": ["title", "body"]},
+            "stop": {"kind": "spec_item", "field": "ends_when"},
+        }))
         worktrees = self.root / "worktrees"
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
-        self.env.update(PATH=str(bins) + os.pathsep + self.env["PATH"],
-                        TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch',
+        self.env.update(TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch',
+                        LANE_MEMORY_CONFIG=str(memory_config), LANE_MEMORY_ROLE="custom-qa-role",
+                        LANE_MEMORY_PROCESS="custom-qa-role", LANE_MEMORY_PROJECT="fixture",
                         ticket_title='Show the complete Task title in history and preserve its full text beyond seventy-two characters')
         self.git('update-ref', 'refs/remotes/origin/develop', 'HEAD')
-        for content, rc in (("", 0), (" \n", 0), ("fixture QA contract", 1),
-                            ("fixture QA contract", 0)):
-            with self.subTest(content=content, rc=rc):
-                self.env.update(QA_RESPONSE=json.dumps({"content": content}), QA_RC=str(rc))
+        cases = (
+            (200, {"workspace": "fixture", "position": 1, "items": []}, False),
+            (200, {"workspace": "fixture", "position": 1, "items": [
+                {"address": "spec_item:qa", "kind": "spec_item", "revision": 1, "title": "QA", "body": ""}]}, False),
+            (500, {"error": "unavailable"}, False),
+            (200, {"workspace": "fixture", "position": 7, "items": [
+                {"address": "spec_item:qa", "kind": "spec_item", "revision": 2, "title": "QA", "body": "fixture QA contract"}]}, True),
+        )
+        for status, reply, ok in cases:
+            with self.subTest(status=status, ok=ok):
+                server.current_reply = (status, reply)
                 result = subprocess.run(["bash", "-c", shell_body("prepare_review")],
                                         cwd=self.repo, env=self.env, capture_output=True,
                                         text=True, timeout=15)
                 contract = self.root / "run/artifacts/qa-contract.txt"
-                if content.strip() and rc == 0:
+                if ok:
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(contract.read_text().strip(), content)
+                    self.assertEqual(contract.read_text().strip(), "## QA\nfixture QA contract")
+                    self.assertEqual(server.requests[-1]["auth"], f"Bearer {token}")
+                    self.assertEqual(server.requests[-1]["body"]["filter"],
+                                     {"role": "custom-qa-role", "project": "fixture"})
                     self.assertIn("<signal:SNAPSHOT>", result.stdout)
                     self.assertEqual(self.git('log', '-1', '--format=%s'), self.env['ticket_title'][:72])
                     self.assertEqual(self.git('log', '-1', '--format=%b'),

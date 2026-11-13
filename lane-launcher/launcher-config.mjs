@@ -5,6 +5,7 @@ import path from 'node:path';
 import {read, validateWritableDirs} from './runtime.mjs';
 import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
+import {validateContext} from './context-config.mjs';
 
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
@@ -42,6 +43,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   // A stable dispatcher identity owns its lock, reservations and containers.
   config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (!config.launchLanes) return config;
+  validateContext(config.context);
   if (!Array.isArray(config.gateCommands) || !config.gateCommands.length ||
       config.gateCommands.some(check => typeof check !== 'string' || !check.trim())) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');
