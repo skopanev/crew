@@ -104,6 +104,8 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 
 `sourceRoot` can contain several repositories or be the repository itself.
 Only configured repositories enter Git and CBM refresh.
+Set each repository's `cbmProject` to the canonical project name returned by CBM.
+Startup requires that name and the indexed root path to match the configured repository.
 `worktreeRoot` sets the checkout directory inside `sourceRoot`. Each Task has a stable execution ID.
 The table shows the full Task address, stage or reason code, run ID, start time and duration.
 
