@@ -82,6 +82,11 @@ class RepositoryScopeTests(unittest.TestCase):
                 {"address": "work:last", "body": free, "repository": None, "steps": None},
                 # A Task of a configured repository in a module this planner does not own is not its context.
                 {"address": "work:module", "body": "Goal: Elsewhere\n\nRepository: service\nModule: billing",
+                 "repository": None, "steps": None},
+                # A blank or conflicting module is not a proof of another module: it stays visible.
+                {"address": "work:blank", "body": "Goal: Blank\n\nRepository: service\nModule:   ",
+                 "repository": None, "steps": None},
+                {"address": "work:twomodules", "body": "Goal: Two\n\nRepository: service\nModule: billing\nModule: core",
                  "repository": None, "steps": None}]
         details = {"work:structured": raw("work:structured", {"title": "Structured", **fields}),
                    "work:free": raw("work:free", {"title": "Free", "body": free}),
@@ -94,7 +99,10 @@ class RepositoryScopeTests(unittest.TestCase):
                    "work:plain": raw("work:plain", {"title": "Plain", "body": "Goal: Plain", "repository": "service"}),
                    "work:last": raw("work:last", {"title": "Last", "body": free}),
                    "work:module": raw("work:module", {"title": "Module",
-                                                      "body": "Goal: Elsewhere\n\nRepository: service\nModule: billing"})}
+                                                      "body": "Goal: Elsewhere\n\nRepository: service\nModule: billing"}),
+                   "work:blank": raw("work:blank", {"title": "Blank", "body": "Goal: Blank\n\nRepository: service\nModule:   "}),
+                   "work:twomodules": raw("work:twomodules", {"title": "Two", "body":
+                                          "Goal: Two\n\nRepository: service\nModule: billing\nModule: core"})}
         calls = []
         class Lists:
             def call(self, name, args):
@@ -106,13 +114,15 @@ class RepositoryScopeTests(unittest.TestCase):
         result = context.pending_work(Lists(), config, data)
         self.assertEqual([(entry["address"], entry["repository"]) for entry in result],
                          [("work:structured", "service"), ("work:free", "service"), ("work:both", "service"),
-                          ("work:malformed", "service"), ("work:nullsteps", "service"), ("work:last", "service")])
+                          ("work:malformed", "service"), ("work:nullsteps", "service"), ("work:last", "service"),
+                          ("work:blank", "service"), ("work:twomodules", "service")])
         malformed = next(entry for entry in result if entry["address"] == "work:malformed")
         self.assertIn("contract_error", malformed)
         self.assertNotIn("contract_error", result[0])
         self.assertEqual([args["address"] for args in calls if args.get("address")],
                          ["work:structured", "work:free", "work:both", "work:malformed", "work:moved",
-                          "work:nullsteps", "work:plain", "work:last", "work:module"])
+                          "work:nullsteps", "work:plain", "work:last", "work:module",
+                          "work:blank", "work:twomodules"])
         listed = [args for args in calls if not args.get("address")]
         self.assertTrue(all("data.projects" not in args["fields"] and "contract" not in args["fields"]
                             for args in listed))
