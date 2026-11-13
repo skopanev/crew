@@ -11,9 +11,68 @@ RUN = Path(__file__).resolve().parents[1] / 'run.sh'
 TEXT = RUN.read_text()
 CLEANUP_TEXT = (RUN.parent / 'startup/cleanup.sh').read_text()
 CLEANUP = CLEANUP_TEXT[CLEANUP_TEXT.index('cleanup() {'):]
+WORKTREE = (RUN.parent / 'startup/worktree.sh').read_text()
 
 
 class WorktreeCleanupTests(unittest.TestCase):
+    def test_retained_candidate_refresh_keeps_cache_and_restores_commit_hooks(self):
+        for route in ('coder', 'review', 'changed-head', 'dirty'):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                source, wt, run = root / 'source', root / 'ticket', root / 'run'
+                source.mkdir()
+                (run / 'artifacts').mkdir(parents=True)
+                def git(cwd, *args):
+                    return subprocess.check_output(['git', '-C', str(cwd), *args], text=True).strip()
+                git(source, 'init', '-q', '-b', 'main')
+                git(source, 'config', 'user.name', 'fixture')
+                git(source, 'config', 'user.email', 'fixture@local')
+                (source / '.gitignore').write_text('node_modules/\ndist/\n')
+                (source / '.githooks').mkdir()
+                (source / '.githooks/pre-commit').write_text('#!/bin/sh\necho ran >> .git/commit-hook-ran\n')
+                (source / 'code.txt').write_text('base\n')
+                git(source, 'add', '.')
+                git(source, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'base')
+                base = git(source, 'rev-parse', 'HEAD')
+                git(root, 'clone', '-q', str(source), str(wt))
+                git(wt, 'checkout', '-qb', 'ticket-fixture')
+                git(wt, 'config', 'user.name', 'lane')
+                git(wt, 'config', 'user.email', 'lane@local')
+                (wt / 'code.txt').write_text('implementation\n')
+                git(wt, 'add', '.')
+                git(wt, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'SAVE STATE: implement_code')
+                head, tree = git(wt, 'rev-parse', 'HEAD'), git(wt, 'rev-parse', 'HEAD^{tree}')
+                (wt / '.git/lane-base').write_text(base + '\n')
+                for folder in ('node_modules', 'dist'):
+                    (wt / folder).mkdir()
+                    (wt / folder / 'warm').write_text('preserve\n')
+                (source / 'independent.txt').write_text('target moved\n')
+                git(source, 'add', '.')
+                git(source, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'new target')
+                target = git(source, 'rev-parse', 'HEAD')
+                retained = {'head': base if route == 'changed-head' else head, 'tree': tree,
+                            'base': base, 'route': 'review' if route == 'review' else 'coder'}
+                (run / 'artifacts/claim.json').write_text(json.dumps({'ticket': {'retained': retained}}))
+                if route == 'dirty':
+                    (wt / 'new.txt').write_text('unowned change\n')
+                env = dict(os.environ, TOOLING_ROOT=str(RUN.parent.parent), LANE_WORKTREE=str(wt),
+                           MEDULLA_RUN_DIR=str(run), project_dir=str(source), ticket_id='fixture', TARGET_BRANCH='main')
+                result = subprocess.run(['bash', str(RUN.parent / 'bin/retained-worktree.sh')],
+                                        env=env, capture_output=True, text=True, timeout=20)
+                if route in ('dirty', 'changed-head'):
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(git(wt, 'rev-parse', 'HEAD'), head)
+                    continue
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('<signal:RESUME_REVIEW>' if route == 'review' else '<signal:READY>', result.stdout)
+                self.assertEqual(git(wt, 'rev-parse', 'HEAD'), target)
+                self.assertEqual((wt / '.git/lane-base').read_text().strip(), target)
+                self.assertEqual(git(wt, 'diff', '--cached', '--name-only'), 'code.txt')
+                git(wt, 'commit', '-qm', 'Joppa Task implementation')
+                self.assertEqual((wt / '.git/commit-hook-ran').read_text(), 'ran\n')
+                for folder in ('node_modules', 'dist'):
+                    self.assertEqual((wt / folder / 'warm').read_text(), 'preserve\n')
+
     def test_confirmed_delivery_cleans_checkout_and_preserves_failed_hook(self):
         for case in ('none', 'success', 'failed', 'mutation', 'verified'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
@@ -65,7 +124,7 @@ class WorktreeCleanupTests(unittest.TestCase):
                 worktree = Path(directory) / 'ticket'
                 if existing:
                     worktree.mkdir()
-                script = ('say() { printf "%s\\n" "$*"; }\n' + CLEANUP +
+                script = ('say() { printf "%s\\n" "$*"; }\n' + WORKTREE + CLEANUP +
                           '\ntrap cleanup EXIT\n' + ownership + '\nexit 2\n')
                 result = subprocess.run(['bash', '-c', script], env=dict(os.environ, worktree=str(worktree)),
                                         capture_output=True, text=True, timeout=10)

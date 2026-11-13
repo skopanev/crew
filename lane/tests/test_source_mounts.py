@@ -43,6 +43,7 @@ class SourceMountTests(unittest.TestCase):
             (runs / 'cleanup.sh').write_text(shell_body('cleanup'))
             (runs / 'artifacts').mkdir()
             shutil.copy(Path(__file__).resolve().parents[1] / 'bin/target.sh', tooling / 'lane/bin/target.sh')
+            shutil.copy(Path(__file__).resolve().parents[1] / 'bin/setup-worktree.sh', tooling / 'lane/bin/setup-worktree.sh')
             script = '''set -euo pipefail
 trap 'cat "$MEDULLA_RUN_DIR/"*.log 2>/dev/null || true' EXIT
 for source in /workspace/sources/repo/README.md /workspace/sources/companion/README.md /workspace/sources/repo/.git/config /workspace/sources/repo/.git/index; do

@@ -60,6 +60,7 @@ nodes:
     on_signal:
       READY: cbm_discovery
       REQUIREMENT_READY: create_worktree
+      RESUME: create_worktree
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -101,6 +102,15 @@ nodes:
       bash "${TOOLING_ROOT}/lane/hooks/agy-home.sh" /tmp/lane-settings.json
       # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
+      if jq -e '.ticket.retained != null' "$claim" >/dev/null; then
+        inputs="$(dirname "$LAUNCH_CLAIM_FILE")/resume-inputs"
+        for name in scout.txt coder-report.txt test-bindings.json; do
+          [ ! -f "$inputs/$name" ] || cp "$inputs/$name" "$MEDULLA_RUN_DIR/artifacts/$name"
+        done
+        [ ! -d "$inputs/prior" ] || cp -R "$inputs/prior" "$MEDULLA_RUN_DIR/artifacts/prior"
+        echo '<signal:RESUME>Continue the confirmed retained candidate for this Task.</signal:RESUME>'
+        exit 0
+      fi
       # Publish only a complete, nonempty Joppa contract.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       _sc="$MEDULLA_RUN_DIR/artifacts/scout-contract.txt"
@@ -183,6 +193,7 @@ nodes:
     on_signal:
       READY: implement_code
       VERIFY_EXISTING: prepare_review
+      RESUME_REVIEW: prepare_review
       REQUIREMENT_SCOUT: cbm_discovery
       FINALIZE_READY: git_landing
       NO_GIT_KEY: notify_failure
@@ -195,6 +206,10 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
+      if jq -e '.ticket.retained != null' "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null; then
+        bash "$TOOLING_ROOT/lane/bin/retained-worktree.sh"
+        exit 0
+      fi
       restore_recovery() {
         recovery_note=""
         if jq -e '.recovery != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
@@ -325,49 +340,7 @@ nodes:
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
       if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
-      # Use repository setup when present; otherwise bind its tracked hooks locally.
-      if [ -f scripts/install-git-hooks.sh ]; then
-        bash scripts/install-git-hooks.sh
-      elif [ -d .githooks ]; then
-        for hook in .githooks/*; do
-          [ -f "$hook" ] || continue
-          name="$(basename "$hook")"
-          printf '#!/usr/bin/env bash\nexec bash "$(git rev-parse --show-toplevel)/.githooks/%s" "$@"\n' "$name" > ".git/hooks/$name"
-          chmod +x ".git/hooks/$name"
-        done
-      elif grep -qE '^[[:space:]]*hooksPath[[:space:]]*=' "$project_dir/.git/config"; then
-        echo "Source uses external hooks; no tracked .githooks in candidate" >&2
-        exit 1
-      fi
-      # Repository setup and Git hooks need Bun on PATH.
-      export PATH="/home/medulla/.bun/bin:${PATH}"
-      # A repository may own dependency setup through its configured preflight.
-      deps=""
-      pf="${REPOSITORY_PREFLIGHT:-}"
-      if [ -n "$pf" ]; then
-        if [ -x "${LANE_WORKTREE}/$pf" ]; then
-          if (cd "${LANE_WORKTREE}" && timeout 600 "./$pf" \
-                > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
-            deps=" Repository preflight ($pf) ran."
-          else
-            cat "$MEDULLA_RUN_DIR/artifacts/preflight.txt" >&2
-            echo "Repository preflight ($pf) failed; see artifacts/preflight.txt" >&2
-            exit 1
-          fi
-        else
-          echo "Repository preflight ($pf) is not executable in the candidate" >&2
-          exit 1
-        fi
-      # Объявил предполёт - он и отвечает за зависимости; нашей установки нет.
-      elif [ -f "${LANE_WORKTREE}/package.json" ] && command -v bun >/dev/null 2>&1; then
-        # Keep installation failure details for the coder.
-        if (cd "${LANE_WORKTREE}" && timeout 240 bun install --frozen-lockfile \
-              > "$MEDULLA_RUN_DIR/artifacts/bun-install.txt" 2>&1); then
-          deps=" Dependencies are installed."
-        else
-          deps=" NOTE: bun install did not complete. Full log: ${MEDULLA_RUN_DIR}/artifacts/bun-install.txt"
-        fi
-      fi
+      source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
         if [ "$FINALIZE_ONLY" = true ]; then
           printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"

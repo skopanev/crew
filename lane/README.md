@@ -16,11 +16,16 @@ read-only repositories. The repository, its `targetBranch` and its optional
 The whole source workspace and canonical `.git` directories are read-only.
 The writable checkout is `<worktreeRoot>/<execution-id>`, mounted at
 `/workspace/<execution-id>`, with its own `.git`. Fetch, commits, and landing write
-there. Artifacts are writable separately. Existing nonempty checkouts are
-retained and rejected on a new launch.
+there. Artifacts are writable separately. The worker can reuse a retained, clean checkout for the same Task.
+It requires the recorded HEAD, tree, branch, scope and unchanged Task context, with no active writer.
+Unknown, dirty or foreign checkouts still fail with `WORKTREE_PREEXISTED`.
 
 After success, the host removes the private checkout. Reports and logs remain in the run directory.
 Failed runs retain code changes. Empty or unchanged checkouts are removed.
+An eligible retry preserves ignored dependencies and build output, then refreshes the target and runs repository setup.
+It stages only the retained Task changes for a new commit through native hooks.
+Known blockers return to the coder. A missing reviewer without known blockers returns to `prepare_review`.
+Each retry runs current gates and all reviewers. Old gate receipts never prove the new candidate.
 
 Startup uses Crew's `lane-launcher/safe-sync.py` for the configured canonical
 repositories under the source root. Up to four repositories refresh in parallel,

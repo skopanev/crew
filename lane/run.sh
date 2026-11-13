@@ -106,7 +106,6 @@ check_mountpoint() {
   fi
 }
 # The host worker starts every lane from a Joppa Task claim.
-ticket_source=joppa
 [[ "${LANE_SOURCE:-}" == joppa ]] || { say "run.sh: start through the Joppa lane worker"; exit 2; }
 ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' "$claim_file")"
 # An explicit module asserts the ticket's module; it cannot replace it.
@@ -130,11 +129,12 @@ source_root_in="/workspace/$(basename "$source_root")"
 if [[ "$repo" == "$source_root" ]]; then project_dir="$source_root_in";
 else project_dir="$source_root_in/${repo#"$source_root/"}"; fi
 worktree="$worktree_root/$ticket"
+source "$WORKFLOW_DIR/startup/worktree.sh"
 # Retained or foreign work must never be reset by a fresh dispatch.
 [[ ! -L "$worktree_root" && ! -L "$worktree" ]] || {
   say "run.sh: worktree path is a symlink; startup refused"; exit 2; }
 if [[ -e "$worktree" ]] && { [[ ! -d "$worktree" ]] || [[ -n "$(ls -A "$worktree")" ]]; }; then
-  say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73
+  retained_worktree || { say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"; exit 73; }
 fi
 LANE_WORKTREE="/workspace/$ticket"
 
@@ -231,7 +231,7 @@ fi
 check_mountpoint "$worktree"
 mkdir -p "$(dirname "$worktree")" "$TOOLING_ROOT/$ticket"
 worktree_created=false
-if mkdir "$worktree" 2>/dev/null; then
+if retained_worktree || mkdir "$worktree" 2>/dev/null; then
   worktree_created=true
 else
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"
@@ -252,7 +252,7 @@ medulla \
   --var "CBM_PROJECT=$cbm_project" \
   --var "ticket_id=$ticket" \
   --var "LAUNCH_CLAIM_FILE=$claim_file" \
-  --var "TICKET_SOURCE=$ticket_source" \
+  --var "TICKET_SOURCE=joppa" \
   --var "TARGET_BRANCH=$target" \
   --var "REPOSITORY_PREFLIGHT=$repository_preflight" \
   --var "DELIVERY=${LANE_DELIVERY:-target}" \
