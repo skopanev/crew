@@ -154,7 +154,7 @@ nodes:
       model: gpt-6.1-sol
       effort: high
       sets: [TICKET_CHECKS]
-      args: [-s, read-only]
+      args: [-s, read-only, --dangerously-bypass-hook-trust]
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
       Artifacts: {{var:RUN_ARTIFACTS}}.
@@ -572,6 +572,7 @@ nodes:
       model: gpt-6.1-sol
       effort: high
       slug: architecture
+      flag: --dangerously-bypass-hook-trust
     - harness: agy
       model: gemini-4-carbon-high
       effort: high
