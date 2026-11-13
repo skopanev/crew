@@ -45,6 +45,9 @@ def snapshot_source(object, types, selected_ac=None):
                                    for link in current["remote_links"]]
     for key in ("verification", "pending_run", "summary", "status"):
         current["process"].pop(key, None)
+    # Joppa signs a new short-lived download URL on every read. The hash identifies the file.
+    current["files"] = [{key: value for key, value in file.items() if key != "url"} if isinstance(file, dict) else file
+                        for file in current.get("files") or []]
     current["document"] = authored_document(current["document"])
     role = types[object["kind"]].get("role")
     selected = {selected_ac} if isinstance(selected_ac, str) else set(selected_ac or [])
