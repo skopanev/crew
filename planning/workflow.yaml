@@ -38,6 +38,7 @@ nodes:
     max_attempts: 2
     # Agents get no tracker credentials from the host, including the retired NTK's.
     env: &agent_environment
+      LANE_MEMORY_CONFIG: ''
       JOPPA_TOKEN: ''
       JOPPA_TOKEN_FILE: ''
       NTK_KEY: ''
@@ -100,6 +101,7 @@ nodes:
       JOPPA_TOKEN_FILE: ''
       NTK_KEY: ''
       NTK_CONFIG: /dev/null
+      LANE_MEMORY_CONFIG: ''
       PLANNING_ASSESSMENT_DIGEST: '{{var:assessment_digest}}'
     agent:
       harness: codex
@@ -186,6 +188,7 @@ nodes:
       JOPPA_TOKEN_FILE: ''
       NTK_KEY: ''
       NTK_CONFIG: /dev/null
+      LANE_MEMORY_CONFIG: ''
       PLANNING_REVIEW_DIGEST: '{{var:plan_digest}}'
     max_parallel: 2
     min_success: 2
@@ -267,6 +270,7 @@ nodes:
       JOPPA_TOKEN_FILE: ''
       NTK_KEY: ''
       NTK_CONFIG: /dev/null
+      LANE_MEMORY_CONFIG: ''
       PLANNING_DRIFT_DIGEST: '{{var:drift_digest}}'
     max_parallel: 3
     min_success: 3
