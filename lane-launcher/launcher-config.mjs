@@ -44,9 +44,14 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   // A stable dispatcher identity owns its lock, reservations and containers.
   config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (config.hooks === undefined) config.hooks = defaultHooks;
-  validateHooks(config.hooks);
   if (!config.launchLanes) return config;
+  validateHooks(config.hooks);
   validateContext(config.context);
+  for (const role of ['scout', 'coder', 'qa', 'reviewer', 'gitfix']) {
+    if (typeof config.context.roles?.[role] !== 'string' || !config.context.roles[role].trim()) {
+      throw new Error(`context.roles.${role} is required`);
+    }
+  }
   if (!Array.isArray(config.gateCommands) || !config.gateCommands.length ||
       config.gateCommands.some(check => typeof check !== 'string' || !check.trim())) {
     throw new Error('Config needs gateCommands: a nonempty array of repository checks');

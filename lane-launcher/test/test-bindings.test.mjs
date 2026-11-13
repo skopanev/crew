@@ -138,6 +138,10 @@ test('an acceptance row outside the Task parent, covers or checks claims nothing
   task.document.data.acceptance_checks = [{ac: 'ac:a1', check: 'invented check'}];
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /BINDING_INVALID: task:t1 acceptance check is not a Task check/);
   assert.equal(batches(f).length, 0);
+  delete task.document.data.checks;
+  task.document.data.acceptance_checks = [{ac: 'ac:a1', check: 'Run one => ok'}];
+  await claimTask(f.run, f.persist, f.runId);
+  assert.deepEqual(f.run.claim.ticket.tasks[0].testAcceptance, [{ac: 'ac:a1', check: 'Run one => ok'}]);
   // The host recomputes at completion. The reproduction returned bound before this check.
   const own = {address: 'task:x', document: {parent: 'ac:own', data: {checks: ['real check'],
     acceptance_checks: [{ac: 'ac:unrelated', check: 'invented check'}]}}};
