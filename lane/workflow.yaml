@@ -429,6 +429,7 @@ nodes:
         rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
       Read {{var:RUN_ARTIFACTS}}/scout.txt.
       If the ticket has tasks, execute them in executionOrder in this coder session.
+      Read each Task's acceptanceTests as its required checks.
       Keep each Task within its contract and writable roots. Record each Task result in coder-report.txt.
       Artifacts: {{var:RUN_ARTIFACTS}}.
       Test report: {{var:test_report}}
