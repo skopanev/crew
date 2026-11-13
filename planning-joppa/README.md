@@ -83,7 +83,7 @@ Claims use one atomic batch. Publication saves Tasks, binds proven tests and fin
 Unchanged AC contracts release their claims. The Joppa batch limit remains 100 operations.
 A claim holds at most 50 ACs: a failure release needs one save with the hold code and one critic note for each AC.
 The explicit `--ac-id` input preserves the one-AC path.
-It also lists unfinished Tasks across Requirements whose `Repository:` line names a configured repository ID, with their module and mechanism.
+It also lists unfinished Tasks across Requirements whose `Repository:` line names a configured repository ID, with their module and mechanism. A Task whose `Module:` is not configured for that repository is left out: this planner cannot change it. A Task without a readable module stays listed.
 This list locates possible overlap. A full current object read still verifies reuse and dependencies.
 Shared modules do not require dependencies unless one Task needs another Task's output.
 It reuses related Tasks through dependencies. It edits only Tasks under the selected ACs.

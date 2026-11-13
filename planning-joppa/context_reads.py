@@ -206,6 +206,7 @@ def pending_work_page(api, config, assignment):
     from joppa_reads import task_state
     visible = set(assignment["joppa"]["objects"])
     repositories = {repo["id"] for repo in config["repositories"]}
+    modules = {repo["id"]: {module["name"] for module in repo.get("modules", [])} for repo in config["repositories"]}
     result, cursor, seen = [], None, set()
     while True:
         # Lists give current Tasks only. Archived Tasks are done or retired.
@@ -241,6 +242,9 @@ def pending_work_page(api, config, assignment):
             match = re.search(r"^Module:[ \t]*([^\r\n]+)$", contract, re.M)
             how = re.search(r"^How:\s*\n(.*?)(?:\nChecks:|\Z)", contract, re.M | re.S)
             entry.update(module=match[1].strip() if match else None, how=" ".join(how[1].split()) if how else None)
+            # A Task in a module this planner cannot change cannot overlap its Tasks.
+            if entry["module"] is not None and entry["module"] not in modules[entry["repository"]]:
+                continue
             result.append(entry)
         cursor = page.get("next_cursor")
         if not cursor:

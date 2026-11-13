@@ -79,7 +79,10 @@ class RepositoryScopeTests(unittest.TestCase):
                 # A list row gives absent keys as null. The detail decides: a steps key, even null, makes it structured.
                 {"address": "work:nullsteps", "body": "Goal: Null steps", "repository": "service", "steps": None},
                 {"address": "work:plain", "body": "Goal: Plain", "repository": "service", "steps": None},
-                {"address": "work:last", "body": free, "repository": None, "steps": None}]
+                {"address": "work:last", "body": free, "repository": None, "steps": None},
+                # A Task of a configured repository in a module this planner does not own is not its context.
+                {"address": "work:module", "body": "Goal: Elsewhere\n\nRepository: service\nModule: billing",
+                 "repository": None, "steps": None}]
         details = {"work:structured": raw("work:structured", {"title": "Structured", **fields}),
                    "work:free": raw("work:free", {"title": "Free", "body": free}),
                    "work:both": raw("work:both", {"title": "Both", "body": "Repository: elsewhere\nRepository: service"}),
@@ -89,7 +92,9 @@ class RepositoryScopeTests(unittest.TestCase):
                    "work:nullsteps": raw("work:nullsteps", {"title": "Null steps", "body": "Goal: Null steps",
                                                             "repository": "service", "steps": None}),
                    "work:plain": raw("work:plain", {"title": "Plain", "body": "Goal: Plain", "repository": "service"}),
-                   "work:last": raw("work:last", {"title": "Last", "body": free})}
+                   "work:last": raw("work:last", {"title": "Last", "body": free}),
+                   "work:module": raw("work:module", {"title": "Module",
+                                                      "body": "Goal: Elsewhere\n\nRepository: service\nModule: billing"})}
         calls = []
         class Lists:
             def call(self, name, args):
@@ -107,7 +112,7 @@ class RepositoryScopeTests(unittest.TestCase):
         self.assertNotIn("contract_error", result[0])
         self.assertEqual([args["address"] for args in calls if args.get("address")],
                          ["work:structured", "work:free", "work:both", "work:malformed", "work:moved",
-                          "work:nullsteps", "work:plain", "work:last"])
+                          "work:nullsteps", "work:plain", "work:last", "work:module"])
         listed = [args for args in calls if not args.get("address")]
         self.assertTrue(all("data.projects" not in args["fields"] and "contract" not in args["fields"]
                             for args in listed))
