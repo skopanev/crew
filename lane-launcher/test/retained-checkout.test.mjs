@@ -6,7 +6,7 @@ import {execFileSync, spawnSync} from 'node:child_process';
 import {randomUUID, createHash} from 'node:crypto';
 import {save} from '../runtime.mjs';
 import {recordRetained, retainedCheckout, retainedLine, prepareReuse} from '../retained-checkout.mjs';
-import {claimTask, finishTask} from '../joppa.mjs';
+import {claimTask, finishTask, contractDigest} from '../joppa.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 
 // A fake Docker answers from DOCKER_ROWS: an empty list means no running container.
@@ -60,8 +60,12 @@ async function reuseFixture(t, {node = 'implement_code', signal = 'GATE_FAIL'} =
   git(canonical, 'init', '-q');
   git(canonical, 'remote', 'add', 'origin', ORIGIN);
   const repository = {id: 'app', path: canonical, targetBranch: 'main'};
+  // The new claim holds the live Task. Its digest is the digest of the live contract.
+  const task = f.objects.get('task:t1');
+  task.document.data.assignee = 'crew-lane:new';
+  const digest = contractDigest(task);
   const claim = (assignee, retained) => ({claimed: true, id: executionId, assignee, address: 'task:t1',
-    tasks: [{address: 'task:t1', digest: 'd1'}], contexts: [{address: 'ac:a1', digest: 'c1'}],
+    tasks: [{address: 'task:t1', digest}], contexts: [{address: 'ac:a1', digest: 'c1'}],
     ticket: {id: executionId, modulePaths: ['a.txt'], ...(retained ? {retained} : {})}});
   const runDir = name => path.join(config.stateDir, 'runs', name);
   const priorId = randomUUID(), prior = {config, workspace: 'fixture', joppaWorker: f.run.joppaWorker, task: 'task:t1',
@@ -103,6 +107,11 @@ test('a confirmed GATE_FAIL checkout returns to the coder with prior reports onl
   const inputs = path.join(x.run.runFolder, 'resume-inputs');
   assert.deepEqual(fs.readdirSync(inputs).sort(), ['prior', 'scout.txt', 'test-bindings.json']);
   assert.deepEqual(fs.readdirSync(path.join(inputs, 'prior')).sort(), ['coder-report.txt', 'failure.txt', 'rejects.txt', 'security.md']);
+  // Without a scout report the run does not resume.
+  fs.writeFileSync(path.join(x.artifacts, 'scout.txt'), '');
+  fs.rmSync(inputs, {recursive: true});
+  assert.equal(await prepareReuse(x.run, x.dir, line => lines.push(line), () => {}), '');
+  assert.match(lines.at(-1), /prior scout.txt is missing or empty/);
 });
 
 test('REVIEW_INCOMPLETE reviews again only without a known blocker and with the reviewed snapshot', async t => {
@@ -179,9 +188,19 @@ test('reuse fails closed on any mismatch', async t => {
   process.env.DOCKER_ROWS = JSON.stringify([{Config: {Labels: {}}, Mounts: [{Source: x.checkout}]}]);
   await refused(/container uses the checkout/);
   process.env.DOCKER_ROWS = '[]';
+  const digest = x.run.claim.tasks[0].digest;
   x.run.claim.tasks[0].digest = 'd2';
   await refused(/contract or context changed/);
-  x.run.claim.tasks[0].digest = 'd1';
+  x.prior.claim.tasks[0].digest = 'd2';
+  x.savePrior();
+  // An owner edit after the claim makes the stored claim stale.
+  await refused(/changed after it/);
+  x.prior.claim.tasks[0].digest = digest;
+  x.savePrior();
+  x.run.claim.tasks[0].digest = digest;
+  x.f.objects.get('task:t1').document.data.assignee = 'crew-lane:other';
+  await refused(/not held by this claim/);
+  x.f.objects.get('task:t1').document.data.assignee = 'crew-lane:new';
   x.f.objects.get('task:t1').annotations.comments[x.note.id].withdrawn = true;
   await refused(/no matching failure note/);
   x.f.objects.get('task:t1').annotations.comments[x.note.id].withdrawn = false;
