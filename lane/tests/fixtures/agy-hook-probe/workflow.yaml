@@ -23,6 +23,37 @@ nodes:
       # Write only into a container HOME: refuse a host run and a root container.
       [ "${MEDULLA_DOCKER:-}" = 1 ] && [ "$(id -u)" != 0 ] || {
         echo 'probe needs medulla --docker and a non-root container user'; exit 1; }
+      # Report only paths, metadata and booleans. Never print credential values.
+      printf 'auth diagnostic: uid=%s gid=%s HOME=%s\n' "$(id -u)" "$(id -g)" "$HOME"
+      for path in /.dockerenv /run/.containerenv; do
+        if [ -e "$path" ]; then printf '%s: present\n' "$path"; else printf '%s: absent\n' "$path"; fi
+      done
+      for name in agy broker-agy sudo dbus-daemon gnome-keyring-daemon secret-tool; do
+        printf '%s: ' "$name"
+        command -v "$name" || echo missing
+      done
+      printf 'DBUS_SESSION_BUS_ADDRESS present: %s\n' "$(test -n "${DBUS_SESSION_BUS_ADDRESS:-}" && echo true || echo false)"
+      printf 'BROKER_ACTIVE present: %s\n' "$(test -n "${BROKER_ACTIVE:-}" && echo true || echo false)"
+      file_info() {
+        printf '%s: ' "$1"
+        if [ ! -f "$1" ]; then echo absent; return; fi
+        stat -Lc 'size=%s uid=%u gid=%g mode=%a' "$1"
+        printf 'readable: %s\n' "$(test -r "$1" && echo true || echo false)"
+      }
+      for path in /mnt/agy-token /mnt/agy-safe-key \
+        /mnt/gemini/antigravity-cli/antigravity-oauth-token \
+        "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"; do file_info "$path"; done
+      token="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+      if [ -r "$token" ]; then
+        if jq -e 'type == "object"' "$token" >/dev/null 2>&1; then
+          jq -c '{valid_json: true, has_id_token: ((.id_token | type) == "string" and (.id_token | length) > 0)}' "$token"
+        else echo 'valid_json: false'; fi
+      fi
+      if command -v secret-tool >/dev/null 2>&1; then
+        if timeout 5s secret-tool lookup service gemini username antigravity >/dev/null 2>&1; then
+          echo 'keyring lookup: success'
+        else echo 'keyring lookup: unavailable'; fi
+      fi
       mkdir -p "$HOME/.gemini/config" "$MEDULLA_RUN_DIR/artifacts"
       [ ! -e "$HOME/.gemini/config/hooks.json" ] || { echo 'hooks.json already exists; probe refused'; exit 1; }
       log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
