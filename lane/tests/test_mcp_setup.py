@@ -1,13 +1,66 @@
 """Check MCP configuration and Joppa context startup without accounts or live services."""
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import tempfile
+import threading
 import tomllib
 import unittest
 
 LANE = Path(__file__).resolve().parents[1]
+TRUST = '--dangerously-bypass-hook-trust'
+IMAGE = os.environ.get('LANE_TEST_IMAGE', 'medulla-crew:latest')
+
+
+def image_ready():
+    return bool(shutil.which('docker')) and subprocess.run(
+        ['docker', 'image', 'inspect', IMAGE], capture_output=True).returncode == 0
+
+
+def workflow_codex_args():
+    """Scout agent args and the Codex reviewer flag, as lane/workflow.yaml configures them."""
+    text = (LANE / 'workflow.yaml').read_text()
+    scout = text[text.index('\n  cbm_discovery:'):]
+    scout = scout[:scout.index('\n  create_worktree:')]
+    reviewer = text[text.index('\n    - harness: codex'):]
+    reviewer = reviewer[:reviewer.index('\n    - harness:', 1)]
+    args = re.search(r'\n      args: \[([^\]]*)\]', scout).group(1)
+    flag = re.search(r'\n      flag: (\S+)', reviewer)
+    return [arg.strip() for arg in args.split(',')], flag and flag.group(1)
+
+
+class ResponsesStub(BaseHTTPRequestHandler):
+    """One shell call, then a final message: the Responses stream Codex reads."""
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"data":[],"models":[]}')
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
+        if any(isinstance(item, dict) and item.get('type') == 'function_call_output' for item in body.get('input', [])):
+            item = {'type': 'message', 'id': 'msg_1', 'role': 'assistant', 'status': 'completed',
+                    'content': [{'type': 'output_text', 'text': 'stub-done', 'annotations': []}]}
+        else:
+            item = {'type': 'function_call', 'id': 'fc_1', 'call_id': 'call_1', 'name': 'exec_command',
+                    'arguments': json.dumps({'cmd': 'echo stub-tool-ran'})}
+        done = {'id': 'resp_1', 'status': 'completed', 'output': [item], 'usage': {
+            'input_tokens': 1, 'output_tokens': 1, 'total_tokens': 2,
+            'input_tokens_details': {'cached_tokens': 0}, 'output_tokens_details': {'reasoning_tokens': 0}}}
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.end_headers()
+        for event in ({'type': 'response.created', 'response': {**done, 'status': 'in_progress', 'output': []}},
+                      {'type': 'response.output_item.done', 'output_index': 0, 'item': item},
+                      {'type': 'response.completed', 'response': done}):
+            self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
 
 
 class McpSetupTests(unittest.TestCase):
@@ -102,3 +155,50 @@ class McpSetupTests(unittest.TestCase):
             self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['hooks'][0]['command'], expected_cmd)
+
+    @unittest.skipUnless(image_ready(), f'Docker image {IMAGE} required')
+    def test_image_codex_fires_lane_hooks_only_with_the_workflow_trust_flag(self):
+        args, reviewer_flag = workflow_codex_args()
+        self.assertIn(TRUST, args)
+        self.assertEqual(reviewer_flag, TRUST)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), ResponsesStub)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+
+        def deliveries(codex_args):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                logger = root / 'logger.sh'
+                logger.write_text('cat >> "$HOOK_LOG"; echo >> "$HOOK_LOG"\n')
+                hook = [{'type': 'command', 'command': f'bash {logger}'}]
+                settings = root / 'settings.json'
+                settings.write_text(json.dumps({'hooks': {
+                    'SessionStart': [{'hooks': hook}], 'PreToolUse': [{'matcher': 'Bash', 'hooks': hook}],
+                    'PostToolUse': [{'matcher': '*', 'hooks': hook}], 'Stop': [{'hooks': hook}]}}))
+                home = root / 'codex-home'
+                subprocess.run(['bash', str(LANE / 'hooks/codex-home.sh'), str(home), str(settings)], check=True,
+                               env=dict(os.environ, CBM_MCP_COMMAND='/unused.py'), capture_output=True)
+                # The stub replaces the account; hooks.json is Crew's own output.
+                (home / 'config.toml').write_text(
+                    'model = "stub-model"\nmodel_provider = "stub"\n[model_providers.stub]\nname = "stub"\n'
+                    f'base_url = "http://127.0.0.1:{server.server_address[1]}/v1"\n'
+                    'wire_api = "responses"\nenv_key = "STUB_KEY"\n')
+                run = subprocess.run([
+                    'docker', 'run', '--rm', '--network', 'host', '--user', f'{os.getuid()}:{os.getgid()}',
+                    '-v', f'{root}:{root}', '-w', str(root), '-e', f'HOME={root}', '-e', f'CODEX_HOME={home}',
+                    '-e', f'HOOK_LOG={root}/hooks.jsonl', '-e', 'STUB_KEY=stub', '--entrypoint', 'codex', IMAGE,
+                    'exec', '--skip-git-repo-check', '--json', *codex_args, 'Run echo once.'],
+                    capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+                self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+                self.assertIn('stub-tool-ran', run.stdout)
+                log = root / 'hooks.jsonl'
+                return [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+
+        self.assertEqual(deliveries([arg for arg in args if arg != TRUST]), [])
+        events = deliveries(args)
+        self.assertEqual([event['hook_event_name'] for event in events], ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'])
+        pre, post, stop = events[1:]
+        self.assertEqual((pre['tool_name'], pre['tool_input']), ('Bash', {'command': 'echo stub-tool-ran'}))
+        self.assertEqual(post['tool_use_id'], pre['tool_use_id'])
+        self.assertIn('tool_response', post)
+        self.assertEqual(stop['last_assistant_message'], 'stub-done')
