@@ -104,7 +104,7 @@ nodes:
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       if jq -e '.ticket.retained != null' "$claim" >/dev/null; then
         inputs="$(dirname "$LAUNCH_CLAIM_FILE")/resume-inputs"
-        for name in scout.txt coder-report.txt test-bindings.json; do
+        for name in scout.txt test-bindings.json; do
           [ ! -f "$inputs/$name" ] || cp "$inputs/$name" "$MEDULLA_RUN_DIR/artifacts/$name"
         done
         [ ! -d "$inputs/prior" ] || cp -R "$inputs/prior" "$MEDULLA_RUN_DIR/artifacts/prior"
@@ -201,6 +201,7 @@ nodes:
       MERGE_CONFLICT: notify_failure
       NO_TARGET_BRANCH: notify_failure
       BRANCH_HAS_WORK: notify_failure
+      RETAINED_CHANGED: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -898,6 +899,11 @@ nodes:
         > "$MEDULLA_RUN_DIR/artifacts/origin.json"
       if [ "$FINALIZE_ONLY" = true ]; then
         printf '%s\nNo Task claim or Task outcome was changed.\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+        cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
+        exit 1
+      fi
+      if [ "${MEDULLA_LAST_SIGNAL:-}" = RETAINED_CHANGED ]; then
+        printf '%s\nCheckout preserved without Git writes.\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
         cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
         exit 1
       fi

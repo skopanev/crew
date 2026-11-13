@@ -7,11 +7,13 @@ head="$(jq -er '.ticket.retained.head' "$retained")"
 tree="$(jq -er '.ticket.retained.tree' "$retained")"
 base="$(jq -er '.ticket.retained.base' "$retained")"
 route="$(jq -er '.ticket.retained.route' "$retained")"
-[[ "$route" == coder || "$route" == review ]] || exit 1
-[[ "$(git symbolic-ref --short HEAD)" == "ticket-$ticket_id" && "$(git rev-parse HEAD)" == "$head" \
+if ! { [[ "$route" == coder || "$route" == review ]] && \
+  [[ "$(git symbolic-ref --short HEAD)" == "ticket-$ticket_id" && "$(git rev-parse HEAD)" == "$head" \
   && "$(git rev-parse 'HEAD^{tree}')" == "$tree" && "$(cat .git/lane-base)" == "$base" \
-  && -z "$(git status --porcelain --untracked-files=all)" ]] || {
-  echo 'Retained candidate changed after the host ownership check.' >&2; exit 1; }
+  && -z "$(git status --porcelain --untracked-files=all)" ]]; }; then
+  echo '<signal:RETAINED_CHANGED>Retained candidate changed after the host ownership check; checkout preserved.</signal:RETAINED_CHANGED>'
+  exit 0
+fi
 target="$(bash "$TOOLING_ROOT/lane/bin/target.sh" "$project_dir")"
 rc=0
 bash "$TOOLING_ROOT/lane/bin/rebase.sh" "$target" || rc=$?
@@ -28,7 +30,7 @@ source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
 # This also removes the no-verify status of a SAVE STATE checkpoint.
 git reset --soft "$base"
 if [[ "$route" == review ]]; then
-  echo '<signal:RESUME_REVIEW>Retained implementation: run current hooks, gates and all reviewers again.</signal:RESUME_REVIEW>'
+  printf '<signal:RESUME_REVIEW>Retained implementation: run current hooks, gates and all reviewers again.%s</signal:RESUME_REVIEW>\n' "$deps"
 else
-  echo '<signal:READY>Continue the retained implementation. Read artifacts/prior/failure.txt and the prior review reports. Repair the recorded blockers only.</signal:READY>'
+  printf '<signal:READY>Continue the retained implementation. Read artifacts/prior/failure.txt and the prior review reports. Repair the recorded blockers only.%s</signal:READY>\n' "$deps"
 fi

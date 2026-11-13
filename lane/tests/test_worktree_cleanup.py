@@ -60,7 +60,8 @@ class WorktreeCleanupTests(unittest.TestCase):
                 result = subprocess.run(['bash', str(RUN.parent / 'bin/retained-worktree.sh')],
                                         env=env, capture_output=True, text=True, timeout=20)
                 if route in ('dirty', 'changed-head'):
-                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('<signal:RETAINED_CHANGED>', result.stdout)
                     self.assertEqual(git(wt, 'rev-parse', 'HEAD'), head)
                     continue
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -39,13 +39,24 @@ def shell_body(node):
 
 class FailureOutcomeTests(unittest.TestCase):
     def run_failure(self, signal, *, update_fails=False, inherited_want=None, claimed=True,
-                    empty_worktree=False):
+                    empty_worktree=False, changed_checkout=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             if empty_worktree:
                 (root / 'worktree').mkdir()
                 subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
                 (root / 'parent.txt').write_text('parent source must remain untouched\n')
+            if changed_checkout:
+                checkout = root / 'worktree'
+                checkout.mkdir()
+                subprocess.run(['git', 'init', '-q', str(checkout)], check=True)
+                (checkout / 'code.txt').write_text('base\n')
+                subprocess.run(['git', '-C', str(checkout), 'add', '.'], check=True)
+                subprocess.run(['git', '-C', str(checkout), '-c', 'user.name=fixture', '-c',
+                                'user.email=fixture@local', '-c', 'core.hooksPath=/dev/null',
+                                'commit', '-qm', 'base'], check=True)
+                before = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'])
+                (checkout / 'code.txt').write_text('changed after ownership check\n')
             commands = root / "lane-launcher"
             commands.mkdir()
             scripts = {
@@ -88,10 +99,15 @@ class FailureOutcomeTests(unittest.TestCase):
                 ["bash", "-c", shell_body("notify_failure")],
                 env=env, cwd=root, capture_output=True, text=True, timeout=5,
             )
-            self.assertEqual(result.returncode, 1 if signal == 'CLAIM_REFUSED' or not claimed else 0, result.stderr)
+            self.assertEqual(result.returncode, 1 if signal in ('CLAIM_REFUSED', 'RETAINED_CHANGED') or not claimed else 0,
+                             result.stderr)
             log = root / "status.log"
             updates = log.read_text().splitlines() if log.exists() else []
             report = (root / "run/artifacts/failure.txt").read_text()
+            if changed_checkout:
+                self.assertEqual(subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD']), before)
+                self.assertEqual(subprocess.check_output(['git', '-C', str(checkout), 'diff', '--cached', '--name-only']), b'')
+                self.assertEqual((checkout / 'code.txt').read_text(), 'changed after ownership check\n')
             if empty_worktree:
                 staged = subprocess.check_output(
                     ['git', '-C', str(root), 'diff', '--cached', '--name-only'], text=True)
@@ -121,6 +137,11 @@ class FailureOutcomeTests(unittest.TestCase):
                     "CLAIM_REFUSED", inherited_want=inherited_want,
                 )
                 self.assertEqual(updates, [])
+
+    def test_changed_retained_checkout_is_not_staged_or_committed(self):
+        updates, report = self.run_failure('RETAINED_CHANGED', changed_checkout=True)
+        self.assertEqual(updates, [])
+        self.assertIn('Checkout preserved without Git writes.', report)
 
     def test_failed_status_write_is_preserved_in_durable_report(self):
         updates, report = self.run_failure("GATE_FAIL", update_fails=True)
