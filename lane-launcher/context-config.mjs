@@ -11,7 +11,7 @@ export function validateContext(config) {
   const url = new URL(config.url);
   require(['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash,
     'context.url needs an HTTP endpoint without URL credentials');
-  require(text(config.root), 'context.root is required');
+  require(config.root === undefined || text(config.root), 'context.root must be nonempty when present');
   require(text(config.token_file) && path.isAbsolute(config.token_file), 'context.token_file must be absolute');
   const stat = fs.statSync(config.token_file);
   require(stat.isFile() && (stat.mode & 0o077) === 0, 'context.token_file must be a private file');

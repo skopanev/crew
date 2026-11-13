@@ -83,6 +83,20 @@ class MemoryHookTests(unittest.TestCase):
                                   "## Rule\nKeep scope.\n\n## ASSIGNMENT\n- ticket: task:t1\n- module: life")
         self.assertNotIn("continue", out)
 
+    def test_flat_memory_omits_root_for_contract_stop_and_query(self):
+        del self.config["root"]
+        for event, fields in (("SessionStart", {}), ("Stop", {}),
+                              ("UserPromptSubmit", {"prompt": "Run the gate"})):
+            with self.subTest(event=event):
+                self.server.replies.append((200, {"items": [{"address": "process:implement",
+                    "body": "Keep scope.", "ends_when": "Return the result."}]}))
+                out = self.hook(event, **fields)
+                self.assertNotIn("root", self.server.requests[-1]["body"])
+                self.assertEqual(self.server.requests[-1]["body"]["workspace"], "crew")
+                self.assertNotIn("stopReason", out)
+                if event == "Stop":
+                    self.assertEqual(out, {"decision": "block", "reason": "Return the result."})
+
     def test_session_start_stops_the_lane_without_a_contract(self):
         for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []}),
                       (200, {"items": [{"address": "rule:r", "title": "Rule"}]})):

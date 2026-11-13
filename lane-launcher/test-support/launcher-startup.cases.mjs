@@ -16,6 +16,21 @@ import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.m
 import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
 
+test('live launcher accepts flat memory and refuses an invalid explicit context root', async t => {
+  const f = await setup(t);
+  delete f.config.context.root;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).context.root, undefined);
+  for (const root of [null, '', '   ', 42]) {
+    f.config.context.root = root;
+    save(f.configFile, f.config);
+    assert.throws(() => configFrom(f.configFile, f.env), /context.root must be nonempty when present/);
+  }
+  f.config.context.root = 'memory:scoped';
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).context.root, 'memory:scoped');
+});
+
 for (const state of ['retained', 'removed', 'other-repository']) test(`Joppa package handles a ${state} blocked sibling checkout`, async t => {
   const f = await packageFixture(t);
   f.queue.splice(0, 1);
