@@ -19,13 +19,14 @@ export function taskContract(data) {
   for (const key of ['repository', 'module']) {
     require(text(data[key]) && !/[\r\n]/.test(data[key]), `Structured Task needs ${key}`);
   }
-  for (const key of ['steps', 'checks']) {
-    require(Array.isArray(data[key]) && data[key].length && data[key].every(text), `Structured Task needs ${key}`);
-  }
+  require(Array.isArray(data.steps) && data.steps.length && data.steps.every(text), 'Structured Task needs steps');
+  // Checks are optional: a Task without them is verified by the tests of its criterion.
+  const checks = data.checks ?? [];
+  require(Array.isArray(checks) && checks.every(text), 'Structured Task checks must be text lines');
   const steps = [...data.steps], lines = [body, '', `Repository: ${data.repository}`,
     `Module: ${data.module}`, '', 'How:'];
   if (steps[0].startsWith('0. ')) lines.push(steps.shift());
-  lines.push(...steps.map((step, index) => `${index + 1}. ${step.replace(/^\s*\d+\.\s+/, '')}`),
-    '', 'Checks:', ...data.checks);
+  lines.push(...steps.map((step, index) => `${index + 1}. ${step.replace(/^\s*\d+\.\s+/, '')}`));
+  if (checks.length) lines.push('', 'Checks:', ...checks);
   return lines.join('\n');
 }

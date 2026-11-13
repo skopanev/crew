@@ -21,6 +21,24 @@ export async function criterionNodes(read, kind, ac) {
   return nodes;
 }
 
+// The live Test children of one criterion, as the coder reads them: what each test checks and
+// how it runs. Every type with role test counts; a schema without one has no tests to show.
+export async function criterionTests(read, types, ac) {
+  const kinds = Object.keys(types || {}).filter(kind => types[kind].role === 'test');
+  if (!kinds.length) return [];
+  const tests = [];
+  for await (const page of nodePages(read, {kind: kinds, parent: ac,
+    fields: ['title', 'revision', 'parent', 'data.body', 'data.command']})) {
+    for (const item of page.items) {
+      if (item.parent !== ac) continue;
+      tests.push({address: item.address, revision: item.revision, title: item.title,
+        ...(typeof item['data.body'] === 'string' && item['data.body'] ? {body: item['data.body']} : {}),
+        ...(typeof item['data.command'] === 'string' && item['data.command'] ? {command: item['data.command']} : {})});
+    }
+  }
+  return tests;
+}
+
 // Read one bound node in full. Return its recorded result or null.
 export async function nodeResult(read, address, ac, title) {
   const detail = await read('joppa_objects', {address});

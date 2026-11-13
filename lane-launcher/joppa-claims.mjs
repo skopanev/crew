@@ -5,6 +5,7 @@ import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
+import {criterionTests} from './test-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes one release save with the hold code and one note for each Task in one batch.
@@ -150,6 +151,12 @@ export async function claimTask(run, persist, runId) {
     const input = taskInput(run.config, object, taskContexts, covered);
     if (coveredContexts.length) input.ticket.coveredContexts = coveredContexts;
     if (parentContext) input.ticket.parentContext = parentContext;
+    // The coder sees how its criterion is tested. These are references, not bindings: Crew binds
+    // only the rows of data.acceptance_checks.
+    if (schema.schema.types[parents.get(object.document.parent)?.kind]?.role === 'ac') {
+      input.ticket.acceptanceTests = await criterionTests((tool, args) =>
+        api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), schema.schema.types, object.document.parent);
+    }
     if (requirementContext) input.ticket.requirementContext = requirementContext;
     require(!inputs.length || inputs[0].repo.id === input.repo.id, 'Claimed Tasks belong to different repositories');
     require(requirement && (!run.requirement || run.requirement === requirement), 'Claimed Tasks belong to different requirements');
