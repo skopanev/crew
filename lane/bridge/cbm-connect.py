@@ -12,9 +12,10 @@ def prepare(command, source_root, cache_dir, output):
     root = str(Path(source_root).resolve(strict=True))
     cache = str(Path(cache_dir).resolve(strict=True))
     # Resolve on EVERY start: a listener is collected after four idle hours.
-    connect_mcp("codebase-memory", [command], output,
-                env={"CBM_ALLOWED_ROOT": root, "CBM_CACHE_DIR": cache}, roots=[root])
-    print("run.sh: shared CBM bridge ready (broker)")
+    connector = connect_mcp("codebase-memory", [command], output,
+                            env={"CBM_ALLOWED_ROOT": root, "CBM_CACHE_DIR": cache}, roots=[root])
+    print(connector)
+    print("run.sh: shared CBM bridge ready (broker)", file=sys.stderr)
 
 
 def prepare_joppa(output):
@@ -23,8 +24,9 @@ def prepare_joppa(output):
     command = json.loads(os.environ["LANE_JOPPA_MCP_COMMAND_JSON"])
     if not isinstance(command, list) or not command or not all(isinstance(arg, str) and arg for arg in command):
         raise ValueError("Joppa MCP command needs executable arguments")
-    connect_mcp("joppa", command, output, lang="js")
-    print("run.sh: shared Joppa reader ready (broker)")
+    connector = connect_mcp("joppa", command, output, lang="js")
+    print(connector)
+    print("run.sh: shared Joppa reader ready (broker)", file=sys.stderr)
 
 
 if __name__ == "__main__":

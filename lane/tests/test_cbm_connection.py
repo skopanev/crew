@@ -6,12 +6,45 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 
 PROBE = Path(__file__).resolve().parents[1] / 'bridge/cbm-probe.py'
 
 
 class SharedCBMTests(unittest.TestCase):
+    def test_bridge_reports_the_broker_connector_path(self):
+        bridge = runpy.run_path(str(PROBE.with_name('cbm-connect.py')))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            calls = []
+            def connect(name, command, output, **kwargs):
+                calls.append((name, command, kwargs))
+                path = output + '-digest'
+                Path(path).write_text('# connector\n')
+                return path
+            broker = types.ModuleType('broker')
+            box = types.ModuleType('broker.box')
+            box.connect_mcp = connect
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
+            with patch.dict(sys.modules, {'broker': broker, 'broker.box': box}), \
+                 patch.dict(os.environ, {'LANE_JOPPA_MCP_COMMAND_JSON': '["node","reader.cjs"]'}):
+                for name in ('codebase-memory', 'joppa'):
+                    with self.subTest(name=name):
+                        output = str(root / name)
+                        out, err = StringIO(), StringIO()
+                        with redirect_stdout(out), redirect_stderr(err):
+                            if name == 'joppa': bridge['prepare_joppa'](output)
+                            else: bridge['prepare']('/server', temp, temp, output)
+                        self.assertEqual(out.getvalue(), output + '-digest\n')
+                        self.assertTrue(Path(out.getvalue().strip()).is_file())
+                        self.assertFalse(Path(output).exists())
+                        self.assertIn('ready (broker)', err.getvalue())
+            self.assertEqual(calls[0][2]['roots'], [str(root)])
+            self.assertEqual(calls[1][2]['lang'], 'js')
+
     def test_container_connector_is_inside_its_mount_after_resolving_an_alias(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

@@ -28,7 +28,9 @@ class LaunchMountTests(unittest.TestCase):
             shutil.copy(CREW / 'lane-launcher/scope.mjs', tooling / 'lane-launcher/scope.mjs')
             shutil.copy(CREW / 'lane-launcher/runtime.mjs', tooling / 'lane-launcher/runtime.mjs')
             (tooling / 'lane/bridge/cbm-connect.py').write_text(
-                "import pathlib,sys\npathlib.Path(sys.argv[4]).write_text('# fixture connector\\n')\n")
+                "import pathlib,sys\n"
+                "path=pathlib.Path(sys.argv[-1]+'-fixture')\n"
+                "path.write_text('# fixture connector\\n')\nprint(path)\n")
             (root / 'connector.py').write_text('# fixture connector\n')
             (root / 'connector.py').chmod(0o755)
             (tooling / 'lane-launcher/safe-sync.py').write_text(
@@ -98,7 +100,18 @@ class LaunchMountTests(unittest.TestCase):
                     self.assertNotIn('repository_git_dir=/workspace/.git', launch)
                     synced = json.loads((root / 'sync.json').read_text())
                     self.assertEqual(synced[0], str(sources))
+                    self.assertTrue(synced[1].endswith('/mcp.py-fixture'))
+                    self.assertIn(f'CBM_MCP_COMMAND={synced[1]}', launch)
                     self.assertEqual(synced[2], env.get('MEDULLA_IMAGE', 'medulla-crew:latest'))
+            output.unlink()
+            # The Joppa reader also uses the path returned by Broker.
+            env['LANE_JOPPA_MCP_COMMAND_JSON'] = '["node","reader.cjs"]'
+            result = run('reader-ticket')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            launch = json.loads(output.read_text())
+            reader = next(arg for arg in launch if arg.startswith('JOPPA_READER_COMMAND_JSON='))
+            self.assertTrue(json.loads(reader.split('=', 1)[1])[1].endswith('/mcp.cjs-fixture'))
+            env.pop('LANE_JOPPA_MCP_COMMAND_JSON')
             output.unlink()
             # The configured repository must stay inside the source root.
             outside = root / 'outside'

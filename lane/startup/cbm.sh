@@ -2,9 +2,8 @@
 # Broker supplies a current bridge, scoped to this source root, as for --box.
 # Only its small per-run connector enters the container; the database stays shared.
 cbm_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/cbm-connector.XXXXXX")"
-cbm_connector="$cbm_connector_dir/mcp.py"
-python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector"
-chmod 600 "$cbm_connector"
+cbm_connector="$(python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" "$cbm_command" "$source_root" "$cbm_cache" "$cbm_connector_dir/mcp.py")"
+[[ -f "$cbm_connector" ]] || { say 'run.sh: broker returned no CBM connector'; exit 2; }
 cbm_project="$(jq -er '.cbmProject' <<<"$LANE_REPOSITORY_JSON")"
 # Read-only Medulla checks do not update canonical sources or CBM.
 sync_sources=true

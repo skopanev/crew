@@ -214,8 +214,8 @@ mkdir -p "$MEDULLA_BRIDGE"
 joppa_reader_command=""
 if [[ -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
   joppa_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/joppa-connector.XXXXXX")"
-  joppa_connector="$joppa_connector_dir/mcp.cjs"
-  python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" --joppa "$joppa_connector"
+  joppa_connector="$(python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" --joppa "$joppa_connector_dir/mcp.cjs")"
+  [[ -f "$joppa_connector" ]] || { say 'run.sh: broker returned no Joppa connector'; exit 2; }
   joppa_reader_command="$(jq -cn --arg file "$joppa_connector" '["node", $file]')"
 fi
 unset LANE_JOPPA_MCP_COMMAND_JSON
