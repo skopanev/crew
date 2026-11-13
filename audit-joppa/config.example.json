@@ -2,14 +2,74 @@
   "url": "https://joppa.example.com/mcp",
   "workspace": "product",
   "project": "product",
-  "mcp_command": ["node", "/path/to/broker-joppa-host.cjs"],
-  "equill_store": "/path/to/equill-store",
-  "equill_actor": "registered-store-reader",
+  "mcp_command": [
+    "node",
+    "/path/to/broker-joppa-host.cjs"
+  ],
   "runs_folder": "/path/to/audit-runs",
   "cbm_root": "/path/to/sources",
   "cbm_store": "/path/to/shared-cbm-store",
-  "repositories": [{"id": "service", "path": "/path/to/sources/service", "cbm_project": "existing-index-project"}],
-  "inbox": {"kind": "configured-input-type", "owner": "user-id"},
+  "repositories": [
+    {
+      "id": "service",
+      "path": "/path/to/sources/service",
+      "cbm_project": "existing-index-project"
+    }
+  ],
+  "inbox": {
+    "kind": "configured-input-type",
+    "owner": "user-id"
+  },
   "audit_model": "gpt-6.1-sol",
-  "review_model": "claude-sonnet-5-5"
+  "review_model": "claude-sonnet-5-5",
+  "context": {
+    "url": "https://joppa.example.com/api/data",
+    "workspace": "context-workspace",
+    "root": "memory:configured-root",
+    "token_file": "/absolute/private/context-read-key",
+    "roles": {
+      "auditor": "crew-audit-auditor"
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "name": "LANE_MEMORY_PROCESS",
+      "project": "LANE_MEMORY_PROJECT"
+    },
+    "session": {
+      "kind": [
+        "guide",
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when",
+        "audit_body",
+        "review_body"
+      ],
+      "max_chars": 32768
+    },
+    "stop": {
+      "kind": "process",
+      "field": "ends_when"
+    },
+    "query": {
+      "kind": "lesson",
+      "filter_env": {
+        "project": "LANE_MEMORY_PROJECT"
+      },
+      "fields": [
+        "title",
+        "body"
+      ],
+      "limit": 10,
+      "max_chars": 32768
+    },
+    "phase_kind": "process",
+    "phase_fields": {
+      "audit": "audit_body",
+      "review": "review_body"
+    }
+  }
 }

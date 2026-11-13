@@ -82,10 +82,12 @@ try {
   require(file && !file.startsWith('-') && args.every(arg => ['--dry-run', '--no-publish'].includes(arg)),
     'Usage: auditor-joppa.sh CONFIG.json [--dry-run] [--no-publish] [--interval-seconds N]');
   const configFile = path.resolve(file), config = read(configFile), root = path.dirname(configFile);
-  for (const key of ['url', 'workspace', 'equill_store', 'equill_actor', 'project', 'runs_folder', 'cbm_root', 'cbm_store']) {
+  for (const key of ['url', 'workspace', 'project', 'runs_folder', 'cbm_root', 'cbm_store']) {
     require(text(config[key]), `Config needs ${key}`);
   }
-  for (const key of ['equill_store', 'runs_folder', 'cbm_root', 'cbm_store']) config[key] = path.resolve(root, config[key]);
+  for (const key of ['runs_folder', 'cbm_root', 'cbm_store']) config[key] = path.resolve(root, config[key]);
+  require(config.context && text(config.context.token_file), 'Config needs context with token_file');
+  config.context.token_file = path.resolve(root, config.context.token_file);
   if (config.mcp_command !== undefined) {
     require(Array.isArray(config.mcp_command) && config.mcp_command.length &&
       config.mcp_command.every(arg => text(arg) && !arg.includes('\0')), 'mcp_command needs an executable and arguments');
@@ -121,8 +123,6 @@ try {
     process.exit(0);
   }
   require(config.mcp_command || fs.existsSync(config.token_file), 'Configured user token file is unavailable');
-  command(process.env.PLANNING_PYTHON || 'python3', [path.join(here, '../roles/export.py'), '--check', 'audit', 'shared'],
-    {env: {...process.env, EQUILL_STORE: config.equill_store}});
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-audit-'));
   try {
     const reader = {command: process.env.PLANNING_PYTHON || 'python3', args: [path.join(here, '../planning-joppa/mcp.py'),

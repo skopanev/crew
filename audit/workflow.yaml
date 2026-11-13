@@ -23,7 +23,7 @@ nodes:
         - -c
         - '{{var:AUDIT_MCP_TOML}}'
     prompt: |
-      Execute the mandatory Equill contract:
+      Execute the mandatory role contract:
       {{var:AUDIT_CONTRACT}}
       Read the audit input: {{var:AUDIT_INPUT}}.
       Inspect implemented code behavior. Use the read-only service MCP to find its current requirements and context.
@@ -66,7 +66,7 @@ nodes:
       Start with CBM search_graph or search_code for {{var:AUDIT_REVIEW_SCOPE}}.
       Repeat these specification searches through the service MCP: {{var:AUDIT_REVIEW_SPEC_SEARCHES}}.
       Use each exact query across the whole workspace, without a kind or type filter.
-      Execute the mandatory Equill contract as an independent verifier:
+      Execute the mandatory role contract as an independent verifier:
       {{var:AUDIT_REVIEW_CONTRACT}}
       Read the input {{var:AUDIT_INPUT}} and proposed findings {{var:AUDIT_FINDINGS}}.
       Read the actual cited source and specification. Verify the complete control flow and owner decisions.

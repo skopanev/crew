@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {command, confirmed, corrected, hash, parseReport, read, require, source, text, validate, write} from './common.mjs';
+import {confirmed, corrected, hash, parseReport, read, require, source, text, validate, write} from './common.mjs';
 import {preflight, verifySearches} from './cbm.mjs';
+import {contract} from './contracts.mjs';
 
 const artifacts = path.join(process.env.MEDULLA_RUN_DIR || '.', 'artifacts');
 const config = () => read(process.env.AUDIT_CONFIG);
@@ -13,22 +14,6 @@ const variable = (key, value) => {
   require(!body.includes('</signal:var>'), 'Reserved signal delimiter in input');
   console.log(`<signal:var key=${key}>${body}</signal:var>`);
 };
-function contract(settings) {
-  const name = 'crew-audit-auditor';
-  const reply = JSON.parse(command(process.env.EQUILL_BIN || 'equill', ['context', '--store', settings.equill_store,
-    '--profile', 'agent.context.target', '--role', name, '--process', name,
-    '--project', settings.project, '--coordinate', 'rules=none', '--json'],
-    {env: {...process.env, EQUILL_ACTOR: settings.equill_actor}}));
-  require(reply.ok && reply.receipt?.projection === 'ready' && !reply.receipt?.degraded && !reply.receipt?.empty
-    && text(reply.content) && text(reply.bundle_digest) && reply.selected_record_ids?.length,
-    'Audit Equill contract is unavailable');
-  const records = reply.content.split('\n\n').filter(text).map(value => JSON.parse(value));
-  require(records.some(item => item.name === name) && [10, 20, 30].every(step =>
-    records.some(item => item.process === name && item.step === step)), 'Audit Equill steps are incomplete');
-  const phase = steps => records.filter(item => item.step === undefined || steps.includes(item.step))
-    .map(item => JSON.stringify(item)).join('\n\n');
-  return {content: reply.content, audit: phase([10, 20]), review: phase([10, 30]), digest: reply.bundle_digest};
-}
 function result(log = process.env.MEDULLA_ATTEMPT_LOG) {
   require(process.env.MEDULLA_BODY_RC === '0', 'Audit agent did not finish');
   const events = fs.readFileSync(log, 'utf8').split('\n').flatMap(line => {
