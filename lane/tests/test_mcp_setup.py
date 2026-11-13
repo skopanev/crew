@@ -161,8 +161,9 @@ class McpSetupTests(unittest.TestCase):
         args, reviewer_flag = workflow_codex_args()
         self.assertIn(TRUST, args)
         self.assertEqual(reviewer_flag, TRUST)
-        server = ThreadingHTTPServer(('127.0.0.1', 0), ResponsesStub)
+        server = ThreadingHTTPServer(('0.0.0.0', 0), ResponsesStub)
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
 
         def deliveries(codex_args):
@@ -181,14 +182,15 @@ class McpSetupTests(unittest.TestCase):
                 # The stub replaces the account; hooks.json is Crew's own output.
                 (home / 'config.toml').write_text(
                     'model = "stub-model"\nmodel_provider = "stub"\n[model_providers.stub]\nname = "stub"\n'
-                    f'base_url = "http://127.0.0.1:{server.server_address[1]}/v1"\n'
+                    f'base_url = "http://host.docker.internal:{server.server_address[1]}/v1"\n'
                     'wire_api = "responses"\nenv_key = "STUB_KEY"\n')
                 run = subprocess.run([
-                    'docker', 'run', '--rm', '--network', 'host', '--user', f'{os.getuid()}:{os.getgid()}',
+                    'docker', 'run', '--rm', '--add-host', 'host.docker.internal:host-gateway',
+                    '--user', f'{os.getuid()}:{os.getgid()}',
                     '-v', f'{root}:{root}', '-w', str(root), '-e', f'HOME={root}', '-e', f'CODEX_HOME={home}',
-                    '-e', f'HOOK_LOG={root}/hooks.jsonl', '-e', 'STUB_KEY=stub', '--entrypoint', 'codex', IMAGE,
-                    'exec', '--skip-git-repo-check', '--json', *codex_args, 'Run echo once.'],
-                    capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+                    '-e', f'HOOK_LOG={root}/hooks.jsonl', '-e', 'STUB_KEY=stub', '--entrypoint', 'timeout', IMAGE,
+                    '50', 'codex', 'exec', '--skip-git-repo-check', '--json', *codex_args, 'Run echo once.'],
+                    capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
                 self.assertEqual(run.returncode, 0, run.stderr[-2000:])
                 self.assertIn('stub-tool-ran', run.stdout)
                 log = root / 'hooks.jsonl'
