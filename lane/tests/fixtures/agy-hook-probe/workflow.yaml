@@ -1,0 +1,73 @@
+# Probe which native AGY hook events reach a command inside the lane image.
+# Run from the Crew root:
+#   medulla --docker --cwd-ro -w lane/tests/fixtures/agy-hook-probe --runs-folder <dir>
+# The hooks file goes into the container-private $HOME only. The log keeps event names,
+# input keys and tool names, never prompt text, transcripts or tokens.
+version: '2'
+start: install_hooks
+timeout: 180
+defaults:
+  timeout: 30
+vars:
+  AGY_MODEL: gemini-4-carbon-high
+nodes:
+  install_hooks:
+    on_signal:
+      OK: probe
+      __done__: __exit_fail__
+      __failed__: __exit_fail__
+      __timeout__: __exit_fail__
+      __default__: __exit_fail__
+    shell: |
+      set -eu
+      mkdir -p "$HOME/.gemini/config" "$MEDULLA_RUN_DIR/artifacts"
+      [ ! -e "$HOME/.gemini/config/hooks.json" ] || { echo 'hooks.json already exists; probe refused'; exit 1; }
+      log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
+      hook="$HOME/agy-hook-probe.sh"
+      cat > "$hook" <<HOOK
+      #!/bin/sh
+      # Record the event (argv), the input keys, the tool name and argument keys, one node env value and cwd.
+      jq -c --arg event "\$1" --arg env "\${PROBE_ENV:-}" --arg cwd "\$(pwd)" '
+        {event: \$event, probeEnv: \$env, cwd: \$cwd, inputKeys: (keys? // []),
+         hookEventName: (.hookEventName? // null), toolName: (.toolCall.name? // null),
+         toolArgKeys: ((.toolCall.args? // {}) | keys? // []), terminationReason: (.terminationReason? // null)}
+      ' >> "$log" 2>/dev/null || echo "{\"event\":\"\$1\",\"inputKeys\":null}" >> "$log"
+      case "\$1" in PreToolUse) echo '{"decision":"allow"}' ;; *) echo '{}' ;; esac
+      HOOK
+      chmod +x "$hook"
+      jq -n --arg h "$hook" '
+        def flat(e): [{type: "command", command: ("sh " + $h + " " + e), timeout: 20}];
+        def grouped(e): [{matcher: "*", hooks: flat(e)}];
+        {"crew-probe": {SessionStart: flat("SessionStart"), PreInvocation: flat("PreInvocation"),
+          PostInvocation: flat("PostInvocation"), Stop: flat("Stop"),
+          PreToolUse: grouped("PreToolUse"), PostToolUse: grouped("PostToolUse")}}' > "$HOME/.gemini/config/hooks.json"
+      agy --version
+      echo '<signal:OK>hooks installed</signal:OK>'
+  probe:
+    timeout: 120
+    env:
+      PROBE_ENV: node-env-visible
+    on_signal:
+      __done__: report
+      __failed__: report
+      __timeout__: report
+      __empty__: report
+      __default__: report
+    agent:
+      harness: agy
+      model: '{{var:AGY_MODEL}}'
+    prompt: |
+      Use your terminal tool once to run the command `true`. Then reply with the single word DONE.
+  report:
+    on_signal:
+      OK: __exit_ok__
+      __done__: __exit_fail__
+      __failed__: __exit_fail__
+      __timeout__: __exit_fail__
+      __default__: __exit_fail__
+    shell: |
+      set -eu
+      log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
+      [ -s "$log" ] || { echo 'no hook event reached the probe command'; exit 1; }
+      jq -s 'group_by(.event) | map({event: .[0].event, count: length})' "$log"
+      echo "<signal:OK>hook events recorded in $log</signal:OK>"
