@@ -92,8 +92,18 @@ Joppa supplies role contracts and memory through the configured Read API.
 The launch config maps scout, coder, reviewer and gitfix roles to their process names. The QA key remains for compatibility.
 Scout and reviewers read one prepared contract file. Their SessionStart hook skips duplicate delivery.
 Coder and gitfix read their contracts through SessionStart.
-Omit `context.query` when the project reads lessons through its Joppa MCP.
+Prompt and tool hooks read lessons through the same API. A lesson revision is delivered once per agent session.
+Set `context.query.filter.role` to the configured lesson group, such as `lane`. Omit `context.query` to disable retrieval.
 The Stop hook reads its configured ending field and returns that text unchanged.
+
+Set `hooks` to an absolute project settings JSON path to replace the bundled hook events.
+Crew copies the file into a private read-only mount. Claude and Codex use the same configured events.
+The default permissions and environment remain. Custom commands stay unchanged, except for `<TOOLING_ROOT>` expansion.
+Commands must resolve inside the container. Include the context-loader events when using a custom file.
+
+Each Task snapshot includes its parent AC's live `acceptanceTests`, with title, body and command when present.
+Authored `checks` and `acceptance_checks` are optional. Without acceptance rows, Crew creates no test bindings.
+The project test uploader can record its report names directly. Existing acceptance rows retain their binding checks.
 
 Agents implement only the ticket's scope and acceptance criteria. CBM locates
 relevant code and checks; findings must be verified against the current source

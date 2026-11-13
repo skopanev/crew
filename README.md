@@ -43,7 +43,7 @@ All lanes access shared host CBM storage through the configured connector. Crew
 does not copy databases, start CBM daemons, or index worktrees.
 
 Role contracts and memory come from Joppa `POST /api/data`.
-Set `context` in the launch config. It names the endpoint, workspace, optional root,
+Set `context` in the launch config. It names the endpoint, optional workspace and root,
 private `token_file`, role map, type selections, fields and filter bindings.
 The key must be a workspace Read key (`jpr_`), not an MCP or mutation token.
 SessionStart reads the complete contract. Prompt and tool hooks query scoped memory.

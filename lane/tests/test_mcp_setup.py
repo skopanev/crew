@@ -100,6 +100,6 @@ class McpSetupTests(unittest.TestCase):
             for event in ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolBatch', 'Stop'):
                 self.assertEqual(claude_hooks[event][0]['hooks'][0]['command'], expected_cmd)
                 self.assertEqual(codex_hooks[event][0]['hooks'][0]['command'], expected_cmd)
-            self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], 'Bash')
+            self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['hooks'][0]['command'], expected_cmd)
