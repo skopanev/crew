@@ -47,7 +47,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   if (!config.launchLanes) return config;
   validateHooks(config.hooks);
   validateContext(config.context);
-  for (const role of ['scout', 'coder', 'qa', 'reviewer', 'gitfix']) {
+  for (const role of ['scout', 'coder', 'reviewer', 'gitfix']) {
     if (typeof config.context.roles?.[role] !== 'string' || !config.context.roles[role].trim()) {
       throw new Error(`context.roles.${role} is required`);
     }

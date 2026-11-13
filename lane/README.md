@@ -89,7 +89,8 @@ Nonblocking findings remain in `artifacts/followups.txt` for the host completion
 ## Agent context
 
 Joppa supplies role contracts and memory through the configured Read API.
-The launch config maps scout, coder, reviewer and gitfix roles to their process names. The QA key remains for compatibility.
+The launch config maps scout, coder, reviewer and gitfix roles to their process names. The optional QA key remains accepted for compatibility.
+Add `context.roles.reviewer` and `context.roles.gitfix` to existing launch configs before a real run.
 Scout and reviewers read one prepared contract file. Their SessionStart hook skips duplicate delivery.
 Coder and gitfix read their contracts through SessionStart.
 Prompt and tool hooks read lessons through the same API. A lesson revision is delivered once per agent session.

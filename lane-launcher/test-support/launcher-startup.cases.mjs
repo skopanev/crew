@@ -30,6 +30,17 @@ test('live launcher accepts flat memory and refuses an invalid explicit context 
   f.config.context.root = 'memory:scoped';
   save(f.configFile, f.config);
   assert.equal(configFrom(f.configFile, f.env).context.root, 'memory:scoped');
+  delete f.config.context.workspace;
+  delete f.config.context.roles.qa;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).context.workspace, undefined);
+  for (const role of ['reviewer', 'gitfix']) {
+    const name = f.config.context.roles[role];
+    delete f.config.context.roles[role];
+    save(f.configFile, f.config);
+    assert.throws(() => configFrom(f.configFile, f.env), new RegExp(`context.roles.${role} is required`));
+    f.config.context.roles[role] = name;
+  }
 });
 
 test('launcher defaults hooks to bundled settings and worker mounts a private copy of custom hooks', async t => {

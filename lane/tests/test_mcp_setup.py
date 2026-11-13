@@ -38,7 +38,7 @@ class McpSetupTests(unittest.TestCase):
             self.assertEqual(no_token.returncode, 2)
 
             (root / 'token').write_text('jpr_' + '0' * 64 + '\n')
-            for missing_role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix'):
+            for missing_role in ('scout', 'coder', 'reviewer', 'gitfix'):
                 roles = {role: f'alpha-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}
                 roles[missing_role] = '   '
                 (root / 'config.json').write_text(json.dumps({'roles': roles}))
@@ -57,7 +57,6 @@ class McpSetupTests(unittest.TestCase):
             self.assertIn(f'LANE_MEMORY_CONFIG=/workspace/{root.name}/config.json', parsed['vars'])
             self.assertIn('LANE_MEMORY_scout_ROLE=alpha-scout', parsed['vars'])
             self.assertIn('LANE_MEMORY_coder_ROLE=alpha-coder', parsed['vars'])
-            self.assertIn('LANE_MEMORY_qa_ROLE=alpha-qa', parsed['vars'])
             self.assertIn('LANE_MEMORY_reviewer_ROLE=alpha-reviewer', parsed['vars'])
             self.assertIn('LANE_MEMORY_gitfix_ROLE=alpha-gitfix', parsed['vars'])
 
