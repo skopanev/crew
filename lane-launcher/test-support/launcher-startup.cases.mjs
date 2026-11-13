@@ -12,6 +12,7 @@ import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
 import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
+import {defaultHooks} from '../hooks-config.mjs';
 
 import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
@@ -29,6 +30,61 @@ test('live launcher accepts flat memory and refuses an invalid explicit context 
   f.config.context.root = 'memory:scoped';
   save(f.configFile, f.config);
   assert.equal(configFrom(f.configFile, f.env).context.root, 'memory:scoped');
+});
+
+test('launcher defaults hooks to bundled settings and worker mounts a private copy of custom hooks', async t => {
+  const f = await setup(t);
+  delete f.config.hooks;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).hooks, defaultHooks);
+  for (const invalid of [null, '', '   ', 42, 'relative/hooks.json', path.join(f.root, 'missing.json'), f.root]) {
+    f.config.hooks = invalid;
+    save(f.configFile, f.config);
+    assert.throws(() => configFrom(f.configFile, f.env), /hooks|Hook settings/);
+  }
+  const customFile = path.join(f.root, 'custom-hooks.json');
+  for (const badBody of ['{', '[]', '{"hooks":[]}', '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":" "}]}]}}']) {
+    fs.writeFileSync(customFile, badBody);
+    f.config.hooks = customFile;
+    save(f.configFile, f.config);
+    assert.throws(() => configFrom(f.configFile, f.env), /Hook settings/);
+  }
+  const customSettings = {
+    permissions: {allow: ['Bash(*pytest*)']},
+    hooks: {Stop: [{matcher: '*', hooks: [{type: 'command', command: 'bash /workspace/custom/lane/stop.sh'}]}]},
+  };
+  fs.writeFileSync(customFile, JSON.stringify(customSettings));
+  f.config.hooks = customFile;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).hooks, customFile);
+
+  const marker = path.join(f.root, 'recorded-hooks.json');
+  const script = `${process.execPath} -e '
+    const fs = require("node:fs"), path = require("node:path");
+    const dir = process.env.LANE_HOOKS_DIR || "";
+    const file = dir && path.join(dir, "settings.json");
+    fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({
+      dir,
+      dirMode: dir ? fs.statSync(dir).mode & 0o777 : null,
+      fileMode: file && fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : null,
+      settings: file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null,
+    }));
+  '\nexit 1\n`;
+  const wf = await workerFixture(t, script, {hooks: customFile});
+  await execute(worker, [wf.stateFile], wf.env);
+  const recorded = read(marker);
+  assert.ok(recorded.dir && recorded.dir !== path.dirname(customFile));
+  assert.equal(recorded.dirMode, 0o700);
+  assert.equal(recorded.fileMode, 0o600);
+  assert.deepEqual(recorded.settings, customSettings);
+  assert.equal(fs.existsSync(recorded.dir), false);
+
+  const defaultMarker = path.join(f.root, 'recorded-default-hooks.json');
+  const defaultWf = await workerFixture(t, `${process.execPath} -e '
+    require("node:fs").writeFileSync(${JSON.stringify(defaultMarker)}, JSON.stringify({dir: process.env.LANE_HOOKS_DIR || ""}));
+  '\nexit 1\n`);
+  await execute(worker, [defaultWf.stateFile], defaultWf.env);
+  assert.equal(read(defaultMarker).dir, '');
 });
 
 for (const state of ['retained', 'removed', 'other-repository']) test(`Joppa package handles a ${state} blocked sibling checkout`, async t => {
