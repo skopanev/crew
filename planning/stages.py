@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 from common import digest, fingerprint, inside, read, require, run, signal, write
-from contracts import ROLES, load_contract
+from contracts import ROLES, load_contract, load_knowledge
 import drift
 import validation
 from responses import body_result
@@ -35,15 +35,12 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
     write(target / "contracts.json", contracts)
     history = {r["id"]: run(["git", "-C", r["path"], "log", "-20", "--format=%h %s"]) for r in assignment["repositories"]}
     write(target / "history.json", history)
-    knowledge = json.loads(run([os.environ["EQUILL_BIN"], "context", "--store", os.environ["EQUILL_STORE"],
-        "--profile", "agent.memory.hybrid", "--role", "planning", "--project", assignment["workspace"],
-        "--query", assignment.get("knowledge_query") or "\n".join(
-            f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")), "--json"], timeout=120))
-    require(knowledge.get("ok") is True, "Equill knowledge retrieval failed")
+    knowledge, lessons = load_knowledge(assignment["workspace"], assignment.get("knowledge_query") or "\n".join(
+        f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")))
     write(target / "knowledge.json", knowledge)
     emit_var("assignment", assignment)
     emit_var("source_history", history)
-    emit_var("knowledge", knowledge.get("content", ""))
+    emit_var("knowledge", lessons)
     for role, contract in contracts.items():
         emit_var(role + "_contract", contract["content"])
     # Values become TOML scalars inside Codex's explicit per-run configuration.
@@ -51,7 +48,7 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
     prepare_opencode([r["path"] for r in assignment["repositories"]] +
                      list(read_paths) + [os.environ["MEDULLA_RUN_DIR"]], mcp_servers=mcp_servers)
-    signal("PREPARED", "Input, code versions, CBM and three Equill contracts recorded")
+    signal("PREPARED", "Input, code versions, CBM and three role contracts recorded")
 
 
 def capture(kind):
@@ -192,7 +189,7 @@ def verify_mechanism_context(assignment, plan):
     with ThreadPoolExecutor(max_workers=3) as pool:
         loaded = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     require(all(loaded[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
-            "mandatory Equill contract changed during planning; re-plan")
+            "mandatory role contract changed during planning; re-plan")
     prepared = read(artifacts() / "snapshots.json")
     current = {repo["id"]: fingerprint(repo) for repo in assignment["repositories"]}
     repositories = {repo["id"]: repo for repo in assignment["repositories"]}
@@ -242,7 +239,7 @@ def verify_freshness(assignment, review=True):
     with ThreadPoolExecutor(max_workers=3) as pool:
         loaded = dict(zip(ROLES, pool.map(lambda role: load_contract(role, assignment["workspace"]), ROLES)))
     require(all(loaded[k]["bundle_digest"] == contracts[k]["bundle_digest"] for k in ROLES),
-            "mandatory Equill contract changed during planning; re-plan")
+            "mandatory role contract changed during planning; re-plan")
     # The source can move while contracts load; judge only the base read above.
     require(sources() == current, CODE_DRIFT)
     if review is None:

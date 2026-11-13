@@ -212,8 +212,13 @@ def lane_runs_folders(config):
 
 def configuration(path, raw=None):
     config = json.loads(raw) if raw is not None else read(path)
-    for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+    for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root"):
         text(config.get(key), "config." + key)
+    # Role contracts and lessons: the lane memory config, inline. launch writes it to a private file.
+    memory = config.get("context")
+    require(isinstance(memory, dict) and all(isinstance(memory.get(key), dict) for key in ("session", "query")),
+            "config.context needs the session and query blocks")
+    text(memory.get("token_file"), "config.context.token_file")
     if config.get("covers_reference") is not None:
         from coverage import RESERVED
         require(text(config["covers_reference"], "config.covers_reference") not in RESERVED,
@@ -225,11 +230,13 @@ def configuration(path, raw=None):
         text(config.get("token_file"), "config.token_file")
     require(isinstance(config.get("repositories"), list) and config["repositories"], "config.repositories required")
     root = Path(path).resolve().parent
-    for key in ("token_file", "reader_token_file", "runs_folder", "cbm_store", "cbm_root", "equill_store"):
+    for key in ("token_file", "reader_token_file", "runs_folder", "cbm_store", "cbm_root"):
         if key in ("token_file", "reader_token_file") and key not in config:
             continue
         value = Path(config[key]).expanduser()
         config[key] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
+    value = Path(memory["token_file"]).expanduser()
+    memory["token_file"] = str((root / value).resolve() if not value.is_absolute() else value.resolve())
     folders = lane_runs_folders(config)
     require(bool(config.get("worktree_root")) == bool(folders),
             "worktree_root and lane runs folders must be configured together")

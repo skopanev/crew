@@ -17,7 +17,7 @@ class ConfigHandoffTests(unittest.TestCase):
         self.config = self.folder / "config.json"
         self.config.write_text(json.dumps({"workspace": "product", "url": "https://joppa.example/mcp",
             "token_file": "token", "runs_folder": "runs", "cbm_store": "cbm", "cbm_root": "src",
-            "equill_store": "equill", "repositories": [{"id": "app", "project": "project:app",
+            "context": {"token_file": "key", "session": {}, "query": {}}, "repositories": [{"id": "app", "project": "project:app",
             "path": str(self.folder / "src" / "app"), "cbm_project": "app", "modules": [{"name": "core", "path": "src"}]}]}))
         self.started = self.folder / "medulla-started"
         medulla = self.folder / "medulla"
