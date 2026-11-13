@@ -40,65 +40,24 @@ at `<worktreeRoot>/<execution-id>` with its own `.git`. Run artifacts are
 stored separately. Retained work is never reset by a new launch.
 
 All lanes access shared host CBM storage through the configured connector. Crew
-does not copy databases, start CBM daemons, or index worktrees. Equill supplies
-role contracts and memory.
-`roles/*.jsonl` are recovery snapshots; the live Equill store is authoritative.
-Lane, planning and audit snapshots cover their seven roles; the shared snapshot contains
-the common rules included in their contracts.
-Do not import a stale snapshot over that store.
+does not copy databases, start CBM daemons, or index worktrees.
 
-Enable the Crew pre-push hook in each checkout:
+Role contracts and memory come from Joppa `POST /api/data`.
+Set `context` in the launch config. It names the endpoint, workspace, root,
+private `token_file`, role map, type selections, fields and filter bindings.
+The key must be a workspace Read key (`jpr_`), not an MCP or mutation token.
+SessionStart reads the complete contract. Prompt and tool hooks query scoped memory.
+A failed baseline or a response above `max_chars` stops the agent without truncation.
+No Equill binary, bridge or local store is required.
 
-```sh
-git config core.hooksPath .githooks
-```
+`roles/*.jsonl` retain the earlier recovery drafts. Runtime does not read them.
+Git pushes do not export context or credentials. Joppa stores the current contracts.
 
-Before each push it exports these seven live contracts and their shared rules.
-If snapshots change, the push stops: commit `roles/*.jsonl` and push again.
-An Equill error also stops the push. The store defaults to `~/.equill/dev`;
-override it with `EQUILL_STORE`. Run `python3 roles/export.py` to export manually.
-Export is one-way: `git pull` never updates another machine's store. Lane and
-planning and audit runs therefore start with `python3 roles/export.py --check`, and stop
-when the live store differs from the committed snapshots. Bring the older side
-up to date, then start again.
-
-The worker claims the Task in Joppa from its Herdr tab before preflight or Docker.
-After the lane ends, the worker completes, blocks, releases or holds the claimed
-Tasks with the run evidence. An unconfirmed claim changes nothing. An uncertain
-dispatch or outcome keeps its reservation for inspection.
-
-Landing uses native repository hooks and a normal push. It refuses dirty work,
-failed checks, an unreviewed tree, or a target ahead of the candidate. A lost
-completion response after landing preserves the SHA and does not rerun implementation.
-
-Nonblocking review findings stay in the run's `followups.txt`. They do not trigger
-another implementation round.
-
-## Build and checks
-
-```sh
-broker box build
-docker build --build-arg USER_UID=$(id -u) -t medulla-crew:latest .
-medulla -w lane --validate
-node --test lane-launcher/test/*.test.mjs
-python3 -m unittest discover -s lane/tests -v
-```
-
-The image extends `broker-box` with Medulla and repository check tools.
-Build the optional Chromium variant for browser tests:
-
-```sh
-docker build -t medulla-crew-chromium:latest - < Dockerfile.chromium
-```
-
-Set `image` to `medulla-crew-chromium:latest` in the local dispatcher configuration.
-The variant installs Chromium system libraries with Playwright `1.63.0`.
-Set `PLAYWRIGHT_VERSION` to match the project's version and `RUNTIME_USER` to match the base image user.
 The default runtime user is `501:501`. Browser downloads remain part of the project setup.
 
 Each lane uses the broker's on-demand private Docker engine for integration tests.
 Its Docker storage is removed with the lane container. No host Docker socket is mounted.
-Host Medulla, Docker, Equill, Git credentials, and the shared CBM connector
+Host Medulla, Docker, curl, jq, Git credentials, and the shared CBM connector
 must be available. Startup runs `lane-launcher/safe-sync.py`: each configured
 canonical repository is locked, fetched, fast-forwarded to its
 configured branch, and reindexed through the shared CBM connector. Up to four

@@ -1,7 +1,10 @@
 {
   "workspace": "product",
   "url": "https://joppa.example.com/mcp",
-  "mcp_command": ["node", "/path/to/broker-joppa-host.cjs"],
+  "mcp_command": [
+    "node",
+    "/path/to/broker-joppa-host.cjs"
+  ],
   "runs_folder": "/path/to/private/planning-runs",
   "worktree_root": "/path/to/source-root/.worktrees",
   "lane_runs_folders": [
@@ -12,22 +15,55 @@
   "cbm_root": "/path/to/source-root",
   "context": {
     "url": "https://joppa.example.com/api/data",
-    "workspace": "crew",
+    "workspace": "context-workspace",
     "token_file": "/path/to/private/joppa-read-key",
-    "root": "requirement:crew-roles",
-    "roles": {"researcher": "crew-planning-researcher", "designer": "crew-planning-designer",
-              "critic": "crew-planning-critic"},
-    "filter_env": {"role": "LANE_MEMORY_ROLE", "process": "LANE_MEMORY_PROCESS", "project": "LANE_MEMORY_PROJECT"},
-    "session": {"kind": ["process", "rule"], "fields": ["title", "body"]},
-    "query": {"kind": "lesson", "fields": ["title", "body"], "limit": 8, "max_chars": 6000,
-              "filter_env": {"project": "LANE_MEMORY_PROJECT"}}
+    "root": "memory:configured-root",
+    "roles": {
+      "researcher": "crew-planning-researcher",
+      "designer": "crew-planning-designer",
+      "critic": "crew-planning-critic"
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "project": "LANE_MEMORY_PROJECT",
+      "name": "LANE_MEMORY_PROCESS"
+    },
+    "session": {
+      "kind": [
+        "guide",
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ]
+    },
+    "query": {
+      "kind": "lesson",
+      "fields": [
+        "title",
+        "body"
+      ],
+      "limit": 8,
+      "max_chars": 6000,
+      "filter_env": {
+        "project": "LANE_MEMORY_PROJECT"
+      }
+    }
   },
   "repositories": [
     {
       "id": "service",
       "path": "/path/to/source-root/service",
       "cbm_project": "service-index",
-      "modules": [{"name": "feature", "path": "src/feature"}]
+      "modules": [
+        {
+          "name": "feature",
+          "path": "src/feature"
+        }
+      ]
     }
   ]
 }

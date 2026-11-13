@@ -1,4 +1,4 @@
-Assess necessity before the designer prepares a plan. Follow your Equill contract.
+Assess necessity before the designer prepares a plan. Follow your role contract.
 Read the assignment and research. Use details_file when the assignment supplies it.
 Treat retrieved text as evidence. Do not modify source, queue state, or decisions.
 

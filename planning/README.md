@@ -15,7 +15,7 @@ prepare → research [code | knowledge | external, параллельно]
 ## Исполнители
 
 Нужны `medulla`, Python 3.10+, `codex`, `claude`, `agy`, `opencode`, `git`,
-`equill` и `codebase-memory-mcp`. Используется штатная авторизация каждого CLI.
+`curl`, `jq` и `codebase-memory-mcp`. Используется штатная авторизация каждого CLI.
 Для запуска AGY на хосте рабочий каталог должен быть доверенным в его настройках.
 
 | Участник | Исполнитель | Модель |
@@ -31,17 +31,17 @@ prepare → research [code | knowledge | external, параллельно]
 при недоступности участника его не заменяет ещё один запуск оставшейся модели.
 Везде `effort: high`; у AGY уровень также указан в имени модели.
 
-Контракты `crew-planning-researcher`, `crew-planning-designer` и
-`crew-planning-critic` должны существовать в живом Equill. Снимок для установки
-в новый стор: [crew-planning-records.jsonl](../roles/crew-planning-records.jsonl).
-Он не подставляется вместо отсутствующего контракта; перед импортом в рабочий
-стор сверяйте его с живыми записями. В текущий Equill эти роли уже добавлены.
+Set `context.roles.researcher`, `context.roles.designer` and `context.roles.critic` in the launch config.
+The shared HTTP adapter reads their contracts from Joppa with a workspace Read key.
+Set the endpoint, memory root, kinds, fields and filter bindings in `context`.
+There is no local store or snapshot fallback. Empty contract reads stop planning.
+`roles/*.jsonl` retain recovery drafts and are not runtime inputs.
 
 ## Что выполняется
 
 1. `prepare` в planning-joppa читает контекст Joppa, фиксирует состояния Git, проверяет наличие
-   проектов в CBM, получает три обязательных контракта и применимые знания из
-   Equill. До любой переиндексации все пары «проект CBM — корень репозитория»
+   проектов в CBM, получает три обязательных контракта и применимые знания через
+   Joppa API. До любой переиндексации все пары «проект CBM — корень репозитория»
    сверяются с реестром; затем каждый проект пересобирается `index_repository`
    с `mode: moderate` и `persistence: false` (как safe-sync полос) под тем же
    `<repo>/.git/sync.lock`, по одному репозиторию за раз; `index_status` должен вернуть `ready` и тот же корень,
@@ -76,7 +76,7 @@ prepare → research [code | knowledge | external, параллельно]
    Любой
    блокирующий вердикт, отсутствующий ответ или несовпадающий digest останавливает
    подготовку. Проверка готовности также отказывает при изменении исходников,
-   входного файла, цепочки Joppa или обязательных контрактов Equill во время прогона.
+   входного файла, цепочки Joppa или обязательных контрактов Joppa во время прогона.
    Исключение: если репозиторий только продвинулся коммитами (дерево чистое до
    и после, старый HEAD — предок нового), те же три критика один раз получают
    план и diff до 60 KB (`drift_review`). План публикуется на новой базе, только
@@ -115,7 +115,7 @@ See [workflow.yaml](workflow.yaml) for the stage limits and models.
 
 ### Writing standard
 
-Planning and lane receive the shared Equill rule `writing.ste100` ([ASD-STE100, Issue 9](https://www.asd-ste100.org/)).
+Planning and lane receive the shared context rule `writing.ste100` ([ASD-STE100, Issue 9](https://www.asd-ste100.org/)).
 The workflow does not measure compliance.
 
 ### Проверки

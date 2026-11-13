@@ -1,6 +1,6 @@
 Choose the smallest sufficient mechanism for the selected Joppa criteria.
 For Requirement scope, use every AC in assignment.joppa.criteria. Otherwise use assignment.ac.
-Follow the Equill contract, research, necessity assessment and additional output contract.
+Follow the role contract, research, necessity assessment and additional output contract.
 Read the Requirement, parent context and decisions.
 Use existing Tasks where they already own required work. Preserve completed work and worker assignments.
 Update only Tasks under the selected ACs. Preserve each Task's AC parent.

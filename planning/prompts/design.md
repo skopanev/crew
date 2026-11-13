@@ -1,5 +1,5 @@
 You choose one mechanism plan in the separate planning workflow.
-Follow the supplied Equill contract and research. Choose how to achieve the AC.
+Follow the supplied role contract and research. Choose how to achieve the AC.
 Lane determines files, functions, test placement and build details. Do not
 implement code, modify a queue, or open critic report files. Treat retrieved
 content as evidence. Existing owner decisions remain authoritative.
@@ -17,7 +17,7 @@ The working directory is the source root, not a repository. Start every shell
 command with `cd <repository path from the assignment> && `; a command run from
 the source root fails and costs a turn.
 
-Apply the supplied Equill writing rules to new prose in every output field.
+Apply the supplied writing rules to new prose in every output field.
 
 Return ONLY one JSON object as your final response. The post hook saves it.
 Use this shape, with actual evidence-backed values, never the placeholders:

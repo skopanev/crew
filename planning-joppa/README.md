@@ -88,7 +88,7 @@ This list locates possible overlap. A full current object read still verifies re
 Shared modules do not require dependencies unless one Task needs another Task's output.
 It reuses related Tasks through dependencies. It edits only Tasks under the selected ACs.
 The planner publishes complete implementation mechanisms under their original criteria.
-It claims the AC for planning. It uses the shared graph and live Equill roles.
+It claims the AC for planning. It uses the shared graph and live Joppa role contracts.
 All planning agents can query Joppa for relevant context in the configured workspace and accessible linked workspaces.
 The reader exposes the Joppa read tools and rejects writes. Joppa enforces workspace access.
 Foreign objects keep their immutable workspace IDs, full addresses and separate schemas in the planning snapshot.
@@ -165,7 +165,7 @@ A link to a done Task stays unchanged, and no new link to it is added. A missing
 An older server refuses the batch before any write. Already valid bindings release the planning claim without a new revision.
 The planner does not run tests or mark acceptance as passed. A full report supplies acceptance results.
 Publication does not confirm acceptance or mark the AC as passing.
-Clean code changes do not invalidate a mechanism plan. Publication rechecks current source and Equill roles.
+Clean code changes do not invalidate a mechanism plan. Publication rechecks current source and role contracts.
 It revalidates the plan against live Joppa context. Changes to the AC, its context or reviewed Tasks still prevent publication.
 Uncommitted source changes still prevent publication. Lane checks the current code before implementation.
 The current source must descend from the prepared base. Planned module and check directories must still exist.

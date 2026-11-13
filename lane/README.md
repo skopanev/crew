@@ -88,9 +88,10 @@ Nonblocking findings remain in `artifacts/followups.txt` for the host completion
 
 ## Agent context
 
-Equill supplies contracts and memory. Each agent's `pre` step obtains its role
-context; hooks also deliver memory to Claude. Implementation uses
-`crew-lane-coder`; the review panel uses `crew-lane-qa`.
+Joppa supplies role contracts and memory through the configured Read API.
+The launch config maps scout, coder and QA roles to their process names.
+SessionStart reads the complete selected contract. Prompt and tool hooks query memory.
+The Stop hook reads its configured ending field and returns that text unchanged.
 
 Agents implement only the ticket's scope and acceptance criteria. CBM locates
 relevant code and checks; findings must be verified against the current source
@@ -101,11 +102,10 @@ uses the installed broker's box bridge with `CBM_ALLOWED_ROOT=sourceRoot`
 and `CBM_CACHE_DIR=cbmCacheDir`;
 expired bridges are recreated. No database copy, extra CBM daemon, or worktree
 indexing is created. Startup checks the per-run connector
-from the container. Equill is accessed through the host bridge under the fixed
-`lane` identity, allowing only `context` and `search`.
+from the container. Context uses curl and jq, with a workspace Read key in a private read-only mount.
 
 The lane reads the Task snapshot from the host claim; Joppa credentials stay on
-the host. Shell nodes retain `artifacts/ticket.json` for deterministic checks;
+the host. Only the scoped context Read key enters the lane. Shell nodes retain `artifacts/ticket.json` for deterministic checks;
 agent prompts use the ticket reader. Codex credentials remain managed by its broker.
 
 The container is the filesystem boundary. The Git key is readable by agents;
