@@ -3,9 +3,14 @@
   "workspace": "my-workspace",
   "joppa": {
     "url": "https://joppa.example.com/mcp",
-    "mcpCommand": ["node", "/absolute/private/broker-joppa-host.cjs"],
+    "mcpCommand": [
+      "node",
+      "/absolute/private/broker-joppa-host.cjs"
+    ],
     "workers": [
-      {"actor": "existing-user-id"}
+      {
+        "actor": "existing-user-id"
+      }
     ]
   },
   "limit": 1,
@@ -30,13 +35,82 @@
       "path": "/absolute/source-workspace/application",
       "targetBranch": "develop",
       "cbmProject": "application",
-      "modules": [{"name": "core", "path": ".", "paths": ["src", "tests", "migrations"]}],
+      "modules": [
+        {
+          "name": "core",
+          "path": ".",
+          "paths": [
+            "src",
+            "tests",
+            "migrations"
+          ]
+        }
+      ],
       "preflight": null,
-      "gateCommands": ["bun run typecheck", "bun run test"],
-      "reviewCommands": ["bun run lint", "bun run test:changed"],
-      "testCommand": ["bun", "run", "test"],
-      "testReport": {"path": "junit/report.xml", "format": "junit", "identity": "{file} > {name}"}
+      "gateCommands": [
+        "bun run typecheck",
+        "bun run test"
+      ],
+      "reviewCommands": [
+        "bun run lint",
+        "bun run test:changed"
+      ],
+      "testCommand": [
+        "bun",
+        "run",
+        "test"
+      ],
+      "testReport": {
+        "path": "junit/report.xml",
+        "format": "junit",
+        "identity": "{file} > {name}"
+      }
     }
   ],
-  "notify": null
+  "notify": null,
+  "context": {
+    "url": "https://joppa.example.com/api/data",
+    "workspace": "context-workspace",
+    "root": "memory:configured-root",
+    "token_file": "/absolute/private/context-read-key",
+    "roles": {
+      "scout": "crew-lane-scout",
+      "coder": "crew-lane-coder",
+      "qa": "crew-lane-qa"
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "name": "LANE_MEMORY_PROCESS",
+      "project": "LANE_MEMORY_PROJECT"
+    },
+    "session": {
+      "kind": [
+        "guide",
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ],
+      "max_chars": 32768
+    },
+    "stop": {
+      "kind": "process",
+      "field": "ends_when"
+    },
+    "query": {
+      "kind": "lesson",
+      "filter_env": {
+        "project": "LANE_MEMORY_PROJECT"
+      },
+      "fields": [
+        "title",
+        "body"
+      ],
+      "limit": 10,
+      "max_chars": 32768
+    }
+  }
 }

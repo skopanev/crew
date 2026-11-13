@@ -24,8 +24,6 @@ RUN python3 -m venv /opt/medulla \
 # Update Medulla by rebuilding the image.
 ENV MEDULLA_UPGRADE_ON_START=0
 
-COPY lane/bridge/equill-shim.sh /usr/local/bin/equill
-RUN chmod 755 /usr/local/bin/equill
 
 # Match the host UID for files written into mounted checkouts.
 ARG USER_UID=501

@@ -22,8 +22,10 @@ vars:
   REQUIREMENT_READER_FILE: ''
   JOPPA_READER_COMMAND_JSON: ''
   FINALIZE_ONLY: 'false'
-  EQUILL_ACTOR: lane
-  EQUILL_STORE: ''
+  LANE_MEMORY_CONFIG: ''
+  LANE_MEMORY_scout_ROLE: ''
+  LANE_MEMORY_coder_ROLE: ''
+  LANE_MEMORY_qa_ROLE: ''
   SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
   LANE_SHARED_LOCK_DIR: ''
@@ -35,9 +37,12 @@ vars:
 nodes:
   prepare:
     env:
-      # Equill requires the calling actor to assemble the contract.
-      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
-      EQUILL_STORE: '{{var:EQUILL_STORE}}'
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_scout_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
       LANE_PATH: '{{var:LANE_PATH}}'   # читает inject.sh, не тело узла
       # codex-home.sh embeds the shared MCP connector in Codex configuration.
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
@@ -89,16 +94,14 @@ nodes:
         /tmp/codex-home /tmp/lane-settings.json
       # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
-      # Publish only a complete, nonempty Equill contract.
+      # Publish only a complete, nonempty Joppa contract.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       _sc="$MEDULLA_RUN_DIR/artifacts/scout-contract.txt"
       rm -f "$_sc"
       for attempt in 1 2 3; do
-        if timeout --kill-after=2s 30s equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
-           --profile agent.context.target --role crew-lane-scout \
-           --project "$project_name" \
-           --process crew-lane-scout --coordinate rules=none --json >"$_sc.reply" 2>"$_sc.err" \
-          && jq -er 'select(.ok != false) | .content | select(type == "string" and test("\\S"))' "$_sc.reply" >"$_sc.tmp" 2>>"$_sc.err"; then
+        if timeout --kill-after=2s 35s bash "${TOOLING_ROOT}/lane/hooks/memory-hook.sh" \
+           <<<'{"hook_event_name":"SessionStart"}' >"$_sc.reply" 2>"$_sc.err" \
+          && jq -er 'select(.continue != false) | .hookSpecificOutput.additionalContext | select(type == "string" and test("\\S"))' "$_sc.reply" >"$_sc.tmp" 2>>"$_sc.err"; then
           mv "$_sc.tmp" "$_sc"
           break
         fi
@@ -107,7 +110,7 @@ nodes:
       done
       if [ ! -s "$_sc" ]; then
         rm -f "$_sc.tmp"
-        printf '\nEquill response:\n' >> "$_sc.err"
+        printf '\nJoppa response:\n' >> "$_sc.err"
         cat "$_sc.reply" >> "$_sc.err"
         echo "Scout contract unavailable after 3 attempts; response: $_sc.reply; error: $_sc.err" >&2
         cat "$_sc.err" >&2
@@ -124,15 +127,13 @@ nodes:
   cbm_discovery:
     timeout: 900
     env:
-      EQUILL_ROLE: crew-lane-scout
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_scout_ROLE}}'
       CODEX_HOME: /tmp/codex-home
-      EQUILL_RULES: none
-      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
-      EQUILL_RULE_MODULES: tickets
-      EQUILL_PROCESS: crew-lane-scout
-      EQUILL_TICKET: '{{var:ticket_id}}'
-      EQUILL_PROJECT: '{{var:project_name}}'
-      EQUILL_MODULE: '{{var:module_name}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
     on_signal:
       OK: create_worktree          # закрытый набор скаута: OK, DUPLICATE, OUT_OF_MODULE, PREMISE_BROKEN
@@ -387,15 +388,12 @@ nodes:
     env:
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       BASH_MAX_TIMEOUT_MS: '900000'
-      EQUILL_ROLE: crew-lane-coder
-      EQUILL_RULES: none
-      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
-      EQUILL_RULE_MODULES: tickets
-      EQUILL_PROCESS: crew-lane-coder
-      EQUILL_TICKET: '{{var:ticket_id}}'
-      EQUILL_PROJECT: '{{var:project_name}}'
-      EQUILL_MODULE: '{{var:module_name}}'
-      EQUILL_PHASE: unit
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_coder_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_coder_ROLE}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
@@ -418,8 +416,7 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      EQUILL_PHASE=unit.
-      Follow your Equill contract.
+      Follow your Joppa contract.
       Current handoff: {{last.message}}
       Repository checks: {{var:review_commands}}
       Test command: {{var:ticket_test_command}}
@@ -453,8 +450,12 @@ nodes:
       ticket_id: '{{var:ticket_id}}'
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
-      EQUILL_STORE: '{{var:EQUILL_STORE}}'
-      EQUILL_ACTOR: '{{var:EQUILL_ACTOR}}'
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
     timeout: 3600
     on_signal:
       SNAPSHOT: expert_review
@@ -527,16 +528,14 @@ nodes:
         exit 0
       fi
       printf '%s\n' "$bindings"
-      # Share one Equill contract across all review harnesses and rounds.
+      # Share one Joppa contract across all review harnesses and rounds.
       qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
       # Extract content and publish atomically after a successful read.
       if [ ! -s "$qa" ]; then
         for attempt in 1 2 3; do
-          if timeout --kill-after=2s 30s equill context --store "${EQUILL_STORE:-$HOME/.equill/dev}" \
-             --profile agent.context.target --role crew-lane-qa --process crew-lane-qa \
-             --project "$project_name" \
-             --coordinate rules=none --json >"$qa.reply" 2>"$qa.err" \
-            && jq -er 'select(.ok != false) | .content | select(type == "string" and test("\\S"))' "$qa.reply" >"$qa.tmp" 2>>"$qa.err"; then
+          if timeout --kill-after=2s 35s bash "${TOOLING_ROOT}/lane/hooks/memory-hook.sh" \
+           <<<'{"hook_event_name":"SessionStart"}' >"$qa.reply" 2>"$qa.err" \
+            && jq -er 'select(.continue != false) | .hookSpecificOutput.additionalContext | select(type == "string" and test("\\S"))' "$qa.reply" >"$qa.tmp" 2>>"$qa.err"; then
             mv "$qa.tmp" "$qa"
             break
           fi
@@ -545,7 +544,7 @@ nodes:
         done
         if [ ! -s "$qa" ]; then
           rm -f "$qa.tmp"
-          printf '\nEquill response:\n' >> "$qa.err"
+          printf '\nJoppa response:\n' >> "$qa.err"
           cat "$qa.reply" >> "$qa.err"
           echo "QA contract unavailable after 3 attempts; response: $qa.reply; error: $qa.err" >&2
           cat "$qa.err" >&2
@@ -574,14 +573,12 @@ nodes:
       slug: security
     env:
       CODEX_HOME: /tmp/codex-home
-      EQUILL_ROLE: crew-lane-qa
-      EQUILL_RULES: none
-      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
-      EQUILL_RULE_MODULES: tickets
-      EQUILL_PROCESS: crew-lane-qa
-      EQUILL_TICKET: '{{var:ticket_id}}'
-      EQUILL_PROJECT: '{{var:project_name}}'
-      EQUILL_MODULE: '{{var:module_name}}'
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
     on_signal:
       __done__: expert_review_synthesis
       __failed__: expert_review_synthesis
@@ -992,15 +989,12 @@ nodes:
     env:
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
-      EQUILL_ROLE: crew-lane-coder
-      EQUILL_RULES: none
-      EQUILL_PROMPT_PROFILE: agent.memory.hybrid
-      EQUILL_RULE_MODULES: tickets
-      EQUILL_PROCESS: crew-lane-coder
-      EQUILL_TICKET: '{{var:ticket_id}}'
-      EQUILL_PROJECT: '{{var:project_name}}'
-      EQUILL_MODULE: '{{var:module_name}}'
-      EQUILL_PHASE: land
+      LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_coder_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_coder_ROLE}}'
+      LANE_MEMORY_TICKET: '{{var:ticket_id}}'
+      LANE_MEMORY_PROJECT: '{{var:project_name}}'
+      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
@@ -1021,7 +1015,6 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      EQUILL_PHASE=land.
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
       1. In {{var:LANE_WORKTREE}}, read the target with

@@ -64,7 +64,7 @@
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
             "timeout": 600,
-            "statusMessage": "Loading Equill contract"
+            "statusMessage": "Loading Joppa contract"
           }
         ]
       }
@@ -76,7 +76,7 @@
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
             "timeout": 45,
-            "statusMessage": "Retrieving relevant Equill memory"
+            "statusMessage": "Retrieving relevant Joppa memory"
           }
         ],
         "matcher": "*"
@@ -88,8 +88,8 @@
           {
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
-            "timeout": 20,
-            "statusMessage": "Refreshing Equill memory"
+            "timeout": 45,
+            "statusMessage": "Refreshing Joppa memory"
           }
         ],
         "matcher": "*"
@@ -101,8 +101,8 @@
           {
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
-            "timeout": 20,
-            "statusMessage": "Refreshing Equill memory"
+            "timeout": 45,
+            "statusMessage": "Refreshing Joppa memory"
           }
         ],
         "matcher": "*"
@@ -114,8 +114,8 @@
           {
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
-            "timeout": 20,
-            "statusMessage": "Refreshing Equill memory"
+            "timeout": 45,
+            "statusMessage": "Refreshing Joppa memory"
           }
         ],
         "matcher": "*"

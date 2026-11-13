@@ -14,6 +14,7 @@ import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
 import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead} from './worker-outcome.mjs';
 import {publishLandedResults} from './test-results-publish.mjs';
+import {prepareContext} from './context-config.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -54,6 +55,7 @@ process.on('SIGHUP', () => stop('SIGTERM'));
 let result, claimRefused = false;
 let artifacts = null;
 let readerDir;
+let contextDir;
 let finalizationTicket;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
@@ -140,6 +142,11 @@ try {
     fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(readerDir, 'token'));
     fs.chmodSync(path.join(readerDir, 'token'), 0o600);
   }
+  if (!run.finalizeOnly) {
+    const context = prepareContext(run.config.context, {ticket: run.ticket, project: run.workspace,
+      module: run.claim.ticket.module, worktree: `/workspace/${run.executionId}`});
+    contextDir = context.dir;
+  }
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
@@ -152,7 +159,7 @@ try {
       LANE_REQUIREMENT_READER_DIR: readerDir || '',
       ...(run.config.joppa.mcpCommand ? {LANE_JOPPA_MCP_COMMAND_JSON: JSON.stringify(run.config.joppa.mcpCommand)} : {}),
       LANE_FINALIZE_ONLY: String(run.finalizeOnly === true),
-      EQUILL_STORE: run.config.equillStore || process.env.EQUILL_STORE || '',
+      LANE_MEMORY_DIR: contextDir || '',
       LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   run.launchPgid = child.pid;
@@ -185,6 +192,7 @@ try {
   process.exitCode = 2;
 } finally {
   if (readerDir) fs.rmSync(readerDir, {recursive: true, force: true});
+  if (contextDir) fs.rmSync(contextDir, {recursive: true, force: true});
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
   if (result.status !== 'exited') {
     artifacts = failureDetails(run, announce);
