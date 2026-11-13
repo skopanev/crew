@@ -54,6 +54,20 @@ nodes:
           echo 'keyring lookup: success'
         else echo 'keyring lookup: unavailable'; fi
       fi
+      # Broker can prepare this private container HOME. Native AGY then uses it unchanged.
+      if ! jq -e 'type == "object" and (.token | type) == "object"' "$token" >/dev/null 2>&1; then
+        command -v broker-agy >/dev/null 2>&1 || { echo 'AGY_AUTH_UNAVAILABLE: no credential or broker-agy'; exit 1; }
+        echo 'preparing AGY auth through Broker in container-private HOME'
+        if BROKER_AGY_HOME="$HOME" timeout 20s broker-agy models >/dev/null 2>&1; then
+          jq -e 'type == "object" and (.token | type) == "object"' "$token" >/dev/null 2>&1 || {
+            echo 'AGY_AUTH_UNAVAILABLE: Broker returned no usable credential'; exit 1; }
+          file_info "$token"
+        else
+          code=$?
+          printf 'AGY_AUTH_UNAVAILABLE: Broker initialization exited %s\n' "$code"
+          exit "$code"
+        fi
+      fi
       mkdir -p "$HOME/.gemini/config" "$MEDULLA_RUN_DIR/artifacts"
       [ ! -e "$HOME/.gemini/config/hooks.json" ] || { echo 'hooks.json already exists; probe refused'; exit 1; }
       log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
