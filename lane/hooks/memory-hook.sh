@@ -148,7 +148,9 @@ if [[ "$event" == PostToolUse || "$event" == PostToolBatch ]]; then
   input="$(python3 -c '
 import fcntl, hashlib, json, os, sys
 data = json.load(sys.stdin)
-scope = [os.environ.get(k, "") for k in ("MEDULLA_RUN_DIR", "LANE_MEMORY_CONFIG")]
+# Every node shares the run and the config; the caller filters tell the nodes apart.
+scope = [os.environ.get(k, "") for k in ("MEDULLA_RUN_DIR", "LANE_MEMORY_CONFIG", "LANE_MEMORY_ROLE",
+                                         "LANE_MEMORY_PROCESS", "LANE_MEMORY_TICKET")]
 scope.append(data.get("session_id") or data.get("transcript_path") or "")
 key = hashlib.sha256(json.dumps(scope).encode()).hexdigest()
 file = os.path.join(os.environ.get("TMPDIR", "/tmp"), "lane-memory-seen." + key)
