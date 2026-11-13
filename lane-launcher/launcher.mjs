@@ -68,6 +68,12 @@ function preflight(config) {
   for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
     command('bash', ['-c', 'command -v "$1"', '_', bin]);
   }
+  if (config.launchLanes) {
+    try { command('medulla', ['-w', config.workflow, '--validate']); }
+    catch (error) {
+      throw new Error(`Workflow failed Medulla validation; no ticket was claimed: ${String(error.stderr || error.stdout || error.message).trim()}`);
+    }
+  }
   const coderTimeout = config.coderTimeoutSeconds != null || config.repositories?.some(repo => repo.coderTimeoutSeconds != null);
   if (config.launchLanes && (config.dockerEngine || coderTimeout)) {
     const help = command('medulla', ['--help']);

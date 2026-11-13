@@ -102,6 +102,13 @@ Crew copies the file into a private read-only mount. Claude and Codex use the sa
 The default permissions and environment remain. Custom commands stay unchanged, except for `<TOOLING_ROOT>` expansion.
 Commands must resolve inside the container. Include the context-loader events when using a custom file.
 
+Set `workflow` to an absolute project `workflow.yaml` path to replace `lane/workflow.yaml`.
+Dolber runs `medulla -w <file> --validate` before it reads or claims a Task.
+Medulla mounts the directory of that file read-only at `/mnt/medulla-workflows/<directory-name>` and reads `workflow.yaml` there.
+Medulla also reads a `.env` file in that directory. Keep only workflow files in it.
+Crew stays read-only at `/workspace`, and `TOOLING_ROOT` is `/workspace`. Crew scripts keep their `${TOOLING_ROOT}/lane/` paths.
+The Docker label `medulla.workflow` shows the directory name instead of `lane`.
+
 Each Task snapshot includes its parent AC's live `acceptanceTests`, with title, body and command when present.
 Authored `checks` and `acceptance_checks` are optional. Without acceptance rows, Crew creates no test bindings.
 The project test uploader can record its report names directly. Existing acceptance rows retain their binding checks.

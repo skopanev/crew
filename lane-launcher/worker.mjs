@@ -16,6 +16,7 @@ import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementH
 import {publishLandedResults} from './test-results-publish.mjs';
 import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
+import {workflowFile} from './workflow-config.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -63,6 +64,7 @@ try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
+  const laneWorkflow = workflowFile(run.config.workflow);
   if (run.finalizeOnly) {
     if (run.config.delivery !== 'requirement') throw new Error('Finalization requires requirement delivery');
     run.repository = run.config.repositories.find(repo => repo.id === run.repositoryId);
@@ -165,6 +167,7 @@ try {
       LANE_FINALIZE_ONLY: String(run.finalizeOnly === true),
       LANE_MEMORY_DIR: contextDir || '',
       LANE_HOOKS_DIR: hooksDir || '',
+      LANE_WORKFLOW_FILE: laneWorkflow,
       LANE_CLAIM_FILE: claimFile}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   run.launchPgid = child.pid;

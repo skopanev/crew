@@ -13,6 +13,7 @@ import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDig
 import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
 import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
 import {defaultHooks} from '../hooks-config.mjs';
+import {defaultWorkflow} from '../workflow-config.mjs';
 
 import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
@@ -96,6 +97,60 @@ test('launcher defaults hooks to bundled settings and worker mounts a private co
   '\nexit 1\n`);
   await execute(worker, [defaultWf.stateFile], defaultWf.env);
   assert.equal(read(defaultMarker).dir, '');
+});
+
+test('launcher defaults to the lane workflow and passes a custom workflow by its real path', async t => {
+  const f = await setup(t);
+  delete f.config.workflow;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).workflow, defaultWorkflow);
+  const customFile = path.join(f.root, 'project-flow/workflow.yaml');
+  fs.mkdirSync(path.dirname(customFile));
+  fs.writeFileSync(customFile, 'version: "2"\n');
+  fs.writeFileSync(path.join(f.root, 'custom.yaml'), 'version: "2"\n');
+  fs.writeFileSync(path.join(f.root, 'workflow.yaml'), '');
+  fs.symlinkSync(customFile, path.join(f.root, 'project-flow/linked.yaml'));
+  for (const invalid of [null, '', 42, 'project-flow/workflow.yaml', path.join(f.root, 'custom.yaml'),
+    path.join(f.root, 'missing/workflow.yaml'), path.join(f.root, 'workflow.yaml'), path.join(f.root, 'project-flow')]) {
+    f.config.workflow = invalid;
+    save(f.configFile, f.config);
+    assert.throws(() => configFrom(f.configFile, f.env), /workflow|Workflow/);
+  }
+  f.config.workflow = customFile;
+  save(f.configFile, f.config);
+  assert.equal(configFrom(f.configFile, f.env).workflow, customFile);
+
+  const record = name => `${process.execPath} -e '
+    require("node:fs").writeFileSync(${JSON.stringify(path.join(f.root, name))}, JSON.stringify(process.env.LANE_WORKFLOW_FILE ?? null));
+  '\nexit 1\n`;
+  fs.symlinkSync(path.dirname(customFile), path.join(f.root, 'flow-link'));
+  const customWf = await workerFixture(t, record('custom.json'), {workflow: path.join(f.root, 'flow-link/workflow.yaml')});
+  await execute(worker, [customWf.stateFile], customWf.env);
+  assert.equal(read(path.join(f.root, 'custom.json')), fs.realpathSync(customFile));
+  const defaultWf = await workerFixture(t, record('default.json'));
+  await execute(worker, [defaultWf.stateFile], defaultWf.env);
+  assert.equal(read(path.join(f.root, 'default.json')), '');
+  const invalidWf = await workerFixture(t, record('invalid.json'), {workflow: path.join(f.root, 'missing/workflow.yaml')});
+  await execute(worker, [invalidWf.stateFile], invalidWf.env);
+  assert.equal(fs.existsSync(path.join(f.root, 'invalid.json')), false);
+  assert.equal(invalidWf.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('a workflow that Medulla rejects fails before reading or claiming a ticket', async t => {
+  const f = await setup(t);
+  const customFile = path.join(f.root, 'project-flow/workflow.yaml');
+  fs.mkdirSync(path.dirname(customFile));
+  fs.writeFileSync(customFile, 'version: "2"\n');
+  const args = path.join(f.root, 'medulla-args');
+  fs.writeFileSync(path.join(f.bins, 'medulla'), `#!/bin/sh\necho "$@" >> '${args}'\n` +
+    'case "$*" in *--validate*) echo "E_VALIDATION: nodes must be a non-empty mapping" >&2; exit 1;; esac\n', {mode: 0o755});
+  save(f.configFile, {...f.config, workflow: customFile});
+  const result = await execute(launcher, [f.configFile, '--once'], f.env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Workflow failed Medulla validation; no ticket was claimed: E_VALIDATION: nodes must be/);
+  assert.match(fs.readFileSync(args, 'utf8'), new RegExp(`^-w ${customFile} --validate$`, 'm'));
+  assert.equal(f.calls.length, 0);
+  assert.equal(fs.existsSync(f.events), false);
 });
 
 for (const state of ['retained', 'removed', 'other-repository']) test(`Joppa package handles a ${state} blocked sibling checkout`, async t => {

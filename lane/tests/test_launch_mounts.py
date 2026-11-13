@@ -46,6 +46,7 @@ class LaunchMountTests(unittest.TestCase):
                 'docker': '#!/bin/sh\nexit 0\n',
                 'medulla': '#!/usr/bin/env python3\nimport json,os,sys\n'
                            'open(os.environ["TEST_ARGS"],"w").write(json.dumps(sys.argv[1:]))\n'
+                           'open(os.environ["TEST_ARGS"]+".cwd","w").write(os.getcwd())\n'
                            'sys.exit(int(os.environ.get("TEST_MEDULLA_FAILURE","0")))\n',
             }.items():
                 file = bins / name
@@ -103,6 +104,10 @@ class LaunchMountTests(unittest.TestCase):
                     self.assertTrue(synced[1].endswith('/mcp.py-fixture'))
                     self.assertIn(f'CBM_MCP_COMMAND={synced[1]}', launch)
                     self.assertEqual(synced[2], env.get('MEDULLA_IMAGE', 'medulla-crew:latest'))
+            # Without a project workflow, Medulla runs Crew's lane workflow from the Crew root.
+            self.assertEqual(launch[launch.index('-w') + 1], 'lane')
+            self.assertNotIn('TOOLING_ROOT=/workspace', launch)
+            self.assertEqual(Path(str(output) + '.cwd').read_text(), str(tooling))
             output.unlink()
             # The Joppa reader also uses the path returned by Broker.
             env['LANE_JOPPA_MCP_COMMAND_JSON'] = '["node","reader.cjs"]'
@@ -149,11 +154,43 @@ class LaunchMountTests(unittest.TestCase):
             result = run('preview', ['--dry-run'])
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((root / 'sync.json').exists())
+            # A project workflow outside Crew is passed by its real path; one inside Crew stays relative.
+            outside_flow = root / 'project-flow/workflow.yaml'
+            inside_flow = tooling / 'flows/workflow.yaml'
+            for flow in (outside_flow, inside_flow):
+                flow.parent.mkdir(parents=True)
+                flow.write_text('version: "2"\n')
+            (root / 'flow-link').symlink_to(outside_flow.parent)
+            for given, expected in [(root / 'flow-link/workflow.yaml', str(outside_flow)),
+                                    (inside_flow, 'flows/workflow.yaml')]:
+                with self.subTest(workflow=str(given)):
+                    env['LANE_WORKFLOW_FILE'] = str(given)
+                    result = run(f'flow-{len(expected)}')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    launch = json.loads(output.read_text())
+                    self.assertEqual(launch[launch.index('-w') + 1], expected)
+                    self.assertIn('TOOLING_ROOT=/workspace', launch)
+                    self.assertEqual(Path(str(output) + '.cwd').read_text(), str(tooling))
+            # An invalid project workflow stops before Medulla and before the checkout.
+            (root / 'empty-flow').mkdir()
+            (root / 'empty-flow/workflow.yaml').write_text('')
+            (root / 'custom.yaml').write_text('version: "2"\n')
+            output.unlink()
+            for invalid in ['project-flow/workflow.yaml', str(root / 'custom.yaml'),
+                            str(root / 'missing/workflow.yaml'), str(root / 'empty-flow/workflow.yaml')]:
+                with self.subTest(invalid=invalid):
+                    env['LANE_WORKFLOW_FILE'] = invalid
+                    result = run('bad-flow')
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('LANE_WORKFLOW_FILE must name', result.stderr)
+                    self.assertFalse(output.exists())
+                    self.assertFalse((sources / '.worktrees/bad-flow').exists())
+            env.pop('LANE_WORKFLOW_FILE')
             # Existing work belongs to its owner: refusal must happen before Medulla.
             retained = sources / '.worktrees/app-ticket/keep.txt'
             retained.parent.mkdir()
             retained.write_text('saved work\n')
-            output.unlink()
+            output.unlink(missing_ok=True)
             env['TEST_MODULE'] = 'app/src/module'
             configure('app')
             result = run('app-ticket')

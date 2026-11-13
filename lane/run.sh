@@ -203,6 +203,7 @@ for m in "$source_root" "$ssh_dir" ${also[@]+"${also[@]}"} ${writable[@]+"${writ
   mkdir -p "$point"
 done
 
+source "$WORKFLOW_DIR/startup/workflow.sh"
 export MEDULLA_IMAGE="$image"
 if ! docker image inspect "$MEDULLA_IMAGE" >/dev/null; then
   say "run.sh: Docker image $MEDULLA_IMAGE is unavailable; startup refused."
@@ -237,14 +238,13 @@ else
   exit 73
 fi
 mounts+=(--mount-rw "$worktree")
-cd "$TOOLING_ROOT"
 # Joppa service credentials belong to the host worker, not lane agents.
 unset JOPPA_TOKEN JOPPA_TOKEN_FILE
 # Keep Crew's workflow, hooks and verification scripts read-only.
 medulla \
   --docker \
   --cwd-ro \
-  -w "${WORKFLOW_DIR#"$TOOLING_ROOT"/}" \
+  "${workflow_args[@]}" \
   --runs-folder "$RUNS_FOLDER" \
   ${coder_args[@]+"${coder_args[@]}"} \
   "${mounts[@]}" \

@@ -61,6 +61,7 @@ their `workspace` settings. Only `*.example.json` templates belong in the reposi
 | `sharedLockDir` | Required for target and requirement delivery: one existing shared directory directly under `sourceRoot`, mounted writable at `/workspace/<directory-name>` |
 | `image` | Lane runtime image; defaults to `medulla-crew:latest` |
 | `dockerEngine` | Enable private Docker inside the lane for integration tests; defaults to `false` |
+| `workflow` | Optional absolute path to a project `workflow.yaml`; defaults to Crew's `lane/workflow.yaml`. Medulla validates it before Dolber reads or claims a Task |
 
 The entire `sourceRoot`, including canonical Git metadata, is read-only.
 The Task names its configured repository; there is no repository override.
