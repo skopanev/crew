@@ -240,14 +240,14 @@ class MemoryHookTests(unittest.TestCase):
     def test_agy_records_calls_and_retrieves_once_at_the_next_model_call(self):
         call = lambda command: {"conversationId": "c1", "transcriptPath": "/t",
                                 "toolCall": {"name": "run_command", "args": {"CommandLine": command, "toolSummary": "Run"}}}
-        self.assertEqual(self.agy("PreToolUse", call("bun test life")), {"decision": "allow"})
+        self.assertEqual(self.agy("PreToolUse", call("bun test life")), {})
         self.assertEqual(self.server.requests, [])
         [record] = self.folder.glob("lane-agy-calls.*")
         self.assertEqual(record.stat().st_mode & 0o777, 0o600)
         lesson = {"address": "lesson:l", "revision": 1, "title": "Tests", "body": "Run focused tests."}
         self.server.replies.append((200, {"items": [lesson]}))
         out = self.agy("PreInvocation", {"conversationId": "c1", "transcriptPath": "/t"})
-        self.assertEqual(out, {"injectSteps": [{"ephemeralMessage": "## Tests\nRun focused tests."}]})
+        self.assertEqual(out, {"injectSteps": [{"userMessage": "Joppa memory:\n## Tests\nRun focused tests."}]})
         self.assertEqual(self.server.requests[0]["body"]["query"], "bun test life Run")
         # The calls are taken once; a delivered lesson is not delivered again.
         self.assertEqual(self.agy("PreInvocation", {"conversationId": "c1"}), {})
@@ -267,8 +267,8 @@ class MemoryHookTests(unittest.TestCase):
         self.agy("PreToolUse", call("gate"))
         self.server.replies.append((503, {}))
         out = self.agy("PreInvocation", {"conversationId": "c1"})
-        self.assertIn("lane memory: retrieval failed: HTTP 503", out["injectSteps"][0]["ephemeralMessage"])
-        self.assertEqual(self.agy("PreToolUse", {}), {"decision": "allow"})
+        self.assertIn("Joppa memory:\nlane memory: retrieval failed: HTTP 503", out["injectSteps"][0]["userMessage"])
+        self.assertEqual(self.agy("PreToolUse", {}), {})
         self.assertEqual(self.agy("SessionStart", {"conversationId": "c1"}), {})
 
     def test_agy_home_prepares_sign_in_and_wires_hooks_only_for_selected_memory_queries(self):
