@@ -242,8 +242,10 @@ def pending_work_page(api, config, assignment):
             match = re.search(r"^Module:[ \t]*([^\r\n]+)$", contract, re.M)
             how = re.search(r"^How:\s*\n(.*?)(?:\nChecks:|\Z)", contract, re.M | re.S)
             entry.update(module=match[1].strip() if match else None, how=" ".join(how[1].split()) if how else None)
-            # A Task in a module this planner cannot change cannot overlap its Tasks.
-            if entry["module"] is not None and entry["module"] not in modules[entry["repository"]]:
+            # A Task in a module this planner cannot change cannot overlap its Tasks. Only one
+            # unambiguous declaration excludes; a blank or conflicting one stays visible.
+            declared = [value.strip() for value in re.findall(r"^Module:[ \t]*([^\r\n]*)$", contract, re.M)]
+            if len(set(declared)) == 1 and declared[0] and declared[0] not in modules[entry["repository"]]:
                 continue
             result.append(entry)
         cursor = page.get("next_cursor")
