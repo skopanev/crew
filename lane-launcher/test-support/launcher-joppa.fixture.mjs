@@ -39,6 +39,9 @@ async function packageFixture(t, mode = 'success') {
   const types = {req: {role: 'requirement'}, ac: {role: 'ac'},
     task: {role: 'task', ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}};
   const schema = {types};
+  // Tests can lower the batch size cap, alias an address, give an object more comment pages
+  // or make batch reads unavailable.
+  const batch = {cap: 25, alias: {}, paged: [], unavailable: false};
   let created = 0;
   const server = http.createServer(async (req, res) => {
     if (req.method === 'DELETE') { res.writeHead(204).end(); return; }
@@ -54,7 +57,20 @@ async function packageFixture(t, mode = 'success') {
     calls.push({name, args});
     assert.equal(Object.hasOwn(args, 'purpose'), false, 'The removed purpose filter was sent');
     let value, rejected = false;
+    if (batch.unavailable && args.address?.includes(',')) { res.writeHead(503).end(); return; }
     if (name === 'joppa_tree') value = {schema: structuredClone(schema)};
+    // A read of 2 to 25 addresses gives items in request order. One unknown address or a reply
+    // over the size cap refuses the whole call, as the live server does.
+    else if (name === 'joppa_objects' && args.address?.includes(',')) {
+      const addresses = args.address.split(',');
+      if (addresses.length > batch.cap) {
+        rejected = true; value = {error: 'reply exceeds 256 KB; narrow the request with fields, fewer addresses or a smaller limit'};
+      } else if (addresses.some(address => !objects.has(address))) {
+        rejected = true; value = {error: 'object not found'};
+      } else value = {items: addresses.map(address => ({...served(objects.get(address)),
+        ...(batch.alias[address] ? {address: batch.alias[address]} : {}),
+        ...(batch.paged.includes(address) ? {comments: {items: [], total: 30, next_cursor: 'c1'}} : {})}))};
+    }
     // A detail read has the live server shape: no document, edges in relations.
     else if (name === 'joppa_objects' && args.address) value = served(objects.get(args.address));
     else if (name === 'joppa_objects') {
@@ -174,7 +190,7 @@ async function packageFixture(t, mode = 'success') {
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};
   const stateFile = path.join(root, 'launch.json');
   fs.writeFileSync(path.join(root, 'output.log'), '');
-  return {root, runId, run, stateFile, calls, objects, queue, schema, persist: () => save(stateFile, run)};
+  return {root, runId, run, stateFile, calls, objects, queue, schema, batch, persist: () => save(stateFile, run)};
 }
 
 // Update a document in place so test getters on unchanged fields keep working.

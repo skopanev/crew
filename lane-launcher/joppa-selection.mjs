@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {api, claimTasks, runTasks, hasRecoveryCheckpoint} from './joppa-common.mjs';
+import {readDetails} from './joppa-api.mjs';
 import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {repositoryDeclarations} from './task-contract.mjs';
@@ -26,13 +27,29 @@ export function runHoldsTasks(run) {
 // One selection pass of one worker shares object and schema reads. Other tools and later passes read again.
 export function passReader(config, worker) {
   const reads = new Map();
-  return (tool, args) => {
+  const detailKey = address => JSON.stringify(['joppa_objects', {workspace: config.workspace, address}]);
+  const read = (tool, args) => {
     const effective = {workspace: config.workspace, ...args};
     if (tool !== 'joppa_objects' && tool !== 'joppa_tree') return api(config, worker, tool, effective);
     const key = JSON.stringify([tool, effective]);
     if (!reads.has(key)) reads.set(key, api(config, worker, tool, effective));
     return reads.get(key);
   };
+  // Seed detail reads in calls of up to 25 addresses. An address without an exact result stays a single read.
+  read.prefetch = async addresses => {
+    const wanted = [...new Set(addresses.filter(text))].filter(address => !reads.has(detailKey(address)));
+    const found = new Map();
+    for (let index = 0; index < wanted.length; index += 25) {
+      const part = await readDetails(config.joppa.url, worker.tokenFile, {workspace: config.workspace},
+        wanted.slice(index, index + 25), {mcpCommand: config.joppa.mcpCommand});
+      for (const [address, value] of part) {
+        reads.set(detailKey(address), Promise.resolve(value));
+        found.set(address, value);
+      }
+    }
+    return [...found.values()];
+  };
+  return read;
 }
 
 export async function occupancyReader(config, read) {
@@ -98,21 +115,28 @@ export async function nextTask(config) {
     const dependencies = dependencyCheck(read);
     const publications = publicationReader(config, read);
     const eligible = [], {object, group} = await occupancyReader(config, read);
-    const inventory = [];
-    let workerHeld = 0;
-    await heldTasks(config, read, async task => {
-      const current = await object(task.address, {allowArchived: true});
-      if (current.document.present && repositoryDeclarations(current.document.data)
-        .some(id => config.repositories.some(repo => repo.id === id))) workerHeld++;
-    }, inventory);
-    held = Math.max(held, workerHeld);
+    const inventory = [], assigned = [];
+    await heldTasks(config, read, async task => { assigned.push(task); }, inventory);
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
+    const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) &&
+      !nodeAssignee(task) && !nodeWaiting(task) && !(priorities && !priorities.includes(task['data.priority']));
+    // Batch the Task details, then their immediate parents and local dependencies. Deeper reads stay single.
+    const tasks = await read.prefetch([...assigned, ...inventory.filter(open)].map(task => task.address));
+    await read.prefetch(tasks.flatMap(value => [value.document.parent, ...(value.document.links || [])
+      .filter(link => link.relation === 'depends_on' && link.blocking === true && link.workspace === undefined)
+      .map(link => link.target)]));
+    let workerHeld = 0;
+    for (const task of assigned) {
+      const current = await object(task.address, {allowArchived: true});
+      if (current.document.present && repositoryDeclarations(current.document.data)
+        .some(id => config.repositories.some(repo => repo.id === id))) workerHeld++;
+    }
+    held = Math.max(held, workerHeld);
     let coversOf;
     for (const task of inventory) {
-      if (task.present !== true || reserved.has(task.address) || nodeStageDone(task) || nodeAssignee(task) || nodeWaiting(task) ||
-          priorities && !priorities.includes(task['data.priority'])) continue;
+      if (!open(task)) continue;
         try {
           const context = await group(task.address);
           if (!context) continue;

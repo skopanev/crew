@@ -31,9 +31,11 @@ test('Joppa selects one executable Task in plan order', async t => {
 
 test('Joppa selection shares object reads within one worker pass and reads again on the next pass', async t => {
   const f = await packageFixture(t);
-  const objectReads = () => f.calls.filter(call => call.name === 'joppa_objects' && call.args.address)
-    .map(call => call.args.address).sort();
+  const detailCalls = () => f.calls.filter(call => call.name === 'joppa_objects' && call.args.address);
+  const objectReads = () => detailCalls().flatMap(call => call.args.address.split(',')).sort();
   const treeReads = () => f.calls.filter(call => call.name === 'joppa_tree').length;
+  // One call reads both Tasks, one reads both parents, and the Requirement two levels up stays a single read.
+  const batched = () => detailCalls().map(call => call.args.address.split(',').sort().join(','));
   const once = ['ac:a1', 'ac:a2', 'req:r', 'task:t1', 'task:t2'];
   for (let pass = 0; pass < 2; pass++) {
     f.calls.length = 0;
@@ -43,6 +45,7 @@ test('Joppa selection shares object reads within one worker pass and reads again
     assert.equal(selected.held, 0);
     assert.deepEqual(selected.dependencyIssues, []);
     assert.deepEqual(objectReads(), once);
+    assert.deepEqual(batched(), ['task:t1,task:t2', 'ac:a1,ac:a2', 'req:r']);
     assert.equal(treeReads(), 1);
   }
   // Each worker keeps its own reads. Blocked dependencies make both workers read the whole queue.
@@ -54,7 +57,40 @@ test('Joppa selection shares object reads within one worker pass and reads again
   assert.equal(blocked.candidate, null);
   assert.equal(blocked.available, 0);
   assert.deepEqual(objectReads(), once.flatMap(address => [address, address]));
+  assert.equal(detailCalls().length, 6);
   assert.equal(treeReads(), 2);
+});
+
+test('Joppa batch reads keep selection when Joppa refuses or shortens a batch', async t => {
+  const select = async setup => {
+    const f = await packageFixture(t);
+    setup(f);
+    const selected = await nextTask(f.run.config);
+    return {f, selected: {candidate: selected.candidate?.id ?? null, available: selected.available, held: selected.held,
+      issues: selected.dependencyIssues.length}};
+  };
+  const reads = f => f.calls.filter(call => call.name === 'joppa_objects' && call.args.address).map(call => call.args.address);
+  const {selected: expected} = await select(() => {});
+  // Oversized replies split down to single reads; an alias and a paged comment list stay single reads.
+  for (const [name, setup, single] of [
+    ['size cap', f => { f.batch.cap = 1; }, ['task:t1', 'task:t2', 'ac:a1', 'ac:a2']],
+    ['alias', f => { f.batch.alias['task:t1'] = 'task:renamed'; }, ['task:t1']],
+    ['comment pages', f => { f.batch.paged = ['task:t2']; }, ['task:t2']]]) {
+    const {f, selected} = await select(setup);
+    assert.deepEqual(selected, expected, name);
+    for (const address of single) assert(reads(f).includes(address), `${name}: ${address} was read singly`);
+  }
+  // An unknown dependency target refuses its whole batch. The single reads then decide as before:
+  // here the single read of the missing target fails the pass, exactly as without batches.
+  const refused = await packageFixture(t);
+  refused.objects.get('task:t1').document.links = [{relation: 'depends_on', blocking: true, target: 'task:ghost'}];
+  await assert.rejects(nextTask(refused.run.config), /joppa_objects returned no object/);
+  assert(reads(refused).some(address => address.includes(',') && address.split(',').includes('task:ghost')));
+  assert(reads(refused).includes('task:ghost'));
+  // Transport and service errors still fail the pass.
+  const failing = await packageFixture(t);
+  failing.batch.unavailable = true;
+  await assert.rejects(nextTask(failing.run.config), /Joppa MCP HTTP 503/);
 });
 
 test('Joppa planner reads all compact pages and uses native criterion tones', async t => {

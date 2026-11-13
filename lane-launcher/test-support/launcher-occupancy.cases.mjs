@@ -61,5 +61,5 @@ test('Joppa package ignores held Tasks without a repository contract', async t =
   const selected = await nextTask(f.run.config);
   assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
   assert(!f.calls.some(call => call.name === 'joppa_tasks'));
-  assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address === 'task:t2'), true);
+  assert.equal(f.calls.some(call => call.name === 'joppa_objects' && call.args.address?.split(',').includes('task:t2')), true);
 });

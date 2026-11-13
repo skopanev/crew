@@ -76,10 +76,47 @@ export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) 
     return completeDetail(args, result, next => rawCall(url, tokenFile, tool, next, options));
   }
   const result = await rawCall(url, tokenFile, tool, arguments_, options);
-  if (tool === 'joppa_objects' && arguments_.address && !arguments_.history) {
+  // A read of more addresses gives {items}; readDetails completes each item.
+  if (tool === 'joppa_objects' && arguments_.address && !arguments_.address.includes(',') && !arguments_.history) {
     return completeDetail(arguments_, result, args => rawCall(url, tokenFile, tool, args, options));
   }
   return result;
+}
+
+const REPLY_TOO_LARGE = /^Joppa joppa_objects: reply exceeds 256 KB;/;
+
+// Detail reads of 2 to 25 addresses in one call, as a Map of address to the single-read result.
+// Joppa refuses the whole call for one unknown or hidden address, and an alias returns its new
+// address. Such addresses and objects with more comment pages are left out for the single read.
+// Transport, authentication and other protocol errors still fail.
+export async function readDetails(url, tokenFile, arguments_, addresses, options = {}) {
+  const found = new Map();
+  if (addresses.length < 2) return found;
+  if (addresses.length > 25) throw new Error('Joppa reads at most 25 addresses in one call');
+  const args = {...arguments_, address: addresses.join(','), fields: DETAIL_FIELDS};
+  let reply;
+  try { reply = await rawCall(url, tokenFile, 'joppa_objects', args, options); }
+  catch (error) {
+    if (!error.rejected) throw error;
+    if (REPLY_TOO_LARGE.test(error.message)) {
+      const half = Math.ceil(addresses.length / 2);
+      for (const part of [addresses.slice(0, half), addresses.slice(half)]) {
+        for (const [address, value] of await readDetails(url, tokenFile, arguments_, part, options)) found.set(address, value);
+      }
+    }
+    return found;
+  }
+  if (!Array.isArray(reply?.items) || reply.items.length !== addresses.length) return found;
+  for (const [index, item] of reply.items.entries()) {
+    const address = addresses[index];
+    if (!object(item) || item.address !== address || item.comments?.next_cursor) continue;
+    try {
+      found.set(address, await completeDetail({...args, address}, item, () => {
+        throw new Error('Joppa batch item needs another comment page');
+      }));
+    } catch {}
+  }
+  return found;
 }
 
 async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = {}) {
