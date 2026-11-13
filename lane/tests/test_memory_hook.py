@@ -156,14 +156,21 @@ class MemoryHookTests(unittest.TestCase):
 
     def test_tool_events_retrieve_once_per_tool_call(self):
         call = {"tool_name": "Bash", "tool_use_id": "u1", "tool_input": {"description": "Run the gate"},
-                "tool_response": "error: gate failed"}
+                "tool_response": "error: gate failed", "session_id": ""}
         self.hook("PostToolUse", **call)
         self.hook("PostToolUse", **call)
         self.assertEqual(len(self.server.requests), 1)
         self.assertIn("Run the gate", self.server.requests[0]["body"]["query"])
+        # The same tool ID from another node of the run is that node's first event.
+        self.env["LANE_MEMORY_ROLE"] = "crew-lane-qa"
+        self.hook("PostToolUse", **call)
+        self.assertEqual(len(self.server.requests), 2)
+        self.env["LANE_MEMORY_PROCESS"] = "verify"
+        self.hook("PostToolUse", **call)
+        self.assertEqual(len(self.server.requests), 3)
         del self.config["query"]
         self.hook("PostToolUse", **{**call, "tool_use_id": "u2"})
-        self.assertEqual(len(self.server.requests), 1)
+        self.assertEqual(len(self.server.requests), 3)
 
     def test_background_commands_are_still_refused(self):
         out = self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "x", "run_in_background": True})
