@@ -10,6 +10,9 @@
 set -euo pipefail
 home="${1:?CODEX_HOME required}"
 settings="${2:?source settings json required}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${TOOLING_ROOT:=$(cd "$here/../.." && pwd)}"
+title="Ticket ${ticket_id:-UNKNOWN}"
 mkdir -p "$home" && chmod 700 "$home"
 
 # Хуки: берём те же события из общего файла настроек. jq, а не cp - у claude
@@ -19,8 +22,27 @@ mkdir -p "$home" && chmod 700 "$home"
 # command_execution), поэтому по "Bash" хук не срабатывал ни разу: замер на
 # прогоне 2cc48395 - 18 команд оболочки у разведчика и НОЛЬ переписанных в rtk,
 # при том что правило tools.rtk уровня must висит в контракте.
-jq '{hooks}' "$settings" \
-  | jq '(.hooks.PreToolUse[]?.matcher) |= "*"' > "$home/hooks.json"
+jq --arg title "$title" --arg root "$TOOLING_ROOT" '
+  def retarget:
+    if type == "object" and .type == "command" and (.command | type == "string")
+    then .command |= (
+      if test("^(?:/usr/bin/env\\s+bash\\s+|bash\\s+)?<TOOLING_ROOT>/")
+      then sub("^(?:/usr/bin/env\\s+bash\\s+|bash\\s+)?<TOOLING_ROOT>/"; "bash \($root)/")
+      else gsub("<TOOLING_ROOT>"; $root) end
+    )
+    else . end;
+  def retitle:
+    if type == "object" and .type == "mcp_tool" then .input.query = $title else . end;
+  {
+    hooks: (
+      (.hooks // {})
+      | to_entries
+      | map(.value |= map(.hooks |= map(retarget | retitle)))
+      | from_entries
+    )
+  }
+  | (.hooks.PreToolUse[]? | select(.matcher == null or .matcher == "" or .matcher == "Bash").matcher) |= "*"
+' "$settings" > "$home/hooks.json"
 
 # У кодекса нет своего процессора rtk, но вход PreToolUse у него того же вида,
 # что у claude - tool_name и tool_input, - поэтому годится процессор claude.

@@ -217,6 +217,84 @@ class MemoryHookTests(unittest.TestCase):
         self.assertNotIn("Authorization: Bearer $(", script)
         self.assertIn("-K -", (HOOKS / "joppa-data.sh").read_text())
 
+    def test_custom_hooks_startup_and_injection_preserve_defaults_and_custom_commands(self):
+        startup = HOOKS.parent / "startup/hooks.sh"
+        probe = (
+            "set -euo pipefail\n"
+            'say() { printf "%s\\n" "$*"; }\n'
+            "mounts=()\n"
+            f'source "{startup}"\n'
+            'jq -cn --argjson mounts "$((( ${#mounts[@]} )) && printf "%s\\0" "${mounts[@]}" | jq -Rs "split(\\"\\u0000\\")[:-1]" || echo "[]")" '
+            '--argjson vars "$((( ${#hooks_vars[@]} )) && printf "%s\\0" "${hooks_vars[@]}" | jq -Rs "split(\\"\\u0000\\")[:-1]" || echo "[]")" '
+            '"{mounts: \\$mounts, vars: \\$vars}"\n'
+        )
+        default_run = subprocess.run(["bash", "-c", probe], env=dict(os.environ, LANE_HOOKS_DIR=""),
+                                     capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(default_run.stdout.splitlines()[-1]), {"mounts": [], "vars": []})
+
+        hooks_dir = self.folder / "crew-hooks-custom"
+        hooks_dir.mkdir()
+        missing = subprocess.run(["bash", "-c", probe], env=dict(os.environ, LANE_HOOKS_DIR=str(hooks_dir)),
+                                 capture_output=True, text=True)
+        self.assertEqual(missing.returncode, 2)
+
+        custom_settings = self.folder / "crew-hooks-custom/settings.json"
+        custom_settings.write_text('{"hooks": []}')
+        invalid = subprocess.run(["bash", "-c", probe], env=dict(os.environ, LANE_HOOKS_DIR=str(hooks_dir)),
+                                 capture_output=True, text=True)
+        self.assertEqual(invalid.returncode, 2)
+
+        custom_settings.write_text(json.dumps({
+            "permissions": {"allow": ["Bash(*pytest*)"], "deny": ["Bash(*rm -rf*)"]},
+            "env": {"CUSTOM_HOOK_ENV": "1"},
+            "hooks": {
+                "SessionStart": [{
+                    "matcher": "startup",
+                    "hooks": [
+                        {"type": "command", "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh"},
+                        {"type": "command", "command": "bash /workspace/project/lane/custom-hook.sh"},
+                    ],
+                }],
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]},
+                    {"matcher": "Edit", "hooks": [{"type": "command", "command": "/opt/project/check-edit.sh"}]},
+                ],
+            },
+        }))
+        ready = subprocess.run(["bash", "-c", probe], env=dict(os.environ, LANE_HOOKS_DIR=str(hooks_dir)),
+                               capture_output=True, text=True, check=True)
+        parsed = json.loads(ready.stdout.splitlines()[-1])
+        self.assertEqual(parsed["mounts"], ["--mount", str(hooks_dir)])
+        self.assertEqual(parsed["vars"], [f"--var", f"LANE_HOOKS_CONFIG=/workspace/{hooks_dir.name}/settings.json"])
+
+        tooling = self.folder / "tooling"
+        injected = self.folder / "injected.json"
+        codex_home = self.folder / "codex-home"
+        env = dict(os.environ, TOOLING_ROOT=str(tooling), LANE_HOOKS_CONFIG=str(custom_settings),
+                   CBM_MCP_COMMAND=str(self.folder / "cbm.py"))
+        subprocess.run(["bash", str(HOOKS / "inject.sh"), str(injected), str(HOOKS / "claude-settings.json")],
+                       env=env, check=True, capture_output=True, text=True)
+        subprocess.run(["bash", str(HOOKS / "codex-home.sh"), str(codex_home), str(injected)],
+                       env=env, check=True, capture_output=True, text=True)
+
+        claude = json.loads(injected.read_text())
+        codex = json.loads((codex_home / "hooks.json").read_text())
+        self.assertEqual(claude["permissions"]["defaultMode"], "auto")
+        self.assertIn("Bash(*git *)", claude["permissions"]["allow"])
+        self.assertIn("Bash(*pytest*)", claude["permissions"]["allow"])
+        self.assertIn("Bash(*git push*)", claude["permissions"]["deny"])
+        self.assertIn("Bash(*rm -rf*)", claude["permissions"]["deny"])
+        self.assertEqual(claude["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1")
+        self.assertEqual(claude["env"]["CUSTOM_HOOK_ENV"], "1")
+        session_hooks = claude["hooks"]["SessionStart"][0]["hooks"]
+        self.assertEqual(session_hooks[0]["command"], f"bash {tooling}/lane/hooks/memory-hook.sh")
+        self.assertEqual(session_hooks[1]["command"], "bash /workspace/project/lane/custom-hook.sh")
+        self.assertEqual(codex["hooks"]["SessionStart"], claude["hooks"]["SessionStart"])
+        self.assertEqual(codex["hooks"]["PreToolUse"][0]["matcher"], "*")
+        self.assertEqual(codex["hooks"]["PreToolUse"][1]["matcher"], "Edit")
+        self.assertEqual(json.loads((codex_home / "mcp.json").read_text())["mcpServers"]["codebase-memory"],
+                         {"command": "python3", "args": [str(self.folder / "cbm.py")]})
+
 
 if __name__ == "__main__":
     unittest.main()
