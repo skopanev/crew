@@ -17,8 +17,8 @@ const inside = (child, parent) => !path.relative(parent, child).startsWith('..')
 
 export const checkoutPath = run => path.join(run.config.worktreeRoot, run.executionId);
 
-// Read the checkout without its own Git hooks or fsmonitor. Throw on anything but a clean lane branch.
-export function checkoutState(checkout, executionId) {
+// Git for an agent-written checkout. Refuse redirecting or executable configuration before any Git command.
+function laneGit(checkout) {
   const stat = fs.lstatSync(checkout);
   require(stat.isDirectory() && fs.realpathSync(checkout) === checkout, 'checkout is not a plain directory');
   const dotGit = path.join(checkout, '.git');
@@ -32,8 +32,13 @@ export function checkoutState(checkout, executionId) {
     .split('\n').filter(key => /^(filter|include|includeif)\.|^extensions\.worktreeconfig$/i.test(key));
   require(!keys.length, `checkout .git/config sets ${keys.join(', ')}`);
   // Explicit paths: a local core.worktree or hook setting written by an agent must not steer host Git.
-  const git = (...args) => command('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
+  return (...args) => command('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
     '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args]);
+}
+
+// Throw on anything but a clean lane branch with a commit above lane-base.
+export function checkoutState(checkout, executionId) {
+  const git = laneGit(checkout), dotGit = path.join(checkout, '.git');
   const branch = git('symbolic-ref', '-q', 'HEAD');
   require(branch === `refs/heads/ticket-${executionId}`, `checkout is on ${branch || 'a detached HEAD'}`);
   const head = git('rev-parse', '--verify', 'HEAD^{commit}'), tree = git('rev-parse', '--verify', 'HEAD^{tree}');
@@ -46,10 +51,9 @@ export function checkoutState(checkout, executionId) {
 
 // The old lane process group and every container of its run or with this checkout mounted are gone.
 export function writerGone(run, checkout) {
-  if (Number.isSafeInteger(run.launchPgid) && run.launchPgid > 1) {
-    try { process.kill(-run.launchPgid, 0); return false; }
-    catch (error) { if (error.code !== 'ESRCH') throw error; }
-  }
+  if (!Number.isSafeInteger(run.launchPgid) || run.launchPgid <= 1) return false;
+  try { process.kill(-run.launchPgid, 0); return false; }
+  catch (error) { if (error.code !== 'ESRCH') throw error; }
   const folders = new Set([run.runFolder, exists(run.runFolder) ? fs.realpathSync(run.runFolder) : null].filter(Boolean));
   const ids = command('docker', ['ps', '-q', '--no-trunc']).split('\n').filter(Boolean);
   if (!ids.length) return true;
@@ -80,13 +84,25 @@ function route({node, signal, artifacts, head, tree}) {
   const last = rounds.at(-1);
   if (!last || REJECT.test(last) || HIGH.test(last)) return 'coder';
   if (readText(path.join(artifacts, 'reviewed-tree.txt')) !== `${tree}\n${head}\n`) return 'coder';
-  const record = readText(path.join(artifacts, 'test-bindings-receipt.json'));
+  const recordText = readText(path.join(artifacts, 'test-bindings-receipt.json'));
   const bindings = path.join(artifacts, 'test-bindings.json');
-  if (!record) return exists(bindings) ? 'coder' : 'review';
-  const receipt = JSON.parse(record);
-  if (receipt.tree !== tree || receipt.candidate_sha !== head) return 'coder';
-  return receipt.status !== 'bound' || exists(bindings) && fileDigest(bindings) === receipt.bindings_sha256 ? 'review' : 'coder';
+  if (!recordText) return exists(bindings) ? 'coder' : 'review';
+  // As in frozenBindings: the record names the current passing gate receipt of this tree above this HEAD.
+  const record = JSON.parse(recordText), folder = value => path.basename(path.dirname(String(value)));
+  const pointer = JSON.parse(readText(path.join(artifacts, 'gates', 'current.json')) || '{}');
+  const receiptFile = path.join(artifacts, 'gates', folder(record.receipt), 'receipt.json');
+  if (!/^[0-9a-f]{32}$/.test(folder(record.receipt)) || folder(record.receipt) !== folder(pointer.receipt) ||
+      record.receipt_sha256 !== pointer.sha256 || !exists(receiptFile) || fileDigest(receiptFile) !== record.receipt_sha256) return 'coder';
+  const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+  if (receipt.passed !== true || receipt.tree !== tree || receipt.base !== head || record.tree !== tree ||
+      receipt.candidate_sha !== record.candidate_sha) return 'coder';
+  if (record.status === 'no_report') return 'review';
+  return record.status === 'bound' && exists(bindings) && fileDigest(bindings) === record.bindings_sha256 ? 'review' : 'coder';
 }
+
+// Each changed file stays inside the writable roots of the old and the new Task contract.
+const within = (file, roots) => Array.isArray(roots) && roots.length > 0 && file.length > 0 && !/[\r\n]/.test(file) &&
+  !file.split('/').includes('..') && roots.some(scope => scope === '.' || file === scope || file.startsWith(scope.replace(/\/+$/, '') + '/'));
 
 const contexts = claim => (claim.contexts || []).map(item => `${item.address}=${item.digest}`).sort().join(',');
 const repository = run => JSON.stringify([run.repository?.id, run.repository?.path, run.repository?.targetBranch]);
@@ -135,9 +151,16 @@ export async function retainedCheckout(run, dir) {
       comment.actor === prior.run.joppaWorker?.actor && comment.text === note.text &&
       note.text.includes(`\nRun: ${path.basename(prior.dir)}\n`) && note.text.includes(retainedLine(retained)),
       'Joppa shows no matching failure note for the retained checkout');
-    require(writerGone(prior.run, checkout), 'the failed run or a container still uses the checkout');
+    require(writerGone(prior.run, checkout), 'the failed run has no stopped process group, or a container uses the checkout');
     const state = checkoutState(checkout, run.executionId);
     for (const key of ['branch', 'head', 'tree', 'base']) require(state[key] === retained[key], `checkout ${key} changed`);
+    const files = laneGit(checkout)('diff', '-z', '--no-renames', '--name-only', `${state.base}..${state.head}`).split('\0').filter(Boolean);
+    require(files.length && files.every(file => within(file, prior.run.claim.ticket?.modulePaths) &&
+      within(file, run.claim.ticket?.modulePaths)), 'checkout changes files outside the Task modulePaths');
+    // Read the remote as a plain config file. The canonical repository is host configuration.
+    const remote = command('git', ['config', '--file', path.join(checkout, '.git', 'config'), '--no-includes', '--get', 'remote.origin.url']);
+    require(remote === command('git', ['-C', run.repository.path, 'remote', 'get-url', 'origin']),
+      'checkout origin differs from the repository origin');
     return {retained: {head: state.head, tree: state.tree, base: state.base, route: route(retained),
       previousRun: path.basename(prior.dir)}, inputs: retained.artifacts};
   } catch (error) { return {reason: error.message}; }
