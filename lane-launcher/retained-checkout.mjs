@@ -6,6 +6,7 @@ import {command, readRun, runDirectories} from './runtime.mjs';
 import {api, claimTasks, contractDigest} from './joppa-common.mjs';
 import {heldBy} from './joppa-claims.mjs';
 import {runHoldsTasks} from './joppa-selection.mjs';
+import {workflowDigest, supportsRetainedCheckout} from './workflow-config.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const sha = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const HIGH = /^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])/m;
@@ -15,6 +16,9 @@ const readText = file => exists(file) ? fs.readFileSync(file, 'utf8') : null;
 const inside = (child, parent) => !path.relative(parent, child).startsWith('..') && !path.isAbsolute(path.relative(parent, child));
 
 export const checkoutPath = run => path.join(run.config.worktreeRoot, run.executionId);
+const workflowUnchanged = run => /^[0-9a-f]{64}$/.test(run.workflow?.digest || '') &&
+  typeof run.workflow.file === 'string' && path.isAbsolute(run.workflow.file) &&
+  supportsRetainedCheckout(run.workflow.file) && workflowDigest(run.workflow.file) === run.workflow.digest;
 
 // Git for an agent-written checkout. Refuse redirecting or executable configuration before any Git command.
 function laneGit(checkout) {
@@ -63,7 +67,8 @@ export function writerGone(run, checkout) {
 // Record the retained checkout in the failed launch state. Null when it cannot be proven.
 export function recordRetained(run, artifacts) {
   try {
-    if (run.finalizeOnly || run.requirementDelivery || !['target', 'branch'].includes(run.config.delivery)) return null;
+    if (run.finalizeOnly || run.requirementDelivery || !['target', 'branch'].includes(run.config.delivery) ||
+        !workflowUnchanged(run)) return null;
     const checkout = checkoutPath(run);
     if (!artifacts || !inside(artifacts, run.runFolder) || !exists(checkout) || !writerGone(run, checkout)) return null;
     const origin = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8'));
@@ -106,6 +111,8 @@ function owner(run, dir, checkout) {
   require(prior.result.status === 'failed' && prior.result.blockConfirmed === true && !prior.result.completed,
     'the latest run of this Task has no confirmed failure');
   require(retained?.checkout === checkout, 'the latest failed run recorded no checkout');
+  require(workflowUnchanged(run) && prior.workflow?.digest === run.workflow.digest,
+    'workflow changed or the failed run has no matching workflow digest');
   require(prior.workspace === run.workspace && prior.config.joppa?.url === run.config.joppa.url &&
     prior.task === run.task && (prior.tasks?.length ?? 1) === 1 &&
     prior.config.delivery === run.config.delivery && !prior.requirementDelivery &&

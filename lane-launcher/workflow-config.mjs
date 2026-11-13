@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
 
 export const defaultWorkflow = fileURLToPath(new URL('../lane/workflow.yaml', import.meta.url));
 
@@ -21,7 +22,13 @@ export function workflowFile(file = defaultWorkflow) {
   return resolved === fs.realpathSync(defaultWorkflow) ? '' : resolved;
 }
 
-// A custom workflow must not receive retained state unless it is an exact copy of this supported flow.
+// Record the selected file bytes, including custom models, prompts and timeouts.
+export function workflowDigest(file = defaultWorkflow) {
+  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+// A custom author explicitly declares support for the retained checkout handoff.
 export function supportsRetainedCheckout(file = defaultWorkflow) {
-  return fs.readFileSync(file, 'utf8') === fs.readFileSync(defaultWorkflow, 'utf8');
+  const declarations = fs.readFileSync(file, 'utf8').match(/^  RETAINED_CHECKOUT_PROTOCOL:[^\n]*/gm) || [];
+  return declarations.length === 1 && /^  RETAINED_CHECKOUT_PROTOCOL:[ \t]+(?:1|'1'|"1")[ \t]*\r?$/.test(declarations[0]);
 }

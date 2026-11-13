@@ -2,100 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {execFileSync, spawnSync} from 'node:child_process';
-import {randomUUID} from 'node:crypto';
-import {save} from '../runtime.mjs';
 import {recordRetained, retainedCheckout, retainedLine, prepareReuse} from '../retained-checkout.mjs';
-import {claimTask, finishTask, contractDigest} from '../joppa.mjs';
+import {claimTask, finishTask} from '../joppa.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
-import {defaultWorkflow, supportsRetainedCheckout} from '../workflow-config.mjs';
-
-// A fake Docker answers from DOCKER_ROWS: an empty list means no running container.
-function fakeDocker(root) {
-  const bin = path.join(root, 'bin');
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env node
-const rows = JSON.parse(process.env.DOCKER_ROWS || '[]');
-if (process.argv[2] === 'ps') console.log(rows.map((row, index) => 'c' + index).join('\\n'));
-else console.log(JSON.stringify(rows));
-`, {mode: 0o755});
-  const previous = process.env.PATH;
-  process.env.PATH = `${bin}:${previous}`;
-  process.env.DOCKER_ROWS = '[]';
-  return () => { process.env.PATH = previous; delete process.env.DOCKER_ROWS; };
-}
-
-const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], {encoding: 'utf8',
-  env: {...process.env, GIT_AUTHOR_NAME: 'lane', GIT_AUTHOR_EMAIL: 'lane@local', GIT_COMMITTER_NAME: 'lane',
-    GIT_COMMITTER_EMAIL: 'lane@local'}}).trim();
-
-const ORIGIN = 'ssh://example.invalid/app.git';
-// The process group of a lane that has already stopped.
-const stoppedPgid = () => spawnSync('true').pid;
-
-// A clean lane branch with one commit above lane-base and ignored dependencies.
-function laneCheckout(checkout, executionId) {
-  fs.mkdirSync(checkout, {recursive: true});
-  git(checkout, 'init', '-q', '-b', `ticket-${executionId}`);
-  git(checkout, 'remote', 'add', 'origin', ORIGIN);
-  fs.writeFileSync(path.join(checkout, 'a.txt'), 'base\n');
-  fs.writeFileSync(path.join(checkout, '.gitignore'), 'node_modules/\n');
-  git(checkout, 'add', '-A'); git(checkout, 'commit', '-qm', 'base');
-  fs.writeFileSync(path.join(checkout, '.git/lane-base'), git(checkout, 'rev-parse', 'HEAD') + '\n');
-  fs.writeFileSync(path.join(checkout, 'a.txt'), 'change\n');
-  git(checkout, 'commit', '-qam', 'change');
-  // Ignored dependencies stay in place and do not make the checkout dirty.
-  fs.mkdirSync(path.join(checkout, 'node_modules'));
-  fs.writeFileSync(path.join(checkout, 'node_modules/dep.js'), '');
-}
-
-async function reuseFixture(t, {node = 'implement_code', signal = 'GATE_FAIL'} = {}) {
-  const f = await packageFixture(t);
-  t.after(fakeDocker(f.root));
-  const config = {...f.run.config, delivery: 'target', worktreeRoot: path.join(f.root, 'wt'),
-    stateDir: path.join(f.root, 'state')};
-  const executionId = 'joppa-' + 'a'.repeat(32), checkout = path.join(config.worktreeRoot, executionId);
-  laneCheckout(checkout, executionId);
-  const canonical = path.join(f.root, 'canonical');
-  fs.mkdirSync(canonical);
-  git(canonical, 'init', '-q');
-  git(canonical, 'remote', 'add', 'origin', ORIGIN);
-  const repository = {id: 'app', path: canonical, targetBranch: 'main'};
-  // The new claim holds the live Task. Its digest is the digest of the live contract.
-  const task = f.objects.get('task:t1');
-  task.document.data.assignee = 'crew-lane:new';
-  const digest = contractDigest(task);
-  const claim = (assignee, retained) => ({claimed: true, id: executionId, assignee, address: 'task:t1',
-    tasks: [{address: 'task:t1', digest}], contexts: [{address: 'ac:a1', digest: 'c1'}],
-    ticket: {id: executionId, modulePaths: ['a.txt'], ...(retained ? {retained} : {})}});
-  const runDir = name => path.join(config.stateDir, 'runs', name);
-  const priorId = randomUUID(), prior = {config, workspace: 'fixture', joppaWorker: f.run.joppaWorker, task: 'task:t1',
-    executionId, repository, createdAt: '2026-11-13T10:00:00.000Z', runFolder: path.join(runDir(priorId), 'lane'),
-    claim: claim('crew-lane:old'), launchPgid: stoppedPgid()};
-  const artifacts = path.join(prior.runFolder, 'm1', 'artifacts');
-  fs.mkdirSync(path.join(prior.runFolder, 'm1', 'steps', '007-expert_review'), {recursive: true});
-  fs.mkdirSync(artifacts);
-  fs.writeFileSync(path.join(artifacts, 'origin.json'), JSON.stringify({node, signal, message: 'stopped'}));
-  for (const name of ['scout.txt', 'coder-report.txt', 'failure.txt', 'rejects.txt', 'security.md', 'reviewed-tree.txt',
-    'test-bindings-receipt.json', 'test-bindings.json']) fs.writeFileSync(path.join(artifacts, name), `${name}\n`);
-  fs.writeFileSync(path.join(prior.runFolder, 'm1', 'steps', '007-expert_review', 'inputs.json'),
-    JSON.stringify([{slug: 'security'}, {slug: '../escape'}]));
-  // The failure outcome records the checkout and notes it in the Task block.
-  prior.retained = recordRetained(prior, artifacts);
-  assert.ok(prior.retained, 'a clean lane checkout is recorded');
-  const note = {op: 'note', target: 'task:t1', id: randomUUID(), reply_to: null,
-    text: `CREW_FAILURE\nTask: task:t1\nRun: ${priorId}\nReason: ${signal}\n${retainedLine(prior.retained)}\nlane stopped`};
-  prior.blockRequest = {operations: [{command: note}]};
-  prior.result = {status: 'failed', code: 1, blocked: true, blockConfirmed: true};
-  f.objects.get('task:t1').annotations.comments[note.id] = {actor: 'lane-1', text: note.text, withdrawn: false};
-  const savePrior = () => { fs.mkdirSync(runDir(priorId), {recursive: true}); save(path.join(runDir(priorId), 'launch.json'), prior); };
-  savePrior();
-  const currentId = randomUUID();
-  fs.mkdirSync(runDir(currentId), {recursive: true});
-  const run = {config, workspace: 'fixture', joppaWorker: f.run.joppaWorker, task: 'task:t1', executionId, repository,
-    createdAt: '2026-11-13T11:00:00.000Z', runFolder: path.join(runDir(currentId), 'lane'), claim: claim('crew-lane:new')};
-  return {f, run, dir: runDir(currentId), prior, savePrior, artifacts, checkout, note};
-}
+import {fakeDocker, git, laneCheckout, stoppedPgid, reuseFixture, ORIGIN} from '../test-support/retained-checkout.fixture.mjs';
+import {defaultWorkflow, supportsRetainedCheckout, workflowDigest} from '../workflow-config.mjs';
 
 test('a confirmed GATE_FAIL checkout returns to the coder with prior reports only', async t => {
   const x = await reuseFixture(t);
@@ -113,11 +24,7 @@ test('a confirmed GATE_FAIL checkout returns to the coder with prior reports onl
   fs.rmSync(inputs, {recursive: true});
   assert.equal(await prepareReuse(x.run, x.dir, line => lines.push(line), () => {}), '');
   assert.match(lines.at(-1), /prior scout.txt is missing or empty/);
-  const workflow = path.join(x.f.root, 'workflow.yaml');
-  fs.copyFileSync(defaultWorkflow, workflow);
-  assert.equal(supportsRetainedCheckout(workflow), true);
-  fs.appendFileSync(workflow, '\n# A custom workflow needs its own retained-state support.\n');
-  assert.equal(supportsRetainedCheckout(workflow), false);
+  assert.notEqual(x.run.workflow.digest, workflowDigest(defaultWorkflow));
 });
 
 test('REVIEW_INCOMPLETE reviews again only without a known blocker', async t => {
@@ -143,6 +50,29 @@ test('reuse fails closed on any mismatch', async t => {
     assert.equal(reuse.retained, undefined);
     assert.match(reuse.reason, pattern);
   };
+  const workflow = x.prior.workflow, bytes = fs.readFileSync(workflow.file);
+  for (const prior of [undefined, {...workflow, digest: 'bad'}, {...workflow, digest: 'f'.repeat(64)}]) {
+    x.prior.workflow = prior; x.savePrior();
+    await refused(/workflow changed|workflow digest/);
+  }
+  x.prior.workflow = workflow; x.savePrior();
+  fs.appendFileSync(workflow.file, '\n# Changed timeout.\n');
+  await refused(/workflow changed/);
+  assert.equal(recordRetained(x.prior, x.artifacts), null);
+  fs.writeFileSync(workflow.file, bytes);
+  x.run.workflow.file = path.join(x.f.root, 'relocated.yaml');
+  fs.writeFileSync(x.run.workflow.file, bytes);
+  assert.ok((await retainedCheckout(x.run, x.dir)).retained);
+  for (const value of ['2', '']) {
+    fs.writeFileSync(x.run.workflow.file, bytes.toString().replace("RETAINED_CHECKOUT_PROTOCOL: '1'", `RETAINED_CHECKOUT_PROTOCOL: '${value}'`));
+    x.run.workflow.digest = workflowDigest(x.run.workflow.file);
+    x.prior.workflow = {...x.run.workflow}; x.savePrior();
+    assert.equal(supportsRetainedCheckout(x.run.workflow.file), false);
+    await refused(/workflow changed/);
+    assert.equal(recordRetained(x.prior, x.artifacts), null);
+  }
+  fs.writeFileSync(x.run.workflow.file, bytes); x.run.workflow.digest = workflow.digest;
+  x.prior.workflow = workflow; x.savePrior();
   fs.writeFileSync(path.join(x.checkout, 'stray.txt'), 'x');
   await refused(/uncommitted changes/);
   // A local core.worktree written by an agent cannot point the clean check elsewhere.
@@ -242,6 +172,7 @@ test('a single-Task failure records the clean checkout and notes it in the Task 
   t.after(fakeDocker(f.root));
   f.run.tasks = [{address: 'task:t1', revision: 3}];
   f.run.launchPgid = stoppedPgid();
+  f.run.workflow = {file: defaultWorkflow, digest: workflowDigest()};
   f.run.config = {...f.run.config, delivery: 'target', worktreeRoot: path.join(f.root, 'wt')};
   await claimTask(f.run, f.persist, f.runId);
   const checkout = path.join(f.run.config.worktreeRoot, f.run.executionId);

@@ -19,7 +19,13 @@ The writable checkout is `<worktreeRoot>/<execution-id>`, mounted at
 there. Artifacts are writable separately. The worker can reuse a retained, clean checkout for the same Task.
 It requires the recorded HEAD, tree, branch, scope and unchanged Task context, with no active writer.
 Unknown, dirty or foreign checkouts still fail with `WORKTREE_PREEXISTED`.
-Retained checkout reuse requires the bundled workflow or an exact copy. Other custom workflows keep the refusal.
+The worker records the SHA256 of the selected `workflow.yaml` before launch, including custom workflows.
+Reuse requires the same workflow bytes as the failed run. A missing or changed digest keeps the refusal.
+The source file must also remain unchanged when the failed run records its retained checkout.
+This digest covers `workflow.yaml`, not sibling files, tooling scripts or the container image.
+Custom workflows must implement the retained handoff through `RESUME`, `RESUME_REVIEW` and `RETAINED_CHANGED`.
+Declare support with `RETAINED_CHECKOUT_PROTOCOL: '1'`, indented two spaces under `vars`.
+Keep custom resume logic in `workflow.yaml`. A sibling script change does not change this digest.
 
 After success, the host removes the private checkout. Reports and logs remain in the run directory.
 Failed runs retain code changes. Empty or unchanged checkouts are removed.

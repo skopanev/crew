@@ -16,7 +16,7 @@ import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementH
 import {publishLandedResults} from './test-results-publish.mjs';
 import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
-import {workflowFile, supportsRetainedCheckout} from './workflow-config.mjs';
+import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.mjs';
 import {prepareReuse} from './retained-checkout.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
@@ -131,11 +131,11 @@ try {
   save(stateFile, run);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   run.runFolder = laneRunFolder(run.runFolder, run.config.id);
+  run.workflow = {file: laneWorkflow || defaultWorkflow, digest: workflowDigest(laneWorkflow || undefined)};
   save(stateFile, run);
   fs.mkdirSync(run.runFolder, {recursive: true});
   // A retained checkout of this Task runs only after validation. Otherwise run.sh refuses it with exit 73.
-  const reuseHead = run.finalizeOnly || !supportsRetainedCheckout(laneWorkflow || undefined) ? '' :
-    await prepareReuse(run, dir, announce, () => save(stateFile, run));
+  const reuseHead = run.finalizeOnly ? '' : await prepareReuse(run, dir, announce, () => save(stateFile, run));
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
   const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
     input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,

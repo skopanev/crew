@@ -4,6 +4,7 @@ timeout: 86400
 defaults:
   timeout: 300
 vars:
+  RETAINED_CHECKOUT_PROTOCOL: '1'
   REJECT_ROUNDS: '3'
   ticket_title: ''
   gate_commands: '[]'
