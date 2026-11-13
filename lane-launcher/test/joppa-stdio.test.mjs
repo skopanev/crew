@@ -39,8 +39,14 @@ print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
     ticket_id: ticket.id, project_name: 'sample'}});
   assert.equal(JSON.parse(fs.readFileSync(path.join(artifacts, 'ticket.json'), 'utf8')).body, body);
   assert.equal(taskContract({contract: body}), body);
-  for (const bad of [{...data, steps: null}, {...data, repository: undefined}, {...data, checks: []}]) {
+  for (const bad of [{...data, steps: null}, {...data, repository: undefined}, {...data, checks: ['Check', ' ']},
+                     {...data, checks: 'Check'}]) {
     assert.throws(() => taskContract(bad), /Structured Task/);
+  }
+  // Checks are optional: without them the contract ends with its steps.
+  for (const checks of [undefined, null, []]) {
+    const rendered = taskContract({...data, checks});
+    assert.equal(rendered, body.slice(0, body.indexOf('\n\nChecks:\n')));
   }
 });
 

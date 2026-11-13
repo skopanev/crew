@@ -39,6 +39,34 @@ test('claim saves the run-specific assignee at the read revision and keeps the a
   assert.deepEqual(f.run.claim.tasks.map(task => task.revision), [4, 4]);
 });
 
+test('claim shows the coder the live tests of its criterion and accepts a structured Task without checks', async t => {
+  const f = await packageFixture(t);
+  f.schema.types.check = {role: 'test', parents: ['ac']};
+  const node = (address, parent, data, present = true) => f.objects.set(address, {address, kind: 'check', historical: false,
+    current_revision: 2, status: {tone: 'green'}, document: {present, parent, data, links: []}, process: {}, annotations: {comments: {}}});
+  // More than one page, so the read follows the cursor.
+  for (let index = 1; index <= 26; index++) node(`check:c${index}`, 'ac:a1', {title: `suite > case ${index}`});
+  node('check:c1', 'ac:a1', {title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite'});
+  node('check:gone', 'ac:a1', {title: 'suite > archived'}, false);
+  node('check:other', 'ac:a2', {title: 'other > case'});
+  // A structured Task with steps and no checks, and no acceptance rows: no Crew bindings.
+  f.objects.get('task:t2').document.data = {title: '[02] Task 2', body: 'Goal: scoped change 2',
+    repository: 'app', module: 'm2', steps: ['Make the change.']};
+  await claimTask(f.run, f.persist, f.runId);
+  const [one, two] = f.run.claim.tasks.map(task => task.ticket);
+  assert.equal(one.acceptanceTests.length, 26);
+  assert.deepEqual(one.acceptanceTests.find(test => test.address === 'check:c1'), {address: 'check:c1', revision: 2,
+    title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite'});
+  assert.deepEqual(one.acceptanceTests.find(test => test.address === 'check:c2'),
+    {address: 'check:c2', revision: 2, title: 'suite > case 2'});
+  assert(!one.acceptanceTests.some(test => test.address === 'check:gone'));
+  assert.deepEqual(two.acceptanceTests, [{address: 'check:other', revision: 2, title: 'other > case'}]);
+  assert.equal(two.body, 'Goal: scoped change 2\n\nRepository: app\nModule: m2\n\nHow:\n1. Make the change.');
+  assert.equal(two.testAcceptance, undefined);
+  // Reading tests writes nothing: the claim is the only batch.
+  assert.equal(batches(f).length, 1);
+});
+
 test('release clears only the assignee with a revision-checked partial save', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);
