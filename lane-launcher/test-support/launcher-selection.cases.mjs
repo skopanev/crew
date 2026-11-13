@@ -29,6 +29,34 @@ test('Joppa selects one executable Task in plan order', async t => {
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
+test('Joppa selection shares object reads within one worker pass and reads again on the next pass', async t => {
+  const f = await packageFixture(t);
+  const objectReads = () => f.calls.filter(call => call.name === 'joppa_objects' && call.args.address)
+    .map(call => call.args.address).sort();
+  const treeReads = () => f.calls.filter(call => call.name === 'joppa_tree').length;
+  const once = ['ac:a1', 'ac:a2', 'req:r', 'task:t1', 'task:t2'];
+  for (let pass = 0; pass < 2; pass++) {
+    f.calls.length = 0;
+    const selected = await nextTask(f.run.config);
+    assert.deepEqual(selected.candidate.tasks.map(task => task.address), ['task:t1']);
+    assert.equal(selected.available, 2);
+    assert.equal(selected.held, 0);
+    assert.deepEqual(selected.dependencyIssues, []);
+    assert.deepEqual(objectReads(), once);
+    assert.equal(treeReads(), 1);
+  }
+  // Each worker keeps its own reads. Blocked dependencies make both workers read the whole queue.
+  f.run.config.joppa.workers = [f.run.joppaWorker, {...f.run.joppaWorker, actor: 'lane-2'}];
+  f.objects.get('task:t1').document.links = [{relation: 'depends_on', blocking: true, target: 'task:t2'}];
+  f.objects.get('task:t2').document.links = [{relation: 'depends_on', blocking: true, target: 'task:t1'}];
+  f.calls.length = 0;
+  const blocked = await nextTask(f.run.config);
+  assert.equal(blocked.candidate, null);
+  assert.equal(blocked.available, 0);
+  assert.deepEqual(objectReads(), once.flatMap(address => [address, address]));
+  assert.equal(treeReads(), 2);
+});
+
 test('Joppa planner reads all compact pages and uses native criterion tones', async t => {
   const f = await packageFixture(t), sample = f.objects.get('ac:a1');
   f.queue.length = 0;

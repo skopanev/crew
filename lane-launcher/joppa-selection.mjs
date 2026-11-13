@@ -23,14 +23,25 @@ export function runHoldsTasks(run) {
     run.result.blocked && !run.result.blockConfirmed || /JOPPA_OUTCOME_UNCONFIRMED/.test(run.result.error || ''));
 }
 
-export async function occupancyReader(config, worker) {
+// One selection pass of one worker shares object and schema reads. Other tools and later passes read again.
+export function passReader(config, worker) {
+  const reads = new Map();
+  return (tool, args) => {
+    const effective = {workspace: config.workspace, ...args};
+    if (tool !== 'joppa_objects' && tool !== 'joppa_tree') return api(config, worker, tool, effective);
+    const key = JSON.stringify([tool, effective]);
+    if (!reads.has(key)) reads.set(key, api(config, worker, tool, effective));
+    return reads.get(key);
+  };
+}
+
+export async function occupancyReader(config, read) {
   const check = (condition, message) => {
     if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
   };
-  const schema = await api(config, worker, 'joppa_tree', {workspace: config.workspace}), objects = new Map();
+  const schema = await read('joppa_tree', {});
   const object = async (address, {allowArchived = false} = {}) => {
-    if (!objects.has(address)) objects.set(address, api(config, worker, 'joppa_objects', {workspace: config.workspace, address}));
-    const current = await objects.get(address);
+    const current = await read('joppa_objects', {address});
     check(current?.address === address && (allowArchived || current.document?.present === true) && current.historical === false,
       'Task ownership context is absent or historical');
     return current;
@@ -57,8 +68,7 @@ export async function occupancyReader(config, worker) {
   return {object, group};
 }
 
-export async function heldTasks(config, worker, visit, inventory) {
-  const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
+export async function heldTasks(config, read, visit, inventory) {
   for await (const page of taskPages(read, {}, coversFields(config))) {
     for (const task of page.items) {
       inventory?.push(task);
@@ -84,18 +94,18 @@ export async function nextTask(config) {
   const dependencyIssues = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
-    const dependencies = dependencyCheck((tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
-    const publications = publicationReader(config, (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}));
-    const eligible = [], {object, group} = await occupancyReader(config, worker);
+    const read = passReader(config, worker);
+    const dependencies = dependencyCheck(read);
+    const publications = publicationReader(config, read);
+    const eligible = [], {object, group} = await occupancyReader(config, read);
     const inventory = [];
     let workerHeld = 0;
-    await heldTasks(config, worker, async task => {
+    await heldTasks(config, read, async task => {
       const current = await object(task.address, {allowArchived: true});
       if (current.document.present && repositoryDeclarations(current.document.data)
         .some(id => config.repositories.some(repo => repo.id === id))) workerHeld++;
     }, inventory);
     held = Math.max(held, workerHeld);
-    const read = (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args});
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
