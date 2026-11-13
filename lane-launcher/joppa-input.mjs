@@ -65,11 +65,13 @@ export function latestRecovery(config, object, digest = contractDigest(object), 
 // Rendered check lines of one Task: structured data.checks, or the Checks section of an inline contract.
 export function taskChecks(data) {
   if (Array.isArray(data?.checks)) return data.checks.filter(text);
+  const body = taskBody(data);
+  const inline = typeof body === 'string' ? body.split(/\r?\nChecks:\r?\n/)[1] : undefined;
+  if (inline !== undefined) return inline.split(/\r?\n/).filter(text);
   if (data?.checks == null && Array.isArray(data?.acceptance_checks)) {
     return data.acceptance_checks.map(row => row?.check).filter(text);
   }
-  const body = taskBody(data);
-  return typeof body === 'string' ? (body.split(/\r?\nChecks:\r?\n/)[1] || '').split(/\r?\n/).filter(text) : [];
+  return [];
 }
 
 // Criterion checks that the lane must bind to verified tests: [{ac, check}]. A bare AC ID reads as the parent type.

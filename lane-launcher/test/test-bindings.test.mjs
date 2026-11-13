@@ -139,6 +139,11 @@ test('an acceptance row outside the Task parent, covers or checks claims nothing
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /BINDING_INVALID: task:t1 acceptance check is not a Task check/);
   assert.equal(batches(f).length, 0);
   delete task.document.data.checks;
+  const body = task.document.data.body;
+  task.document.data.body += '\nChecks:\nReal inline check';
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /acceptance check is not a Task check/);
+  assert.equal(batches(f).length, 0);
+  task.document.data.body = body;
   task.document.data.acceptance_checks = [{ac: 'ac:a1', check: 'Run one => ok'}];
   await claimTask(f.run, f.persist, f.runId);
   assert.deepEqual(f.run.claim.ticket.tasks[0].testAcceptance, [{ac: 'ac:a1', check: 'Run one => ok'}]);
