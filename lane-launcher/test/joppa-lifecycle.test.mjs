@@ -67,6 +67,23 @@ test('claim shows the coder the live tests of its criterion and accepts a struct
   assert.equal(batches(f).length, 1);
 });
 
+test('Tasks of one criterion share one paginated read of its tests', async t => {
+  const f = await packageFixture(t);
+  f.schema.types.check = {role: 'test', parents: ['ac']};
+  for (let index = 1; index <= 26; index++) f.objects.set(`check:c${index}`, {address: `check:c${index}`, kind: 'check',
+    historical: false, current_revision: 2, status: {tone: 'green'},
+    document: {present: true, parent: 'ac:a1', data: {title: `suite > case ${index}`}, links: []}, process: {}, annotations: {comments: {}}});
+  f.objects.get('task:t2').document.parent = 'ac:a1';
+  await claimTask(f.run, f.persist, f.runId);
+  const [one, two] = f.run.claim.tasks.map(task => task.ticket);
+  assert.equal(one.acceptanceTests.length, 26);
+  assert.deepEqual(two.acceptanceTests, one.acceptanceTests);
+  const reads = f.calls.filter(call => call.name === 'joppa_objects' && call.args.parent === 'ac:a1' &&
+    [call.args.kind].flat().includes('check'));
+  // Two pages, read once for both Tasks.
+  assert.equal(reads.length, 2);
+});
+
 test('release clears only the assignee with a revision-checked partial save', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);

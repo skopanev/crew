@@ -99,7 +99,7 @@ export async function claimTask(run, persist, runId) {
     address: run.task, actor: run.joppaWorker.actor, assignee, runId, tasks: objects.map(object => ({address: object.address,
       revision: object.current_revision, digest: contractDigest(object)}))};
   persist();
-  const inputs = [], parents = new Map();
+  const inputs = [], parents = new Map(), acceptanceTests = new Map();
   const schema = await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace});
   run.claim.contexts = [];
   for (const [index, object] of objects.entries()) {
@@ -152,10 +152,12 @@ export async function claimTask(run, persist, runId) {
     if (coveredContexts.length) input.ticket.coveredContexts = coveredContexts;
     if (parentContext) input.ticket.parentContext = parentContext;
     // The coder sees how its criterion is tested. These are references, not bindings: Crew binds
-    // only the rows of data.acceptance_checks.
-    if (schema.schema.types[parents.get(object.document.parent)?.kind]?.role === 'ac') {
-      input.ticket.acceptanceTests = await criterionTests((tool, args) =>
-        api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), schema.schema.types, object.document.parent);
+    // only the rows of data.acceptance_checks. Tasks of one criterion share one read and one snapshot.
+    const ac = object.document.parent;
+    if (schema.schema.types[parents.get(ac)?.kind]?.role === 'ac') {
+      if (!acceptanceTests.has(ac)) acceptanceTests.set(ac, await criterionTests((tool, args) =>
+        api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), schema.schema.types, ac));
+      input.ticket.acceptanceTests = acceptanceTests.get(ac);
     }
     if (requirementContext) input.ticket.requirementContext = requirementContext;
     require(!inputs.length || inputs[0].repo.id === input.repo.id, 'Claimed Tasks belong to different repositories');
