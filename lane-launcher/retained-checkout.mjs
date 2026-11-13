@@ -23,9 +23,14 @@ export function checkoutState(checkout, executionId) {
   require(stat.isDirectory() && fs.realpathSync(checkout) === checkout, 'checkout is not a plain directory');
   const dotGit = path.join(checkout, '.git');
   require(fs.lstatSync(dotGit).isDirectory(), 'checkout has no private .git directory');
-  for (const name of ['objects/info/alternates', 'rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'index.lock']) {
+  for (const name of ['objects/info/alternates', 'commondir', 'config.worktree', 'rebase-merge', 'rebase-apply',
+    'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'index.lock']) {
     require(!exists(path.join(dotGit, name)), `checkout has .git/${name}`);
   }
+  // Agents can write .git/config. Read it as a plain file first: Git status would run a filter it names.
+  const keys = command('git', ['config', '--file', path.join(dotGit, 'config'), '--no-includes', '--list', '--name-only'])
+    .split('\n').filter(key => /^(filter|include|includeif)\.|^extensions\.worktreeconfig$/i.test(key));
+  require(!keys.length, `checkout .git/config sets ${keys.join(', ')}`);
   // Explicit paths: a local core.worktree or hook setting written by an agent must not steer host Git.
   const git = (...args) => command('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
     '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args]);
@@ -35,7 +40,7 @@ export function checkoutState(checkout, executionId) {
   const base = fs.readFileSync(path.join(dotGit, 'lane-base'), 'utf8').trim();
   require(sha.test(head) && sha.test(tree) && sha.test(base) && head !== base, 'checkout has no lane commit above lane-base');
   git('merge-base', '--is-ancestor', base, head);
-  require(!git('status', '--porcelain', '--untracked-files=all'), 'checkout has uncommitted changes');
+  require(!git('status', '--porcelain', '--untracked-files=all', '--ignore-submodules=all'), 'checkout has uncommitted changes');
   return {checkout, branch, head, tree, base};
 }
 
@@ -59,6 +64,8 @@ export function recordRetained(run, artifacts) {
     const checkout = checkoutPath(run);
     if (!artifacts || !inside(artifacts, run.runFolder) || !exists(checkout) || !writerGone(run, checkout)) return null;
     const origin = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8'));
+    // A retained checkout that changed after the host check is evidence only.
+    if (origin.signal === 'RETAINED_CHANGED') return null;
     return {...checkoutState(checkout, run.executionId), node: origin.node, signal: origin.signal, artifacts};
   } catch { return null; }
 }
@@ -144,8 +151,9 @@ export function copyResumeInputs(artifacts, runFolder) {
     const source = path.join(artifacts, name);
     if (exists(source) && fs.lstatSync(source).isFile()) fs.copyFileSync(source, path.join(folder, name), fs.constants.COPYFILE_EXCL);
   };
-  for (const name of ['scout.txt', 'coder-report.txt', 'test-bindings.json']) copy(name, target);
-  for (const name of ['failure.txt', 'rejects.txt', 'panel-findings.txt']) copy(name, prior);
+  // The prior coder report describes an older candidate. It stays under prior/.
+  for (const name of ['scout.txt', 'test-bindings.json']) copy(name, target);
+  for (const name of ['coder-report.txt', 'failure.txt', 'rejects.txt', 'panel-findings.txt']) copy(name, prior);
   // Panel reports are the seats of the latest expert_review step.
   const steps = path.join(path.dirname(artifacts), 'steps');
   const panel = exists(steps) ? fs.readdirSync(steps).filter(name => /-expert_review$/.test(name)).sort().at(-1) : null;

@@ -92,8 +92,8 @@ test('a confirmed GATE_FAIL checkout returns to the coder with prior reports onl
     base: x.prior.retained.base, route: 'coder', previousRun: path.basename(path.dirname(x.prior.runFolder))});
   assert.match(lines[0], /^\[lane\] REUSE [0-9a-f]{12} from .* · route coder$/);
   const inputs = path.join(x.run.runFolder, 'resume-inputs');
-  assert.deepEqual(fs.readdirSync(inputs).sort(), ['coder-report.txt', 'prior', 'scout.txt']);
-  assert.deepEqual(fs.readdirSync(path.join(inputs, 'prior')).sort(), ['failure.txt', 'rejects.txt', 'security.md']);
+  assert.deepEqual(fs.readdirSync(inputs).sort(), ['prior', 'scout.txt']);
+  assert.deepEqual(fs.readdirSync(path.join(inputs, 'prior')).sort(), ['coder-report.txt', 'failure.txt', 'rejects.txt', 'security.md']);
 });
 
 test('REVIEW_INCOMPLETE reviews again only without a known blocker and with the reviewed snapshot', async t => {
@@ -130,6 +130,20 @@ test('reuse fails closed on any mismatch', async t => {
   git(x.checkout, 'config', '--unset', 'core.worktree');
   fs.rmSync(elsewhere, {recursive: true});
   fs.rmSync(path.join(x.checkout, 'stray.txt'));
+  // A filter or an include in the agent-writable config is refused before Git status runs.
+  const marker = path.join(path.dirname(x.checkout), 'filter-ran');
+  fs.writeFileSync(path.join(x.checkout, '.git/info/attributes'), '* filter=evil\n');
+  for (const [key, value] of [['filter.evil.clean', `touch ${marker}; cat`], ['includeIf.gitdir:/.path', '/dev/null'],
+    ['include.path', '/dev/null'], ['extensions.worktreeConfig', 'true']]) {
+    git(x.checkout, 'config', key, value);
+    await refused(/\.git\/config sets/);
+    git(x.checkout, 'config', '--unset', key);
+  }
+  fs.rmSync(path.join(x.checkout, '.git/info/attributes'));
+  assert.equal(fs.existsSync(marker), false);
+  fs.writeFileSync(path.join(x.checkout, '.git/config.worktree'), '');
+  await refused(/\.git\/config\.worktree/);
+  fs.rmSync(path.join(x.checkout, '.git/config.worktree'));
   process.env.DOCKER_ROWS = JSON.stringify([{Config: {Labels: {'medulla.runs_under': x.prior.runFolder}}, Mounts: []}]);
   await refused(/still uses the checkout/);
   process.env.DOCKER_ROWS = JSON.stringify([{Config: {Labels: {}}, Mounts: [{Source: x.checkout}]}]);
@@ -163,6 +177,10 @@ test('reuse fails closed on any mismatch', async t => {
 test('an unknown failure origin and a live writer leave no reusable record', async t => {
   const x = await reuseFixture(t, {node: 'prepare_review', signal: '__timeout__'});
   assert.match((await retainedCheckout(x.run, x.dir)).reason, /prepare_review\/__timeout__ cannot resume/);
+  fs.writeFileSync(path.join(x.artifacts, 'origin.json'), JSON.stringify({node: 'create_worktree', signal: 'RETAINED_CHANGED'}));
+  assert.equal(recordRetained(x.prior, x.artifacts), null);
+  fs.writeFileSync(path.join(x.artifacts, 'origin.json'), JSON.stringify({node: 'implement_code', signal: 'GATE_FAIL'}));
+  assert.ok(recordRetained(x.prior, x.artifacts));
   process.env.DOCKER_ROWS = JSON.stringify([{Config: {Labels: {}}, Mounts: [{Source: x.checkout}]}]);
   assert.equal(recordRetained(x.prior, x.artifacts), null);
   process.env.DOCKER_ROWS = '[]';
