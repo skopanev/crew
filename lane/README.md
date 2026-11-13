@@ -19,6 +19,7 @@ The writable checkout is `<worktreeRoot>/<execution-id>`, mounted at
 there. Artifacts are writable separately. The worker can reuse a retained, clean checkout for the same Task.
 It requires the recorded HEAD, tree, branch, scope and unchanged Task context, with no active writer.
 Unknown, dirty or foreign checkouts still fail with `WORKTREE_PREEXISTED`.
+Retained checkout reuse requires the bundled workflow or an exact copy. Other custom workflows keep the refusal.
 
 After success, the host removes the private checkout. Reports and logs remain in the run directory.
 Failed runs retain code changes. Empty or unchanged checkouts are removed.

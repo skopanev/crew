@@ -231,7 +231,7 @@ fi
 check_mountpoint "$worktree"
 mkdir -p "$(dirname "$worktree")" "$TOOLING_ROOT/$ticket"
 worktree_created=false
-if retained_worktree || mkdir "$worktree" 2>/dev/null; then
+if prepare_worktree_directory; then
   worktree_created=true
 else
   say "run.sh: WORKTREE PREEXISTED: $worktree; retained unchanged; inspect before retrying"

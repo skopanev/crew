@@ -120,18 +120,19 @@ class WorktreeCleanupTests(unittest.TestCase):
 
     def test_only_successful_creation_owns_an_empty_checkout(self):
         ownership = TEXT[TEXT.index('worktree_created=false'):TEXT.index('mounts+=(--mount-rw "$worktree")')]
-        for existing in (False, True):
-            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as directory:
+        for existing, reuse in ((False, False), (True, False), (False, True)):
+            with self.subTest(existing=existing, reuse=reuse), tempfile.TemporaryDirectory() as directory:
                 worktree = Path(directory) / 'ticket'
                 if existing:
                     worktree.mkdir()
                 script = ('say() { printf "%s\\n" "$*"; }\n' + WORKTREE + CLEANUP +
                           '\ntrap cleanup EXIT\n' + ownership + '\nexit 2\n')
-                result = subprocess.run(['bash', '-c', script], env=dict(os.environ, worktree=str(worktree)),
+                result = subprocess.run(['bash', '-c', script], env=dict(os.environ, worktree=str(worktree),
+                                        LANE_REUSE_HEAD='a' * 40 if reuse else ''),
                                         capture_output=True, text=True, timeout=10)
-                self.assertEqual(result.returncode, 73 if existing else 2, result.stderr)
+                self.assertEqual(result.returncode, 73 if existing or reuse else 2, result.stderr)
                 self.assertEqual(worktree.exists(), existing)
-                if existing:
+                if existing or reuse:
                     self.assertIn('WORKTREE PREEXISTED', result.stdout)
 
     def test_failure_cleanup_preserves_work_and_existing_trees(self):

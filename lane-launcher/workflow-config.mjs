@@ -20,3 +20,8 @@ export function workflowFile(file = defaultWorkflow) {
   const resolved = fs.realpathSync(validateWorkflow(file));
   return resolved === fs.realpathSync(defaultWorkflow) ? '' : resolved;
 }
+
+// A custom workflow must not receive retained state unless it is an exact copy of this supported flow.
+export function supportsRetainedCheckout(file = defaultWorkflow) {
+  return fs.readFileSync(file, 'utf8') === fs.readFileSync(defaultWorkflow, 'utf8');
+}

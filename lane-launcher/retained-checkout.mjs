@@ -2,7 +2,6 @@
 // The failed launch state records the checkout; a later claim of that Task reuses it only on an exact match.
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
 import {command, readRun, runDirectories} from './runtime.mjs';
 import {api, claimTasks, contractDigest} from './joppa-common.mjs';
 import {heldBy} from './joppa-claims.mjs';
@@ -13,7 +12,6 @@ const HIGH = /^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])/m;
 const REJECT = /^- [^:\r\n]+: REJECT\b/m;
 const exists = file => { try { fs.lstatSync(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } };
 const readText = file => exists(file) ? fs.readFileSync(file, 'utf8') : null;
-const fileDigest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const inside = (child, parent) => !path.relative(parent, child).startsWith('..') && !path.isAbsolute(path.relative(parent, child));
 
 export const checkoutPath = run => path.join(run.config.worktreeRoot, run.executionId);
@@ -77,28 +75,13 @@ export function recordRetained(run, artifacts) {
 
 export const retainedLine = retained => `Checkout: ${retained.head} ${retained.tree} ${retained.base}`;
 
-// Review again only when the last panel round named no blocker and the snapshot and bindings are the retained ones.
-function route({node, signal, artifacts, head, tree}) {
+// This selects the next step, not acceptance. Current hooks, gates, bindings and reviews always run again.
+function route({node, signal, artifacts}) {
   if (node === 'implement_code' && signal === 'GATE_FAIL' || node === 'reject_gate' && signal === 'TOO_MANY_ROUNDS') return 'coder';
   require(node === 'expert_review_synthesis' && signal === 'REVIEW_INCOMPLETE', `failure ${node}/${signal} cannot resume`);
   const rounds = (readText(path.join(artifacts, 'panel-findings.txt')) || '').split(/^---$/m).filter(part => part.trim());
   const last = rounds.at(-1);
-  if (!last || REJECT.test(last) || HIGH.test(last)) return 'coder';
-  if (readText(path.join(artifacts, 'reviewed-tree.txt')) !== `${tree}\n${head}\n`) return 'coder';
-  const recordText = readText(path.join(artifacts, 'test-bindings-receipt.json'));
-  const bindings = path.join(artifacts, 'test-bindings.json');
-  if (!recordText) return exists(bindings) ? 'coder' : 'review';
-  // As in frozenBindings: the record names the current passing gate receipt of this tree above this HEAD.
-  const record = JSON.parse(recordText), folder = value => path.basename(path.dirname(String(value)));
-  const pointer = JSON.parse(readText(path.join(artifacts, 'gates', 'current.json')) || '{}');
-  const receiptFile = path.join(artifacts, 'gates', folder(record.receipt), 'receipt.json');
-  if (!/^[0-9a-f]{32}$/.test(folder(record.receipt)) || folder(record.receipt) !== folder(pointer.receipt) ||
-      record.receipt_sha256 !== pointer.sha256 || !exists(receiptFile) || fileDigest(receiptFile) !== record.receipt_sha256) return 'coder';
-  const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
-  if (receipt.passed !== true || receipt.tree !== tree || receipt.base !== head || record.tree !== tree ||
-      receipt.candidate_sha !== record.candidate_sha) return 'coder';
-  if (record.status === 'no_report') return 'review';
-  return record.status === 'bound' && exists(bindings) && fileDigest(bindings) === record.bindings_sha256 ? 'review' : 'coder';
+  return !last || REJECT.test(last) || HIGH.test(last) ? 'coder' : 'review';
 }
 
 // Each changed file stays inside the writable roots of the old and the new Task contract.

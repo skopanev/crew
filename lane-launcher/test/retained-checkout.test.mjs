@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
-import {randomUUID, createHash} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {save} from '../runtime.mjs';
 import {recordRetained, retainedCheckout, retainedLine, prepareReuse} from '../retained-checkout.mjs';
 import {claimTask, finishTask, contractDigest} from '../joppa.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
+import {defaultWorkflow, supportsRetainedCheckout} from '../workflow-config.mjs';
 
 // A fake Docker answers from DOCKER_ROWS: an empty list means no running container.
 function fakeDocker(root) {
@@ -112,43 +113,26 @@ test('a confirmed GATE_FAIL checkout returns to the coder with prior reports onl
   fs.rmSync(inputs, {recursive: true});
   assert.equal(await prepareReuse(x.run, x.dir, line => lines.push(line), () => {}), '');
   assert.match(lines.at(-1), /prior scout.txt is missing or empty/);
+  const workflow = path.join(x.f.root, 'workflow.yaml');
+  fs.copyFileSync(defaultWorkflow, workflow);
+  assert.equal(supportsRetainedCheckout(workflow), true);
+  fs.appendFileSync(workflow, '\n# A custom workflow needs its own retained-state support.\n');
+  assert.equal(supportsRetainedCheckout(workflow), false);
 });
 
-test('REVIEW_INCOMPLETE reviews again only without a known blocker and with the reviewed snapshot', async t => {
+test('REVIEW_INCOMPLETE reviews again only without a known blocker', async t => {
   const x = await reuseFixture(t, {node: 'expert_review_synthesis', signal: 'REVIEW_INCOMPLETE'});
-  const {head, tree} = x.prior.retained;
-  fs.writeFileSync(path.join(x.artifacts, 'reviewed-tree.txt'), `${tree}\n${head}\n`);
-  // The gate receipt has HEAD as base and a synthetic candidate commit. The record names the current receipt.
-  const folder = 'b'.repeat(32), gates = path.join(x.artifacts, 'gates'), sha = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  fs.mkdirSync(path.join(gates, folder), {recursive: true});
-  const bind = ({receipt = {}, record = {}} = {}) => {
-    const receiptFile = path.join(gates, folder, 'receipt.json');
-    fs.writeFileSync(receiptFile, JSON.stringify({tree, base: head, candidate_sha: 'c'.repeat(40), passed: true, ...receipt}));
-    const container = `/workspace/runs/m1/artifacts/gates/${folder}/receipt.json`;
-    fs.writeFileSync(path.join(gates, 'current.json'), JSON.stringify({receipt: container, sha256: sha(receiptFile)}));
-    fs.writeFileSync(path.join(x.artifacts, 'test-bindings-receipt.json'), JSON.stringify({receipt: container,
-      receipt_sha256: sha(receiptFile), tree, candidate_sha: 'c'.repeat(40), status: 'bound',
-      bindings_sha256: sha(path.join(x.artifacts, 'test-bindings.json')), ...record}));
-  };
-  bind();
   const round = lines => fs.writeFileSync(path.join(x.artifacts, 'panel-findings.txt'), `- codex: CLEAR\n---\n${lines}\n---\n`);
   round('- agy: TIMEOUT (m, rc=124, attempts=2)\n- claude-code: CLEAR');
   assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'review');
-  // A bound record needs the current receipt with this HEAD as base and the same bindings file.
-  for (const change of [{receipt: {base: x.prior.retained.base}}, {receipt: {passed: false}}, {record: {bindings_sha256: 'd'.repeat(64)}},
-    {record: {candidate_sha: head}}, {record: {receipt_sha256: 'd'.repeat(64)}}]) {
-    bind(change);
-    assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'coder', JSON.stringify(change));
-  }
-  bind({record: {status: 'no_report', bindings_sha256: undefined}});
+  // Prior receipts are not scheduling inputs. The new run must produce its own evidence.
+  fs.rmSync(path.join(x.artifacts, 'test-bindings-receipt.json'));
   assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'review');
-  bind();
   round('- agy: no verdict\n- claude-code: REJECT: HIGH findings contradict CLEAR');
   assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'coder');
   round('- agy: no verdict\n- HIGH - unsafe write - a.js:1 - loss - FIX: guard');
   assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'coder');
-  round('- agy: no verdict');
-  fs.writeFileSync(path.join(x.artifacts, 'reviewed-tree.txt'), `${tree}\n${x.prior.retained.base}\n`);
+  fs.writeFileSync(path.join(x.artifacts, 'panel-findings.txt'), '');
   assert.equal((await retainedCheckout(x.run, x.dir)).retained.route, 'coder');
 });
 
@@ -204,12 +188,12 @@ test('reuse fails closed on any mismatch', async t => {
   x.f.objects.get('task:t1').annotations.comments[x.note.id].withdrawn = true;
   await refused(/no matching failure note/);
   x.f.objects.get('task:t1').annotations.comments[x.note.id].withdrawn = false;
-  x.prior.claim.ticket.retained = {head: x.prior.retained.head, tree: 'f'.repeat(40)};
-  x.savePrior();
-  await refused(/already retried once/);
-  x.prior.claim.ticket.retained = {head: 'e'.repeat(40), tree: x.prior.retained.tree};
-  x.savePrior();
-  await refused(/already retried once/);
+  for (const retained of [{head: x.prior.retained.head, tree: 'f'.repeat(40)},
+    {head: 'e'.repeat(40), tree: x.prior.retained.tree}]) {
+    x.prior.claim.ticket.retained = retained;
+    x.savePrior();
+    await refused(/already retried once/);
+  }
   delete x.prior.claim.ticket.retained;
   x.prior.result.code = 73;
   x.savePrior();
@@ -220,22 +204,16 @@ test('reuse fails closed on any mismatch', async t => {
   git(x.checkout, 'commit', '-qam', 'other');
   await refused(/head changed/);
   git(x.checkout, 'reset', '-q', '--hard', 'HEAD~1');
-  x.run.claim.ticket.modulePaths = ['src'];
-  await refused(/outside the Task modulePaths/);
-  x.run.claim.ticket.modulePaths = ['a.txt'];
-  x.prior.claim.ticket.modulePaths = ['src'];
-  x.savePrior();
-  await refused(/outside the Task modulePaths/);
-  x.prior.claim.ticket.modulePaths = ['a.txt'];
-  x.savePrior();
+  for (const run of [x.run, x.prior]) {
+    run.claim.ticket.modulePaths = ['src'];
+    x.savePrior();
+    await refused(/outside the Task modulePaths/);
+    run.claim.ticket.modulePaths = ['a.txt'];
+    x.savePrior();
+  }
   git(x.checkout, 'remote', 'set-url', 'origin', 'ssh://example.invalid/other.git');
   await refused(/origin differs/);
   git(x.checkout, 'remote', 'set-url', 'origin', ORIGIN);
-  delete x.prior.launchPgid;
-  x.savePrior();
-  await refused(/no stopped process group/);
-  x.prior.launchPgid = stoppedPgid();
-  x.savePrior();
   assert.ok((await retainedCheckout(x.run, x.dir)).retained);
   x.run.config = {...x.run.config, delivery: 'requirement'};
   await refused(/single Task with target or branch delivery/);

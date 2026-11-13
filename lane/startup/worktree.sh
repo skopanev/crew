@@ -10,6 +10,11 @@ retained_worktree() {
   local head branch changes
   head="$(worktree_git rev-parse HEAD)" || return 1
   branch="$(worktree_git symbolic-ref --short HEAD)" || return 1
-  changes="$(worktree_git status --porcelain --untracked-files=all)" || return 1
+  changes="$(worktree_git status --porcelain --untracked-files=all --ignore-submodules=all)" || return 1
   [[ "$head" == "$LANE_REUSE_HEAD" && "$branch" == "ticket-$ticket" && -z "$changes" ]]
+}
+
+prepare_worktree_directory() {
+  if [[ -n "${LANE_REUSE_HEAD:-}" ]]; then retained_worktree;
+  else mkdir "$worktree" 2>/dev/null; fi
 }
