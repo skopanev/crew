@@ -20,6 +20,9 @@ nodes:
       __default__: __exit_fail__
     shell: |
       set -eu
+      # Write only into a container HOME: refuse a host run and a root container.
+      [ "${MEDULLA_DOCKER:-}" = 1 ] && [ "$(id -u)" != 0 ] || {
+        echo 'probe needs medulla --docker and a non-root container user'; exit 1; }
       mkdir -p "$HOME/.gemini/config" "$MEDULLA_RUN_DIR/artifacts"
       [ ! -e "$HOME/.gemini/config/hooks.json" ] || { echo 'hooks.json already exists; probe refused'; exit 1; }
       log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
@@ -37,7 +40,7 @@ nodes:
       chmod +x "$hook"
       jq -n --arg h "$hook" '
         def flat(e): [{type: "command", command: ("sh " + $h + " " + e), timeout: 20}];
-        def grouped(e): [{matcher: "*", hooks: flat(e)}];
+        def grouped(e): [{matcher: ".*", hooks: flat(e)}];
         {"crew-probe": {SessionStart: flat("SessionStart"), PreInvocation: flat("PreInvocation"),
           PostInvocation: flat("PostInvocation"), Stop: flat("Stop"),
           PreToolUse: grouped("PreToolUse"), PostToolUse: grouped("PostToolUse")}}' > "$HOME/.gemini/config/hooks.json"
@@ -68,6 +71,11 @@ nodes:
     shell: |
       set -eu
       log="$MEDULLA_RUN_DIR/artifacts/agy-hooks.jsonl"
-      [ -s "$log" ] || { echo 'no hook event reached the probe command'; exit 1; }
-      jq -s 'group_by(.event) | map({event: .[0].event, count: length})' "$log"
+      touch "$log"
+      counts="$(jq -sc 'reduce .[] as $row ({SessionStart: 0, PreInvocation: 0, PreToolUse: 0, PostToolUse: 0,
+        PostInvocation: 0, Stop: 0}; .[$row.event] += 1)' "$log")"
+      echo "hook event counts: $counts"
+      # One SessionStart from a failed sign-in must not pass: a tool call and the stop must also arrive.
+      jq -e 'all(.SessionStart, .PreToolUse, .PostToolUse, .Stop; . > 0)' <<<"$counts" >/dev/null || {
+        echo "required native events are missing; see $log"; exit 1; }
       echo "<signal:OK>hook events recorded in $log</signal:OK>"
