@@ -276,38 +276,62 @@ class MemoryHookTests(unittest.TestCase):
         bins.mkdir()
         token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
         broker = bins / "broker-agy"
-        env = {**self.env, "HOME": str(home), "PATH": f"{bins}:{os.environ['PATH']}", "TOOLING_ROOT": "/workspace"}
+        env = {**self.env, "HOME": str(home), "PATH": f"{bins}:{os.environ['PATH']}", "TOOLING_ROOT": "/workspace",
+               "MEDULLA_DOCKER": "1"}
         memory = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
             {"type": "command", "command": "bash /workspace/lane/hooks/memory-hook.sh"}]}]}}
         settings = self.folder / "settings.json"
-        def run(selected, broker_script):
+        def run(selected, broker_script, **changes):
             settings.write_text(json.dumps(selected))
             broker.write_text("#!/bin/sh\n" + broker_script)
             broker.chmod(0o755)
-            return subprocess.run(["bash", str(HOOKS / "agy-home.sh"), str(settings)], env=env,
+            return subprocess.run(["bash", str(HOOKS / "agy-home.sh"), str(settings)], env={**env, **changes},
                                   capture_output=True, text=True, timeout=30)
-        # Broker fails: the hooks are still wired and the reviewer fails later, as before.
-        result = run(memory, f"echo called > {self.folder}/broker-called\nexit 7\n")
+        writes_token = (f'mkdir -p "$BROKER_AGY_HOME/.gemini/antigravity-cli"\n'
+                        f"echo '{{\"token\": {{}}}}' > {token}\n")
+        # A host run writes nothing, not even through a working Broker.
+        result = run(memory, writes_token, MEDULLA_DOCKER="")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("needs medulla --docker", result.stderr)
+        self.assertFalse(home.exists())
+        # The lane requires AGY: a failed or missing Broker stops startup, with its code, before any hook.
+        result = run(memory, "echo secret-value >&2\nexit 7\n")
+        self.assertEqual(result.returncode, 7)
+        self.assertIn("AGY_AUTH_UNAVAILABLE: broker-agy exited 7", result.stderr)
+        self.assertNotIn("secret-value", result.stderr)
+        self.assertEqual(run(memory, "exit 0\n").returncode, 1)
+        self.assertFalse((home / ".gemini/config/hooks.json").exists())
+        broker.unlink()
+        result = subprocess.run(["bash", str(HOOKS / "agy-home.sh"), str(settings)], env={**env, "PATH": f"{bins}:/usr/bin:/bin"},
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no usable token and no broker-agy", result.stderr)
+        # Broker prepares the private token once and the hooks are wired.
+        result = run(memory, writes_token)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("AGY sign-in unavailable", result.stderr)
+        self.assertIn("prepared through Broker", result.stderr)
         hooks = json.loads((home / ".gemini/config/hooks.json").read_text())["crew-lane-memory"]
         self.assertEqual(hooks["PreToolUse"], [{"matcher": ".*", "hooks": [{"type": "command", "timeout": 10,
             "command": f"bash /workspace/lane/hooks/agy-memory.sh PreToolUse"}]}])
         self.assertEqual([h["command"].split()[-1] for e in ("PreInvocation", "Stop") for h in hooks[e]],
                          ["PreInvocation", "Stop"])
-        # Broker writes the private token once; a usable token is never refreshed here.
-        result = run(memory, f'mkdir -p "$BROKER_AGY_HOME/.gemini/antigravity-cli"\n'
-                             f"echo '{{\"token\": {{}}}}' > {token}\n")
-        self.assertIn("prepared through Broker", result.stderr)
+        # A usable token is never refreshed here.
         result = run(memory, f"echo called > {self.folder}/second-call\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.folder / "second-call").exists())
-        # Another hooks file is refused; settings without the memory query wire nothing.
+        # Another hooks file is refused. Only Crew's own memory command wires the hooks:
+        # not a Stop hook, and not another script with a similar name.
         (home / ".gemini/config/hooks.json").write_text('{"other": {}}')
         self.assertEqual(run(memory, "exit 0\n").returncode, 1)
         (home / ".gemini/config/hooks.json").unlink()
-        self.assertIn("AGY hooks off", run({"hooks": {"Stop": memory["hooks"]["PreToolUse"]}}, "exit 0\n").stderr)
-        self.assertFalse((home / ".gemini/config/hooks.json").exists())
+        other = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "bash /work/my-memory-hook.sh"}]}]}}
+        for selected in ({"hooks": {"Stop": memory["hooks"]["PreToolUse"]}}, other):
+            self.assertIn("AGY hooks off", run(selected, "exit 0\n").stderr)
+            self.assertFalse((home / ".gemini/config/hooks.json").exists())
+        bundled = {"hooks": {"PreToolUse": [{"hooks": [
+            {"type": "command", "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh"}]}]}}
+        self.assertEqual(run(bundled, "exit 0\n").returncode, 0)
+        self.assertTrue((home / ".gemini/config/hooks.json").exists())
 
     def test_query_keeps_2000_unicode_characters(self):
         self.hook("UserPromptSubmit", prompt="ж" * 2500)

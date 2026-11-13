@@ -103,11 +103,13 @@ The default permissions and environment remain. Custom commands stay unchanged, 
 Commands must resolve inside the container. Include the context-loader events when using a custom file.
 
 AGY reads its hooks from `$HOME/.gemini/config/hooks.json` in the private container home.
-`agy-home.sh` writes that file only when the selected settings run `memory-hook.sh` at PreToolUse.
+`agy-home.sh` runs only under `medulla --docker` as a non-root user, so a host run writes nothing.
+It writes that file only when the selected settings run Crew's `lane/hooks/memory-hook.sh` at PreToolUse.
 AGY tool hooks cannot add context. PreToolUse records the last 10 calls of the conversation.
 The next PreInvocation runs one memory query for them and gives the lessons as an ephemeral message.
 Stop removes the record. Other custom commands are not translated for AGY.
-A missing AGY token is prepared once with `broker-agy` in the same home. A failure is reported, and the AGY reviewer fails.
+The lane requires AGY. A missing AGY token is prepared once with `broker-agy` in the same home.
+When that fails, startup stops with `AGY_AUTH_UNAVAILABLE` before the coder starts.
 
 Set `workflow` to an absolute project `workflow.yaml` path to replace `lane/workflow.yaml`.
 Dolber runs `medulla -w <file> --validate` before it reads or claims a Task.
