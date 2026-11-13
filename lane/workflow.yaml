@@ -97,6 +97,8 @@ nodes:
       # Generate Codex hooks and MCP configuration.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
+      # Prepare AGY sign-in and memory hooks in the private container HOME.
+      bash "${TOOLING_ROOT}/lane/hooks/agy-home.sh" /tmp/lane-settings.json
       # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       # Publish only a complete, nonempty Joppa contract.

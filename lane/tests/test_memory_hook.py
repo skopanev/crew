@@ -230,6 +230,85 @@ class MemoryHookTests(unittest.TestCase):
         self.assertEqual(self.hook("UserPromptSubmit", prompt="log")["hookSpecificOutput"]["additionalContext"],
                          "## Other\nRead the log.")
 
+    def agy(self, event, payload):
+        (self.folder / "config.json").write_text(json.dumps(self.config))
+        self.env["LANE_MEMORY_CONFIG"] = str(self.folder / "config.json")
+        result = subprocess.run(["bash", str(HOOKS / "agy-memory.sh"), event], input=json.dumps(payload),
+                                env=self.env, capture_output=True, text=True, timeout=30, check=True)
+        return json.loads(result.stdout)
+
+    def test_agy_records_calls_and_retrieves_once_at_the_next_model_call(self):
+        call = lambda command: {"conversationId": "c1", "transcriptPath": "/t",
+                                "toolCall": {"name": "run_command", "args": {"CommandLine": command, "toolSummary": "Run"}}}
+        self.assertEqual(self.agy("PreToolUse", call("bun test life")), {"decision": "allow"})
+        self.assertEqual(self.server.requests, [])
+        [record] = self.folder.glob("lane-agy-calls.*")
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        lesson = {"address": "lesson:l", "revision": 1, "title": "Tests", "body": "Run focused tests."}
+        self.server.replies.append((200, {"items": [lesson]}))
+        out = self.agy("PreInvocation", {"conversationId": "c1", "transcriptPath": "/t"})
+        self.assertEqual(out, {"injectSteps": [{"ephemeralMessage": "## Tests\nRun focused tests."}]})
+        self.assertEqual(self.server.requests[0]["body"]["query"], "bun test life Run")
+        # The calls are taken once; a delivered lesson is not delivered again.
+        self.assertEqual(self.agy("PreInvocation", {"conversationId": "c1"}), {})
+        self.assertEqual(len(self.server.requests), 1)
+        self.agy("PreToolUse", call("bun test life again"))
+        self.server.replies.append((200, {"items": [lesson]}))
+        self.assertEqual(self.agy("PreInvocation", {"conversationId": "c1"}), {})
+        self.assertEqual(len(self.server.requests), 2)
+        # The record keeps the last 10 calls. Stop removes it and lets the agent stop.
+        for number in range(12):
+            self.agy("PreToolUse", call(f"step {number}"))
+        self.assertEqual([c["tool_input"]["CommandLine"] for c in json.loads(record.read_text())],
+                         [f"step {number}" for number in range(2, 12)])
+        self.assertEqual(self.agy("Stop", {"conversationId": "c1"}), {})
+        self.assertFalse(record.exists())
+        # A failed retrieval reaches the model as a warning; no conversation stays neutral.
+        self.agy("PreToolUse", call("gate"))
+        self.server.replies.append((503, {}))
+        out = self.agy("PreInvocation", {"conversationId": "c1"})
+        self.assertIn("lane memory: retrieval failed: HTTP 503", out["injectSteps"][0]["ephemeralMessage"])
+        self.assertEqual(self.agy("PreToolUse", {}), {"decision": "allow"})
+        self.assertEqual(self.agy("SessionStart", {"conversationId": "c1"}), {})
+
+    def test_agy_home_prepares_sign_in_and_wires_hooks_only_for_selected_memory_queries(self):
+        home, bins = self.folder / "agy", self.folder / "bin"
+        bins.mkdir()
+        token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+        broker = bins / "broker-agy"
+        env = {**self.env, "HOME": str(home), "PATH": f"{bins}:{os.environ['PATH']}", "TOOLING_ROOT": "/workspace"}
+        memory = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": "bash /workspace/lane/hooks/memory-hook.sh"}]}]}}
+        settings = self.folder / "settings.json"
+        def run(selected, broker_script):
+            settings.write_text(json.dumps(selected))
+            broker.write_text("#!/bin/sh\n" + broker_script)
+            broker.chmod(0o755)
+            return subprocess.run(["bash", str(HOOKS / "agy-home.sh"), str(settings)], env=env,
+                                  capture_output=True, text=True, timeout=30)
+        # Broker fails: the hooks are still wired and the reviewer fails later, as before.
+        result = run(memory, f"echo called > {self.folder}/broker-called\nexit 7\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("AGY sign-in unavailable", result.stderr)
+        hooks = json.loads((home / ".gemini/config/hooks.json").read_text())["crew-lane-memory"]
+        self.assertEqual(hooks["PreToolUse"], [{"matcher": ".*", "hooks": [{"type": "command", "timeout": 10,
+            "command": f"bash /workspace/lane/hooks/agy-memory.sh PreToolUse"}]}])
+        self.assertEqual([h["command"].split()[-1] for e in ("PreInvocation", "Stop") for h in hooks[e]],
+                         ["PreInvocation", "Stop"])
+        # Broker writes the private token once; a usable token is never refreshed here.
+        result = run(memory, f'mkdir -p "$BROKER_AGY_HOME/.gemini/antigravity-cli"\n'
+                             f"echo '{{\"token\": {{}}}}' > {token}\n")
+        self.assertIn("prepared through Broker", result.stderr)
+        result = run(memory, f"echo called > {self.folder}/second-call\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.folder / "second-call").exists())
+        # Another hooks file is refused; settings without the memory query wire nothing.
+        (home / ".gemini/config/hooks.json").write_text('{"other": {}}')
+        self.assertEqual(run(memory, "exit 0\n").returncode, 1)
+        (home / ".gemini/config/hooks.json").unlink()
+        self.assertIn("AGY hooks off", run({"hooks": {"Stop": memory["hooks"]["PreToolUse"]}}, "exit 0\n").stderr)
+        self.assertFalse((home / ".gemini/config/hooks.json").exists())
+
     def test_query_keeps_2000_unicode_characters(self):
         self.hook("UserPromptSubmit", prompt="ж" * 2500)
         self.assertEqual(self.server.requests[0]["body"]["query"], "ж" * 2000)

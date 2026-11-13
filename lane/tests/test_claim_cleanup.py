@@ -60,6 +60,7 @@ class ClaimCleanupTests(unittest.TestCase):
                     (root / folder).mkdir(parents=True, exist_ok=True)
                 (root / "lane/hooks/inject.sh").write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
                 (root / "lane/hooks/codex-home.sh").write_text("exit 0\n")
+                (root / "lane/hooks/agy-home.sh").write_text("exit 0\n")
                 for hook_file in ("memory-hook.sh", "joppa-data.sh"):
                     shutil.copy(lane_dir / "hooks" / hook_file, root / "lane/hooks" / hook_file)
                 helper = lane_dir / "bin/ticket-input.mjs"
