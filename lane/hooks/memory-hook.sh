@@ -84,10 +84,15 @@ if [[ "$event" == Stop ]]; then
   # the transcript. Its ending field is the message: the requirement, the form and the
   # outcome names are written there once. Without it the hook says why, and invents
   # no signal rule of its own.
+  # Only items that carry the field count; several ending texts are refused, not picked from.
   if reply="$(bash "$data" stop 2>"$err")"; then
     field="$("$jq_bin" -r '.stop.field' "$LANE_MEMORY_CONFIG")"
-    reason="$("$jq_bin" -r --arg f "$field" '.items[0][$f] // empty | strings' <<<"$reply")"
-    [[ -n "$reason" ]] || reason="lane memory: stop text unavailable: the first item has no $field"
+    reason="$("$jq_bin" -r --arg f "$field" '
+      [.items[] | select((.[$f] | type) == "string" and .[$f] != "")] as $found
+      | if ($found | length) == 1 then $found[0][$f]
+        elif ($found | length) == 0 then "lane memory: stop text unavailable: no item has \($f)"
+        else "lane memory: stop text unavailable: several items have \($f): "
+             + ($found | map(.address // .title // "?") | join(", ")) end' <<<"$reply")"
   else
     reason="lane memory: stop text unavailable: $(cat "$err")"
   fi
@@ -103,9 +108,18 @@ case "$event" in SessionStart|UserPromptSubmit|PostToolUse|PostToolBatch) ;; *) 
 if [[ "$event" == SessionStart ]]; then
   reply="$(bash "$data" session 2>"$err")" \
     || { emit_fatal "$event" "lane memory: baseline failed: $(cat "$err")"; exit 0; }
+  fields="$(block_fields session)"
   [[ "$("$jq_bin" '.items | length' <<<"$reply")" != 0 ]] \
     || { emit_fatal "$event" "lane memory: baseline failed: the contract read returned no items"; exit 0; }
-  baseline="$(render "$(block_fields session)" <<<"$reply")"
+  # A heading is not a contract: each item must carry its body or a requested field.
+  empty="$("$jq_bin" -r --argjson fields "$fields" '
+    [.items[] | . as $item
+     | select(([$item.body] + [$fields[] | select(IN("title", "address", "kind", "revision") | not) | $item[.]])
+              | map(select(. != null and . != "" and . != [] and . != {})) | length == 0)
+     | .address // .title // "?"] | join(", ")' <<<"$reply")"
+  [[ -z "$empty" ]] \
+    || { emit_fatal "$event" "lane memory: baseline failed: items without contract text: $empty"; exit 0; }
+  baseline="$(render "$fields" <<<"$reply")"
 
   # The filters select records; they do not appear in what those records say. The
   # launcher writes the launch facts once and they are rendered here.

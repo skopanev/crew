@@ -10,7 +10,7 @@ import threading
 import unittest
 
 HOOKS = Path(__file__).resolve().parents[1] / "hooks"
-TOKEN = "jpr_test_key"
+TOKEN = "jpr_" + "0123456789abcdef" * 4
 
 
 class Joppa(BaseHTTPRequestHandler):
@@ -48,7 +48,7 @@ class MemoryHookTests(unittest.TestCase):
                         "fields": ["title", "body", "ends_when"], "max_chars": 20000},
             "stop": {"kind": "process", "field": "ends_when", "filter_env": {"name": "LANE_MEMORY_PROCESS"}},
             "query": {"kind": ["lesson"], "fields": ["title", "body"], "limit": 5, "max_chars": 4000,
-                      "filter_env": {"role": "LANE_MEMORY_PROJECT"}},
+                      "filter_env": {"project": "LANE_MEMORY_PROJECT"}},
             "assignment": {"ticket": "task:t1", "module": "life"},
         }
         self.env = {"PATH": os.environ["PATH"], "HOME": str(self.folder), "TMPDIR": str(self.folder),
@@ -84,13 +84,19 @@ class MemoryHookTests(unittest.TestCase):
         self.assertNotIn("continue", out)
 
     def test_session_start_stops_the_lane_without_a_contract(self):
-        for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []})):
+        for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []}),
+                      (200, {"items": [{"address": "rule:r", "title": "Rule"}]})):
             with self.subTest(reply=reply):
                 self.server.replies.append(reply)
                 out = self.hook("SessionStart")
                 self.assertIs(out["continue"], False)
                 self.assertIn("lane memory: baseline failed", out["stopReason"])
         self.assertIn("HTTP 422", self.hook_fatal_reason((422, {"error": "unknown kind"})))
+        self.assertIn("items without contract text: rule:r",
+                      self.hook_fatal_reason((200, {"items": [{"address": "rule:r", "title": "Rule"}]})))
+        (self.folder / "token").write_text("jpr_short\n")
+        self.assertIn("does not hold one Joppa read key", self.hook_fatal_reason((200, {"items": []})))
+        (self.folder / "token").write_text(TOKEN + "\n")
         out = self.hook("SessionStart", config=False)
         self.assertIs(out["continue"], False)
         self.assertIn("LANE_MEMORY_CONFIG is not set", out["stopReason"])
@@ -104,20 +110,25 @@ class MemoryHookTests(unittest.TestCase):
     def test_stop_without_a_signal_blocks_with_the_exact_process_text(self):
         transcript = self.folder / "t.jsonl"
         transcript.write_text(json.dumps({"type": "assistant", "message": {"content": "work finished"}}) + "\n")
-        self.server.replies.append((200, {"items": [{"address": "process:implement", "title": "Implement",
+        self.server.replies.append((200, {"items": [{"address": "guide:lane", "title": "Lane"},
+                                                    {"address": "process:implement", "title": "Implement",
                                                      "ends_when": "End with <signal:OK>result</signal:OK>."}]}))
         out = self.hook("Stop", transcript_path=str(transcript))
         self.assertEqual(out, {"decision": "block", "reason": "End with <signal:OK>result</signal:OK>."})
         self.assertEqual(self.server.requests[0]["body"], {
             "root": "requirement:lane", "workspace": "crew", "kind": "process",
-            "filter": {"role": "crew-lane-coder", "project": "life", "name": "implement"}, "fields": ["ends_when"]})
+            "filter": {"name": "implement"}, "fields": ["ends_when"]})
         # A failed read or an empty field blocks with the reason, never with an invented rule.
         self.server.replies.append((500, {"error": "down"}))
         reason = self.hook("Stop", transcript_path=str(transcript))["reason"]
         self.assertTrue(reason.startswith("lane memory: stop text unavailable: HTTP 500"), reason)
         self.server.replies.append((200, {"items": [{"address": "process:implement", "title": "Implement"}]}))
         self.assertEqual(self.hook("Stop", transcript_path=str(transcript))["reason"],
-                         "lane memory: stop text unavailable: the first item has no ends_when")
+                         "lane memory: stop text unavailable: no item has ends_when")
+        self.server.replies.append((200, {"items": [{"address": "process:a", "ends_when": "A"},
+                                                    {"address": "process:b", "ends_when": "B"}]}))
+        self.assertEqual(self.hook("Stop", transcript_path=str(transcript))["reason"],
+                         "lane memory: stop text unavailable: several items have ends_when: process:a, process:b")
         # The loop guard and a tagged answer release without a read.
         count = len(self.server.requests)
         self.assertNotIn("decision", self.hook("Stop", transcript_path=str(transcript), stop_hook_active=True))
@@ -130,7 +141,7 @@ class MemoryHookTests(unittest.TestCase):
         out = self.hook("UserPromptSubmit", prompt="How do I run the gate?")
         self.assertEqual(self.server.requests[0]["body"], {
             "root": "requirement:lane", "workspace": "crew", "kind": ["lesson"],
-            "filter": {"role": "life", "project": "life"}, "fields": ["title", "body"], "max_chars": 4000,
+            "filter": {"project": "life"}, "fields": ["title", "body"], "max_chars": 4000,
             "query": "How do I run the gate?", "limit": 5})
         self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "## Lesson\nUse rtk.")
         self.server.replies.append((503, {}))
