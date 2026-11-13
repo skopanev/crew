@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {command, save} from './runtime.mjs';
 import {api, batchRequest, mutateTasks, claimTasks, contractDigest} from './joppa-common.mjs';
 import {recoverTimeout} from './joppa-recovery.mjs';
+import {recordRetained, retainedLine} from './retained-checkout.mjs';
 import {releaseTasks} from './joppa-claims.mjs';
 import {nodeAssignee, nodeHold, saveNode} from './joppa-nodes.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
@@ -118,11 +119,16 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   const failure = preexisting ? startup : fs.readFileSync(failureFile, 'utf8');
   const runId = path.basename(path.dirname(stateFile));
   const code = preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts));
+  // Record a clean retained checkout once its writer is gone. A later claim of this Task may reuse it.
+  if (!preexisting && claims.length === 1 && !run.blockRequest && run.retained === undefined) {
+    run.retained = recordRetained(run, artifacts);
+    persist();
+  }
   // One batch per package: a save at the read revision releases the Task and holds it with the code, then the note.
   run.blockRequest ||= batchRequest(run, objects.flatMap(object => [
     saveNode(object, {assignee: undefined, hold: code}, `Crew lane failed: ${code}.`),
     {op: 'note', target: object.address, id: randomUUID(), reply_to: null,
-      text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${(failure || 'Lane failed').trim()}`}]));
+      text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${run.retained ? retainedLine(run.retained) + '\n' : ''}${(failure || 'Lane failed').trim()}`}]));
   persist();
   await mutateTasks(run, run.blockRequest);
   result.tasks = [];
