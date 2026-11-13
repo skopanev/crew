@@ -143,9 +143,15 @@ fi
 
 # One agent session: every node shares the run and the config, and the caller filters
 # tell the nodes apart. Tool calls and delivered lessons are both remembered per session.
-session_key="$("$jq_bin" -cn --argjson input "$input" '[env.MEDULLA_RUN_DIR, env.LANE_MEMORY_CONFIG,
-    env.LANE_MEMORY_ROLE, env.LANE_MEMORY_PROCESS, env.LANE_MEMORY_TICKET]
-    | map(. // "") + [$input.session_id // $input.transcript_path // ""]' | sha256sum | cut -c1-64)"
+session_key="$(python3 -c '
+import hashlib, json, os, sys
+data = json.load(sys.stdin)
+scope = [os.environ.get(k, "") for k in ("MEDULLA_RUN_DIR", "LANE_MEMORY_CONFIG", "LANE_MEMORY_ROLE",
+                                         "LANE_MEMORY_PROCESS", "LANE_MEMORY_TICKET")]
+scope.append(data.get("session_id") or data.get("transcript_path") or "")
+print(hashlib.sha256(json.dumps(scope).encode()).hexdigest())
+' <<<"$input")"
+[[ "$session_key" =~ ^[0-9a-f]{64}$ ]] || { emit "$event" "" "lane memory: cannot identify the agent session"; exit 0; }
 seen_file="${TMPDIR:-/tmp}/lane-memory-seen.$session_key"
 lessons_file="${TMPDIR:-/tmp}/lane-memory-lessons.$session_key"
 
@@ -189,6 +195,10 @@ fi
 
 if [[ "$event" == UserPromptSubmit ]]; then
   query="$("$jq_bin" -r '.prompt // empty' <<<"$input")"
+elif [[ "$event" == PreToolUse ]]; then
+  # Before the call, the query is the call itself: every text the agent put in its input,
+  # whatever the harness names the tool (Bash, exec, apply_patch, an MCP tool).
+  query="$("$jq_bin" -r '[.tool_calls[]?.tool_input | .. | strings | select(test("\\S"))] | join(" ")' <<<"$input")"
 else
   # Tool events carry no .prompt. The query is what JUST happened, and only
   # the calls that say something about the WORK.
@@ -275,33 +285,30 @@ reply="$(bash "$data" query "$query" 2>"$err")" \
 
 # Keep only lessons this session has not received at their current revision. A new
 # revision is a new lesson. An item without address and revision cannot be counted
-# and is always shown. Nothing is marked delivered until the text is rendered.
-fresh="$(LESSONS_FILE="$lessons_file" python3 -c '
-import fcntl, json, os, sys
+# and is always shown. Filter, render and record run under one exclusive lock, so two
+# events cannot deliver the same lesson; nothing is recorded unless the text rendered.
+text="$(LESSONS_FILE="$lessons_file" FIELDS="$(block_fields query)" DATA="$data" python3 -c '
+import fcntl, json, os, subprocess, sys
 reply = json.load(sys.stdin)
-with open(os.environ["LESSONS_FILE"], "a+", encoding="utf-8") as cache:
-    fcntl.flock(cache, fcntl.LOCK_SH)
-    cache.seek(0)
-    try: seen = set(json.load(cache))
-    except ValueError: seen = set()
 key = lambda item: "%s@%s" % (item["address"], item["revision"]) if item.get("address") and item.get("revision") is not None else None
-reply["items"] = [item for item in reply["items"] if key(item) is None or key(item) not in seen]
-print(json.dumps(reply))
-' <<<"$reply")" || { emit "$event" "" "lane memory: cannot filter delivered lessons"; exit 0; }
-[[ "$("$jq_bin" '.items | length' <<<"$fresh")" != 0 ]] || quiet
-text="$(render "$(block_fields query)" <<<"$fresh")" \
-  || { emit "$event" "" "lane memory: cannot render lessons"; exit 0; }
-LESSONS_FILE="$lessons_file" python3 -c '
-import fcntl, json, os, sys
-items = json.load(sys.stdin)["items"]
 with open(os.environ["LESSONS_FILE"], "a+", encoding="utf-8") as cache:
     fcntl.flock(cache, fcntl.LOCK_EX)
     cache.seek(0)
     try: seen = json.load(cache)
     except ValueError: seen = []
-    seen += ["%s@%s" % (i["address"], i["revision"]) for i in items if i.get("address") and i.get("revision") is not None]
+    reply["items"] = [item for item in reply["items"] if key(item) is None or key(item) not in seen]
+    if not reply["items"]:
+        sys.exit(0)
+    shown = subprocess.run(["bash", os.environ["DATA"], "render", os.environ["FIELDS"]],
+                           input=json.dumps(reply), capture_output=True, text=True)
+    if shown.returncode != 0:
+        sys.exit("cannot render lessons")
+    seen += [key(item) for item in reply["items"] if key(item)]
     cache.seek(0)
     cache.truncate()
     json.dump(list(dict.fromkeys(seen))[-1024:], cache)
-' <<<"$fresh" || { emit "$event" "" "lane memory: cannot record delivered lessons"; exit 0; }
-emit "$event" "$text"
+    cache.flush()
+    sys.stdout.write(shown.stdout)
+' <<<"$reply" 2>"$err")" || { emit "$event" "" "lane memory: $(cat "$err")"; exit 0; }
+[[ -n "$text" ]] || quiet
+emit "$event" "${text%$'\n'}"
