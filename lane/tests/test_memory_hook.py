@@ -104,8 +104,28 @@ class MemoryHookTests(unittest.TestCase):
                 self.assertIs(out["continue"], False)
                 self.assertIn("config root", out["stopReason"])
                 self.assertEqual(len(self.server.requests), count)
+        # The workspace follows the same rule: omitted is the key default, explicit must be valid.
+        del self.config["root"]
+        del self.config["workspace"]
+        self.server.replies.append((200, {"items": [{"address": "rule:r", "body": "Keep scope."}]}))
+        self.assertNotIn("continue", self.hook("SessionStart"))
+        self.assertNotIn("workspace", self.server.requests[-1]["body"])
+        count = len(self.server.requests)
+        for workspace in ("", "   ", None, 123, []):
+            with self.subTest(workspace=workspace):
+                self.config["workspace"] = workspace
+                out = self.hook("SessionStart")
+                self.assertIs(out["continue"], False)
+                self.assertIn("config workspace", out["stopReason"])
+                self.assertEqual(len(self.server.requests), count)
 
     def test_session_start_stops_the_lane_without_a_contract(self):
+        # A caller that supplies the contract itself turns the read off; nothing is read or stopped.
+        self.env["LANE_MEMORY_SESSION"] = "off"
+        out = self.hook("SessionStart")
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ""}})
+        self.assertEqual(self.server.requests, [])
+        del self.env["LANE_MEMORY_SESSION"]
         for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []}),
                       (200, {"items": [{"address": "rule:r", "title": "Rule"}]})):
             with self.subTest(reply=reply):
