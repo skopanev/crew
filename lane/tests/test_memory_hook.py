@@ -96,6 +96,14 @@ class MemoryHookTests(unittest.TestCase):
                 self.assertNotIn("stopReason", out)
                 if event == "Stop":
                     self.assertEqual(out, {"decision": "block", "reason": "Return the result."})
+        count = len(self.server.requests)
+        for root in ("", "   ", None, 123, []):
+            with self.subTest(root=root):
+                self.config["root"] = root
+                out = self.hook("SessionStart")
+                self.assertIs(out["continue"], False)
+                self.assertIn("config root", out["stopReason"])
+                self.assertEqual(len(self.server.requests), count)
 
     def test_session_start_stops_the_lane_without_a_contract(self):
         for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []}),

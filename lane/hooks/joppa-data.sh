@@ -53,8 +53,9 @@ body="$("$jq_bin" -c --arg mode "$mode" --arg query "$query" '
   | {workspace: ($config | need("workspace")),
      kind: ($block.kind // error("config \($mode).kind is missing")),
      filter: (($block.filter // {}) + $resolved)}
-  + if ($config.root | if type == "string" then test("\\S") else false end)
-    then {root: $config.root} else {} end
+  + if ($config | has("root")) then
+      {root: ($config | need("root") | if test("\\S") then . else error("config root is blank") end)}
+    else {} end
   + if $mode == "stop" then {fields: [$block | need("field")]}
     elif $block.fields then {fields: $block.fields} else {} end
   + if $block.max_chars then {max_chars: $block.max_chars} else {} end
