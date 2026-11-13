@@ -199,6 +199,21 @@ class MemoryHookTests(unittest.TestCase):
         self.server.replies.append((200, {"items": [{**lesson, "revision": 2, "body": "Use rtk proxy."}]}))
         self.assertEqual(self.hook("UserPromptSubmit", prompt="gate")["hookSpecificOutput"]["additionalContext"],
                          "## Lesson\nUse rtk proxy.")
+        # Parallel events of one session deliver a lesson once.
+        parallel = {"address": "lesson:p", "revision": 1, "title": "Parallel", "body": "Once."}
+        self.server.replies.extend((200, {"items": [parallel]}) for _ in range(4))
+        (self.folder / "config.json").write_text(json.dumps(self.config))
+        runs = [subprocess.Popen(["bash", str(HOOKS / "memory-hook.sh")], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 env={**self.env, "LANE_MEMORY_CONFIG": str(self.folder / "config.json")}, text=True)
+                for _ in range(4)]
+        for number, run in enumerate(runs):
+            run.stdin.write(json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "s1",
+                                        "prompt": f"parallel {number}"}))
+            run.stdin.close()
+        shown = [json.loads(run.stdout.read())["hookSpecificOutput"]["additionalContext"] for run in runs]
+        for run in runs:
+            run.wait(timeout=30)
+        self.assertEqual(sorted(shown), ["", "", "", "## Parallel\nOnce."])
         # Another session has received nothing yet.
         self.server.replies.append((200, {"items": [lesson]}))
         self.assertEqual(self.hook("UserPromptSubmit", prompt="gate", session_id="s2")
@@ -249,12 +264,21 @@ class MemoryHookTests(unittest.TestCase):
         out = self.hook("PreToolUse", **call)
         self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                       "additionalContext": "## Gate\nRun it with bun."}})
-        self.assertEqual(self.server.requests[0]["body"]["query"], "Run the gate")
+        self.assertEqual(self.server.requests[0]["body"]["query"], "bun test Run the gate")
         # Once before the call; after it, the result is new information.
         self.hook("PreToolUse", **call)
         self.assertEqual(len(self.server.requests), 1)
         self.hook("PostToolUse", **call, tool_response="error: gate failed")
         self.assertEqual(len(self.server.requests), 2)
+        # The query is the actual input, whatever the tool is called: a bare command, a native
+        # exec with an argument list, a patch.
+        for tool, tool_input, query in (
+                ("Bash", {"command": "bun run gate"}, "bun run gate"),
+                ("exec", {"command": ["bun", "test"], "workdir": "/workspace"}, "bun test /workspace"),
+                ("apply_patch", {"input": "*** Update File: src/a.ts"}, "*** Update File: src/a.ts")):
+            with self.subTest(tool=tool):
+                self.hook("PreToolUse", tool_name=tool, tool_use_id="n-" + tool, tool_input=tool_input)
+                self.assertEqual(self.server.requests[-1]["body"]["query"], query)
 
     def test_other_callers_get_the_raw_reply_and_the_same_render(self):
         reply = {"workspace": "crew", "position": 9, "items": [{"title": "Rule", "body": "Keep scope.", "tags": ["a", "b"]}]}
