@@ -10,6 +10,7 @@ import {nodeAssignee, nodeHold, saveNode} from './joppa-nodes.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
+const excerpt = value => Buffer.from(value, 'utf8').subarray(0, 1500).toString('utf8').replace(/\uFFFD$/, '');
 
 function isImplementTimeout(artifacts) {
   if (!artifacts) return false;
@@ -121,8 +122,10 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     const panel = path.join(artifacts, 'panel-findings.txt');
     const review = fs.existsSync(panel) && fs.lstatSync(panel).isFile() &&
       fs.realpathSync(panel).startsWith(fs.realpathSync(run.runFolder) + path.sep) ? fs.readFileSync(panel, 'utf8') : '';
-    failure += '\nFailed checkout cleanup is configured after Joppa confirms this outcome.' +
-      (review ? '\nReview findings:\n' + review : '');
+    const lastRound = review.split(/^---[ \t]*\r?$/m).filter(part => part.trim()).at(-1) || '';
+    failure = excerpt(failure) + `\nFull failure: ${failureFile}` +
+      '\nFailed checkout cleanup is configured after Joppa confirms this outcome.' +
+      (lastRound ? `\nReview findings (last round excerpt):\n${excerpt(lastRound)}\nFull review: ${panel}` : '');
   }
   const runId = path.basename(path.dirname(stateFile));
   const code = preexisting ? 'WORKTREE_PREEXISTED' : reasonCode(completionEvent(run, result, artifacts));

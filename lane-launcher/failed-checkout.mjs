@@ -31,9 +31,10 @@ export function removeEmptyDiscardCheckout(run, announce) {
   const record = run.discardCheckout;
   if (!record || run.config.discardFailedWorktree !== true) return;
   try {
-    if (!matches(record, record.path) || fs.readdirSync(record.path).length ||
+    if (record.path !== checkoutPath(run) || !matches(record, record.path) || fs.readdirSync(record.path).length ||
         run.launchPgid && !writerGone(run, record.path)) return;
     fs.rmdirSync(record.path);
+    record.removed = true;
     announce(`run.sh: removed unused worktree: ${record.path}`);
   } catch (error) { announce(`[lane] Empty checkout cleanup failed: ${error.message}`); }
 }
@@ -41,7 +42,7 @@ export function removeEmptyDiscardCheckout(run, announce) {
 // Called only after the worker saved the outcome. Never discard an uncertain or foreign checkout.
 export function discardFailedCheckout(run, stateFile, announce) {
   const record = run.discardCheckout, result = run.result;
-  if (run.config.discardFailedWorktree !== true || !record || result?.status !== 'failed' || result.code === 73) return;
+  if (run.config.discardFailedWorktree !== true || !record || record.removed || result?.status !== 'failed' || result.code === 73) return;
   try {
     if (!stat(record.path)) return;
     require(result.held !== true && (result.blockConfirmed === true ||

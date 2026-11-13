@@ -42,6 +42,7 @@ test('the host owns only a directory it creates, and removes an unused one befor
   assert.equal(other.discardCheckout, undefined);
   removeEmptyDiscardCheckout(f.run, f.announce);
   assert.equal(fs.existsSync(f.checkout), false);
+  assert.equal(f.run.discardCheckout.removed, true);
   assert.match(f.lines[0], /^run.sh: removed unused worktree:/);
   f.run.result = {status: 'failed', code: 2};
   discardFailedCheckout(f.run, f.stateFile, f.announce);
@@ -81,7 +82,8 @@ test('a confirmed timeout keeps findings in Joppa and discards its private branc
   fs.writeFileSync(path.join(artifacts, 'origin.json'), JSON.stringify({node: 'implement_code', signal: '__timeout__'}));
   fs.writeFileSync(path.join(path.dirname(artifacts), 'journal.jsonl'), JSON.stringify({node: 'implement_code',
     signal: '__timeout__', timed_out: true, next: 'notify_failure'}) + '\n');
-  fs.writeFileSync(path.join(artifacts, 'panel-findings.txt'), '- HIGH - Missing authorization - FIX: validate the actor\n');
+  fs.writeFileSync(path.join(artifacts, 'panel-findings.txt'), '- HIGH - Historical finding\n' + 'old'.repeat(10000) +
+    '\n---\n- HIGH - Missing authorization - FIX: validate the actor\n' + '界'.repeat(10000) + '\n---\n');
   const result = {status: 'failed', code: 2};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.blockConfirmed, true);
@@ -89,6 +91,11 @@ test('a confirmed timeout keeps findings in Joppa and discards its private branc
   assert.equal(f.run.recovery, undefined);
   const notes = Object.values(f.objects.get('task:t1').annotations.comments);
   assert.ok(notes.some(note => note.text.includes('Missing authorization')));
+  const note = notes.find(note => note.text.startsWith('CREW_FAILURE'));
+  assert.ok(Buffer.byteLength(note.text, 'utf8') < 4096);
+  assert.equal(note.text.includes('Historical finding'), false);
+  assert.equal(note.text.includes('\uFFFD'), false);
+  assert.ok(note.text.includes(`Full review: ${artifacts}/panel-findings.txt`));
   f.run.result = result; f.persist();
   discardFailedCheckout(f.run, f.stateFile, f.announce);
   assert.equal(fs.existsSync(f.checkout), false);

@@ -131,7 +131,7 @@ else project_dir="$source_root_in/${repo#"$source_root/"}"; fi
 worktree="$worktree_root/$ticket"
 source "$WORKFLOW_DIR/startup/worktree.sh"
 # Retained or foreign work must never be reset by a fresh dispatch.
-check_worktree_directory
+check_worktree_directory || exit $?
 LANE_WORKTREE="/workspace/$ticket"
 
 # Docker's medulla.runs_under label carries the stable dispatcher identity,

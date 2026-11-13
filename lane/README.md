@@ -34,6 +34,8 @@ The worker creates and records its private directory before launch. A pre-existi
 Cleanup removes the checkout and its private local branch. It preserves the run logs, failure notes and review findings.
 This option disables retained reuse and timeout checkpoints. The next claim starts from current inputs and the configured target.
 An uncertain Joppa outcome or an active writer keeps the checkout. A failed removal reports `CHECKOUT_DISCARD_FAILED`.
+Interrupted cleanup can leave the ticket directory for manual inspection. A partial removal leaves `.discard-<run-id>` beside it.
+The latter directory no longer occupies the ticket path. Retry its removal after the reported filesystem problem is fixed.
 Source repositories and remote branches stay unchanged. The default is `false`.
 An eligible retry preserves ignored dependencies and build output, then refreshes the target and runs repository setup.
 It stages only the retained Task changes for a new commit through native hooks.
