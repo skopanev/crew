@@ -1,4 +1,4 @@
-"""Drift review gating in verify_freshness on a real Git repository. No agents or Equill."""
+"""Drift review gating in verify_freshness on a real Git repository. No agents or Joppa memory."""
 import json
 import re
 import os
@@ -315,7 +315,7 @@ class DriftReviewTests(unittest.TestCase):
     def test_a_changed_contract_still_wins_over_a_reviewable_drift(self):
         self.land()
         with patch.object(stages, "load_contract", side_effect=lambda role, project: {"bundle_digest": "c2"}), \
-             self.assertRaisesRegex(ValueError, "Equill contract changed"):
+             self.assertRaisesRegex(ValueError, "role contract changed"):
             stages.verify_freshness(self.assignment)
         self.assertFalse((self.target / "drift.json").exists(), "no review requested")
 

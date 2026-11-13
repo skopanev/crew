@@ -1,6 +1,7 @@
 """Launch the separate Joppa planner for one criterion."""
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -85,8 +86,7 @@ def main():
                     "Use Joppa MCP to inspect related work and its context as needed. Describe the minimum mechanism scope. The designer then prepares complete Tasks.",
                  "CBM_CACHE_DIR": config["cbm_store"], "CBM_ALLOWED_ROOT": config["cbm_root"],
                  "CBM_BIN": shutil.which(os.environ.get("CBM_BIN", "codebase-memory-mcp")) or "codebase-memory-mcp",
-                 "EQUILL_STORE": config["equill_store"], "EQUILL_BIN": os.environ.get("EQUILL_BIN", "equill"),
-                 "EQUILL_ACTOR": "planning", "OPENCODE_BIN": shutil.which("opencode") or "opencode",
+                 "OPENCODE_BIN": shutil.which("opencode") or "opencode",
                  "AGY_BIN": shutil.which("agy") or "agy"}
     executable = os.environ.get("MEDULLA_BIN", "medulla")
     command = [executable, "-w", str(workflow), "--runs-folder", config["runs_folder"], "--print-run-dir"]
@@ -97,20 +97,21 @@ def main():
         print("Command: " + " ".join(command))
         print("Dry run: no MCP calls, claims, agents, or writes")
         return 0
-    for binary in (executable, variables["CBM_BIN"], variables["EQUILL_BIN"], "codex", "claude", "opencode", "agy", "git"):
+    for binary in (executable, variables["CBM_BIN"], "codex", "claude", "opencode", "agy", "git", "curl", "jq"):
         require(shutil.which(binary), f"required executable missing: {binary}")
     if not config.get("mcp_command"):
         require(Path(config["token_file"]).is_file(), "Joppa token file is unavailable")
-    if not os.environ.get("CREW_SKIP_ROLE_CHECK"):
-        result = subprocess.run([sys.executable, str(workflow.parent / "roles/export.py"), "--check", "planning", "shared"],
-                                env={**os.environ, "EQUILL_STORE": config["equill_store"]}, capture_output=True, text=True)
-        require(result.returncode == 0, (result.stderr or result.stdout).strip() or "Crew role check failed")
+    require(Path(config["context"]["token_file"]).is_file(), "Joppa memory token file is unavailable")
     with tempfile.TemporaryDirectory(prefix="crew-joppa-opencode-") as opencode, \
-            tempfile.TemporaryDirectory(prefix="crew-joppa-agy-") as agy:
+            tempfile.TemporaryDirectory(prefix="crew-joppa-agy-") as agy, \
+            tempfile.TemporaryDirectory(prefix="crew-joppa-memory-") as memory:
         variables.update(OPENCODE_CONFIG_HOME=opencode, AGY_PROFILE_HOME=agy)
         for key, value in variables.items():
             command += ["--var", f"{key}={value}"]
-        code = subprocess.run(command, check=False).returncode
+        # The directory is private (0700); the file names the key file, never holds the key.
+        memory_config = Path(memory) / "context.json"
+        memory_config.write_text(json.dumps(config["context"]))
+        code = subprocess.run(command, check=False, env={**os.environ, "LANE_MEMORY_CONFIG": str(memory_config)}).returncode
         # Keep HANDOFF_CHANGED for the pre-start refusal: a Medulla run never reports it.
         return 1 if code == HANDOFF_CHANGED else code
 

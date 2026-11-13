@@ -25,7 +25,7 @@ class RepositoryScopeTests(unittest.TestCase):
     def test_configuration_accepts_a_repository_without_a_project(self):
         folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
         config = {"workspace": "product", "url": "https://joppa.example/mcp", "token_file": "token",
-                  "runs_folder": "runs", "cbm_store": "cbm", "cbm_root": "src", "equill_store": "equill",
+                  "runs_folder": "runs", "cbm_store": "cbm", "cbm_root": "src", "context": {"token_file": "key", "session": {}, "query": {}},
                   "repositories": [{"id": "app", "path": str(folder / "src" / "app"), "cbm_project": "app",
                                     "modules": [{"name": "core", "path": "src"}]},
                                    {"id": "web", "path": str(folder / "src" / "web"), "cbm_project": "web",

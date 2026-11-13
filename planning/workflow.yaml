@@ -48,7 +48,7 @@ nodes:
       - slug: code
         question: Inspect current behavior and relevant history with CBM. Verify reuse and SIMILAR_TO candidates in source. Inspect the ticket module and affected interfaces. Do not design edits. Never index or start a watcher.
       - slug: knowledge
-        question: Reconcile the assignment with owner decisions, applicable Equill knowledge, repository documentation and failure evidence. Identify missing decisions and contradictions.
+        question: Reconcile the assignment with owner decisions, applicable lessons, repository documentation and failure evidence. Identify missing decisions and contradictions.
       - slug: external
         question: Decide whether external research is needed. If needed, consult primary documentation for the actual project versions and explain applicability. If unnecessary, return not_needed with the concrete reason. Never invent sources.
     agent:
@@ -74,11 +74,11 @@ nodes:
         - 'web_search="live"'
     prompt: |
       {{file:prompts/research.md}}
-      Mandatory Equill contract:
+      Mandatory role contract:
       {{var:researcher_contract}}
       Assignment: {{var:assignment}}
       Recent Git history: {{var:source_history}}
-      Applicable Equill knowledge: {{var:knowledge}}
+      Applicable lessons: {{var:knowledge}}
       Your independent branch: {{input.slug}}
       Your question: {{input.question}}
     post: '"$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/stages.py" capture research'
@@ -112,7 +112,7 @@ nodes:
         - '{{var:PLANNING_MCP_TOML}}'
     prompt: |
       {{file:prompts/necessity.md}}
-      Mandatory Equill contract:
+      Mandatory role contract:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
@@ -153,7 +153,7 @@ nodes:
         - '{{var:PLANNING_MCP_TOOLS}}'
     prompt: |
       {{file:prompts/design.md}}
-      Mandatory Equill contract:
+      Mandatory role contract:
       {{var:designer_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
@@ -222,7 +222,7 @@ nodes:
     prompt: |
       {{file:prompts/critic.md}}
       {{input.read_instruction:-}}
-      Mandatory Equill contract:
+      Mandatory role contract:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
@@ -281,7 +281,7 @@ nodes:
     prompt: |
       {{file:prompts/drift.md}}
       {{input.read_instruction:-}}
-      Mandatory Equill contract:
+      Mandatory role contract:
       {{var:critic_contract}}
       Assignment: {{var:assignment}}
       Research: {{var:research}}
