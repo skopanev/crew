@@ -104,8 +104,28 @@ class MemoryHookTests(unittest.TestCase):
                 self.assertIs(out["continue"], False)
                 self.assertIn("config root", out["stopReason"])
                 self.assertEqual(len(self.server.requests), count)
+        # The workspace follows the same rule: omitted is the key default, explicit must be valid.
+        del self.config["root"]
+        del self.config["workspace"]
+        self.server.replies.append((200, {"items": [{"address": "rule:r", "body": "Keep scope."}]}))
+        self.assertNotIn("continue", self.hook("SessionStart"))
+        self.assertNotIn("workspace", self.server.requests[-1]["body"])
+        count = len(self.server.requests)
+        for workspace in ("", "   ", None, 123, []):
+            with self.subTest(workspace=workspace):
+                self.config["workspace"] = workspace
+                out = self.hook("SessionStart")
+                self.assertIs(out["continue"], False)
+                self.assertIn("config workspace", out["stopReason"])
+                self.assertEqual(len(self.server.requests), count)
 
     def test_session_start_stops_the_lane_without_a_contract(self):
+        # A caller that supplies the contract itself turns the read off; nothing is read or stopped.
+        self.env["LANE_MEMORY_SESSION"] = "off"
+        out = self.hook("SessionStart")
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ""}})
+        self.assertEqual(self.server.requests, [])
+        del self.env["LANE_MEMORY_SESSION"]
         for reply in ((422, {"error": "unknown kind"}), (500, {}), (200, {"items": []}), (200, {"rows": []}),
                       (200, {"items": [{"address": "rule:r", "title": "Rule"}]})):
             with self.subTest(reply=reply):
@@ -159,7 +179,8 @@ class MemoryHookTests(unittest.TestCase):
         self.assertEqual(len(self.server.requests), count)
 
     def test_retrieval_sends_the_query_with_its_limit_and_warns_on_failure(self):
-        self.server.replies.append((200, {"items": [{"address": "lesson:l", "title": "Lesson", "body": "Use rtk."}]}))
+        lesson = {"address": "lesson:l", "revision": 1, "title": "Lesson", "body": "Use rtk."}
+        self.server.replies.append((200, {"items": [lesson]}))
         out = self.hook("UserPromptSubmit", prompt="How do I run the gate?")
         self.assertEqual(self.server.requests[0]["body"], {
             "root": "requirement:lane", "workspace": "crew", "kind": ["lesson"],
@@ -171,6 +192,28 @@ class MemoryHookTests(unittest.TestCase):
         self.assertIn("lane memory: retrieval failed: HTTP 503", out["systemMessage"])
         self.assertNotIn("continue", out)
         self.assertEqual(self.hook("UserPromptSubmit", prompt="nothing")["hookSpecificOutput"]["additionalContext"], "")
+        # The session has this revision already, from any event; a new revision is shown again.
+        self.server.replies.append((200, {"items": [lesson]}))
+        self.assertEqual(self.hook("PostToolUse", tool_name="Bash", tool_use_id="t9",
+                                   tool_input={"description": "Run the gate"})["hookSpecificOutput"]["additionalContext"], "")
+        self.server.replies.append((200, {"items": [{**lesson, "revision": 2, "body": "Use rtk proxy."}]}))
+        self.assertEqual(self.hook("UserPromptSubmit", prompt="gate")["hookSpecificOutput"]["additionalContext"],
+                         "## Lesson\nUse rtk proxy.")
+        # Another session has received nothing yet.
+        self.server.replies.append((200, {"items": [lesson]}))
+        self.assertEqual(self.hook("UserPromptSubmit", prompt="gate", session_id="s2")
+                         ["hookSpecificOutput"]["additionalContext"], "## Lesson\nUse rtk.")
+        # A refused render marks nothing delivered.
+        other = {"address": "lesson:m", "revision": 1, "title": "Other", "body": "Read the log."}
+        self.server.replies.append((200, {"items": [other]}))
+        self.env["LANE_MEMORY_DATA"] = str(self.folder / "broken-render.sh")
+        (self.folder / "broken-render.sh").write_text(
+            '[[ "$1" == render ]] && exit 1; exec bash %s "$@"\n' % (HOOKS / "joppa-data.sh"))
+        self.assertIn("cannot render", self.hook("UserPromptSubmit", prompt="log")["systemMessage"])
+        del self.env["LANE_MEMORY_DATA"]
+        self.server.replies.append((200, {"items": [other]}))
+        self.assertEqual(self.hook("UserPromptSubmit", prompt="log")["hookSpecificOutput"]["additionalContext"],
+                         "## Other\nRead the log.")
 
     def test_query_keeps_2000_unicode_characters(self):
         self.hook("UserPromptSubmit", prompt="ж" * 2500)
@@ -195,9 +238,23 @@ class MemoryHookTests(unittest.TestCase):
         self.assertEqual(len(self.server.requests), 3)
 
     def test_background_commands_are_still_refused(self):
-        out = self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "x", "run_in_background": True})
+        out = self.hook("PreToolUse", tool_name="Bash", tool_use_id="b1",
+                        tool_input={"command": "x", "description": "Start the server", "run_in_background": True})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(self.server.requests, [])
+        # An allowed call retrieves on what the agent is about to do, and grants nothing.
+        self.server.replies.append((200, {"items": [{"address": "lesson:g", "revision": 1, "title": "Gate",
+                                                    "body": "Run it with bun."}]}))
+        call = {"tool_name": "Bash", "tool_use_id": "f1", "tool_input": {"command": "bun test", "description": "Run the gate"}}
+        out = self.hook("PreToolUse", **call)
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                      "additionalContext": "## Gate\nRun it with bun."}})
+        self.assertEqual(self.server.requests[0]["body"]["query"], "Run the gate")
+        # Once before the call; after it, the result is new information.
+        self.hook("PreToolUse", **call)
+        self.assertEqual(len(self.server.requests), 1)
+        self.hook("PostToolUse", **call, tool_response="error: gate failed")
+        self.assertEqual(len(self.server.requests), 2)
 
     def test_other_callers_get_the_raw_reply_and_the_same_render(self):
         reply = {"workspace": "crew", "position": 9, "items": [{"title": "Rule", "body": "Keep scope.", "tags": ["a", "b"]}]}

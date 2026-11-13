@@ -50,9 +50,12 @@ body="$("$jq_bin" -c --arg mode "$mode" --arg query "$query" '
            | if $value == "" then error("filter variable \($name) is unset")
              else {key, value: $value} end)
      | from_entries) as $resolved
-  | {workspace: ($config | need("workspace")),
-     kind: ($block.kind // error("config \($mode).kind is missing")),
+  | {kind: ($block.kind // error("config \($mode).kind is missing")),
      filter: (($block.filter // {}) + $resolved)}
+  # Optional scopes: omitted means the key default; an explicit invalid value is refused.
+  + if ($config | has("workspace")) then
+      {workspace: ($config | need("workspace") | if test("\\S") then . else error("config workspace is blank") end)}
+    else {} end
   + if ($config | has("root")) then
       {root: ($config | need("root") | if test("\\S") then . else error("config root is blank") end)}
     else {} end

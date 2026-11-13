@@ -3,9 +3,13 @@ set -uo pipefail
 # The lane's memory hook. Self-contained: nothing here reaches into company/.
 #
 #   SessionStart      the contract from Joppa, once, without a query
+#                     (LANE_MEMORY_SESSION=off: the caller supplies the contract)
 #   UserPromptSubmit  retrieval on the user's actual message
-#   PostToolUse     retrieval on what just happened, before the next model call
+#   PreToolUse        retrieval on the call the agent is about to make
+#   PostToolUse       retrieval on what just happened, before the next model call
 #   Stop              the process's own ending text when the signal is missing
+#
+# A lesson address@revision reaches one agent session once, whatever event found it.
 #
 # Why the third one exists, counted on run 2026-09-11_11-21-28: implement_code
 # made 100 model calls and 99 of them carried tool_use. SessionStart and
@@ -24,11 +28,11 @@ event="$("$jq_bin" -r '.hook_event_name // empty' <<<"$input" 2>/dev/null || tru
 # It answers which events reach a non-interactive run at all.
 printf '%s\n' "${event:-NO_NAME}" >> "${MEDULLA_RUN_DIR:-/tmp}/hook-events.log" 2>/dev/null || true
 
-if [[ "$event" == PreToolUse ]]; then
-  if "$jq_bin" -e '.tool_name == "Bash" and .tool_input.run_in_background == true' <<<"$input" >/dev/null 2>&1; then
-    "$jq_bin" -cn '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
-      permissionDecisionReason:"Run commands in the foreground. Wait for their results before the final signal."}}'
-  fi
+# A denied call never runs, so it retrieves nothing.
+if [[ "$event" == PreToolUse ]] \
+   && "$jq_bin" -e '.tool_name == "Bash" and .tool_input.run_in_background == true' <<<"$input" >/dev/null 2>&1; then
+  "$jq_bin" -cn '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",
+    permissionDecisionReason:"Run commands in the foreground. Wait for their results before the final signal."}}'
   exit 0
 fi
 
@@ -100,12 +104,14 @@ if [[ "$event" == Stop ]]; then
   exit 0
 fi
 
-case "$event" in SessionStart|UserPromptSubmit|PostToolUse|PostToolBatch) ;; *) quiet ;; esac
+case "$event" in SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolBatch) ;; *) quiet ;; esac
 
 # ── SessionStart: the contract ───────────────────────────────────────────────
 # A lane without its contract must not run: it would work confidently under rules it
 # never read. A missing config, a refused request, a 422 and an empty reply all stop it.
 if [[ "$event" == SessionStart ]]; then
+  # The caller that already put the contract in the prompt turns this read off.
+  [[ "${LANE_MEMORY_SESSION:-on}" != off ]] || quiet
   reply="$(bash "$data" session 2>"$err")" \
     || { emit_fatal "$event" "lane memory: baseline failed: $(cat "$err")"; exit 0; }
   fields="$(block_fields session)"
@@ -135,8 +141,17 @@ fi
 [[ -r "${LANE_MEMORY_CONFIG:-}" ]] || quiet
 "$jq_bin" -e '.query | type == "object"' "$LANE_MEMORY_CONFIG" >/dev/null 2>&1 || quiet
 
+# One agent session: every node shares the run and the config, and the caller filters
+# tell the nodes apart. Tool calls and delivered lessons are both remembered per session.
+session_key="$("$jq_bin" -cn --argjson input "$input" '[env.MEDULLA_RUN_DIR, env.LANE_MEMORY_CONFIG,
+    env.LANE_MEMORY_ROLE, env.LANE_MEMORY_PROCESS, env.LANE_MEMORY_TICKET]
+    | map(. // "") + [$input.session_id // $input.transcript_path // ""]' | sha256sum | cut -c1-64)"
+seen_file="${TMPDIR:-/tmp}/lane-memory-seen.$session_key"
+lessons_file="${TMPDIR:-/tmp}/lane-memory-lessons.$session_key"
+
 # Normalize single-tool events to the batch shape. Preserve the tool ID for deduplication.
-if [[ "$event" == PostToolUse ]]; then
+# Before the call there is no response yet; the input is what the agent intends.
+if [[ "$event" == PostToolUse || "$event" == PreToolUse ]]; then
   input="$("$jq_bin" -c 'if has("tool_calls") then . else
       . + {tool_calls: [ {tool_use_id: (.tool_use_id // .tool_call_id // .id // null), tool_name: (.tool_name // ""),
                           tool_input: (.tool_input // {}),
@@ -144,17 +159,13 @@ if [[ "$event" == PostToolUse ]]; then
     <<<"$input" 2>/dev/null || printf '%s' "$input")"
 fi
 
-if [[ "$event" == PostToolUse || "$event" == PostToolBatch ]]; then
-  input="$(python3 -c '
+if [[ "$event" == PreToolUse || "$event" == PostToolUse || "$event" == PostToolBatch ]]; then
+  input="$(SEEN_FILE="$seen_file" PHASE="${event%%ToolUse*}" python3 -c '
 import fcntl, hashlib, json, os, sys
 data = json.load(sys.stdin)
-# Every node shares the run and the config; the caller filters tell the nodes apart.
-scope = [os.environ.get(k, "") for k in ("MEDULLA_RUN_DIR", "LANE_MEMORY_CONFIG", "LANE_MEMORY_ROLE",
-                                         "LANE_MEMORY_PROCESS", "LANE_MEMORY_TICKET")]
-scope.append(data.get("session_id") or data.get("transcript_path") or "")
-key = hashlib.sha256(json.dumps(scope).encode()).hexdigest()
-file = os.path.join(os.environ.get("TMPDIR", "/tmp"), "lane-memory-seen." + key)
-with open(file, "a+", encoding="utf-8") as cache:
+# The same call is seen once before and once after it runs: the result is new information.
+phase = "pre:" if os.environ["PHASE"] == "Pre" else ""
+with open(os.environ["SEEN_FILE"], "a+", encoding="utf-8") as cache:
     fcntl.flock(cache, fcntl.LOCK_EX)
     cache.seek(0)
     try: seen = json.load(cache)
@@ -163,7 +174,7 @@ with open(file, "a+", encoding="utf-8") as cache:
     for tool in data.get("tool_calls", []):
         identity = tool.get("tool_use_id") or tool.get("tool_call_id") or tool.get("id")
         payload = [tool.get("tool_name", ""), tool.get("tool_input", {}), tool.get("tool_response", "")]
-        item = "id:" + str(identity) if identity else "content:" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        item = phase + ("id:" + str(identity) if identity else "content:" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
         if item not in seen:
             fresh.append(tool)
             seen.append(item)
@@ -179,7 +190,7 @@ fi
 if [[ "$event" == UserPromptSubmit ]]; then
   query="$("$jq_bin" -r '.prompt // empty' <<<"$input")"
 else
-  # PostToolUse carries no .prompt. The query is what JUST happened, and only
+  # Tool events carry no .prompt. The query is what JUST happened, and only
   # the calls that say something about the WORK.
   #
   # Measured on implement_code of run e9ea21af, 54 calls: Bash 38, ToolSearch 9,
@@ -253,7 +264,7 @@ fi
 
 # Whitespace only. The API limit is 2000 Unicode characters and joppa-data.sh cuts
 # there; a cut in this shell could split a character in the C locale of the image.
-query="$(printf '%s' "$query" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+query="$(printf '%s' "$query" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
 [[ -n "${query// /}" ]] || quiet
 
 # A refused retrieval does not stop the session, but it is not silent either: an agent
@@ -261,4 +272,36 @@ query="$(printf '%s' "$query" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
 # An empty result is normal and adds nothing.
 reply="$(bash "$data" query "$query" 2>"$err")" \
   || { emit "$event" "" "lane memory: retrieval failed: $(cat "$err")"; exit 0; }
-emit "$event" "$(render "$(block_fields query)" <<<"$reply")"
+
+# Keep only lessons this session has not received at their current revision. A new
+# revision is a new lesson. An item without address and revision cannot be counted
+# and is always shown. Nothing is marked delivered until the text is rendered.
+fresh="$(LESSONS_FILE="$lessons_file" python3 -c '
+import fcntl, json, os, sys
+reply = json.load(sys.stdin)
+with open(os.environ["LESSONS_FILE"], "a+", encoding="utf-8") as cache:
+    fcntl.flock(cache, fcntl.LOCK_SH)
+    cache.seek(0)
+    try: seen = set(json.load(cache))
+    except ValueError: seen = set()
+key = lambda item: "%s@%s" % (item["address"], item["revision"]) if item.get("address") and item.get("revision") is not None else None
+reply["items"] = [item for item in reply["items"] if key(item) is None or key(item) not in seen]
+print(json.dumps(reply))
+' <<<"$reply")" || { emit "$event" "" "lane memory: cannot filter delivered lessons"; exit 0; }
+[[ "$("$jq_bin" '.items | length' <<<"$fresh")" != 0 ]] || quiet
+text="$(render "$(block_fields query)" <<<"$fresh")" \
+  || { emit "$event" "" "lane memory: cannot render lessons"; exit 0; }
+LESSONS_FILE="$lessons_file" python3 -c '
+import fcntl, json, os, sys
+items = json.load(sys.stdin)["items"]
+with open(os.environ["LESSONS_FILE"], "a+", encoding="utf-8") as cache:
+    fcntl.flock(cache, fcntl.LOCK_EX)
+    cache.seek(0)
+    try: seen = json.load(cache)
+    except ValueError: seen = []
+    seen += ["%s@%s" % (i["address"], i["revision"]) for i in items if i.get("address") and i.get("revision") is not None]
+    cache.seek(0)
+    cache.truncate()
+    json.dump(list(dict.fromkeys(seen))[-1024:], cache)
+' <<<"$fresh" || { emit "$event" "" "lane memory: cannot record delivered lessons"; exit 0; }
+emit "$event" "$text"
