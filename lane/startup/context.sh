@@ -11,7 +11,7 @@ context_vars=(
   --var "LANE_MEMORY_TICKET=$ticket"
   --var "LANE_MEMORY_MODULE=$module"
 )
-for role in scout coder qa; do
+for role in scout coder qa reviewer gitfix; do
   name="$(jq -er --arg role "$role" '.roles[$role] | select(type == "string" and test("\\S"))' "$context_dir/config.json")" || {
     say "run.sh: context.roles.$role is required"
     exit 2

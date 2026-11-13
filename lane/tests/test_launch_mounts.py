@@ -37,7 +37,7 @@ class LaunchMountTests(unittest.TestCase):
             (context / 'token').write_text('jpr_' + 'a' * 64 + '\n')
             (context / 'token').chmod(0o600)
             (context / 'config.json').write_text(json.dumps({
-                'roles': {'scout': 'fixture-scout', 'coder': 'fixture-coder', 'qa': 'fixture-qa'}}))
+                'roles': {role: f'fixture-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}}))
             for name, script in {
                 'docker': '#!/bin/sh\nexit 0\n',
                 'medulla': '#!/usr/bin/env python3\nimport json,os,sys\n'

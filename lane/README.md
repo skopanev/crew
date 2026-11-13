@@ -89,8 +89,10 @@ Nonblocking findings remain in `artifacts/followups.txt` for the host completion
 ## Agent context
 
 Joppa supplies role contracts and memory through the configured Read API.
-The launch config maps scout, coder and QA roles to their process names.
-SessionStart reads the complete selected contract. Prompt and tool hooks query memory.
+The launch config maps scout, coder, reviewer and gitfix roles to their process names. The QA key remains for compatibility.
+Scout and reviewers read one prepared contract file. Their SessionStart hook skips duplicate delivery.
+Coder and gitfix read their contracts through SessionStart. Prompt and tool hooks query memory.
+Set `context.query.filter.role` to the configured lesson group, such as `lane`.
 The Stop hook reads its configured ending field and returns that text unchanged.
 
 Agents implement only the ticket's scope and acceptance criteria. CBM locates

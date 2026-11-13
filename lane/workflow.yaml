@@ -26,6 +26,8 @@ vars:
   LANE_MEMORY_scout_ROLE: ''
   LANE_MEMORY_coder_ROLE: ''
   LANE_MEMORY_qa_ROLE: ''
+  LANE_MEMORY_reviewer_ROLE: ''
+  LANE_MEMORY_gitfix_ROLE: ''
   SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
   LANE_SHARED_LOCK_DIR: ''
@@ -37,6 +39,7 @@ vars:
 nodes:
   prepare:
     env:
+      LANE_MEMORY_SESSION: 'on'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
       LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_scout_ROLE}}'
       LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'
@@ -127,6 +130,7 @@ nodes:
   cbm_discovery:
     timeout: 900
     env:
+      LANE_MEMORY_SESSION: 'off'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
       LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_scout_ROLE}}'
       CODEX_HOME: /tmp/codex-home
@@ -386,6 +390,7 @@ nodes:
   implement_code:
     timeout: 7200   # writing the code
     env:
+      LANE_MEMORY_SESSION: 'on'
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       BASH_MAX_TIMEOUT_MS: '900000'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
@@ -451,8 +456,9 @@ nodes:
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
-      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_qa_ROLE}}'
-      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_reviewer_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_reviewer_ROLE}}'
+      LANE_MEMORY_SESSION: 'on'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_MODULE: '{{var:module_name}}'
@@ -529,7 +535,7 @@ nodes:
       fi
       printf '%s\n' "$bindings"
       # Share one Joppa contract across all review harnesses and rounds.
-      qa="$MEDULLA_RUN_DIR/artifacts/qa-contract.txt"
+      qa="$MEDULLA_RUN_DIR/artifacts/reviewer-contract.txt"
       # Extract content and publish atomically after a successful read.
       if [ ! -s "$qa" ]; then
         for attempt in 1 2 3; do
@@ -539,14 +545,14 @@ nodes:
             mv "$qa.tmp" "$qa"
             break
           fi
-          echo "QA contract attempt $attempt failed; response: $qa.reply; error: $qa.err" >&2
+          echo "Reviewer contract attempt $attempt failed; response: $qa.reply; error: $qa.err" >&2
           [ "$attempt" -eq 3 ] || sleep 1
         done
         if [ ! -s "$qa" ]; then
           rm -f "$qa.tmp"
           printf '\nJoppa response:\n' >> "$qa.err"
           cat "$qa.reply" >> "$qa.err"
-          echo "QA contract unavailable after 3 attempts; response: $qa.reply; error: $qa.err" >&2
+          echo "Reviewer contract unavailable after 3 attempts; response: $qa.reply; error: $qa.err" >&2
           cat "$qa.err" >&2
           exit 1
         fi
@@ -571,11 +577,14 @@ nodes:
       model: claude-sonnet-5-5
       effort: high
       slug: security
+      flag: --settings
+      settings: /tmp/lane-settings.json
     env:
       CODEX_HOME: /tmp/codex-home
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
-      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_qa_ROLE}}'
-      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_qa_ROLE}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_reviewer_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_reviewer_ROLE}}'
+      LANE_MEMORY_SESSION: 'off'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_MODULE: '{{var:module_name}}'
@@ -589,6 +598,7 @@ nodes:
       effort: '{{input.effort}}'
       args:
       - '{{input.flag:-}}'
+      - '{{input.settings:-}}'
     post: |
       [ "$MEDULLA_BODY_RC" = 0 ] || exit 1
       case "$MEDULLA_BODY_SIGNAL" in
@@ -597,7 +607,7 @@ nodes:
            exit 1 ;;
       esac
     prompt: |
-      Read {{var:RUN_ARTIFACTS}}/qa-contract.txt and execute its steps.
+      Read {{var:RUN_ARTIFACTS}}/reviewer-contract.txt and execute its steps.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
       Workspace: {{var:project_name}}. Verification only: {{var:VERIFY_ONLY}}.
       Worktree: {{var:LANE_WORKTREE}}.
@@ -990,8 +1000,9 @@ nodes:
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
-      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_coder_ROLE}}'
-      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_coder_ROLE}}'
+      LANE_MEMORY_ROLE: '{{var:LANE_MEMORY_gitfix_ROLE}}'
+      LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_gitfix_ROLE}}'
+      LANE_MEMORY_SESSION: 'on'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_MODULE: '{{var:module_name}}'

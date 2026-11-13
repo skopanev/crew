@@ -275,8 +275,8 @@ class GateTests(unittest.TestCase):
         worktrees.mkdir()
         (worktrees / "wt-fixture-task").symlink_to(self.repo, target_is_directory=True)
         self.env.update(TOOLING_ROOT=str(LANE.parent), LANE_WORKTREE=str(self.repo), DELIVERY='branch',
-                        LANE_MEMORY_CONFIG=str(memory_config), LANE_MEMORY_ROLE="custom-qa-role",
-                        LANE_MEMORY_PROCESS="custom-qa-role", LANE_MEMORY_PROJECT="fixture",
+                        LANE_MEMORY_CONFIG=str(memory_config), LANE_MEMORY_ROLE="custom-reviewer-role",
+                        LANE_MEMORY_PROCESS="custom-reviewer-role", LANE_MEMORY_PROJECT="fixture",
                         ticket_title='Show the complete Task title in history and preserve its full text beyond seventy-two characters')
         self.git('update-ref', 'refs/remotes/origin/develop', 'HEAD')
         cases = (
@@ -293,20 +293,20 @@ class GateTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", shell_body("prepare_review")],
                                         cwd=self.repo, env=self.env, capture_output=True,
                                         text=True, timeout=15)
-                contract = self.root / "run/artifacts/qa-contract.txt"
+                contract = self.root / "run/artifacts/reviewer-contract.txt"
                 if ok:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(contract.read_text().strip(), "## QA\nfixture QA contract")
                     self.assertEqual(server.requests[-1]["auth"], f"Bearer {token}")
                     self.assertEqual(server.requests[-1]["body"]["filter"],
-                                     {"role": "custom-qa-role", "project": "fixture"})
+                                     {"role": "custom-reviewer-role", "project": "fixture"})
                     self.assertIn("<signal:SNAPSHOT>", result.stdout)
                     self.assertEqual(self.git('log', '-1', '--format=%s'), self.env['ticket_title'][:72])
                     self.assertEqual(self.git('log', '-1', '--format=%b'),
                                      self.env['ticket_title'] + '\n\nJoppa-Task: fixture-task')
                 else:
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn("QA contract unavailable", result.stderr)
+                    self.assertIn("Reviewer contract unavailable", result.stderr)
                     self.assertFalse(contract.exists())
                     self.assertNotIn("<signal:SNAPSHOT>", result.stdout)
 

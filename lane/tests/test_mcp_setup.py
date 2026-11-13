@@ -32,14 +32,15 @@ class McpSetupTests(unittest.TestCase):
             self.assertIn('Joppa context config and workspace Read key are required', missing.stdout)
 
             (root / 'config.json').write_text(json.dumps({
-                'roles': {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa'}}))
+                'roles': {role: f'alpha-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}}))
             no_token = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
                                       capture_output=True, text=True)
             self.assertEqual(no_token.returncode, 2)
 
             (root / 'token').write_text('jpr_' + '0' * 64 + '\n')
-            for missing_role in ('scout', 'coder', 'qa'):
-                roles = {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa', missing_role: '   '}
+            for missing_role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix'):
+                roles = {role: f'alpha-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}
+                roles[missing_role] = '   '
                 (root / 'config.json').write_text(json.dumps({'roles': roles}))
                 bad_role = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
                                           capture_output=True, text=True)
@@ -47,7 +48,7 @@ class McpSetupTests(unittest.TestCase):
                 self.assertIn(f'context.roles.{missing_role} is required', bad_role.stdout)
 
             (root / 'config.json').write_text(json.dumps({
-                'roles': {'scout': 'alpha-scout', 'coder': 'alpha-coder', 'qa': 'alpha-qa'}}))
+                'roles': {role: f'alpha-{role}' for role in ('scout', 'coder', 'qa', 'reviewer', 'gitfix')}}))
             ready = subprocess.run(['bash', '-c', script], env=dict(os.environ, LANE_MEMORY_DIR=str(root)),
                                    capture_output=True, text=True)
             self.assertEqual(ready.returncode, 0, ready.stderr)
@@ -57,6 +58,8 @@ class McpSetupTests(unittest.TestCase):
             self.assertIn('LANE_MEMORY_scout_ROLE=alpha-scout', parsed['vars'])
             self.assertIn('LANE_MEMORY_coder_ROLE=alpha-coder', parsed['vars'])
             self.assertIn('LANE_MEMORY_qa_ROLE=alpha-qa', parsed['vars'])
+            self.assertIn('LANE_MEMORY_reviewer_ROLE=alpha-reviewer', parsed['vars'])
+            self.assertIn('LANE_MEMORY_gitfix_ROLE=alpha-gitfix', parsed['vars'])
 
     def test_harnesses_share_cbm_connector_and_preserve_broker_auth(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,6 +100,6 @@ class McpSetupTests(unittest.TestCase):
             for event in ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolBatch', 'Stop'):
                 self.assertEqual(claude_hooks[event][0]['hooks'][0]['command'], expected_cmd)
                 self.assertEqual(codex_hooks[event][0]['hooks'][0]['command'], expected_cmd)
-            self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], 'Bash')
+            self.assertEqual(claude_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['matcher'], '*')
             self.assertEqual(codex_hooks['PreToolUse'][0]['hooks'][0]['command'], expected_cmd)

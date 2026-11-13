@@ -123,12 +123,12 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "/usr/bin/env bash <TOOLING_ROOT>/lane/hooks/memory-hook.sh",
-            "timeout": 5
+            "timeout": 45
           },
           {
             "type": "command",

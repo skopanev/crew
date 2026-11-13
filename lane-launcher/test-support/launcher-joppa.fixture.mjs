@@ -161,7 +161,7 @@ async function packageFixture(t, mode = 'success') {
   t.after(() => new Promise(resolve => server.close(resolve)));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const context = {url: `${baseUrl}/api/data`, workspace: 'fixture', root: 'req:r', token_file: contextTokenFile,
-    roles: {scout: 'fixture-scout', coder: 'fixture-coder', qa: 'fixture-qa'},
+    roles: {scout: 'fixture-scout', coder: 'fixture-coder', qa: 'fixture-qa', reviewer: 'fixture-reviewer', gitfix: 'fixture-gitfix'},
     filter_env: {role: 'LANE_MEMORY_ROLE', name: 'LANE_MEMORY_PROCESS', project: 'LANE_MEMORY_PROJECT'},
     session: {kind: ['guide', 'process', 'rule'], fields: ['title', 'body', 'ends_when'], max_chars: 32768},
     stop: {kind: 'process', field: 'ends_when'},

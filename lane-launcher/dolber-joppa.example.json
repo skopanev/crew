@@ -76,7 +76,9 @@
     "roles": {
       "scout": "crew-lane-scout",
       "coder": "crew-lane-coder",
-      "qa": "crew-lane-qa"
+      "qa": "crew-lane-qa",
+      "reviewer": "crew-lane-reviewer",
+      "gitfix": "crew-lane-gitfix"
     },
     "filter_env": {
       "role": "LANE_MEMORY_ROLE",
@@ -102,6 +104,7 @@
     },
     "query": {
       "kind": "lesson",
+      "filter": {"role": "lane"},
       "filter_env": {
         "project": "LANE_MEMORY_PROJECT"
       },
