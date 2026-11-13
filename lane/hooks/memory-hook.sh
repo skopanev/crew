@@ -3,6 +3,7 @@ set -uo pipefail
 # The lane's memory hook. Self-contained: nothing here reaches into company/.
 #
 #   SessionStart      the contract from Joppa, once, without a query
+#                     (LANE_MEMORY_SESSION=off: the caller supplies the contract)
 #   UserPromptSubmit  retrieval on the user's actual message
 #   PostToolUse     retrieval on what just happened, before the next model call
 #   Stop              the process's own ending text when the signal is missing
@@ -106,6 +107,8 @@ case "$event" in SessionStart|UserPromptSubmit|PostToolUse|PostToolBatch) ;; *) 
 # A lane without its contract must not run: it would work confidently under rules it
 # never read. A missing config, a refused request, a 422 and an empty reply all stop it.
 if [[ "$event" == SessionStart ]]; then
+  # The caller that already put the contract in the prompt turns this read off.
+  [[ "${LANE_MEMORY_SESSION:-on}" != off ]] || quiet
   reply="$(bash "$data" session 2>"$err")" \
     || { emit_fatal "$event" "lane memory: baseline failed: $(cat "$err")"; exit 0; }
   fields="$(block_fields session)"
