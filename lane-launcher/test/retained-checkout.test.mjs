@@ -71,6 +71,9 @@ test('reuse fails closed on any mismatch', async t => {
     await refused(/workflow changed/);
     assert.equal(recordRetained(x.prior, x.artifacts), null);
   }
+  fs.writeFileSync(x.run.workflow.file, bytes.toString().replace("  RETAINED_CHECKOUT_PROTOCOL: '1'\n", '')
+    .replace('defaults:\n', "defaults:\n  RETAINED_CHECKOUT_PROTOCOL: '1'\n"));
+  assert.equal(supportsRetainedCheckout(x.run.workflow.file), false);
   fs.writeFileSync(x.run.workflow.file, bytes); x.run.workflow.digest = workflow.digest;
   x.prior.workflow = workflow; x.savePrior();
   fs.writeFileSync(path.join(x.checkout, 'stray.txt'), 'x');

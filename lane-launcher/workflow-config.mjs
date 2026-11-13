@@ -29,6 +29,8 @@ export function workflowDigest(file = defaultWorkflow) {
 
 // A custom author explicitly declares support for the retained checkout handoff.
 export function supportsRetainedCheckout(file = defaultWorkflow) {
-  const declarations = fs.readFileSync(file, 'utf8').match(/^  RETAINED_CHECKOUT_PROTOCOL:[^\n]*/gm) || [];
+  const blocks = fs.readFileSync(file, 'utf8').split(/^vars:[ \t]*\r?$/m);
+  const vars = blocks.length === 2 ? blocks[1].split(/^\S/m)[0] : '';
+  const declarations = vars.match(/^  RETAINED_CHECKOUT_PROTOCOL:[^\n]*/gm) || [];
   return declarations.length === 1 && /^  RETAINED_CHECKOUT_PROTOCOL:[ \t]+(?:1|'1'|"1")[ \t]*\r?$/.test(declarations[0]);
 }
