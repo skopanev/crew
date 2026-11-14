@@ -25,11 +25,15 @@ The continuous dispatcher still checks for other work.
 Set `joppa.claimRetryDelaysSeconds` to retry a claim after a transport failure, for example `[5, 15, 35]`.
 The list gives the delays and the maximum retry count. Omit it, or use `[]`, for no retries.
 Each delay must be a positive integer that fits a Node.js timer.
+The configured waits keep the lane slot occupied.
 Crew repeats the saved request with the same actor, `request_id` and operations. It never creates a replacement claim request.
 Joppa stores immutable receipts with the transaction. An identical replay returns that receipt instead of applying another mutation.
-The worker still confirms the live Task assignee before startup. Docker does not start during retries.
+The worker confirms the live Task assignee and exact saved revision plus one before startup. Docker does not start during retries.
+An authored Task edit between the claim and readback leaves the claim uncertain. Comments do not change the Task revision.
 User stop cancels the RPC or delay. Application refusals, malformed receipts and maintenance responses do not retry.
-After an earlier transport failure, a later refusal needs readback proving that this run owns none of the Tasks.
+HTTP gateway errors, including 502, 503 and 504, retain the existing uncertain handling.
+After an earlier transport failure, a later refusal needs readback proving every original revision advanced and this run owns no Tasks.
+An unchanged revision cannot rule out a delayed original request, so it remains uncertain.
 Otherwise the claim remains uncertain and reserved. Exhausted retries also retain the existing uncertain state.
 The existing `launch.json` records each failure's time, thrown message and numeric RPC code when available.
 Crew does not store connector stderr or login data. Existing workers keep their saved retry config.

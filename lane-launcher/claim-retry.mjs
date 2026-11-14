@@ -18,6 +18,7 @@ async function noOwnedTasks(run, options) {
       const object = await api(run.config, run.joppaWorker, 'joppa_objects',
         {workspace: run.claimRequest.workspace, address}, options);
       if (object?.address !== address || object.historical !== false || !object.document ||
+          !Number.isSafeInteger(object.current_revision) || object.current_revision <= command.revision ||
           nodeAssignee(object) === command.data.assignee) return false;
     }
     return true;

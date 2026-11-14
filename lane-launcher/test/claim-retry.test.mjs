@@ -77,17 +77,20 @@ test('application refusals, malformed receipts and maintenance RPC errors never 
   }
 });
 
-test('a refusal after ambiguity releases only a confirmed unowned claim', async t => {
-  for (const applied of [false, true]) {
+test('a refusal after ambiguity releases only a superseded and unowned claim', async t => {
+  for (const state of ['committed', 'superseded', 'unchanged']) {
     const f = await retryFixture(t);
-    if (applied) { f.control.after = 1; f.control.refuseReplay = true; }
+    if (state === 'committed') { f.control.after = 1; f.control.refuseReplay = true; }
     else {
       f.control.before = 1;
-      f.control.onDrop = () => f.objects.get('task:t1').current_revision++;
+      f.control.onDrop = () => {
+        if (state === 'superseded') f.objects.get('task:t1').current_revision++;
+        else f.control.reject = true;
+      };
     }
     await assert.rejects(claimTask(f.run, f.persist, f.runId), /unconfirmed after a transport failure|revision changed/);
-    assert.equal(Boolean(f.run.claimRejected), !applied);
-    assert.equal(runHoldsTasks({...f.run, result: {status: 'failed', code: 2}}), applied);
+    assert.equal(Boolean(f.run.claimRejected), state === 'superseded');
+    assert.equal(runHoldsTasks({...f.run, result: {status: 'failed', code: 2}}), state !== 'superseded');
   }
 });
 
