@@ -1,7 +1,7 @@
 // Check dependency delivery before a new worker runs any repository code.
 import {requirementBranch} from './requirement-delivery.mjs';
 import {remoteDependencyBlocker} from './dependencies.mjs';
-import {taskContract} from './task-contract.mjs';
+import {taskContract, taskRepositoryChoice} from './task-contract.mjs';
 import {execFile} from 'node:child_process';
 import path from 'node:path';
 import {quote} from './runtime.mjs';
@@ -88,8 +88,8 @@ export async function guardPublications(run, read, ancestor) {
         let contract;
         try { contract = taskContract(target.document.data); }
         catch (error) { invalid(`Dependency Task contract is invalid: ${target.address}: ${error.message}`); }
-        const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
-        const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
+        let repo;
+        try { repo = taskRepositoryChoice(run.config, target.document.data); } catch { repo = null; }
         if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
         const internal = run.config.delivery === 'requirement' && repo.id === run.repository.id &&
           await requirement(target) === run.requirement;

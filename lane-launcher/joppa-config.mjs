@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {command} from './runtime.mjs';
 import {validateTestReport} from './test-results.mjs';
 import {validateTaskFilter} from './task-filter.mjs';
+import {validateTaskFields} from './task-contract.mjs';
 import {validateClaimRetries} from './claim-retry.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -14,6 +15,7 @@ export function validateJoppa(config) {
   const joppa = config.joppa;
   require(joppa && text(joppa.url), 'Config needs joppa.url');
   validateTaskFilter(config);
+  validateTaskFields(config);
   validateClaimRetries(config);
   const url = new URL(joppa.url);
   require((url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&

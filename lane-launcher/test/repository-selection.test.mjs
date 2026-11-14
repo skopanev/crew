@@ -33,9 +33,41 @@ test('missing Module uses the only module or the whole repository, while explici
     }
   }
   object.document.data = {...original, body: 'Goal: required change\nRepository: app'};
-  assert.throws(() => taskInput(f.config, object), /exactly one Module/);
+  assert.throws(() => taskInput(f.config, object), /module is ambiguous/);
   object.document.data.body += '\nModule: m1\nModule: m2';
-  assert.throws(() => taskInput(f.config, object), /exactly one Module/);
+  assert.throws(() => taskInput(f.config, object), /more than one module/);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('taskFields selects project labels or data paths, and no mapping reads no body label', async t => {
+  const f = await setup(t, {launchLanes: false}), object = f.joppa.objects.get('task:t1');
+  const original = structuredClone(object.document.data), base = structuredClone(f.config);
+  const load = raw => { save(f.configFile, raw); return configFrom(f.configFile, f.env, {dryRun: true}); };
+  const input = (config, data) => { object.document.data = {...original, ...data}; return taskInput(config, object).ticket; };
+  // Without taskFields, line labels are plain text. The sole repository and module apply.
+  const whole = load({...base, taskFields: undefined, repositories: [{...base.repositories[0], modules: undefined}]});
+  assert.equal(input(whole, {body: 'Goal: change\nRepository: other\nModule: unknown'}).module, '.');
+  assert.equal(input(whole, {body: 'Goal: change', steps: ['Make the change.']}).moduleId, 'app');
+  assert.throws(() => input(whole, {body: 'Goal: change', repository: 'other', steps: ['Make the change.']}),
+    /not configured or not unique/);
+  assert.throws(() => input(whole, {body: 'Goal: change', module: 'unknown', steps: ['Make the change.']}),
+    /module is not configured/);
+  const custom = load({...base, taskFields: {repository: 'body:Target repo', module: 'data:scope.module'}});
+  assert.equal(input(custom, {body: 'Goal: change\nTarget repo: app', scope: {module: 'm2'}}).moduleId, 'm2');
+  assert.equal(input(custom, {body: 'Goal: change', scope: {module: 'm1'}}).moduleId, 'm1');
+  assert.throws(() => input(custom, {body: 'Goal: change\nModule: m1'}), /module is ambiguous/);
+  assert.throws(() => input(custom, {body: 'Goal: change', scope: {module: 'm3'}}), /module is not configured/);
+  assert.throws(() => input(custom, {body: 'Goal: change', scope: {module: ['m1']}}), /scope.module must be one line/);
+  assert.throws(() => input(custom, {body: 'Target repo: app\nTarget repo: app', scope: {module: 'm1'}}), /ambiguous/);
+  // A second repository removes the sole choice: selection skips the Task without a read of its parent.
+  const two = {...custom, taskFields: {module: 'data:scope.module'},
+    repositories: [...custom.repositories, {...custom.repositories[0], id: 'other'}]};
+  object.document.data = {...original, body: 'Goal: change', scope: {module: 'm1'}};
+  assert.notEqual((await nextTask(two)).candidate?.id, object.address);
+  assert.throws(() => taskInput(two, object), /not configured or not unique/);
+  for (const taskFields of [{repository: 'Repository'}, {repository: 'body:'}, {module: 'data:a..b'}, {other: 'body:X'}]) {
+    assert.throws(() => load({...base, taskFields}), /taskFields maps repository and module/);
+  }
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
@@ -67,6 +99,8 @@ test('repository selection ignores project membership and does not write Tasks',
 for (const body of ['Goal: no repository', 'Repository: unknown\nModule: unknown']) {
   test(`an unrelated Task is skipped unchanged: ${body.split('\n')[0]}`, async t => {
     const f = await packageFixture(t), task = f.objects.get('task:t1');
+    // With a second repository, a Task without a repository value has no sole choice.
+    f.run.config.repositories.push({...f.run.config.repositories[0], id: 'other'});
     task.document.data.body = body;
     task.document.parent = 'ac:unavailable';
     const before = structuredClone(task);

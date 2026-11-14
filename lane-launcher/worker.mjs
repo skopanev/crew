@@ -141,7 +141,7 @@ try {
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
   const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
     input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,
-      task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})),
+      task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})), taskFields: run.config.taskFields,
         joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
   const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
     source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;

@@ -55,6 +55,8 @@ for (const data of [{body: 'Record a decision.'},
   {body: 'Repository: unknown\nRepository: elsewhere'}]) {
   test(`Requirement delivery skips unrelated sibling scope: ${JSON.stringify(data)}`, async () => {
     const f = fixture(), sibling = f.add('work:unrelated', 'measure:a', 'open');
+    // With a second repository, a Task without a repository value has no sole choice.
+    f.run.config.repositories.push({id: 'other'});
     Object.assign(sibling.document.data, data);
     const before = structuredClone(sibling);
     const plan = await requirementPlan(f.run, f.read);
@@ -67,9 +69,11 @@ for (const data of [{body: 'Record a decision.'},
 test('Requirement delivery refuses ambiguity that includes its repository', async () => {
   const f = fixture(), sibling = f.add('work:ambiguous', 'measure:a', 'open');
   sibling.document.data.body = 'Repository: repo\nRepository: elsewhere';
-  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous Repository/);
+  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous repository: work:ambiguous/);
+  sibling.document.data.body = 'Repository: elsewhere';
   f.objects.get('work:one').document.data.body = 'Goal: missing own repository';
-  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous Repository/);
+  f.run.config.repositories.push({id: 'other'});
+  await assert.rejects(requirementPlan(f.run, f.read), /unambiguous repository: work:one/);
 });
 
 test('compact traversal checks an archived container through its full detail', async () => {

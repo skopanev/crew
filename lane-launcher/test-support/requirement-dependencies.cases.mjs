@@ -29,7 +29,7 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   git(['push', '-q', 'origin', `HEAD:${f.branch}`]);
   f.objects.get('work:two').document.data.commit = sha;
   f.objects.get('work:one').document.links = [{relation: 'depends_on', blocking: true, target: 'work:two'}];
-  const config = {delivery: 'requirement', repositories: [{id: 'repo', path: repo, targetBranch: 'develop'}]};
+  const config = {delivery: 'requirement', taskFields: f.run.config.taskFields, repositories: [{id: 'repo', path: repo, targetBranch: 'develop'}]};
   const run = {...f.run, repository: config.repositories[0], config, requirementDelivery: {branch: f.branch}};
   await publicationReader(config, f.read)(run);
   f.objects.get('work:two').document.present = true;

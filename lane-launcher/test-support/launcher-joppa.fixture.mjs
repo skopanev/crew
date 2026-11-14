@@ -185,7 +185,8 @@ async function packageFixture(t, mode = 'success') {
     session: {kind: ['guide', 'process', 'rule'], fields: ['title', 'body', 'ends_when'], max_chars: 32768},
     stop: {kind: 'process', field: 'ends_when'},
     query: {kind: 'lesson', filter_env: {project: 'LANE_MEMORY_PROJECT'}, fields: ['title', 'body'], limit: 10, max_chars: 32768}};
-  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, joppa: {url: baseUrl,
+  // The fixture Task bodies use explicit legacy line labels.
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, taskFields: {repository: 'body:Repository', module: 'body:Module'}, joppa: {url: baseUrl,
     workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
     modules: [{name: 'm1', path: 'src/a', paths: ['src/a', 'tests/a']}, {name: 'm2', path: 'src/b', paths: ['src/b', 'tests/b']}]}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',

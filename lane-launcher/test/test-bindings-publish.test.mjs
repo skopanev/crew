@@ -26,7 +26,8 @@ function fixture(t, {results = [{test: ONE, outcome: 'pass'}, {test: TWO, outcom
   fs.writeFileSync(path.join(artifacts, 'gates', 'current.json'),
     JSON.stringify({receipt: '/workspace/x/artifacts/gates/f1/receipt.json', sha256: digest(receipt)}));
   fs.writeFileSync(path.join(artifacts, 'landing.txt'), `Landed SHA: ${sha}\nTarget: develop\n`);
-  const run = {workspace: 'ws', requirement: 'req:r', config: {delivery: 'target'},
+  const run = {workspace: 'ws', requirement: 'req:r', config: {delivery: 'target', repositories: [{id: 'app'}],
+    taskFields: {repository: 'body:Repository'}},
     repository: {id: 'app', targetBranch: 'develop', gateCommands: ['bun test'], testReport}};
   const task = {address: 'task:t1', kind: 'task', historical: false, current_revision: 5,
     document: {present: false, parent: 'ac:a1', data: {body: 'Goal: x\nRepository: app', commit: sha,

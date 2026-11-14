@@ -16,8 +16,8 @@ Keep credentials outside every mounted directory.
 ## Execution
 
 Dolber and the planner queue use the same Node.js MCP client. Their queue calls do not start a Python process.
-Dolber selects available Tasks whose `Repository:` declaration matches a configured repository ID.
-Joppa project membership does not filter Tasks. Dolber skips missing or unknown repository declarations without changing the Task.
+Dolber selects available Tasks whose repository resolves to a configured repository ID. See `taskFields` below.
+Joppa project membership does not filter Tasks. Dolber skips unknown or ambiguous repositories without changing the Task.
 It opens a Herdr tab in the current workspace. Its worker claims that exact Task before preflight or Docker.
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
@@ -58,10 +58,20 @@ Computed status can change without a Task revision. This filter does not lock th
 Existing dependency and contract guards still apply. The filter grants no write access and does not change Task data.
 Local revision pins must be positive integers. Remote dependencies retain their access and revision checks.
 
-The Task contract must declare exactly one `Repository:` line.
-Omit `Module:` when the repository has one configured module. Crew uses that module.
+Set `taskFields` to tell Crew where a Task names its repository and module. Crew has no default label:
+
+```json
+{"taskFields": {"repository": "body:Repository", "module": "data:scope.module"}}
+```
+
+`body:<label>` reads each body line that starts with `<label>:`. `data:<field.path>` reads one text field of the Task data.
+A structured Task also declares its own `repository` and `module` fields. They are optional.
+Without a value, Crew uses the sole configured repository, then the sole module of that repository.
+With several choices and no value, the queue skips the Task and the claim refuses it.
+An explicit value must name a configured repository or module. Two values for one field are refused.
+A Task that names only an unknown repository belongs to another dispatcher and is skipped.
 Omit the repository's `modules` config to use the whole repository, with its repository ID as the module name.
-An explicit `Module:` must name a configured module. Several modules require exactly one `Module:` line.
+Selection, claim, Requirement delivery and the dependency guard use the same resolver.
 Module paths remain inside the selected repository.
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
 The snapshot includes the direct parent as acceptance context. The Task contract defines the execution scope.
@@ -127,6 +137,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
+| `taskFields` | Optional `repository` and `module` sources: `body:<line label>` or `data:<field.path>` |
 | `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |

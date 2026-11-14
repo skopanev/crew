@@ -88,7 +88,7 @@ export async function requirementPlan(run, read) {
     const status = taskStatus(current);
     require(status !== 'done' && status !== 'retired', `Current run Task is already ${status}: ${address}`);
     require(await requirementAncestor(current, true) === requirement, `Current run Task belongs to a different requirement: ${address}`);
-    require(taskRepository(current, types) === repository, `Current run Task belongs to a different repository: ${address}`);
+    require(taskRepository(current, types, undefined, run.config) === repository, `Current run Task belongs to a different repository: ${address}`);
     await remember(current);
     manifestByAddress.set(address, {address, revision: current.current_revision, status: 'finishing', finishing: true});
     requirementTasksByAddress.set(address, taskRecord(current, status, true));
@@ -104,7 +104,7 @@ export async function requirementPlan(run, read) {
       }
       const current = await object(item.address);
       require(current.current_revision === item.revision, `Task changed while reading delivery state: ${item.address}`);
-      if (taskRepository(current, types, repository) !== repository) continue;
+      if (taskRepository(current, types, repository, run.config) !== repository) continue;
       if (await requirementAncestor(current, false) !== requirement) continue;
       const status = taskStatus(current);
       requirementTasksByAddress.set(current.address, taskRecord(current, status, false));

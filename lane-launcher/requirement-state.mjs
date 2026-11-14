@@ -1,6 +1,6 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
-import {repositoryDeclarations} from './task-contract.mjs';
+import {taskRepositoryChoice} from './task-contract.mjs';
 import {nodeAssignee, nodeHold, nodeWaiting} from './joppa-nodes.mjs';
 
 export const require = (condition, message) => {
@@ -113,13 +113,15 @@ export async function collectRequirementCriteria(requirement, requirementKind, t
   return criteriaByAddress;
 }
 
-export function taskRepository(value, types, expected) {
+// The same repository resolver as selection and claim. Another repository gives null when expected is set.
+export function taskRepository(value, types, expected, config) {
   require(types[value.kind]?.role === 'task', `Object is not a Task: ${value.address}`);
-  const declarations = repositoryDeclarations(value.document.data);
-  if (expected && !declarations.includes(expected)) return null;
-  require(declarations.length === 1 && Boolean(declarations[0]) && !/\s/.test(declarations[0]),
-    `Task needs an unambiguous Repository line: ${value.address}`);
-  return declarations[0];
+  let repo;
+  try { repo = taskRepositoryChoice(config, value.document.data); }
+  catch (error) { throw new Error(`Task needs an unambiguous repository: ${value.address}: ${error.message}`); }
+  if (expected && repo?.id !== expected) return null;
+  require(repo, `Task needs an unambiguous repository: ${value.address}`);
+  return repo.id;
 }
 export const taskStatus = value => {
   if (value.document.present === false) {

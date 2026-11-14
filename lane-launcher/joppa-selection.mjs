@@ -3,7 +3,7 @@ import {api, claimTasks, runTasks, hasRecoveryCheckpoint} from './joppa-common.m
 import {readDetails} from './joppa-api.mjs';
 import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {repositoryDeclarations} from './task-contract.mjs';
+import {taskRepositoryChoice} from './task-contract.mjs';
 import {taskInput} from './joppa-input.mjs';
 import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
@@ -67,11 +67,11 @@ export async function occupancyReader(config, read) {
   const group = async (address, allowArchived = false) => {
     const current = await object(address, {allowArchived: true});
     if (!allowArchived && current.document.present !== true) return null;
-    const declarations = repositoryDeclarations(current.document.data);
-    const configured = declarations.filter(id => config.repositories.some(repo => repo.id === id));
-    if (!configured.length) return null;
-    check(declarations.length === 1, 'Task repository declaration is ambiguous');
-    const repository = configured[0], seen = new Set();
+    let choice;
+    try { choice = taskRepositoryChoice(config, current.document.data); }
+    catch (error) { check(false, error.message); }
+    if (!choice) return null;
+    const repository = choice.id, seen = new Set();
     let parent = current.document.parent;
     while (parent) {
       check(!seen.has(parent), 'Task parent context contains a cycle');
@@ -133,8 +133,9 @@ export async function nextTask(config) {
     let workerHeld = 0;
     for (const task of assigned) {
       const current = await object(task.address, {allowArchived: true});
-      if (current.document.present && repositoryDeclarations(current.document.data)
-        .some(id => config.repositories.some(repo => repo.id === id))) workerHeld++;
+      if (!current.document.present) continue;
+      // An ambiguous declaration that names one of these repositories still occupies it.
+      try { if (taskRepositoryChoice(config, current.document.data)) workerHeld++; } catch { workerHeld++; }
     }
     held = Math.max(held, workerHeld);
     let coversOf;

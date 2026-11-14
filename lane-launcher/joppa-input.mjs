@@ -1,5 +1,5 @@
 import {contractDigest, executionId} from './joppa-common.mjs';
-import {taskContract, taskBody} from './task-contract.mjs';
+import {taskContract, taskBody, taskRepositoryChoice, taskModuleChoice} from './task-contract.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -100,17 +100,11 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   require(object.document?.present === true && object.historical === false, 'Joppa Task is absent or historical');
   const data = object.document.data;
   const contract = taskContract(data);
-  const field = name => {
-    const matches = [...contract.matchAll(new RegExp(`^${name}:[ \\t]*(\\S[^\\r\\n]*)$`, 'gm'))];
-    require(matches.length === 1, `Task contract needs exactly one ${name}: line`);
-    return matches[0][1].trim();
-  };
-  const repo = config.repositories.find(repo => repo.id === field('Repository'));
-  require(repo, 'Task repository is not configured');
-  const module = repo.modules.length === 1 && !/^Module:/m.test(contract) ? repo.modules[0].name : field('Module');
-  const configuredModule = repo.modules.find(item => item.name === module);
-  const modulePath = configuredModule?.path;
-  require(modulePath, 'Task module is not configured');
+  // Selection, claim and delivery share this resolver. An unknown or several possible repositories stop here.
+  const repo = taskRepositoryChoice(config, data);
+  require(repo, 'Task repository is not configured or not unique');
+  const configuredModule = taskModuleChoice(config, repo, data);
+  const module = configuredModule.name, modulePath = configuredModule.path;
   const modulePaths = configuredModule.paths || [modulePath];
   const recovery = config.discardFailedWorktree === true ? null : latestRecovery(config, object, contractDigest(object), contexts);
   return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,

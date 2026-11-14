@@ -61,7 +61,7 @@ function fixture() {
     throw new Error(`Unexpected read ${tool}`);
   };
   const run = {requirement: 'spec:r', repository: 'repo', tasks: [{address: 'work:one', revision: 1}],
-    config: {repositories: [{id: 'repo'}]}};
+    config: {repositories: [{id: 'repo'}], taskFields: {repository: 'body:Repository', module: 'body:Module'}}};
   return {objects, add, read, run, branch};
 }
 
