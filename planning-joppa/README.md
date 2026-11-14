@@ -41,6 +41,7 @@ The host combines a selected-object save with the claim release. Archiving the s
 Without either operation, the host adds a partial claim release to the same batch.
 Native data merges preserve unspecified fields. The host refuses moves, whole-document replacements and assignee changes.
 It rechecks the schema, references, child membership, revisions and claim before publication.
+Reference reads precede the batch. A reference edit inside this interval is not part of the batch revision guard.
 An uncertain write retains its receipt and requires recovery. A workflow result never proves acceptance.
 A finished run records the revision it left, so its own claim release does not cause another automatic attempt.
 Edit the selected node or remove that run after receipt recovery to permit another attempt at unchanged work.
