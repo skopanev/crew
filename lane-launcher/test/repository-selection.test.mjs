@@ -48,9 +48,14 @@ test('taskFields selects project labels or data paths, and no mapping reads no b
   const whole = load({...base, taskFields: undefined, repositories: [{...base.repositories[0], modules: undefined}]});
   assert.equal(input(whole, {body: 'Goal: change\nRepository: other\nModule: unknown'}).module, '.');
   assert.equal(input(whole, {body: 'Goal: change', steps: ['Make the change.']}).moduleId, 'app');
-  assert.throws(() => input(whole, {body: 'Goal: change', repository: 'other', steps: ['Make the change.']}),
+  // Unmapped structured scope fields are ignored, and the contract does not render them.
+  const ignored = input(whole, {body: 'Goal: change', repository: 'other', module: 'unknown', steps: ['Make the change.']});
+  assert.deepEqual([ignored.repository, ignored.moduleId, ignored.body], ['app', 'app', 'Goal: change\n\nHow:\n1. Make the change.']);
+  const mapped = load({...base, taskFields: {repository: 'data:repository', module: 'data:module'},
+    repositories: [{...base.repositories[0], modules: undefined}]});
+  assert.throws(() => input(mapped, {body: 'Goal: change', repository: 'other', steps: ['Make the change.']}),
     /not configured or not unique/);
-  assert.throws(() => input(whole, {body: 'Goal: change', module: 'unknown', steps: ['Make the change.']}),
+  assert.throws(() => input(mapped, {body: 'Goal: change', module: 'unknown', steps: ['Make the change.']}),
     /module is not configured/);
   const custom = load({...base, taskFields: {repository: 'body:Target repo', module: 'data:scope.module'}});
   assert.equal(input(custom, {body: 'Goal: change\nTarget repo: app', scope: {module: 'm2'}}).moduleId, 'm2');
@@ -129,6 +134,7 @@ test('held Tasks count only configured repositories regardless of project member
 
 test('unrelated structured contracts do not need executable steps or checks', async t => {
   const f = await packageFixture(t), task = f.objects.get('task:t1');
+  f.run.config.taskFields = {repository: 'data:repository', module: 'body:Module'};
   Object.assign(task.document.data, {body: 'External work', repository: 'unknown', steps: [], checks: []});
   task.document.parent = 'ac:unavailable';
   for (const assignee of [undefined, 'another-run']) {

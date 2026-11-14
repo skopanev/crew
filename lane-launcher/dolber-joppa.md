@@ -65,7 +65,7 @@ Set `taskFields` to tell Crew where a Task names its repository and module. Crew
 ```
 
 `body:<label>` reads each body line that starts with `<label>:`. `data:<field.path>` reads one text field of the Task data.
-A structured Task also declares its own `repository` and `module` fields. They are optional.
+Structured Tasks follow the same mapping. Unmapped `repository` or `module` fields are ignored and are not rendered.
 Without a value, Crew uses the sole configured repository, then the sole module of that repository.
 With several choices and no value, the queue skips the Task and the claim refuses it.
 An explicit value must name a configured repository or module. Two values for one field are refused.

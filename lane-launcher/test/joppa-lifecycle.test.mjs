@@ -50,8 +50,9 @@ test('claim shows the coder the live tests of its criterion and accepts a struct
   node('check:gone', 'ac:a1', {title: 'suite > archived'}, false);
   node('check:other', 'ac:a2', {title: 'other > case'});
   // A structured Task with steps and no checks, and no acceptance rows: no Crew bindings.
-  f.objects.get('task:t2').document.data = {title: '[02] Task 2', body: 'Goal: scoped change 2',
-    repository: 'app', module: 'm2', steps: ['Make the change.']};
+  // Its unmapped repository and module fields do not appear in the rendered contract.
+  f.objects.get('task:t2').document.data = {title: '[02] Task 2', body: 'Goal: scoped change 2\nModule: m2',
+    repository: 'other', module: 'm1', steps: ['Make the change.']};
   await claimTask(f.run, f.persist, f.runId);
   const [one, two] = f.run.claim.tasks.map(task => task.ticket);
   assert.equal(one.acceptanceTests.length, 26);
@@ -61,7 +62,8 @@ test('claim shows the coder the live tests of its criterion and accepts a struct
     {address: 'check:c2', revision: 2, title: 'suite > case 2'});
   assert(!one.acceptanceTests.some(test => test.address === 'check:gone'));
   assert.deepEqual(two.acceptanceTests, [{address: 'check:other', revision: 2, title: 'other > case'}]);
-  assert.equal(two.body, 'Goal: scoped change 2\n\nRepository: app\nModule: m2\n\nHow:\n1. Make the change.');
+  assert.equal(two.body, 'Goal: scoped change 2\nModule: m2\n\nHow:\n1. Make the change.');
+  assert.equal(two.moduleId, 'm2');
   assert.equal(two.testAcceptance, undefined);
   // Reading tests writes nothing: the claim is the only batch.
   assert.equal(batches(f).length, 1);

@@ -14,23 +14,20 @@ export function validateTaskFields(config) {
   'taskFields maps repository and module to "body:<line label>" or "data:<field.path>"');
 }
 
-// The values that a Task declares for one scope field. A structured Task also declares its own field.
+// The values that a Task declares for one scope field. taskFields is the only source, also for structured Tasks.
 function declared(config, data, name) {
-  const spec = config?.taskFields?.[name], values = [];
-  const body = taskBody(data);
-  if (spec?.startsWith('body:') && typeof body === 'string') {
+  const spec = config?.taskFields?.[name], body = taskBody(data);
+  if (spec?.startsWith('body:')) {
+    if (typeof body !== 'string') return [];
     const label = spec.slice(5).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    values.push(...[...body.matchAll(new RegExp(`^${label}:[ \\t]*([^\\r\\n]*)$`, 'gm'))].map(match => match[1].trim()));
+    return [...body.matchAll(new RegExp(`^${label}:[ \\t]*([^\\r\\n]*)$`, 'gm'))].map(match => match[1].trim());
   }
-  const paths = [...(spec?.startsWith('data:') ? [spec.slice(5)] : []),
-    ...(Object.hasOwn(data || {}, 'steps') && spec !== `data:${name}` ? [name] : [])];
-  for (const path of paths) {
-    const value = path.split('.').reduce((item, key) => item && Object.hasOwn(item, key) ? item[key] : undefined, data);
-    if (value === undefined || value === null) continue;
-    require(typeof value === 'string' && !/[\r\n]/.test(value), `Task field ${path} must be one line of text`);
-    values.push(value.trim());
-  }
-  return values;
+  if (!spec) return [];
+  const path = spec.slice(5);
+  const value = path.split('.').reduce((item, key) => item && Object.hasOwn(item, key) ? item[key] : undefined, data);
+  if (value === undefined || value === null) return [];
+  require(typeof value === 'string' && !/[\r\n]/.test(value), `Task field ${path} must be one line of text`);
+  return [value.trim()];
 }
 
 // One of this config's repositories, or null for a Task of another repository or with several possible repositories.
@@ -59,15 +56,12 @@ export function taskContract(data) {
   const body = taskBody(data);
   require(text(body), 'Task needs an implementation contract');
   if (!Object.hasOwn(data, 'steps')) return body;
-  const scope = SCOPE.filter(key => data[key] !== undefined);
-  for (const key of scope) require(text(data[key]) && !/[\r\n]/.test(data[key]), `Structured Task needs ${key}`);
   require(Array.isArray(data.steps) && data.steps.length && data.steps.every(text), 'Structured Task needs steps');
   // Checks are optional: a Task without them is verified by the tests of its criterion.
   const checks = data.checks ?? [];
   require(Array.isArray(checks) && checks.every(text), 'Structured Task checks must be text lines');
-  const labels = {repository: 'Repository', module: 'Module'};
-  const steps = [...data.steps], lines = [body, '', ...scope.map(key => `${labels[key]}: ${data[key]}`),
-    ...(scope.length ? [''] : []), 'How:'];
+  // The rendered contract shows the authored body, steps and checks. Scope comes from taskFields, not from here.
+  const steps = [...data.steps], lines = [body, '', 'How:'];
   if (steps[0].startsWith('0. ')) lines.push(steps.shift());
   lines.push(...steps.map((step, index) => `${index + 1}. ${step.replace(/^\s*\d+\.\s+/, '')}`));
   if (checks.length) lines.push('', 'Checks:', ...checks);

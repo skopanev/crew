@@ -12,7 +12,7 @@ test('Task rendering reads full body and keeps historical contracts readable', (
   const structured = {body: 'Goal: output', repository: 'service', module: 'core',
     steps: ['Reuse the mechanism.'], checks: ['Required output']};
   const before = structuredClone(structured);
-  assert.equal(taskContract(structured), body);
+  assert.equal(taskContract(structured), 'Goal: output\n\nHow:\n1. Reuse the mechanism.\n\nChecks:\nRequired output');
   assert.deepEqual(structured, before);
   assert.throws(() => taskContract({body: '', contract: body}), /implementation contract/);
   assert.throws(() => taskContract({body: null, contract: body}), /implementation contract/);

@@ -119,6 +119,7 @@ test('Joppa planner reads all compact pages and uses native criterion tones', as
 
 test('Joppa selects structured Tasks and detects their remote repository holders', async t => {
   const f = await packageFixture(t);
+  f.run.config.taskFields = {repository: 'data:repository', module: 'data:module'};
   for (const index of [1, 2]) Object.assign(f.objects.get(`task:t${index}`).document.data, {
     body: `Goal: scoped change ${index}`, repository: 'app', module: `m${index}`,
     steps: ['Implement the scoped change.'], checks: [`Exercise the change => exact check ${index}`]});

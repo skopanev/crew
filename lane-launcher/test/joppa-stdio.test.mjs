@@ -22,8 +22,12 @@ ops=fixture.publication.operations(value,fixture.assignment())
 data=ops[0]['command']['data']
 print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
 `;
-  const {data, body} = JSON.parse(execFileSync(process.env.PLANNING_PYTHON || 'python3', ['-c', source, folder], {encoding: 'utf8'}));
+  let {data, body} = JSON.parse(execFileSync(process.env.PLANNING_PYTHON || 'python3', ['-c', source, folder], {encoding: 'utf8'}));
   assert([...body].length > 1024);
+  // The planner renders its repository and module lines. The lane renders only body, steps and checks.
+  const planned = body;
+  body = planned.replace(/^Repository: service\nModule: core\n\n/m, '');
+  assert.notEqual(body, planned);
   assert.equal(taskContract(data), body);
   const object = {address: 'work:one', historical: false, current_revision: 1,
     document: {present: true, parent: 'criterion:a', links: [], data}};
@@ -39,7 +43,7 @@ print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
     ticket_id: ticket.id, project_name: 'sample'}});
   assert.equal(JSON.parse(fs.readFileSync(path.join(artifacts, 'ticket.json'), 'utf8')).body, body);
   assert.equal(taskContract({contract: body}), body);
-  for (const bad of [{...data, steps: null}, {...data, repository: ' '}, {...data, checks: ['Check', ' ']},
+  for (const bad of [{...data, steps: null}, {...data, checks: ['Check', ' ']},
                      {...data, checks: 'Check'}]) {
     assert.throws(() => taskContract(bad), /Structured Task/);
   }
