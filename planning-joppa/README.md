@@ -1,5 +1,50 @@
 # Joppa planning
 
+An explicit `workflow` selects a configured Medulla flow through this same dispatcher.
+Without this field, the bundled Requirement planner keeps its existing behavior.
+For the configured path, use:
+
+```sh
+sh ./lane-launcher/planner-joppa.sh /absolute/path/to/flow.json
+sh ./lane-launcher/planner-joppa.sh /absolute/path/to/flow.json --item-id ac:criterion-id --dry-run
+```
+
+Set these fields in the flow config:
+
+- `workflow`: the absolute path to a Medulla `workflow.yaml`.
+- `selection`: native Joppa filters, including `kind`. Optional `order` lists `{field, direction}` entries.
+- `exclude_children`: an optional native filter for direct children that exclude a selected item.
+- `references`: selected data reference fields to read. Optional `children` supplies a native direct-child query.
+- `publication`: `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Pass workflow models and stages through `vars`.
+
+The dispatcher adds no stage, hold, Task, Requirement or dependency selection rule to this path.
+The configured filter decides eligibility. The existing claim prevents two flows from editing the same selected object.
+The host loads the configured live role contracts from `context.roles`.
+It does not require repositories or CBM for a flow that does not use them.
+The workflow controls its stages, model calls, review decisions and revision loop.
+Writer is the first bundled example in [writer](../writer/README.md).
+
+The workflow calls `flow_stages.py` through the supplied `CREW_FLOW_STAGES` variable.
+`prepare` emits `assignment` and each configured `<role>_contract`.
+The assignment contains the full `selected` object, `claim_revision`, configured references, children and schema.
+`capture NAME` stores the final agent JSON in `artifacts/NAME.json` and emits the matching variable and `CAPTURED` signal.
+Use a distinct name for each parallel input. A hyphen becomes an underscore in the variable name.
+`publish` reads the configured publication file from the artifacts directory and sends one native Joppa batch.
+`fail` records a short note and releases the claim. It preserves stages, holds and all other business fields.
+
+The publication file contains `{ "operations": [{ "command": { "op": "save_object", "...": "..." } }] }`.
+The host supports declared `save_object`, `archive_object` and `note` operations.
+New objects must use a configured creation kind and belong to the selected object.
+Updates must use a configured update kind and target the selected object or a captured direct child.
+Every update uses its captured revision. For the selected object, use `assignment.claim_revision`.
+The host combines a selected-object save with the claim release. Archiving the selected object ends that claim.
+Without either operation, the host adds a partial claim release to the same batch.
+Native data merges preserve unspecified fields. The host refuses moves, whole-document replacements and assignee changes.
+It rechecks the schema, references, child membership, revisions and claim before publication.
+An uncertain write retains its receipt and requires recovery. A workflow result never proves acceptance.
+A finished run records the revision it left, so its own claim release does not cause another automatic attempt.
+Edit the selected node or remove that run after receipt recovery to permit another attempt at unchanged work.
+
 Status: live publication and lane completion passed before native context reads were added.
 Native reads pass on four providers. Full native planning publication remains unverified.
 Whole-Requirement planning uses generic node operations: `save_object` and `archive_object`.

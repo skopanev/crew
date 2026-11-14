@@ -63,7 +63,7 @@ def main():
     parser = argparse.ArgumentParser(description="Plan one Joppa criterion in a separate Medulla workflow.")
     parser.add_argument("--config", required=True)
     scope = parser.add_mutually_exclusive_group(required=True)
-    scope.add_argument("--ac-id", help="criterion address or ID when its schema type is unique")
+    scope.add_argument("--ac-id", "--item-id", dest="ac_id", help="selected object address or criterion ID")
     scope.add_argument("--req-id", help="Requirement address or ID when its schema type is unique")
     parser.add_argument("--dry-run", action="store_true", help="validate the config and show the command without MCP, agents or writes")
     args = parser.parse_args()
@@ -75,6 +75,10 @@ def main():
         print("planning-joppa: planner config changed after the dispatcher selected this pass; "
               "no claim was made, the next check reloads it", file=sys.stderr)
         return HANDOFF_CHANGED
+    if json.loads(raw).get("workflow"):
+        from flow_launch import launch
+        require(not args.req_id, "configured workflows use --item-id")
+        return launch(path, raw, args.ac_id, args.dry_run)
     config = context.configuration(path, raw)
     workflow = Path(__file__).resolve().parent
     variables = {"PLANNING_JOPPA_CONFIG": str(path), "PLANNING_JOPPA_CONFIG_DIGEST": digest(config),
