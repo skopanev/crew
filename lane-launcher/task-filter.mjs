@@ -1,16 +1,17 @@
-// Joppa evaluates the filter. Crew keeps the workspace, Task kinds and pagination under its control.
+// Joppa evaluates the filter. Crew keeps the workspace, node kinds and pagination under its control.
 import {taskPages} from './joppa-nodes.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const keys = new Set(['data', 'parent', 'depth', 'status', 'owner', 'assignee']);
 
-export function validateTaskFilter(config) {
-  const filter = config.joppa?.filter;
+export function validateNodeFilter(filter, label = 'joppa.filter') {
   if (filter === undefined) return;
   if (!object(filter) || Object.keys(filter).some(key => !keys.has(key)) ||
       Object.hasOwn(filter, 'data') && !object(filter.data)) {
-    throw new Error('joppa.filter must contain only native data, parent, depth, status, owner or assignee filters; data must be an object');
+    throw new Error(`${label} must contain only native data, parent, depth, status, owner or assignee filters; data must be an object`);
   }
 }
+
+export const validateTaskFilter = config => validateNodeFilter(config.joppa?.filter);
 
 // The revision from the filtered list must match the revision used by the claim save.
 export async function filteredTasks(config, read, wanted) {
