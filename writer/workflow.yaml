@@ -30,6 +30,8 @@ nodes:
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
+      # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
+      [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
     on_signal:
       PREPARED: author
@@ -83,7 +85,9 @@ nodes:
       if jq -e --arg test "$TEST_KIND" --arg task "$TASK_KIND" --arg waiting "$WAITING_STAGE" \
         --slurpfile input "$a/input.json" '
         $input[0] as $in | ($in.schema.types[$test] // {}) as $type | ($in.schema.test_results // {}) as $rules |
-        ($type.fields // {}) as $fields | ($type.required_fields // {} | keys) as $required |
+        # required_fields is an object keyed by field or a list of field names.
+        ($type.fields // {}) as $fields |
+        ($type.required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end) as $required |
         ([$in.children[]? | select(.kind == $test) | .document.data.title]) as $existing |
         ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting)] | length) as $tasks |
         def fits($limit): $limit == null or length <= $limit;
@@ -184,7 +188,9 @@ nodes:
           ((.tests | map(.id) | sort) == $ids) and all(.tests[]; .score | type == "string" and test("^[01]{5}$")) and
           (.coverage == "complete" or .coverage == "incomplete");
         def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete";
-        (if ($in.schema.types[$test].required_fields // {} | has("owner")) and $in.selected.document.data.owner
+        ($in.schema.types[$test].required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end)
+          as $required |
+        (if ($required | index("owner")) != null and $in.selected.document.data.owner
          then {owner: $in.selected.document.data.owner} else {} end) as $owner |
         if all($reviews[]; clean) then {approved: true, operations: (
           [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
