@@ -32,7 +32,16 @@ nodes:
       done
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
-      exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
+      "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
+      # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
+      # input.json stays complete: review_join reads the waiting Tasks from it.
+      view="$(jq -c --arg test "$TEST_KIND" '
+        ([.selected.kind, $test] + [.references[]?[]?.kind]) as $kinds |
+        del(.help, .claim_revision) | .children |= map(select(.kind == $test)) |
+        .schema.types |= with_entries(select(.key as $kind | $kinds | index($kind) != null))' \
+        "$MEDULLA_RUN_DIR/artifacts/input.json")"
+      case "$view" in *'</signal:var>'*) echo 'writer: reserved signal delimiter in the assignment' >&2; exit 1;; esac
+      printf '<signal:var key=writer_assignment>%s</signal:var>\n' "$view"
     on_signal:
       PREPARED: author
       BLOCKED: __exit_fail__
@@ -68,7 +77,7 @@ nodes:
       The critics score each Test with the questions of this contract:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
-      Assignment: {{var:assignment}}
+      Assignment: {{var:writer_assignment}}
       Your previous draft (empty in the first round): {{var:draft}}
       Critic findings on your previous draft (empty in the first round): {{var:critique}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
@@ -163,7 +172,7 @@ nodes:
       Mandatory role contract:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
-      Assignment: {{var:assignment}}
+      Assignment: {{var:writer_assignment}}
       Draft digest: {{var:draft_digest}}
       Frozen draft: {{var:draft}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
@@ -187,7 +196,8 @@ nodes:
         def valid: type == "object" and .draft_digest == $digest and (.tests | type == "array") and
           ((.tests | map(.id) | sort) == $ids) and all(.tests[]; .score | type == "string" and test("^[01]{5}$")) and
           (.coverage == "complete" or .coverage == "incomplete");
-        def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete";
+        def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete" and
+          (.missing | type == "array" and length == 0);
         ($in.schema.types[$test].required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end)
           as $required |
         (if ($required | index("owner")) != null and $in.selected.document.data.owner

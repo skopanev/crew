@@ -10,7 +10,8 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
 ## Flow
 
 1. `prepare` checks the required vars. The shared flow stage reads the selected item, its references and its direct children, and claims the item.
-2. `author` drafts the new Tests. It sees the assignment, the author contract and the critic questions.
+2. `author` drafts the new Tests. It sees the selected item, its references, its existing Tests, the author contract and the critic questions.
+   Task children stay out of the agent view. The host uses them only to publish the Task stage.
 3. `draft_check` checks the draft against the native Test schema. It records the digest of the exact draft bytes.
 4. `critics` runs two independent seats from different vendors in parallel. Each seat scores every Test and the coverage.
 5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
