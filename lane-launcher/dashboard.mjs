@@ -79,19 +79,21 @@ function reasonFor(run) {
   return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
-export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE'} = {}) {
+export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE', finished = false} = {}) {
   const width = Math.max(1, process.stdout.columns || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
   const statusWidth = Math.min(8, Math.max(6, ...recent.map(row => row.status.length)));
   const length = value => Array.from(plain(value || '')).length;
   const ticketWidth = identityWidth || Math.max(length(identityLabel), ...recent.map(row => length(row.ticket)));
-  const started = row => {
-    const date = new Date(row.start);
+  const localTime = value => {
+    const date = new Date(value);
     return Number.isFinite(date.valueOf()) ? startFormat.format(date) : '—';
   };
   let columns = [
-    {key: 'started', label: 'STARTED', width: 19, value: started},
+    {key: 'started', label: 'STARTED', width: 19, value: row => localTime(row.start)},
+    ...(finished ? [{key: 'finished', label: 'FINISHED', width: 19,
+      value: row => row.active || !row.end ? '' : localTime(row.end)}] : []),
     {key: 'ticket', label: identityLabel, width: ticketWidth, value: row => row.ticket},
     ...(recent.some(row => row.title) ? [{key: 'title', label: titleLabel,
       width: Math.min(60, Math.max(length(titleLabel), ...recent.map(row => length(row.title)))), value: row => row.title || ''}] : []),
@@ -101,7 +103,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     {key: 'time', label: 'ELAPSED', width: 8, value: row => duration(row.start, row.end || Date.now())},
   ];
   const tableWidth = () => columns.reduce((total, column) => total + column.width, 2 * (columns.length - 1));
-  for (const key of ['title', 'started', 'run', 'stage']) {
+  for (const key of ['finished', 'title', 'started', 'run', 'stage']) {
     if (tableWidth() <= width) break;
     columns = columns.filter(column => column.key !== key);
   }
@@ -191,7 +193,7 @@ export function createDashboard(config, paint) {
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
-    output.push(...renderRunTable(rows, paint, 7 + footer.length));
+    output.push(...renderRunTable(rows, paint, 7 + footer.length, {finished: true}));
     output.push(...footer);
     output.push(stopped ? 'Stopped' : config.monitorOnly ? 'Dispatch paused · Ctrl+C to close' : left == null ? 'Checking tickets · Ctrl+C to stop' :
       `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);
