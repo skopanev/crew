@@ -2,6 +2,9 @@
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeWaiting, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
+import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
 export function criterionIds(config) {
   const ids = config.ac_ids;
@@ -129,4 +132,75 @@ export async function readyRequirements(config, tokenFile, signal) {
   if (!candidates.length) return [];
   return groupRequirements(candidates, (tool, args) => api({joppa: {url: config.url, mcpCommand: config.mcp_command}}, {tokenFile}, tool,
     {workspace: config.workspace, ...args}, {signal}));
+}
+
+// A configured flow selects with native Joppa filters only. Crew adds no stage, hold, assignee, Task or Requirement rule.
+export function flowSettings(config) {
+  if (config.workflow === undefined) return null;
+  if (typeof config.workflow !== 'string' || !config.workflow.trim()) throw new Error('workflow must name a Medulla workflow.yaml file');
+  if (config.ac_ids !== undefined || config.covers_reference !== undefined) {
+    throw new Error('ac_ids and covers_reference apply only to the planner flow without workflow');
+  }
+  const {kind, ...selection} = object(config.selection) ? config.selection : {};
+  if (!object(config.selection) || kind === undefined || !kindList(kind) || ![kind].flat().length) {
+    throw new Error('selection needs a native kind and optional native filters');
+  }
+  validateNodeFilter(selection, 'selection');
+  const exclude = config.exclude_children;
+  if (exclude !== undefined) {
+    const {kind: childKind, ...filters} = object(exclude) ? exclude : {};
+    if (!object(exclude) || !kindList(childKind) || 'parent' in filters || 'depth' in filters) {
+      throw new Error('exclude_children needs native child filters without parent or depth');
+    }
+    validateNodeFilter(filters, 'exclude_children');
+  }
+  const order = config.order ?? [];
+  if (!Array.isArray(order) || order.some(item => !object(item) || Object.keys(item).sort().join() !== 'direction,field' ||
+      typeof item.field !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(item.field) ||
+      !['asc', 'desc'].includes(item.direction))) {
+    throw new Error('order must list {field, direction} with direction asc or desc');
+  }
+  return {selection: config.selection, exclude: exclude ?? null, order};
+}
+
+const compare = order => (a, b) => {
+  for (const {field, direction} of order) {
+    const left = a[field] ?? null, right = b[field] ?? null;
+    if (left === right) continue;
+    if (left === null || right === null) return left === null ? 1 : -1;
+    const result = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right));
+    if (result) return direction === 'desc' ? -result : result;
+  }
+  return a.address.localeCompare(b.address);
+};
+
+// One pass takes the first ordered item that skip() allows and that has no excluded direct child.
+export async function nextConfiguredItem(config, tokenFile, signal, skip = () => false) {
+  const flow = flowSettings(config);
+  const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
+  const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
+  const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...flow.order.map(item => item.field)])];
+  const rows = [], seen = new Set();
+  for await (const page of nodePages(read, {...flow.selection, fields})) {
+    for (const row of page.items) {
+      if (typeof row.address !== 'string' || !row.address.includes(':') || !Number.isSafeInteger(row.revision) || row.revision < 1) {
+        throw new Error('Configured selection returned an item without a full address or revision');
+      }
+      if (seen.has(row.address)) continue;
+      seen.add(row.address);
+      rows.push({...row, title: row.title || row.address, attemptKey: JSON.stringify([row.address, row.revision])});
+    }
+  }
+  rows.sort(compare(flow.order));
+  for (const row of rows) {
+    if (skip(row)) continue;
+    let excluded = false;
+    if (flow.exclude) {
+      for await (const page of nodePages(read, {...flow.exclude, parent: row.address, depth: 1, fields: ['parent']})) {
+        if ((excluded = page.items.some(item => item.parent === row.address))) break;
+      }
+    }
+    if (!excluded) return {count: rows.length, next: row};
+  }
+  return {count: rows.length, next: null};
 }

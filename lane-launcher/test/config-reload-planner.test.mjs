@@ -5,6 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {configReloader} from '../config-reload.mjs';
+import {plannerConfig} from '../../planning-joppa/planner-config.mjs';
+import {plannerRows} from '../../planning-joppa/run-rows.mjs';
+import {nextConfiguredItem} from '../../planning-joppa/queue.mjs';
 import {pause, plannerFixture} from '../test-support/config-reload.fixture.mjs';
 
 const count = (text, pattern) => (text.match(pattern) || []).length;
@@ -132,4 +135,43 @@ test('a genuine pass failure stays attempted', async t => {
   await run.until(output => count(output, /Requirements: 1 ready · no unattempted/g) >= 3);
   assert.deepEqual(f.passes(), ['start req:r']);
   assert.equal(await run.stop(), 130);
+});
+
+test('a configured flow selects one ordered native item, skips excluded and started items and passes --item-id', async t => {
+  const pass = '#!/bin/sh\nprintf \'start %s %s\\n\' "$4" "$5" >> "$TEST_PASSES"\n';
+  const workflow = path.join(os.tmpdir(), `crew-flow-${process.pid}-${Date.now()}`, 'workflow.yaml');
+  fs.mkdirSync(path.dirname(workflow));
+  fs.writeFileSync(workflow, 'nodes: {}\n');
+  t.after(() => fs.rmSync(path.dirname(workflow), {recursive: true, force: true}));
+  const flow = {workflow, selection: {kind: 'ac'}, order: [{field: 'title', direction: 'desc'}],
+    exclude_children: {kind: 'task', data: {title: '[02] Task 2'}}};
+  const f = await plannerFixture(t, flow, 0, pass);
+  f.queue.push('task:t2');
+  // A finished run of ac:a1 at its current revision is not repeated. ac:a2 has an excluded direct child.
+  const artifacts = path.join(f.config.runs_folder, '2026-11-14_10-00-00-done', 'artifacts');
+  fs.mkdirSync(artifacts, {recursive: true});
+  fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({workspace: 'fixture',
+    selected: {address: 'ac:a1', current_revision: 3, document: {data: {title: 'Configured title'}}}}));
+  fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published'}));
+  const run = f.start();
+  await run.until(output => count(output, /Items: 2 selected · no unattempted items/g) >= 2);
+  assert.deepEqual(f.passes(), []);
+  assert.match(run.output(), /ITEM/);
+  assert.deepEqual(plannerRows(f.config.runs_folder).map(row => [row.ac, row.acTitle, row.attemptKey]),
+    [['ac:a1', 'Configured title', JSON.stringify(['ac:a1', 3])]]);
+  assert.doesNotMatch(run.output(), /REQ \/ AC/);
+  f.write({...f.config, exclude_children: {kind: 'task', data: {title: 'no such task'}}});
+  await run.until(() => f.passes().length === 1);
+  assert.deepEqual(f.passes(), ['start --item-id ac:a2']);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+  assert.equal(await run.stop(), 130);
+  for (const [direction, first] of [['desc', 'ac:a2'], ['asc', 'ac:a1']]) {
+    const config = {...f.config, ...flow, exclude_children: undefined, order: [{field: 'title', direction}]};
+    assert.equal((await nextConfiguredItem(config, f.config.token_file)).next.address, first);
+  }
+  for (const bad of [{workflow: 'workflow.yaml'}, {selection: {data: {}}}, {selection: {kind: 'ac', fields: ['data']}},
+    {exclude_children: {parent: 'ac:a1'}}, {order: [{field: 'title', direction: 'up'}]}, {ac_ids: ['ac:a1']}]) {
+    assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, ...flow, ...bad}))),
+      /workflow|selection|exclude_children|order|ac_ids/);
+  }
 });

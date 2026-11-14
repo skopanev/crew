@@ -30,15 +30,19 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       let vars = '', pid;
       try { vars = fs.readFileSync(path.join(folder, 'vars.yaml'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const subject = input?.joppa?.scope === 'requirement' ? input.requirement : input?.ac;
-      const ac = subject?.id || /^PLANNING_JOPPA_(?:REQ|AC):\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
+      // A configured flow records the complete selected object. Its identity and revision dedupe later passes.
+      const selected = input?.selected && typeof input.selected === 'object' ? input.selected : null;
+      const ac = selected?.address || subject?.id || /^PLANNING_JOPPA_(?:REQ|AC|ITEM):\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
       if (!ac) return [];
+      const revision = selected?.current_revision ?? selected?.revision;
       const title = item => {
         if (!item) return '';
         const data = input?.joppa?.objects?.[item.id]?.document?.data;
         if (data?.title) return data.title;
         try { return JSON.parse(item.text).data?.title || item.id; } catch { return item.id; }
       };
-      const label = input ? title(subject) : ac;
+      const label = selected ? selected.document?.data?.title || selected.data?.title || selected.title || ac :
+        input ? title(subject) : ac;
       try { pid = Number(fs.readFileSync(path.join(folder, '.lock'), 'utf8').trim()); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const journal = tail(path.join(folder, 'journal.jsonl')).split('\n').flatMap(line => {
         try { return [JSON.parse(line)]; } catch { return []; }
@@ -75,7 +79,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const end = active ? undefined : current?.folder === folder && current.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, acTitle: input ? title(subject) : '', ac,
+      return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac,
+        ...(selected && Number.isSafeInteger(revision) ? {attemptKey: JSON.stringify([ac, revision])} : {}),
         runId: match?.[5] || entry.name, start, end, active, status, stage}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }

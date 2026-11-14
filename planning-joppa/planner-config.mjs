@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
-import {criterionIds} from './queue.mjs';
+import {criterionIds, flowSettings} from './queue.mjs';
 
 const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
 const real = folder => fs.existsSync(folder) ? fs.realpathSync(folder) : folder;
@@ -17,6 +17,12 @@ export function plannerConfig(configFile, {ac = null, automatic = false} = {}, b
   const ids = criterionIds(config);
   if (ac && ids && !ids.includes(ac)) throw new Error('Selected AC is outside config.ac_ids');
   if (typeof config.workspace !== 'string' || typeof config.runs_folder !== 'string') throw new Error('Config needs workspace and runs_folder');
+  // A configured flow names its Medulla workflow explicitly. Without workflow the bundled planner flow applies.
+  if (flowSettings(config)) {
+    const workflow = expand(config.workflow);
+    if (!path.isAbsolute(workflow) || path.basename(workflow) !== 'workflow.yaml' ||
+        !fs.statSync(workflow, {throwIfNoEntry: false})?.isFile()) throw new Error('workflow must be an absolute path to a workflow.yaml file');
+  }
   const root = real(path.resolve(path.dirname(configFile), expand(config.runs_folder)));
   const interval = config.interval_seconds ?? 60;
   if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
