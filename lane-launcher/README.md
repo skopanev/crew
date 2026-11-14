@@ -23,21 +23,25 @@ The command uses no shell. A preparation failure leaves all three tabs unopened.
 ## Configure the bundled lane
 
 Use the bundled workflow without a project copy. These optional config values change its behavior:
+Remove `workflow` from the config to select the bundled workflow.
+A custom workflow must read these options itself.
 
 ```json
 {
   "scout": false,
   "reviewers": [
     {"harness": "codex", "model": "gpt-6.1-sol", "flag": "--dangerously-bypass-hook-trust"},
-    {"harness": "claude-code", "model": "claude-sonnet-5-5", "slug": "correctness"}
+    {"harness": "claude-code", "model": "claude-sonnet-5-5", "slug": "correctness", "flag": "--settings", "settings": "/tmp/lane-settings.json"}
   ]
 }
 ```
 
 The scout runs by default. With `scout: false`, the coder reads the contract and inspects the checkout itself.
+The separate scout's duplicate-detection shortcut does not run in this mode.
 The disabled scout needs no `context.roles.scout` entry.
 Omit `reviewers` to keep the bundled panel. An explicit list must contain at least one reviewer.
 Optional reviewer values are `effort` (default `high`), `flag`, `settings` and a distinct `slug`.
+Reviewer `flag` and `settings` pass directly to its CLI.
 Every configured reviewer must return a complete verdict. The reviewer timeout remains 480 seconds.
 Use `repositories[].preflight` for an executable setup script inside the fresh checkout.
 Crew runs it before the coder. It also runs on a retained checkout when that checkout resumes.

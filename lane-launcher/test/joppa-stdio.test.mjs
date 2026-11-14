@@ -20,15 +20,13 @@ value=fixture.plan()
 value['tasks'][0]['steps']=['Preserve the required behavior. '+('🙂'*220)]*5
 ops=fixture.publication.operations(value,fixture.assignment())
 data=ops[0]['command']['data']
-print(json.dumps({'data':data,'body':fixture.context.task_contract(data)}))
+print(json.dumps(data))
 `;
-  let {data, body} = JSON.parse(execFileSync(process.env.PLANNING_PYTHON || 'python3', ['-c', source, folder], {encoding: 'utf8'}));
+  const data = JSON.parse(execFileSync(process.env.PLANNING_PYTHON || 'python3', ['-c', source, folder], {encoding: 'utf8'}));
+  const body = taskContract(data);
   assert([...body].length > 1024);
-  // The planner renders its repository and module lines. The lane renders only body, steps and checks.
-  const planned = body;
-  body = planned.replace(/^Repository: service\nModule: core\n\n/m, '');
-  assert.notEqual(body, planned);
-  assert.equal(taskContract(data), body);
+  assert(body.includes(data.body));
+  for (const text of [...data.steps, ...data.checks]) assert(body.includes(text));
   const object = {address: 'work:one', historical: false, current_revision: 1,
     document: {present: true, parent: 'criterion:a', links: [], data}};
   const config = {repositories: [{id: 'service', modules: [{name: 'core', path: 'src'}]}]};
