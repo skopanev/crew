@@ -8,6 +8,7 @@ import {validateJoppa} from './joppa.mjs';
 import {validateContext} from './context-config.mjs';
 import {defaultHooks, validateHooks} from './hooks-config.mjs';
 import {defaultWorkflow, validateWorkflow} from './workflow-config.mjs';
+import {validateLaneOptions} from './lane-options.mjs';
 
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
@@ -20,6 +21,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   config.source = 'joppa';
   config.delivery ??= 'branch';
   validateJoppa(config);
+  validateLaneOptions(config);
   config.gateCommands = config.repositories[0].gateCommands;
   config.testCommand = config.repositories[0].testCommand;
   if (dryRun) config.launchLanes = false;
@@ -53,6 +55,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   validateWorkflow(config.workflow);
   validateContext(config.context);
   for (const role of ['scout', 'coder', 'reviewer', 'gitfix']) {
+    if (role === 'scout' && config.scout === false) continue;
     if (typeof config.context.roles?.[role] !== 'string' || !config.context.roles[role].trim()) {
       throw new Error(`context.roles.${role} is required`);
     }

@@ -52,7 +52,8 @@ class ClaimCleanupTests(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
-        for response, contract, adopted in cases:
+        cases = [(*case, True) for case in cases] + [(cases[0][0], "", True, False)]
+        for response, contract, adopted, scout in cases:
             with self.subTest(response=response, contract=contract), tempfile.TemporaryDirectory() as d:
                 server.contract_body = contract
                 root = Path(d)
@@ -60,7 +61,7 @@ class ClaimCleanupTests(unittest.TestCase):
                     (root / folder).mkdir(parents=True, exist_ok=True)
                 (root / "lane/hooks/inject.sh").write_text('printf \'{"permissions":{"deny":[]}}\' > "$1"\n')
                 (root / "lane/hooks/codex-home.sh").write_text("exit 0\n")
-                (root / "lane/hooks/agy-home.sh").write_text("exit 0\n")
+                (root / "lane/hooks/agy-home.sh").write_text('touch "$AGY_CALLED"\n')
                 for hook_file in ("memory-hook.sh", "joppa-data.sh"):
                     shutil.copy(lane_dir / "hooks" / hook_file, root / "lane/hooks" / hook_file)
                 helper = lane_dir / "bin/ticket-input.mjs"
@@ -84,18 +85,26 @@ class ClaimCleanupTests(unittest.TestCase):
                 env = dict(os.environ, TOOLING_ROOT=d, project_dir=d, ticket_id="T1", project_name="test",
                            MEDULLA_RUN_DIR=str(root / "run"), LAUNCH_CLAIM_FILE=str(claim_file),
                            LANE_MEMORY_CONFIG=str(memory_config), LANE_MEMORY_ROLE="scout-role",
-                           LANE_MEMORY_PROCESS="scout-role", LANE_MEMORY_PROJECT="test",
+                           LANE_MEMORY_PROCESS="scout-role", LANE_MEMORY_PROJECT="test", SCOUT_ENABLED=str(scout).lower(),
+                           AGY_CALLED=str(root / "agy-called"),
                            PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
+                if not scout:
+                    env["REVIEWERS_JSON"] = json.dumps([{"harness": "codex", "model": "configured-model"}])
                 body = shell_body("prepare").replace("/tmp/", d + "/")
                 result = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True)
                 receipt = root / "run/artifacts/claim.json"
                 if adopted:
-                    self.assertEqual(result.returncode, 0 if contract else 1, result.stderr)
+                    self.assertEqual(result.returncode, 0 if contract or not scout else 1, result.stderr)
                     self.assertIn(f'<signal:var key=RUN_ARTIFACTS>{root}/run/artifacts</signal:var>', result.stdout)
                     claim = json.loads(receipt.read_text())
                     self.assertEqual(claim["workspace"], "test")
                     self.assertEqual(claim["run_dir"], str(root / "run"))
-                    if contract:
+                    if not scout:
+                        self.assertFalse((root / "agy-called").exists())
+                        self.assertIn("<signal:SCOUT_SKIPPED>", result.stdout)
+                        self.assertFalse((root / "run/artifacts/scout-contract.txt").exists())
+                        self.assertEqual((root / "run/artifacts/scout.txt").read_text(), "Separate scout disabled.\n")
+                    elif contract:
                         self.assertIn("<signal:READY>", result.stdout)
                         self.assertIn(contract, (root / "run/artifacts/scout-contract.txt").read_text())
                         ticket = json.loads((root / "run/artifacts/ticket.json").read_text())

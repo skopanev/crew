@@ -15,6 +15,8 @@ vars:
   TICKET_SOURCE: joppa
   TARGET_BRANCH: ''
   REPOSITORY_PREFLIGHT: ''
+  SCOUT_ENABLED: 'true'
+  REVIEWERS_JSON: '[{"harness":"codex","model":"gpt-6.1-sol","effort":"high","slug":"architecture","flag":"--dangerously-bypass-hook-trust"},{"harness":"agy","model":"gemini-4-carbon-high","effort":"high","slug":"codereview"},{"harness":"claude-code","model":"claude-sonnet-5-5","effort":"high","slug":"security","flag":"--settings","settings":"/tmp/lane-settings.json"}]'
   DELIVERY: target
   DELIVERY_BRANCH: ''
   REQUIREMENT_BRANCH: ''
@@ -62,6 +64,7 @@ nodes:
       READY: cbm_discovery
       REQUIREMENT_READY: create_worktree
       RESUME: create_worktree
+      SCOUT_SKIPPED: create_worktree
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -99,8 +102,10 @@ nodes:
       # Generate Codex hooks and MCP configuration.
       bash "${TOOLING_ROOT}/lane/hooks/codex-home.sh" \
         /tmp/codex-home /tmp/lane-settings.json
-      # Prepare AGY sign-in and memory hooks in the private container HOME.
-      bash "${TOOLING_ROOT}/lane/hooks/agy-home.sh" /tmp/lane-settings.json
+      # Prepare AGY only when the configured panel uses it.
+      if jq -e 'any(.[]; .harness == "agy")' <<<"$REVIEWERS_JSON" >/dev/null; then
+        bash "${TOOLING_ROOT}/lane/hooks/agy-home.sh" /tmp/lane-settings.json
+      fi
       # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
       if jq -e '.ticket.retained != null' "$claim" >/dev/null; then
@@ -112,7 +117,12 @@ nodes:
         echo '<signal:RESUME>Continue the confirmed retained candidate for this Task.</signal:RESUME>'
         exit 0
       fi
-      # Publish only a complete, nonempty Joppa contract.
+      if [ "$SCOUT_ENABLED" = false ]; then
+        printf '%s\n' 'Separate scout disabled.' > "$MEDULLA_RUN_DIR/artifacts/scout.txt"
+        echo '<signal:SCOUT_SKIPPED>Prepare checkout for implementation.</signal:SCOUT_SKIPPED>'
+        exit 0
+      fi
+      # Publish only a complete, nonempty session contract.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       _sc="$MEDULLA_RUN_DIR/artifacts/scout-contract.txt"
       rm -f "$_sc"
@@ -349,8 +359,10 @@ nodes:
           echo '<signal:FINALIZE_READY>Run full gates and deliver completed Requirement work.</signal:FINALIZE_READY>'
           exit 0
         fi
-        echo '<signal:REQUIREMENT_SCOUT>Inspect this requirement checkout before implementation.</signal:REQUIREMENT_SCOUT>'
-        exit 0
+        if [ "$SCOUT_ENABLED" != false ]; then
+          echo '<signal:REQUIREMENT_SCOUT>Inspect this requirement checkout before implementation.</signal:REQUIREMENT_SCOUT>'
+          exit 0
+        fi
       fi
       # Preserve the scout report; use its signal as data only when the report is missing.
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
@@ -400,7 +412,7 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      Follow your Joppa contract.
+      Follow the contract in your session context.
       Current handoff: {{last.message}}
       Repository checks: {{var:review_commands}}
       Test command: {{var:ticket_test_command}}
@@ -514,7 +526,7 @@ nodes:
         exit 0
       fi
       printf '%s\n' "$bindings"
-      # Share one Joppa contract across all review harnesses and rounds.
+      # Share one session contract across all review harnesses and rounds.
       qa="$MEDULLA_RUN_DIR/artifacts/reviewer-contract.txt"
       # Extract content and publish atomically after a successful read.
       if [ ! -s "$qa" ]; then
@@ -545,21 +557,7 @@ nodes:
     # Retry a reviewer that returns no verdict.
     max_attempts: 2
     inputs:
-    - harness: codex
-      model: gpt-6.1-sol
-      effort: high
-      slug: architecture
-      flag: --dangerously-bypass-hook-trust
-    - harness: agy
-      model: gemini-4-carbon-high
-      effort: high
-      slug: codereview
-    - harness: claude-code
-      model: claude-sonnet-5-5
-      effort: high
-      slug: security
-      flag: --settings
-      settings: /tmp/lane-settings.json
+      shell: printf '%s\n' "$REVIEWERS_JSON"
     env:
       CODEX_HOME: /tmp/codex-home
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
@@ -1012,7 +1010,7 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      Follow your Joppa contract.
+      Follow the contract in your session context.
       Resolve the landing conflict for ticket {{var:ticket_id}}.
       {{last.message}}
       Worktree: {{var:LANE_WORKTREE}}.

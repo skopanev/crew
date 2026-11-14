@@ -26,11 +26,10 @@ def workflow_codex_args():
     text = (LANE / 'workflow.yaml').read_text()
     scout = text[text.index('\n  cbm_discovery:'):]
     scout = scout[:scout.index('\n  create_worktree:')]
-    reviewer = text[text.index('\n    - harness: codex'):]
-    reviewer = reviewer[:reviewer.index('\n    - harness:', 1)]
+    reviewers = json.loads(re.search(r"^  REVIEWERS_JSON: '(.*)'$", text, re.M).group(1))
+    reviewer = next(seat for seat in reviewers if seat['harness'] == 'codex')
     args = re.search(r'\n      args: \[([^\]]*)\]', scout).group(1)
-    flag = re.search(r'\n      flag: (\S+)', reviewer)
-    return [arg.strip() for arg in args.split(',')], flag and flag.group(1)
+    return [arg.strip() for arg in args.split(',')], reviewer.get('flag')
 
 
 class ResponsesStub(BaseHTTPRequestHandler):

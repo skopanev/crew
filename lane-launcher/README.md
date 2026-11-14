@@ -20,6 +20,29 @@ For a host connector, use Broker 0.9.17 or later with `--target host`. Give Java
 The command uses no shell. A preparation failure leaves all three tabs unopened.
 `--dry-run` prints all three commands without creating tabs or starting workflows.
 
+## Configure the bundled lane
+
+Use the bundled workflow without a project copy. These optional config values change its behavior:
+
+```json
+{
+  "scout": false,
+  "reviewers": [
+    {"harness": "codex", "model": "gpt-6.1-sol", "flag": "--dangerously-bypass-hook-trust"},
+    {"harness": "claude-code", "model": "claude-sonnet-5-5", "slug": "correctness"}
+  ]
+}
+```
+
+The scout runs by default. With `scout: false`, the coder reads the contract and inspects the checkout itself.
+The disabled scout needs no `context.roles.scout` entry.
+Omit `reviewers` to keep the bundled panel. An explicit list must contain at least one reviewer.
+Optional reviewer values are `effort` (default `high`), `flag`, `settings` and a distinct `slug`.
+Every configured reviewer must return a complete verdict. The reviewer timeout remains 480 seconds.
+Use `repositories[].preflight` for an executable setup script inside the fresh checkout.
+Crew runs it before the coder. It also runs on a retained checkout when that checkout resumes.
+The existing script timeout remains 600 seconds. Do not add a separate setup command.
+
 ## Run one dispatcher
 
 Run from a Herdr terminal. Requires Node.js 24, Herdr, Docker, Medulla, jq, the installed broker and native CBM on the host, plus the Crew image.

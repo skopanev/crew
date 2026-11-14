@@ -14,3 +14,6 @@ if [[ -n "$workflow_file" ]]; then
   workflow_args=(-w "${workflow_file#"$(pwd -P)"/}" --var "TOOLING_ROOT=/workspace")
   say "run.sh: workflow RO: $workflow_file"
 fi
+if [[ -n "${LANE_REVIEWERS_JSON:-}" ]]; then
+  workflow_args+=(--var "REVIEWERS_JSON=$LANE_REVIEWERS_JSON")
+fi

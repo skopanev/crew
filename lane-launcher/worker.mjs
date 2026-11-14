@@ -19,6 +19,7 @@ import {prepareHooks} from './hooks-config.mjs';
 import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.mjs';
 import {prepareReuse} from './retained-checkout.mjs';
 import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
+import {laneOptionsEnv} from './lane-options.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -58,11 +59,8 @@ const stop = value => {
 process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
-let result, claimRefused = false;
-let artifacts = null;
-let readerDir;
-let contextDir;
-let hooksDir;
+let result, artifacts = null, claimRefused = false;
+let readerDir, contextDir, hooksDir;
 let finalizationTicket;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
@@ -163,7 +161,7 @@ try {
   }
   // Dedicated process group lets a stopped worker stop all of its shell children.
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
-    env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
+    env: {...process.env, ...laneOptionsEnv(run.config), LANE_RUNS_FOLDER: run.runFolder,
       LANE_SOURCE: 'joppa', LANE_REPOSITORY_JSON: JSON.stringify(run.repository),
       LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
       LANE_DELIVERY: run.config.delivery, LANE_DELIVERY_BRANCH: run.deliveryBranch || '',

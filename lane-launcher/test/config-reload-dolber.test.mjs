@@ -6,8 +6,35 @@ import path from 'node:path';
 import {save, read, runDirectories} from '../runtime.mjs';
 import {launcher, queueReads, setup} from '../test-support/launcher.fixture.mjs';
 import {pause, watch} from '../test-support/config-reload.fixture.mjs';
+import {configFrom} from '../launcher-config.mjs';
+import {laneOptionsEnv} from '../lane-options.mjs';
 
 const count = (text, pattern) => (text.match(pattern) || []).length;
+
+test('lane options accept an optional scout and explicit reviewers without changing panel arguments', async t => {
+  const f = await setup(t), reviewers = [{harness: 'codex', model: 'configured-model', flag: '--configured-flag'},
+    {harness: 'claude-code', model: 'other-model', slug: 'quality', effort: 'medium'}];
+  const raw = {...f.config, scout: false, reviewers,
+    context: {...f.config.context, roles: {...f.config.context.roles}}};
+  delete raw.context.roles.scout;
+  save(f.configFile, raw);
+  const config = configFrom(f.configFile, f.env);
+  const env = laneOptionsEnv(config), inputs = JSON.parse(env.LANE_REVIEWERS_JSON);
+  assert.equal(env.LANE_SCOUT, 'false');
+  assert.equal(inputs[0].model, reviewers[0].model);
+  assert.equal(inputs[0].flag, reviewers[0].flag);
+  assert.equal(inputs[0].slug, 'reviewer-1');
+  assert.equal(inputs[1].slug, 'quality');
+  assert.equal(inputs[1].effort, 'medium');
+  assert.deepEqual(laneOptionsEnv({}), {LANE_SCOUT: 'true', LANE_REVIEWERS_JSON: ''});
+  for (const change of [{scout: 'false'}, {reviewers: []}, {reviewers: [{harness: 'codex'}]},
+    {reviewers: reviewers.map(seat => ({...seat, slug: 'same'}))},
+    {reviewers: [{...reviewers[0], slug: '../outside'}]}]) {
+    save(f.configFile, {...raw, ...change});
+    assert.throws(() => configFrom(f.configFile, f.env), /scout|reviewer/i);
+  }
+});
+
 async function dolber(t, options, values = {}) {
   const f = await setup(t, options);
   f.config = {...f.config, intervalSeconds: 1, ...values};

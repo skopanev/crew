@@ -7,8 +7,9 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import re
 
-from test_failure_outcome import shell_body
+from test_failure_outcome import shell_body, WORKFLOW
 
 
 class ReviewPanelTests(unittest.TestCase):
@@ -67,9 +68,11 @@ class ReviewPanelTests(unittest.TestCase):
     def test_real_engine_provides_the_configured_pool_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            source = re.search(r"^    inputs:\n      shell: (.+)$", WORKFLOW.read_text(), re.M).group(1)
             workflow = {"version": "2", "start": "expert_review", "timeout": 30,
+                "vars": {"REVIEWERS_JSON": json.dumps([{"slug": "quality"}, {"slug": "correctness"}])},
                 "nodes": {
-                    "expert_review": {"inputs": [{"slug": "quality"}, {"slug": "correctness"}],
+                    "expert_review": {"inputs": {"shell": source},
                         "max_parallel": 2,
                         "shell": 'mkdir -p "$MEDULLA_RUN_DIR/artifacts"\n'
                                  'printf "NONE\\nCOVERAGE: assigned behavior\\n" > "$MEDULLA_RUN_DIR/artifacts/$MEDULLA_INPUT_SLUG.md"\n'

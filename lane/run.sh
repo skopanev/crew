@@ -251,6 +251,7 @@ medulla \
   --var "TICKET_SOURCE=joppa" \
   --var "TARGET_BRANCH=$target" \
   --var "REPOSITORY_PREFLIGHT=$repository_preflight" \
+  --var "SCOUT_ENABLED=${LANE_SCOUT:-true}" \
   --var "DELIVERY=${LANE_DELIVERY:-target}" \
   --var "DELIVERY_BRANCH=${LANE_DELIVERY_BRANCH:-}" \
   --var "REQUIREMENT_BRANCH=${LANE_REQUIREMENT_BRANCH:-}" \

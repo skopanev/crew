@@ -12,6 +12,7 @@ context_vars=(
   --var "LANE_MEMORY_MODULE=$module"
 )
 for role in scout coder reviewer gitfix; do
+  [[ "$role" != scout || "${LANE_SCOUT:-true}" != false ]] || continue
   name="$(jq -er --arg role "$role" '.roles[$role] | select(type == "string" and test("\\S"))' "$context_dir/config.json")" || {
     say "run.sh: context.roles.$role is required"
     exit 2
