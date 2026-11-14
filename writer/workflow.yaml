@@ -8,6 +8,7 @@ vars:
   PLANNING_PYTHON: python3
   # launch.py supplies the shared flow stages, the selected item and the publication policy.
   CREW_FLOW_STAGES: ''
+  FLOW_PUBLICATION: ''
   AUTHOR_MODEL: claude-opus-5-5
   CRITIC_CODEX_MODEL: gpt-6.1-sol
   CRITIC_CLAUDE_MODEL: claude-sonnet-5-5
@@ -25,20 +26,21 @@ nodes:
     timeout: 300
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
+      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
         eval "value=\${$name:-}"
-        [ -n "$value" ] || { echo "writer: config.vars.$name is required" >&2; exit 2; }
+        [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
       exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
     on_signal:
       PREPARED: author
       BLOCKED: __exit_fail__
-      __failed__: __exit_fail__
-      __default__: __exit_fail__
+      # The failed node records the result when the shared stage did not.
+      __failed__: failed
+      __default__: failed
   author:
     timeout: 1200
     max_attempts: 2
-    # Agents get no tracker credentials and no tools. The prompt holds everything they need.
+    # Agents get no tracker credentials, no MCP servers and no tools. The prompt holds everything they need.
     env: &agent_environment
       LANE_MEMORY_CONFIG: ''
       JOPPA_TOKEN: ''
@@ -56,11 +58,13 @@ nodes:
         - --mcp-config
         - '{"mcpServers":{}}'
         - --disallowedTools
-        - Bash,Read,Glob,Grep,LS,WebFetch,WebSearch,Task,NotebookRead,Edit,Write,NotebookEdit
+        - Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit
     prompt: |
       {{file:prompts/author.md}}
       Mandatory role contract:
       {{var:author_contract}}
+      The critics score each Test with the questions of this contract:
+      {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
       Assignment: {{var:assignment}}
       Your previous draft (empty in the first round): {{var:draft}}
@@ -71,30 +75,46 @@ nodes:
       __failed__: failed
       __default__: failed
   draft_check:
-    # The critics review these exact bytes. review_join checks the digest again before publication.
+    # The schema of the native Test kind supplies every limit. The critics review these exact bytes.
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       rm -f "$a"/critic-*.json
-      if jq -e --arg test "$TEST_KIND" --slurpfile input "$a/input.json" '
-        ([$input[0].children[]? | select(.kind == $test) | .document.data.title // .title]) as $existing |
-        (.tests | type == "array" and length > 0 and length <= 40) and
-        all(.tests[]; type == "object" and (.id | type == "string" and test("^[A-Za-z0-9_-]{1,40}$")) and
-          (.title | type == "string" and length > 0 and length <= 128 and (explode | all(. >= 32)) and
-            ([.] - $existing | length == 1)) and
-          (.body | type == "string" and length > 0) and ((.command // "") | type == "string")) and
+      if jq -e --arg test "$TEST_KIND" --arg task "$TASK_KIND" --arg waiting "$WAITING_STAGE" \
+        --slurpfile input "$a/input.json" '
+        $input[0] as $in | ($in.schema.types[$test] // {}) as $type | ($in.schema.test_results // {}) as $rules |
+        ($type.fields // {}) as $fields | ($type.required_fields // {} | keys) as $required |
+        ([$in.children[]? | select(.kind == $test) | .document.data.title]) as $existing |
+        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting)] | length) as $tasks |
+        def fits($limit): $limit == null or length <= $limit;
+        def name_ok: type == "string" and length > 0 and (explode | all(. >= 32)) and
+          fits($type.title_max_length) and fits($rules.name.max_length) and
+          ($rules.name.separator == null or $rules.name.min_parts == null or
+            (split($rules.name.separator) | length >= $rules.name.min_parts));
+        def field_ok: .key as $key | .value as $value | ($fields[$key] // null) as $field |
+          ($key != "title" and $key != "assignee") and $value != null and
+          ($field == null or (($field.from // "own") == "own" and
+            ($field.values == null or ($field.values | any(. == $value))))) and
+          (($value | type) != "string" or ($value | fits($type.field_max_length)));
+        def complete: . as $item | all($required[]; . as $key | $key == "title" or $item.data[$key] != null or
+          ($key == "owner" and $in.selected.document.data.owner != null));
+        (.tests | type == "array" and length > 0 and length + $tasks <= 98) and
+        ($rules.max_tests == null or (.tests | length) + ($existing | length) <= $rules.max_tests) and
+        all(.tests[]; type == "object" and (.id | type == "string" and test("^[A-Za-z0-9_-]+$")) and
+          (.title | name_ok) and ([.title] - $existing | length == 1) and
+          (.data | type == "object") and all(.data | to_entries[]; field_ok) and complete) and
         ([.tests[].id] | length == (unique | length)) and ([.tests[].title] | length == (unique | length)) and
         (.coverage | type == "string" and length > 0)' "$a/draft.json" >/dev/null; then
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
         printf '<signal:var key=draft_digest>%s</signal:var>\n' "${hash%% *}"
         echo '<signal:DRAFTED>The draft is ready for independent review.</signal:DRAFTED>'
       elif [ "${round:-1}" = 1 ]; then
-        echo '<signal:var key=critique>{"draft":"The draft does not match the output contract: unique ids and titles, no title of an existing Test, a body for each Test, and a coverage statement."}</signal:var>'
+        echo '<signal:var key=critique>{"draft":"The draft does not match the output contract or the Test schema: unique ids and titles, no title of an existing Test, the name rules and limits, every required field, the listed values of each typed field, and a coverage statement."}</signal:var>'
         echo '<signal:var key=round>2</signal:var>'
-        echo '<signal:REVISE>The draft does not match the output contract.</signal:REVISE>'
+        echo '<signal:REVISE>The draft does not match the output contract or the Test schema.</signal:REVISE>'
       else
-        echo 'The revised author draft does not match the Writer output contract.' > "$a/failure.txt"
-        echo '<signal:INVALID>The revised draft does not match the output contract.</signal:INVALID>'
+        echo 'The revised author draft does not match the Writer output contract or the Test schema.' > "$a/failure.txt"
+        echo '<signal:INVALID>The revised draft does not match the output contract or the Test schema.</signal:INVALID>'
       fi
     on_signal:
       DRAFTED: critics
@@ -118,10 +138,10 @@ nodes:
     inputs:
       shell: |
         jq -nc --arg codex '{{var:CRITIC_CODEX_MODEL}}' --arg claude '{{var:CRITIC_CLAUDE_MODEL}}' '[
-          {slug: "codex", harness: "codex", model: $codex, a1: "--ignore-user-config"},
+          {slug: "codex", harness: "codex", model: $codex, a1: "--ignore-user-config", a2: "-c", a3: "mcp_servers={}"},
           {slug: "claude", harness: "claude-code", model: $claude, a1: "--strict-mcp-config", a2: "--setting-sources=",
            a3: "--mcp-config", a4: "{\"mcpServers\":{}}", a5: "--disallowedTools",
-           a6: "Bash,Read,Glob,Grep,LS,WebFetch,WebSearch,Task,NotebookRead,Edit,Write,NotebookEdit"}]'
+           a6: "Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit"}]'
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -138,6 +158,7 @@ nodes:
       {{file:prompts/critic.md}}
       Mandatory role contract:
       {{var:critic_contract}}
+      Native Test kind: {{var:TEST_KIND}}
       Assignment: {{var:assignment}}
       Draft digest: {{var:draft_digest}}
       Frozen draft: {{var:draft}}
@@ -151,6 +172,7 @@ nodes:
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
+      file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" --arg task "$TASK_KIND" \
         --arg waiting "$WAITING_STAGE" --arg ready "$READY_STAGE" --slurpfile draft "$a/draft.json" \
@@ -167,7 +189,7 @@ nodes:
         if all($reviews[]; clean) then {approved: true, operations: (
           [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
             parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
-            data: ({title, body} + (if (.command // "") != "" then {command} else {} end) + $owner)}}] +
+            data: ($owner + .data + {title})}}] +
           [$in.children[] | select(.kind == $task and .document.data.stage == $waiting) |
             {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
               data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}])}
@@ -175,7 +197,7 @@ nodes:
           {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else
           {invalid: "The review does not match the critic output contract or reviewed another draft."} end))} end')"
       if [ "$(printf '%s' "$verdict" | jq -r .approved)" = true ]; then
-        printf '%s' "$verdict" | jq '{operations}' > "$a/operations.json"
+        printf '%s' "$verdict" | jq '{operations}' > "$a/$file"
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
       elif [ "${round:-1}" = 1 ]; then
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
@@ -200,14 +222,19 @@ nodes:
     on_signal:
       READY: __exit_ok__
       BLOCKED: __exit_fail__
-      __failed__: __exit_fail__
-      __default__: __exit_fail__
+      __failed__: failed
+      __default__: failed
   failed:
+    # A shared stage that already recorded result.json released or retained its claim. Do not repeat it.
     # A business rejection leaves failure.txt. Other stops record the last step message.
     timeout: 660
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
+      if [ -e "$a/result.json" ]; then
+        echo '<signal:BLOCKED>The shared stage already recorded the result.</signal:BLOCKED>'
+        exit 0
+      fi
       [ -s "$a/failure.txt" ] || printf '%s\n' "${MEDULLA_LAST_MESSAGE:-Writer stopped before publication}" | cut -c1-1000 > "$a/failure.txt"
       exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
     on_signal:

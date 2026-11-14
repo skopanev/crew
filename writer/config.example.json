@@ -1,18 +1,46 @@
 {
   "workspace": "my-workspace",
   "url": "https://joppa.example.com/mcp",
-  "mcp_command": ["node", "/absolute/private/broker-joppa-host.cjs"],
+  "mcp_command": [
+    "node",
+    "/absolute/private/broker-joppa-host.cjs"
+  ],
   "runs_folder": "/absolute/private/writer-runs",
   "workflow": "/absolute/path/to/crew/writer/workflow.yaml",
-  "selection": {"kind": "ac", "data": {"stage": "tests_needed"}, "assignee": ""},
-  "order": [{"field": "revision", "direction": "asc"}],
-  "children": {"kind": ["task", "test"]},
-  "references": ["sources"],
+  "selection": {
+    "kind": "ac",
+    "data": {
+      "stage": "tests_needed"
+    },
+    "assignee": ""
+  },
+  "order": [
+    {
+      "field": "revision",
+      "direction": "asc"
+    }
+  ],
+  "children": {
+    "kind": [
+      "task",
+      "test"
+    ]
+  },
+  "references": [
+    "sources"
+  ],
   "publication": {
     "file": "operations.json",
-    "allowed_operations": ["save_object", "note"],
-    "create_kinds": ["test"],
-    "update_kinds": ["task"]
+    "allowed_operations": [
+      "save_object",
+      "note"
+    ],
+    "create_kinds": [
+      "test"
+    ],
+    "update_kinds": [
+      "task"
+    ]
   },
   "vars": {
     "TEST_KIND": "test",
@@ -25,6 +53,38 @@
     "workspace": "context-workspace",
     "token_file": "/absolute/private/joppa-read-key",
     "root": "memory:configured-root",
-    "roles": {"author": "writer-author", "critic": "writer-critic"}
+    "roles": {
+      "author": "writer-author",
+      "critic": "writer-critic"
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "project": "LANE_MEMORY_PROJECT",
+      "name": "LANE_MEMORY_PROCESS"
+    },
+    "session": {
+      "kind": [
+        "guide",
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ]
+    },
+    "query": {
+      "kind": "lesson",
+      "fields": [
+        "title",
+        "body"
+      ],
+      "limit": 8,
+      "max_chars": 6000,
+      "filter_env": {
+        "project": "LANE_MEMORY_PROJECT"
+      }
+    }
   }
 }
