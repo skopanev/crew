@@ -8,6 +8,7 @@ import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 import {criterionTests} from './test-nodes.mjs';
 import {criterionSources} from './source-context.mjs';
 import {filteredTasks} from './task-filter.mjs';
+import {sendClaim} from './claim-retry.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes one release save with the hold code and one note for each Task in one batch.
@@ -47,7 +48,7 @@ export async function releaseTasks(run, persist, objects, reason, code) {
   persist();
 }
 
-export async function claimTask(run, persist, runId) {
+export async function claimTask(run, persist, runId, options = {}) {
   const tasks = runTasks(run);
   require(tasks.length > 0 && tasks.length * FAILURE_OPERATIONS <= 100,
     'Repository package exceeds the Joppa 100-operation atomic batch limit; no Tasks claimed');
@@ -92,13 +93,14 @@ export async function claimTask(run, persist, runId) {
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.')));
   }
   persist();
-  try { await mutateTasks(run, run.claimRequest); }
-  catch (error) { if (error.rejected) { run.claimRejected = true; persist(); } throw error; }
+  await sendClaim(run, persist, options);
   const objects = [];
   for (const task of tasks) {
     const object = await read(run, task.address);
     require(object.address === task.address, 'Joppa returned a different Task after claim');
-    require(heldBy({claim: {assignee}}, object), 'Joppa did not confirm this run as Task assignee');
+    const saved = run.claimRequest.operations.find(({command}) => `${command.kind}:${command.id}` === task.address);
+    require(heldBy({claim: {assignee}}, object) && object.current_revision === saved?.command.revision + 1,
+      `Joppa did not confirm this run as Task assignee at the claimed revision: ${task.address}`);
     objects.push(object);
   }
   run.claim = {claimed: true, id: run.executionId, workspace: run.workspace, status: 'in_progress', source: 'joppa',

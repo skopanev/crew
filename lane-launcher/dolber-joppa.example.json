@@ -4,6 +4,7 @@
   "joppa": {
     "url": "https://joppa.example.com/mcp",
     "filter": {},
+    "claimRetryDelaysSeconds": [],
     "mcpCommand": [
       "node",
       "/absolute/private/broker-joppa-host.cjs"

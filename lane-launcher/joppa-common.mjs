@@ -49,9 +49,9 @@ export function batchRequest(run, commands) {
   return {workspace: run.workspace, request_id: randomUUID(), operations: commands.map(command => ({command}))};
 }
 
-export async function mutateTasks(run, request) {
+export async function mutateTasks(run, request, options = {}) {
   const batch = Array.isArray(request.operations);
-  const result = await api(run.config, run.joppaWorker, batch ? 'joppa_batch' : 'joppa_command', request);
+  const result = await api(run.config, run.joppaWorker, batch ? 'joppa_batch' : 'joppa_command', request, options);
   if (batch) {
     require(Array.isArray(result.results) && result.results.length === request.operations.length,
       'Joppa batch response is incomplete; Tasks remain held for inspection');

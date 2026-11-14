@@ -47,8 +47,10 @@ run.worker = {pid: process.pid, startedAt: new Date().toISOString()};
 save(stateFile, run);
 const script = fileURLToPath(new URL('../lane/run.sh', import.meta.url));
 let child, signal;
+const claimAbort = new AbortController();
 const stop = value => {
   signal = value;
+  claimAbort.abort(new Error(`Startup interrupted by ${value}`));
   if (child?.pid) {
     try { process.kill(-child.pid, value); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
@@ -77,7 +79,7 @@ try {
   } else {
     announce(`[lane] CLAIM ${run.ticket}`);
     const adoptedJoppaClaim = Boolean(run.claim);
-    const claimed = run.claim || await claimTask(run, () => save(stateFile, run), path.basename(dir));
+    const claimed = run.claim || await claimTask(run, () => save(stateFile, run), path.basename(dir), {signal: claimAbort.signal, announce});
     if (claimed?.claimed !== true || claimed.status !== 'in_progress' ||
         String(claimed.id).toLowerCase() !== String(run.executionId || run.ticket).toLowerCase()) {
       delete run.claim;

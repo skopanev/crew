@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {McpClient} from './mcp-client.mjs';
+import {McpClient, JoppaTransportError} from './mcp-client.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const maxBytes = 8 * 1024 * 1024;
@@ -169,10 +169,14 @@ async function rawCall(url, tokenFile, tool, arguments_, {signal, mcpCommand} = 
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       if (/^Joppa (MCP HTTP \d+|response exceeds 8 MiB)$/.test(error.message)) throw error;
-      throw new Error('Joppa MCP transport failed');
+      throw new JoppaTransportError();
     }
     if (!object(message) || message.id !== id) throw new Error('Joppa returned a different MCP response');
-    if ('error' in message || !('result' in message)) throw new Error('Joppa rejected the MCP operation');
+    if ('error' in message || !('result' in message)) {
+      const error = new Error('Joppa rejected the MCP operation');
+      error.rpcError = message.error;
+      throw error;
+    }
     return message.result;
   }
 

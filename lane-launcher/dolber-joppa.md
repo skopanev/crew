@@ -22,6 +22,18 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
+Set `joppa.claimRetryDelaysSeconds` to retry a claim after a transport failure, for example `[5, 15, 35]`.
+The list gives the delays and the maximum retry count. Omit it, or use `[]`, for no retries.
+Each delay must be a positive integer that fits a Node.js timer.
+Crew repeats the saved request with the same actor, `request_id` and operations. It never creates a replacement claim request.
+Joppa stores immutable receipts with the transaction. An identical replay returns that receipt instead of applying another mutation.
+The worker still confirms the live Task assignee before startup. Docker does not start during retries.
+User stop cancels the RPC or delay. Application refusals, malformed receipts and maintenance responses do not retry.
+After an earlier transport failure, a later refusal needs readback proving that this run owns none of the Tasks.
+Otherwise the claim remains uncertain and reserved. Exhausted retries also retain the existing uncertain state.
+The existing `launch.json` records each failure's time, thrown message and numeric RPC code when available.
+Crew does not store connector stderr or login data. Existing workers keep their saved retry config.
+
 The queue checks blocking `depends_on` targets on each Task and its ancestors.
 Archived targets satisfy a dependency. A live Task needs `data.stage: done`; other live targets need a green status.
 The queue skips completed Tasks. The claim also refuses them.

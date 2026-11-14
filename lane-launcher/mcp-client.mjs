@@ -3,6 +3,9 @@ import {StringDecoder} from 'node:string_decoder';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const maxBytes = 8 * 1024 * 1024;
+export class JoppaTransportError extends Error {
+  constructor() { super('Joppa MCP transport failed'); this.name = 'JoppaTransportError'; }
+}
 const children = new Set();
 const signalChild = (child, signal) => {
   if (!child?.pid) return;
@@ -124,7 +127,7 @@ McpClient.prototype._spawn = function () {
     // Drain stderr so the child never blocks on a full pipe.
   });
   child.stdin.on('error', () => {
-    if (this.child === child) this._failAll(new Error('Joppa MCP transport failed'));
+    if (this.child === child) this._failAll(new JoppaTransportError());
   });
 
   child.stdout.on('data', chunk => {
@@ -145,7 +148,7 @@ McpClient.prototype._spawn = function () {
       try {
         message = JSON.parse(raw);
       } catch {
-        this._failAll(new Error('Joppa MCP transport failed'));
+        this._failAll(new JoppaTransportError());
         return;
       }
       if (!object(message)) {
@@ -181,7 +184,7 @@ McpClient.prototype._spawn = function () {
 
   const onExit = () => {
     if (this.child !== child) return;
-    this._failAll(new Error('Joppa MCP transport failed'));
+    this._failAll(new JoppaTransportError());
   };
   child.once('error', onExit);
   child.once('exit', onExit);
@@ -191,17 +194,17 @@ McpClient.prototype._spawn = function () {
 
 McpClient.prototype._send = function (method, params = {}, {timeoutMs, signal} = {}) {
   if (this.closed) return Promise.reject(new Error('Joppa MCP client is closed'));
-  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('Joppa MCP transport failed'));
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new JoppaTransportError());
   this._spawn();
   const id = ++this.sequence;
   const payload = JSON.stringify({jsonrpc: '2.0', id, method, params}) + '\n';
   const duration = timeoutMs ?? (method === 'tools/call' ? this.defaultTimeoutMs : this.handshakeTimeoutMs);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      this._failAll(new Error('Joppa MCP transport failed'));
+      this._failAll(new JoppaTransportError());
     }, duration);
     const onAbort = () => {
-      this._failAll(signal.reason ?? new Error('Joppa MCP transport failed'));
+      this._failAll(signal.reason ?? new JoppaTransportError());
     };
     if (signal) signal.addEventListener('abort', onAbort, {once: true});
     this.pending.set(id, {resolve, reject, timer, signal, onAbort});
@@ -209,7 +212,7 @@ McpClient.prototype._send = function (method, params = {}, {timeoutMs, signal} =
     try {
       this.child.stdin.write(payload);
     } catch {
-      this._failAll(new Error('Joppa MCP transport failed'));
+      this._failAll(new JoppaTransportError());
     }
   });
 };
@@ -229,7 +232,7 @@ McpClient.prototype._ensureInitialized = function (options = {}) {
       throw new Error('Joppa returned an invalid initialization');
     }
     this.protocolVersion = initialized.protocolVersion || '2025-03-26';
-    if (this.child !== child) throw new Error('Joppa MCP transport failed');
+    if (this.child !== child) throw new JoppaTransportError();
     child.stdin.write(JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized', params: {}}) + '\n');
     return initialized;
   })().catch(error => {
@@ -242,7 +245,7 @@ McpClient.prototype._ensureInitialized = function (options = {}) {
 
 McpClient.prototype.request = async function (method, params = {}, options = {}) {
   if (this.closed) throw new Error('Joppa MCP client is closed');
-  if (options.signal?.aborted) throw options.signal.reason ?? new Error('Joppa MCP transport failed');
+  if (options.signal?.aborted) throw options.signal.reason ?? new JoppaTransportError();
   if (typeof method !== 'string' || !method.trim()) throw new Error('MCP request needs a method name');
   const initialized = await this._ensureInitialized(options);
   if (method === 'initialize') return initialized;
