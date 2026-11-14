@@ -1,0 +1,30 @@
+{
+  "workspace": "my-workspace",
+  "url": "https://joppa.example.com/mcp",
+  "mcp_command": ["node", "/absolute/private/broker-joppa-host.cjs"],
+  "runs_folder": "/absolute/private/writer-runs",
+  "workflow": "/absolute/path/to/crew/writer/workflow.yaml",
+  "selection": {"kind": "ac", "data": {"stage": "tests_needed"}, "assignee": ""},
+  "order": [{"field": "revision", "direction": "asc"}],
+  "children": {"kind": ["task", "test"]},
+  "references": ["sources"],
+  "publication": {
+    "file": "operations.json",
+    "allowed_operations": ["save_object", "note"],
+    "create_kinds": ["test"],
+    "update_kinds": ["task"]
+  },
+  "vars": {
+    "TEST_KIND": "test",
+    "TASK_KIND": "task",
+    "WAITING_STAGE": "waiting_for_tests",
+    "READY_STAGE": "to_implement"
+  },
+  "context": {
+    "url": "https://joppa.example.com/api/data",
+    "workspace": "context-workspace",
+    "token_file": "/absolute/private/joppa-read-key",
+    "root": "memory:configured-root",
+    "roles": {"author": "writer-author", "critic": "writer-critic"}
+  }
+}
