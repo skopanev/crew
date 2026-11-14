@@ -66,6 +66,18 @@ Set `taskFields` to tell Crew where a Task names its repository and module. Crew
 
 `body:<label>` reads each body line that starts with `<label>:`. `data:<field.path>` reads one text field of the Task data.
 Structured Tasks follow the same mapping. Unmapped `repository` or `module` fields are ignored and are not rendered.
+For Tasks from the bundled Joppa planner, use its stored data fields explicitly:
+
+```json
+{"taskFields": {"repository": "data:repository", "module": "data:module"}}
+```
+
+The planner still writes those fields. This change does not modify its scope parser.
+Existing configs that use body labels must now set their `body:` mappings before restarting Dolber.
+Without a mapping, a single-repository config treats every otherwise eligible Task as work for that repository.
+Each field has one source. Crew does not try another source when the selected field is missing.
+Use a consistent Task format, or separate configs and filters for different formats in the same workspace.
+Dispatchers that share a workspace must set `taskFields` or `joppa.filter` to select their own work.
 Without a value, Crew uses the sole configured repository, then the sole module of that repository.
 With several choices and no value, the queue skips the Task and the claim refuses it.
 An explicit value must name a configured repository or module. Two values for one field are refused.
