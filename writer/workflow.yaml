@@ -221,7 +221,9 @@ nodes:
         echo '<signal:var key=round>2</signal:var>'
         echo '<signal:REVISE>The critics did not approve the draft. The author revises it once.</signal:REVISE>'
       else
-        printf '%s' "$verdict" | jq -r '"Independent critics did not approve the revised Tests: " + (.critique | tojson)' |
+        printf '%s' "$verdict" | jq -r '"Writer stopped after one rework. " +
+          (.critique | to_entries | map(.key + ": " +
+            ((.value.failing[0].reasons[0] // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
           cut -c1-1000 > "$a/failure.txt"
         echo '<signal:REJECTED>The critics did not approve the revised draft.</signal:REJECTED>'
       fi
