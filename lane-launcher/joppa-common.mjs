@@ -19,6 +19,16 @@ export const contractDigest = object => {
   })).digest('hex');
 };
 
+// Never expose download credentials. These fields also identify attachment changes independently of document revisions.
+export const sourceFiles = object => (object.files || []).map(file => Object.fromEntries(
+  ['id', 'name', 'hash', 'size', 'content_type', 'at'].filter(key => file[key] !== undefined).map(key => [key, file[key]])));
+
+// A Source fixes a version. Its file edits must invalidate the context, even when its body does not change.
+export const contextDigest = (object, context) => context.source
+  ? createHash('sha256').update(JSON.stringify({revision: object.current_revision,
+    contract: contractDigest(object), files: sourceFiles(object)})).digest('hex')
+  : contractDigest(object);
+
 export function verifyRemoteDependencies(object) {
   const link = remoteDependencyBlocker(object);
   require(!link, `DEPENDENCY_NOT_READY: ${link}`);

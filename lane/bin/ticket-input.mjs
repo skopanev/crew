@@ -16,7 +16,10 @@ try {
   const claim = JSON.parse(fs.readFileSync(path.join(runDir, 'artifacts/claim.json'), 'utf8'));
   if (claim?.source !== 'joppa' || !claim.ticket) throw new Error('This run has no Joppa Task claim');
   const ticket = claim.ticket;
-  if (ticket.id.toLowerCase() !== id.toLowerCase() && ticket.address !== id) throw new Error('Ticket source returned a different ticket');
+  if (ticket.id.toLowerCase() !== id.toLowerCase() && ticket.address !== id) {
+    throw new Error(`This reader reads only the claimed Task or package ${ticket.id}. ` +
+      'Read its sources, parentContext and coveredContexts in the ticket input. Source IDs are not ticket IDs.');
+  }
   if (claim.workspace !== workspace) throw new Error('Joppa Task belongs to another workspace');
   const content = JSON.stringify(ticket, null, 2) + '\n';
   if (readOnly) {

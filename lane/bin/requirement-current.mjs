@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {callJoppa} from '../../lane-launcher/joppa-api.mjs';
 import {contractDigest} from '../../lane-launcher/joppa.mjs';
+import {contextDigest} from '../../lane-launcher/joppa-common.mjs';
 import {nodeAssignee, nodeWaiting} from '../../lane-launcher/joppa-nodes.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../../lane-launcher/dependencies.mjs';
 import {assertRequirementHead, requirementPlan} from '../../lane-launcher/requirement-delivery.mjs';
@@ -90,7 +91,7 @@ try {
         parent.document?.present === true &&
         live(parent),
         `Acceptance context is invalid, needs review, or has active planning: ${context.address}`);
-      require(contractDigest(parent) === context.digest, `Acceptance context changed after claim: ${context.address}`);
+      require(contextDigest(parent, context) === context.digest, `Acceptance context changed after claim: ${context.address}`);
       const dependency = await dependencies(context.address);
       require(dependency.ready, `Acceptance dependency changed: ${dependency.blocker}`);
     }

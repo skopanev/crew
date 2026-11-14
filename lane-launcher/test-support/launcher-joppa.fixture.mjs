@@ -217,6 +217,7 @@ function served(object) {
     // Live detail reads give comments as one page {items, total, next_cursor}, not annotations.
     comments: comments(object), ...(object.remote_links ? {remote_links: object.remote_links} : {}),
     ...(object.remote_links_revision ? {remote_links_revision: object.remote_links_revision} : {}),
+    ...(object.files ? {files: object.files} : {}),
     ...(object.workspace_key ? {workspace_key: object.workspace_key} : {}), ...(object.item_id ? {item_id: object.item_id} : {})};
 }
 

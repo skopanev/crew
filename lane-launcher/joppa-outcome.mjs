@@ -3,7 +3,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {isDeepStrictEqual} from 'node:util';
 import {quote, save} from './runtime.mjs';
-import {api, batchRequest, claimTasks, contractDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
+import {api, batchRequest, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive} from './joppa-claims.mjs';
@@ -58,7 +58,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
       verifyRemoteDependencies(parent);
       require(parent.address === context.address && contextLive(parent) &&
         (await dependencies(context.address)).ready &&
-        contractDigest(parent) === context.digest, 'Package acceptance context changed during execution; completion refused');
+        contextDigest(parent, context) === context.digest,
+        `Package acceptance context changed during execution: ${context.address}; completion refused`);
     }
   };
   const objects = await currentTasks(result.code === 0, result.code !== 0);

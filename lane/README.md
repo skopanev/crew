@@ -140,6 +140,12 @@ Crew stays read-only at `/workspace`, and `TOOLING_ROOT` is `/workspace`. Crew s
 The Docker label `medulla.workflow` shows the directory name instead of `lane`.
 
 Each Task snapshot includes its parent AC's live `acceptanceTests`, with title, body and command when present.
+The ticket's `sources` list includes the title and body of Sources referenced by its parent and covered ACs.
+Crew reads only schema-declared references to types with `source: true`. Shared Sources appear once per claimed package.
+File metadata is included without download URLs. Crew does not fetch attachments.
+Missing or archived Sources stop startup with `SOURCE_CONTEXT_INVALID`. Source changes invalidate the captured context before landing and completion.
+Old recovery notes without these Source snapshots require inspection before reuse.
+`ticket-input.mjs` reads only the claimed Task or package. It cannot fetch a Source by its ID.
 Authored `checks` and `acceptance_checks` are optional. Without acceptance rows, Crew creates no test bindings.
 The project test uploader can record its report names directly. Existing acceptance rows retain their binding checks.
 

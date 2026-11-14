@@ -1,11 +1,12 @@
 import os from 'node:os';
-import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, verifyRemoteDependencies} from './joppa-common.mjs';
+import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeWaiting, nodeStageDone, saveNode} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 import {criterionTests} from './test-nodes.mjs';
+import {criterionSources} from './source-context.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes one release save with the hold code and one note for each Task in one batch.
@@ -99,9 +100,15 @@ export async function claimTask(run, persist, runId) {
     address: run.task, actor: run.joppaWorker.actor, assignee, runId, tasks: objects.map(object => ({address: object.address,
       revision: object.current_revision, digest: contractDigest(object)}))};
   persist();
-  const inputs = [], parents = new Map(), acceptanceTests = new Map();
+  const inputs = [], parents = new Map(), acceptanceTests = new Map(), sources = new Map();
   const schema = await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace});
   run.claim.contexts = [];
+  const sourceContext = async (criterion, taskContexts) => {
+    for (const {snapshot} of await criterionSources(run, schema.schema.types, criterion, sources)) {
+      if (!taskContexts.some(item => item.address === snapshot.address)) taskContexts.push(snapshot);
+      if (!run.claim.contexts.some(item => item.address === snapshot.address)) run.claim.contexts.push(snapshot);
+    }
+  };
   for (const [index, object] of objects.entries()) {
     let address = object.document.parent, requirement, parentContext, requirementContext;
     const seen = new Set(), taskContexts = [];
@@ -119,6 +126,7 @@ export async function claimTask(run, persist, runId) {
         criterion: schema.schema.types[parent.kind]?.role === 'ac'};
       taskContexts.push(snapshot);
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
+      if (snapshot.criterion) await sourceContext(parent, taskContexts);
       if (address === object.document.parent) {
         parentContext = context;
         run.claim.tasks[index].parent = snapshot;
@@ -146,6 +154,7 @@ export async function claimTask(run, persist, runId) {
       if (!run.claim.contexts.some(item => item.address === address)) run.claim.contexts.push(snapshot);
       coveredContexts.push({use: 'Covered acceptance reference. Execute only this Task contract.',
         address, item_id: criterion.item_id, revision: criterion.current_revision, data: criterion.document.data});
+      await sourceContext(criterion, taskContexts);
     }
     if (covered.length) run.claim.tasks[index].covers = covered;
     const input = taskInput(run.config, object, taskContexts, covered);
@@ -170,6 +179,7 @@ export async function claimTask(run, persist, runId) {
   run.repository = inputs[0].repo;
   // Keep the original receipt fields for readers of single-Task runs.
   if (objects.length === 1) Object.assign(run.claim, run.claim.tasks[0]);
+  if (sources.size) run.claim.ticket.sources = [...sources.values()].map(item => item.input);
   // The lane refuses more distinct (AC, test) node saves than the completion batch can hold.
   run.claim.ticket = {...run.claim.ticket, bindingNodeLimit: packageBudget(objects.length, 0)};
   persist();
@@ -198,8 +208,8 @@ export async function guardTaskClaims(run, persist) {
     const dependency = await dependencies(context.address);
     require(object?.address === context.address && contextLive(object) &&
       dependency.ready &&
-      contractDigest(object) === context.digest,
-      'Acceptance context changed before lane startup');
+      contextDigest(object, context) === context.digest,
+      `Acceptance context changed before lane startup: ${context.address}`);
   }
 }
 
