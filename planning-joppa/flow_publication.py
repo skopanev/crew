@@ -82,6 +82,12 @@ def saved_revision(result, command):
 
 
 def fail(api, config, target, reason):
+    for name in ("claim.json", "publication.json", "release.json"):
+        receipt = target / name
+        if receipt.exists() and read(receipt).get("status") in ("pending", "uncertain"):
+            write(target / "result.json", {"status": "blocked", "reason": reason,
+                  "claim_released": False, "needs_recovery": True, "acceptance_verified": False})
+            return
     claim_path = target / "claim.json"
     released = False
     if claim_path.exists() and read(claim_path).get("status") == "confirmed":

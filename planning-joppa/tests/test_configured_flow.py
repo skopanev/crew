@@ -114,6 +114,15 @@ class ConfiguredFlowTests(unittest.TestCase):
             flow_publication.publish(self.api, self.config, self.target)
         self.assertEqual(len(self.api.batches), 1)
 
+    def test_uncertain_claim_stays_held_without_another_mutation(self):
+        receipt = read(self.target / "claim.json")
+        write(self.target / "claim.json", {**receipt, "status": "uncertain"})
+        flow_publication.fail(self.api, self.config, self.target, "The claim response was lost")
+        result = read(self.target / "result.json")
+        self.assertTrue(result["needs_recovery"])
+        self.assertFalse(result["claim_released"])
+        self.assertEqual(len(self.api.batches), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
