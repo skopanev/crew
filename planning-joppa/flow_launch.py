@@ -62,6 +62,8 @@ def launch(path, raw, item, dry_run):
         return 0
     require(shutil.which(executable), "required executable missing: " + executable)
     with tempfile.TemporaryDirectory(prefix="crew-planner-memory-") as memory:
+        working = Path(memory) / "work"
+        working.mkdir()
         env = dict(os.environ)
         env["LANE_MEMORY_CONFIG"] = ""
         if config.get("context"):
@@ -69,5 +71,5 @@ def launch(path, raw, item, dry_run):
             target.write_text(json.dumps(config["context"]))
             target.chmod(0o600)
             env["LANE_MEMORY_CONFIG"] = str(target)
-        code = subprocess.run(command, env=env, check=False).returncode
+        code = subprocess.run(command, env=env, cwd=working, check=False).returncode
         return 1 if code == 75 else code
