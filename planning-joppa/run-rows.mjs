@@ -31,10 +31,12 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       try { vars = fs.readFileSync(path.join(folder, 'vars.yaml'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const subject = input?.joppa?.scope === 'requirement' ? input.requirement : input?.ac;
       // A configured flow records the complete selected object. Its identity and revision dedupe later passes.
+      // The claim and its release change the item revision, so a finished run records the revision it left.
       const selected = input?.selected && typeof input.selected === 'object' ? input.selected : null;
       const ac = selected?.address || subject?.id || /^PLANNING_JOPPA_(?:REQ|AC|ITEM):\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
       if (!ac) return [];
-      const revision = selected?.current_revision ?? selected?.revision;
+      const revision = Number.isSafeInteger(result?.selected_revision) ? result.selected_revision :
+        selected?.current_revision ?? selected?.revision;
       const title = item => {
         if (!item) return '';
         const data = input?.joppa?.objects?.[item.id]?.document?.data;

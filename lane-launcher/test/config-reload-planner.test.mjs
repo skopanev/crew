@@ -147,12 +147,13 @@ test('a configured flow selects one ordered native item, skips excluded and star
     exclude_children: {kind: 'task', data: {title: '[02] Task 2'}}};
   const f = await plannerFixture(t, flow, 0, pass);
   f.queue.push('task:t2');
-  // A finished run of ac:a1 at its current revision is not repeated. ac:a2 has an excluded direct child.
+  // A finished run that left ac:a1 at its current revision is not repeated. ac:a2 has an excluded direct child.
+  // The run started at revision 2; its claim and release left revision 3.
   const artifacts = path.join(f.config.runs_folder, '2026-11-14_10-00-00-done', 'artifacts');
   fs.mkdirSync(artifacts, {recursive: true});
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({workspace: 'fixture',
-    selected: {address: 'ac:a1', current_revision: 3, document: {data: {title: 'Configured title'}}}}));
-  fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published'}));
+    selected: {address: 'ac:a1', current_revision: 2, document: {data: {title: 'Configured title'}}}}));
+  fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published', selected_revision: 3}));
   const run = f.start();
   await run.until(output => count(output, /Items: 2 selected · no unattempted items/g) >= 2);
   assert.deepEqual(f.passes(), []);
