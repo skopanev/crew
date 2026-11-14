@@ -58,8 +58,11 @@ Computed status can change without a Task revision. This filter does not lock th
 Existing dependency and contract guards still apply. The filter grants no write access and does not change Task data.
 Local revision pins must be positive integers. Remote dependencies retain their access and revision checks.
 
-The Task contract must declare exactly one `Repository:` line and one `Module:` line.
-These names select entries in the config. Module paths remain inside the selected repository.
+The Task contract must declare exactly one `Repository:` line.
+Omit `Module:` when the repository has one configured module. Crew uses that module.
+Omit the repository's `modules` config to use the whole repository, with its repository ID as the module name.
+An explicit `Module:` must name a configured module. Several modules require exactly one `Module:` line.
+Module paths remain inside the selected repository.
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
 The snapshot includes the direct parent as acceptance context. The Task contract defines the execution scope.
 Completion checks that both authored documents remain unchanged.

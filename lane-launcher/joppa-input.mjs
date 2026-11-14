@@ -107,7 +107,7 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   };
   const repo = config.repositories.find(repo => repo.id === field('Repository'));
   require(repo, 'Task repository is not configured');
-  const module = field('Module');
+  const module = repo.modules.length === 1 && !/^Module:/m.test(contract) ? repo.modules[0].name : field('Module');
   const configuredModule = repo.modules.find(item => item.name === module);
   const modulePath = configuredModule?.path;
   require(modulePath, 'Task module is not configured');

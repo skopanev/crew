@@ -16,7 +16,7 @@ export function taskContract(data) {
   const body = taskBody(data);
   require(text(body), 'Task needs an implementation contract');
   if (!Object.hasOwn(data, 'steps')) return body;
-  for (const key of ['repository', 'module']) {
+  for (const key of data.module === undefined ? ['repository'] : ['repository', 'module']) {
     require(text(data[key]) && !/[\r\n]/.test(data[key]), `Structured Task needs ${key}`);
   }
   require(Array.isArray(data.steps) && data.steps.length && data.steps.every(text), 'Structured Task needs steps');
@@ -24,7 +24,7 @@ export function taskContract(data) {
   const checks = data.checks ?? [];
   require(Array.isArray(checks) && checks.every(text), 'Structured Task checks must be text lines');
   const steps = [...data.steps], lines = [body, '', `Repository: ${data.repository}`,
-    `Module: ${data.module}`, '', 'How:'];
+    ...(data.module === undefined ? [] : [`Module: ${data.module}`]), '', 'How:'];
   if (steps[0].startsWith('0. ')) lines.push(steps.shift());
   lines.push(...steps.map((step, index) => `${index + 1}. ${step.replace(/^\s*\d+\.\s+/, '')}`));
   if (checks.length) lines.push('', 'Checks:', ...checks);

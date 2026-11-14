@@ -55,6 +55,7 @@ export function validateJoppa(config) {
     require(text(repo.targetBranch) && repo.targetBranch !== 'HEAD' && !repo.targetBranch.startsWith('-'), 'Repository needs targetBranch');
     command('git', ['check-ref-format', `refs/heads/${repo.targetBranch}`]);
     require(text(repo.cbmProject), 'Repository needs cbmProject');
+    if (repo.modules === undefined) repo.modules = [{name: repo.id, path: '.'}];
     require(Array.isArray(repo.modules) && repo.modules.length, 'Repository needs modules: [{name, path}]');
     const modules = new Set();
     for (const {name, path: modulePath, paths: modulePaths = [modulePath]} of repo.modules) {

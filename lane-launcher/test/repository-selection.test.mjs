@@ -2,11 +2,42 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {nextTask, claimTask} from '../joppa.mjs';
+import {nextTask, claimTask, taskInput} from '../joppa.mjs';
 import {configFrom} from '../launcher-config.mjs';
 import {save} from '../runtime.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
+
+test('missing Module uses the only module or the whole repository, while explicit scope stays strict', async t => {
+  const f = await setup(t, {launchLanes: false}), object = f.joppa.objects.get('task:t1');
+  const original = structuredClone(object.document.data);
+  for (const modules of [undefined, [f.config.repositories[0].modules[0]]]) {
+    const raw = structuredClone(f.config);
+    if (modules === undefined) delete raw.repositories[0].modules;
+    else raw.repositories[0].modules = modules;
+    save(f.configFile, raw);
+    const config = configFrom(f.configFile, f.env, {dryRun: true});
+    const expected = modules?.[0] ?? {name: 'app', path: '.'};
+    for (const structured of [false, true]) {
+      object.document.data = {...original, body: structured ? 'Goal: required change' : 'Goal: required change\nRepository: app',
+        ...(structured ? {repository: 'app', steps: ['Make the required change.']} : {})};
+      const before = structuredClone(object);
+      const {ticket} = taskInput(config, object);
+      assert.equal(ticket.moduleId, expected.name);
+      assert.equal(ticket.module, expected.path);
+      assert.deepEqual(ticket.modulePaths, expected.paths ?? [expected.path]);
+      assert.equal((await nextTask(config)).candidate.id, object.address);
+      assert.deepEqual(object, before);
+      object.document.data.body += '\nModule: unknown';
+      assert.throws(() => taskInput(config, object), /Task module is not configured/);
+    }
+  }
+  object.document.data = {...original, body: 'Goal: required change\nRepository: app'};
+  assert.throws(() => taskInput(f.config, object), /exactly one Module/);
+  object.document.data.body += '\nModule: m1\nModule: m2';
+  assert.throws(() => taskInput(f.config, object), /exactly one Module/);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
 
 test('one authenticated worker supports the configured lane limit without a project address', async t => {
   const f = await setup(t, {launchLanes: false});
