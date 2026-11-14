@@ -3,6 +3,7 @@
   "workspace": "my-workspace",
   "joppa": {
     "url": "https://joppa.example.com/mcp",
+    "filter": {},
     "mcpCommand": [
       "node",
       "/absolute/private/broker-joppa-host.cjs"

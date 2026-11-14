@@ -21,9 +21,8 @@ const paint = (tone, value) => useColor ? `\x1b[${tones[tone]}m${value}\x1b[0m` 
 const divider = () => console.log(paint('line', '─'.repeat(Math.min(process.stdout.columns || 64, 64))));
 export const usage = 'dolber-joppa.sh [config.json | --config <file>] [--once | --dry-run | --monitor]';
 export function dockerLanes(output, config) {
-  return output.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => {
-    return row.workflow === 'lane' && runScope(row.runFolder) === config.id;
-  });
+  return output.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row =>
+    row.workflow === 'lane' && runScope(row.runFolder) === config.id);
 }
 
 export function activeCount(config, containers, panes) {
@@ -55,7 +54,6 @@ function snapshots(config) {
   // containing commas. JSON quoting also preserves spaces and escapes.
   const format = '{"workflow":{{json (.Label "medulla.workflow")}},"runFolder":{{json (.Label "medulla.runs_under")}}}';
   const containers = dockerLanes(command('docker', ['ps', '--format', format]), config);
-  if (!config.launchLanes) return {containers, panes: null};
   const result = herdr(config, ['pane', 'list', '--workspace', config.herdrWorkspace]);
   if (!Array.isArray(result?.panes)) throw new Error('Herdr returned no pane list; refusing to assume free capacity');
   return {containers, panes: new Set(result.panes.map(pane => pane.pane_id))};
@@ -109,7 +107,8 @@ export async function tick(config, display = null) {
     print(`Joppa Tasks [workspace=${config.workspace}, repositories=${config.repositories.map(repo => repo.id).join(',')}]: ${selected.available} available · ${selected.held} held Tasks${dependencySummary}`);
     for (const issue of dependencyIssues.slice(0, 5)) print(formatDependencyIssue(issue));
     print('checking params:');
-    print(`  repositories: ${config.repositories.map(repo => repo.id).join(', ')}`);
+    print(`  repositories: ${config.repositories.map(repo => repo.id).join(', ')}` +
+      (config.joppa.filter ? `\n  filter: ${JSON.stringify(config.joppa.filter)}` : ''));
   }
   if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');

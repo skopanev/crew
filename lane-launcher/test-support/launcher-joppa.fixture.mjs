@@ -74,6 +74,7 @@ async function packageFixture(t, mode = 'success') {
     // A detail read has the live server shape: no document, edges in relations.
     else if (name === 'joppa_objects' && args.address) value = served(objects.get(args.address));
     else if (name === 'joppa_objects') {
+      if (args.data) batch.beforeFilter?.();
       assert.equal(Object.hasOwn(args, 'work_filter'), false);
       const kinds = args.kind && [args.kind].flat(), tones = args.status && [args.status].flat();
       const descendant = object => {
@@ -87,7 +88,8 @@ async function packageFixture(t, mode = 'success') {
         return false;
       };
       const rows = [...objects.values()].filter(object => descendant(object) &&
-        (!kinds || kinds.includes(object.kind)) && (object.kind !== 'task' || queue.includes(object.address)))
+        (!kinds || kinds.includes(object.kind)) && (object.kind !== 'task' || queue.includes(object.address)) &&
+        Object.entries(args.data || {}).every(([key, value]) => JSON.stringify(object.document.data[key]) === JSON.stringify(value)))
         .map(object => ({address: object.address, revision: object.current_revision,
           kind: object.kind, parent: object.document.parent, present: object.document.present,
           status: object.document.present ? object.status?.tone || 'blue' : 'purple',
@@ -106,6 +108,7 @@ async function packageFixture(t, mode = 'success') {
     }
     else if (name === 'joppa_tasks') throw new Error('The removed Task tool was called');
     else if (name === 'joppa_batch') {
+      batch.beforeWrite?.();
       const commands = args.operations.map(({command}) => command);
       const removed = commands.findIndex(command => command.op === 'assess' || Object.hasOwn(command, 'links') ||
         Object.hasOwn(command, 'question_checked') || command.op === 'save_object' && !command.reason);

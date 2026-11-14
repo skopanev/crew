@@ -176,7 +176,8 @@ export function createDashboard(config, paint) {
       clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
       counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tickets: —',
-      clip(`Source: Joppa · delivery: ${config.delivery}`, width),
+      clip(`Source: Joppa · delivery: ${config.delivery}` +
+        (config.joppa.filter ? ` · filter: ${JSON.stringify(config.joppa.filter)}` : ''), width),
       '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)

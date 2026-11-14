@@ -9,6 +9,7 @@ import {coveredBy} from './test-bindings.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
+import {filteredTasks} from './task-filter.mjs';
 import {nodeAssignee, nodeWaiting, nodeStageDone, taskPages, coversFields} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -117,11 +118,13 @@ export async function nextTask(config) {
     const eligible = [], {object, group} = await occupancyReader(config, read);
     const inventory = [], assigned = [];
     await heldTasks(config, read, async task => { assigned.push(task); }, inventory);
+    const matches = await filteredTasks(config, read);
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
     const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) &&
-      !nodeAssignee(task) && !nodeWaiting(task) && !(priorities && !priorities.includes(task['data.priority']));
+      !nodeAssignee(task) && !nodeWaiting(task) && !(priorities && !priorities.includes(task['data.priority'])) &&
+      (!matches || matches.get(task.address) === task.revision);
     // Batch the Task details, then their immediate parents and local dependencies. Deeper reads stay single.
     const tasks = await read.prefetch([...assigned, ...inventory.filter(open)].map(task => task.address));
     await read.prefetch(tasks.flatMap(value => [value.document.parent, ...(value.document.links || [])

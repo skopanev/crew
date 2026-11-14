@@ -25,6 +25,21 @@ The continuous dispatcher still checks for other work.
 The queue checks blocking `depends_on` targets on each Task and its ancestors.
 Archived targets satisfy a dependency. A live Task needs `data.stage: done`; other live targets need a green status.
 The queue skips completed Tasks. The claim also refuses them.
+Set `joppa.filter` to narrow Task selection with native Joppa filters. For example:
+
+```json
+{"joppa": {"filter": {"data": {"stage": "to_implement"}}}}
+```
+
+The project supplies the field names and values. Crew has no stage vocabulary for this filter.
+Joppa evaluates `data` with JSON containment, including nested objects and arrays. Array containment requires every listed value.
+The other supported native filters are `parent`, `depth`, `status`, `owner` and `assignee`. All filters must match.
+Omit `filter`, or set `{}`, to keep the current selection. A field typo can give zero matches.
+The available count respects the filter. Held counts and Requirement finalization still use the full inventory.
+Before a claim, Crew checks every selected Task against the same filter and its current revision.
+A mismatch returns `TASK_FILTER_MISMATCH` before a claim write or Docker. A changed revision refuses the atomic claim.
+Computed status can change without a Task revision. This filter does not lock the state of other nodes.
+Existing dependency and contract guards still apply. The filter grants no write access and does not change Task data.
 Local revision pins must be positive integers. Remote dependencies retain their access and revision checks.
 
 The Task contract must declare exactly one `Repository:` line and one `Module:` line.

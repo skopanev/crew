@@ -7,6 +7,7 @@ import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 import {criterionTests} from './test-nodes.mjs';
 import {criterionSources} from './source-context.mjs';
+import {filteredTasks} from './task-filter.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes one release save with the hold code and one note for each Task in one batch.
@@ -83,6 +84,10 @@ export async function claimTask(run, persist, runId) {
     const coversOf = coveredBy(run.config, types);
     for (const object of selected) testAcceptance(object, coversOf(object));
     packageBudget(selected.length, estimatedNodes(selected, coversOf));
+    const matches = await filteredTasks(run.config, (tool, args) =>
+      api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), selected.map(object => object.address));
+    for (const object of selected) require(!matches || matches.get(object.address) === object.current_revision,
+      `TASK_FILTER_MISMATCH: ${object.address} no longer matches joppa.filter at its claim revision; no Tasks claimed`);
     run.claimRequest = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.')));
   }
