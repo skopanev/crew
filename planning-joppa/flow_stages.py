@@ -79,11 +79,10 @@ def capture(name):
 
 def failure(reason=None):
     target, config = artifacts(), settings()
-    reason = reason or os.environ.get("MEDULLA_LAST_MESSAGE") or "Configured workflow stopped before publication"
-    # A workflow can leave a short business diagnosis without changing tracker fields.
     detail = target / "failure.txt"
-    if detail.is_file() and reason == "Configured workflow stopped before publication":
-        reason = detail.read_text()[:1000].strip() or reason
+    # An explicit exception takes priority. Otherwise use the workflow's business diagnosis.
+    reason = reason or (detail.read_text()[:1000].strip() if detail.is_file() else "") or \
+             os.environ.get("MEDULLA_LAST_MESSAGE") or "Configured workflow stopped before publication"
     flow_publication.fail(client(config), config, target, reason)
     signal("BLOCKED", reason)
 
