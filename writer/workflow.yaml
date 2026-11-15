@@ -1,7 +1,7 @@
 version: '2'
 start: prepare
-# Two rounds of author 1200 + critics 1200, plus prepare, checks and publication.
-timeout: 5400
+# Node timeouts and the finite rework count bound the run. A global deadline must not skip claim release.
+timeout: 0
 defaults:
   timeout: 60
 vars:
@@ -17,6 +17,7 @@ vars:
   TASK_KIND: ''
   WAITING_STAGE: ''
   READY_STAGE: ''
+  REWORK_LIMIT: '1'
   round: '1'
   draft: ''
   draft_digest: ''
@@ -30,6 +31,9 @@ nodes:
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
+      case "$REWORK_LIMIT" in
+        ''|*[!0-9]*) echo 'writer: REWORK_LIMIT must be a nonnegative integer' >&2; exit 2 ;;
+      esac
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
@@ -121,9 +125,9 @@ nodes:
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
         printf '<signal:var key=draft_digest>%s</signal:var>\n' "${hash%% *}"
         echo '<signal:DRAFTED>The draft is ready for independent review.</signal:DRAFTED>'
-      elif [ "${round:-1}" = 1 ]; then
+      elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
         echo '<signal:var key=critique>{"draft":"The draft does not match the output contract or the Test schema: unique ids and titles, no title of an existing Test, the name rules and limits, every required field, the listed values of each typed field, and a coverage statement."}</signal:var>'
-        echo '<signal:var key=round>2</signal:var>'
+        printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The draft does not match the output contract or the Test schema.</signal:REVISE>'
       else
         echo 'The revised author draft does not match the Writer output contract or the Test schema.' > "$a/failure.txt"
@@ -215,13 +219,13 @@ nodes:
       if [ "$(printf '%s' "$verdict" | jq -r .approved)" = true ]; then
         printf '%s' "$verdict" | jq '{operations}' > "$a/$file"
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
-      elif [ "${round:-1}" = 1 ]; then
+      elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
         printf '<signal:var key=critique>%s</signal:var>\n' "$critique"
-        echo '<signal:var key=round>2</signal:var>'
-        echo '<signal:REVISE>The critics did not approve the draft. The author revises it once.</signal:REVISE>'
+        printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
+        echo '<signal:REVISE>The critics did not approve the draft. The author revises it within the configured limit.</signal:REVISE>'
       else
-        printf '%s' "$verdict" | jq -r '"Writer stopped after one rework. " +
+        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + (if $limit == "1" then " rework. " else " reworks. " end) +
           (.critique | to_entries | map(.key + ": " +
             ((.value.failing[0].reasons[0] // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
           cut -c1-1000 > "$a/failure.txt"
