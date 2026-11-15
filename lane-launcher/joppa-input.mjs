@@ -107,10 +107,11 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   };
   const repo = config.repositories.find(repo => repo.id === field('Repository'));
   require(repo, 'Task repository is not configured');
-  const module = field('Module');
+  const module = !/^Module:/m.test(contract) && repo.modules.length === 1
+    ? repo.modules[0].name : field('Module');
   const configuredModule = repo.modules.find(item => item.name === module);
   const modulePath = configuredModule?.path;
-  require(modulePath, 'Task module is not configured');
+  require(modulePath, `Task module is not configured: declared ${module}, configured ${repo.modules.map(item => item.name).join(', ')}`);
   const modulePaths = configuredModule.paths || [modulePath];
   const recovery = config.discardFailedWorktree === true ? null : latestRecovery(config, object, contractDigest(object), contexts);
   return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,
