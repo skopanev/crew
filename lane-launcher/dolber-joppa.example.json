@@ -22,6 +22,7 @@
   "closeTabOnExit": true,
   "discardFailedWorktree": false,
   "delivery": "branch",
+  "pendingDeliveryData": {"stage": "awaiting_target"},
   "sourceRoot": "/absolute/source-workspace",
   "worktreeRoot": "/absolute/source-workspace/.worktrees",
   "stateDir": "/absolute/project-runs/lane-launcher",

@@ -55,7 +55,9 @@ def ensure_recovered(root, current, server, workspace, ac):
             release = read(target / "release.json") if (target / "release.json").exists() else {}
             released = release.get("status") == "confirmed" and not any(
                 item.get("ac") == ac and item.get("unknown") for item in release.get("skipped_claims", []))
-            finished = (target / "result.json").exists() and read(target / "result.json").get("status") == "published"
+            result = read(target / "result.json") if (target / "result.json").exists() else {}
+            confirmed = (target / "publication.json").exists() and read(target / "publication.json").get("status") == "confirmed"
+            finished = result.get("status") == "published" or result.get("claim_released") is True and confirmed
             require(released or finished, f"earlier claim or publication needs recovery: {target}")
 
 

@@ -153,13 +153,15 @@ test('a configured flow selects one ordered native item, skips excluded and star
   fs.mkdirSync(artifacts, {recursive: true});
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({workspace: 'fixture',
     selected: {address: 'ac:a1', current_revision: 2, document: {data: {title: 'Configured title'}}}}));
-  fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published', selected_revision: 3}));
+  fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published', selected_revision: 3, item_revisions: {'ac:a1': 3, 'ac:a3': 5}}));
   const run = f.start();
   await run.until(output => count(output, /Items: 2 selected · no unattempted items/g) >= 2);
   assert.deepEqual(f.passes(), []);
   assert.match(run.output(), /ITEM/);
   assert.deepEqual(plannerRows(f.config.runs_folder).map(row => [row.ac, row.acTitle, row.attemptKey]),
     [['ac:a1', 'Configured title', JSON.stringify(['ac:a1', 3])]]);
+  assert.deepEqual(plannerRows(f.config.runs_folder)[0].attemptKeys,
+    [JSON.stringify(['ac:a1', 3]), JSON.stringify(['ac:a3', 5])]);
   assert.doesNotMatch(run.output(), /REQ \/ AC/);
   f.write({...f.config, exclude_children: {kind: 'task', data: {title: 'no such task'}}});
   await run.until(() => f.passes().length === 1);

@@ -83,6 +83,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         modified(path.join(folder, 'journal.jsonl')) || start;
       return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac,
         ...(selected && Number.isSafeInteger(revision) ? {attemptKey: JSON.stringify([ac, revision])} : {}),
+        ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
+          .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
+          .map(([address, value]) => JSON.stringify([address, value]))} : {}),
         runId: match?.[5] || entry.name, start, end, active, status, stage}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }

@@ -1,6 +1,7 @@
 """Read only the objects and reference fields named by a flow config."""
 from common import require
 from context_reads import object_read
+import flow_batch
 
 
 def pages(api, workspace, query):
@@ -38,8 +39,12 @@ def load(api, config, address):
     schema = api.call("joppa_tree", {"workspace": workspace})["schema"]
     help = api.call("joppa_help", {"workspace": workspace, "op": "save_object"})
     selected = object_read(api, workspace, address)
-    row = next((item for item in pages(api, workspace, {**config["selection"], "fields": ["revision"]})
-                if item.get("address") == address), None)
+    batch = flow_batch.settings(config)
+    rows = pages(api, workspace, {**config["selection"], "fields": ["revision", "data",
+                 *[item["field"] for item in config.get("order", [])]] if batch else ["revision"]})
+    candidates = list(rows) if batch else None
+    row = next((item for item in candidates if item.get("address") == address), None) if batch else \
+          next((item for item in rows if item.get("address") == address), None)
     require(row and row.get("revision") == selected["current_revision"], "selected object no longer matches the configured filter")
     if config.get("exclude_children") is not None:
         require(not children(api, config, selected, config["exclude_children"]), "selected object has excluded children")
@@ -52,13 +57,34 @@ def load(api, config, address):
         require(all(isinstance(value, str) and value for value in values), "reference values must be object addresses")
         addresses = [value if ":" in value else spec["target"] + ":" + value for value in values]
         refs[field] = [object_read(api, workspace, value) for value in sorted(set(addresses))]
-    return {"workspace": workspace, "selected": selected, "schema": schema, "help": help,
+    assignment = {"workspace": workspace, "selected": selected, "schema": schema, "help": help,
             "references": refs,
             "children": children(api, config, selected, config["children"]) if "children" in config else []}
+    if batch:
+        group = flow_batch.field(selected, batch["by"]) if batch.get("by") else None
+        require(not batch.get("by") or group is not None, "selected item lacks batch.by field")
+        items, seen = [selected], {address}
+        for candidate in flow_batch.ordered(candidates, config):
+            if len(items) == batch["size"]:
+                break
+            if candidate["address"] in seen:
+                continue
+            if batch.get("by") and flow_batch.field(candidate, batch["by"]) != group:
+                continue
+            item = object_read(api, workspace, candidate["address"])
+            require(item["current_revision"] == candidate["revision"], "batch item changed during selection")
+            require(not batch.get("by") or flow_batch.field(item, batch["by"]) == group,
+                    "batch grouping changed during selection")
+            if config.get("exclude_children") is not None and children(api, config, item, config["exclude_children"]):
+                continue
+            items.append(item)
+            seen.add(item["address"])
+        assignment["items"] = items
+    return assignment
 
 
 def objects(assignment):
-    return {item["address"]: item for item in [assignment["selected"], *assignment["children"],
+    return {item["address"]: item for item in [*flow_batch.members(assignment), *assignment["children"],
             *(item for rows in assignment["references"].values() for item in rows)]}
 
 
@@ -75,7 +101,8 @@ def verify(api, config, assignment, claim):
     # Re-read query membership. A new child can invalidate a no-child selection without editing its parent.
     selected = assignment["selected"]
     if config.get("exclude_children") is not None:
-        require(not children(api, config, selected, config["exclude_children"]), "excluded children appeared during the flow")
+        for item in flow_batch.members(assignment):
+            require(not children(api, config, item, config["exclude_children"]), "excluded children appeared during the flow")
     if "children" in config:
         current = children(api, config, selected, config["children"])
         require([(item["address"], item["current_revision"]) for item in current] ==

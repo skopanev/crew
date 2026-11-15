@@ -792,6 +792,7 @@ nodes:
       fi
 
       if [ "$DELIVERY" = branch ]; then
+        export gate_commands="${review_commands:-$gate_commands}"
         if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" verify >/dev/null 2>&1; then
           if ! python3 "${TOOLING_ROOT}/lane/bin/gates.py" run; then
             echo '<signal:GATE_FAIL>Final candidate checks failed; see artifacts/gates for logs and receipts.</signal:GATE_FAIL>'

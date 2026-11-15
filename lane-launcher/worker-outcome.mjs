@@ -101,6 +101,7 @@ export async function recordTaskOutcome({run, stateFile, result, artifacts, anno
     await finishTask(run, stateFile, result, artifacts);
     const tasks = (run.tasks || [{address: run.task}]).map(task => task.address).join(', ');
     if (result.completed) announce(`[lane] DONE ${tasks} · Joppa confirmed`);
+    if (result.pendingDelivery) announce(`[lane] QUEUED ${tasks} · checked branch awaits target integration; Joppa confirmed`);
     for (const gap of result.testBindings?.gaps || []) announce(`[lane] ${gap}`);
     if (result.released) {
       announce(result.checkpointed

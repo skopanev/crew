@@ -63,7 +63,8 @@ export async function main(argv) {
     const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
     const footer = left == null ? 'Ctrl+C to stop' :
       `Next check in ${paint('blue', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`;
-    return ['PLANNING JOPPA', `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
+    return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
+      `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
       closed ? (stopped ? 'Stopped' : 'Completed') : footer].join('\n');
@@ -128,9 +129,10 @@ export async function main(argv) {
           } else if (config.workflow) {
             // The configured flow selects one item. A run folder of the same item revision is not repeated.
             selection = new AbortController();
-            const started = new Set(plannerRows(root, null, Infinity, config).map(row => row.attemptKey).filter(Boolean));
+            const started = new Set(plannerRows(root, null, Infinity, config)
+              .flatMap(row => row.attemptKeys || [row.attemptKey]).filter(Boolean));
             const {count, next} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              row => attempted.has(row.attemptKey) || started.has(row.attemptKey));
+              row => !config.repeat && (attempted.has(row.attemptKey) || started.has(row.attemptKey)));
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);

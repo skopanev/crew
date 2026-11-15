@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const events = new Set(['READY', 'FAILED', 'BLOCKED', 'TIMEOUT']);
+const events = new Set(['READY', 'QUEUED', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
 
 export function reasonCode(event) {
@@ -28,7 +28,7 @@ export async function notify(config, event) {
   }
   const stage = [event.node, event.event === 'TIMEOUT' ? event.model : undefined]
     .filter(Boolean).map(clean).join(' · ');
-  const header = `${event.warning ? '🟡' : event.event === 'READY' ? '🟢' : '🔴'} ${event.event}`;
+  const header = `${event.warning ? '🟡' : event.event === 'READY' ? '🟢' : event.event === 'QUEUED' ? '🔵' : '🔴'} ${event.event}`;
   const ticketId = clean(event.id);
   const ticketLine = `Ticket: ${ticketId}`;
   const reason = reasonCode(event);
@@ -74,6 +74,7 @@ export function completionEvent(run, result, artifacts) {
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
   if (result.code === 0 && result.postLandWarning) event.warning = 'POST_LAND_FAILED';
+  if (result.pendingDelivery) return {...event, event: 'QUEUED', signal: 'PENDING_LANDING'};
   if (result.blocked && result.code === 73) return {...event, signal: 'WORKTREE_PREEXISTED', summary: result.error};
   if (result.code === 0) return event;
   if (!artifacts) {

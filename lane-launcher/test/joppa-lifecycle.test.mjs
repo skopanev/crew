@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {claimTask, finishTask, releaseTaskClaims} from '../joppa.mjs';
+import {claimTask, finishTask, releaseTaskClaims, nextTask} from '../joppa.mjs';
 import {packageFixture, packageLanding} from '../test-support/launcher-joppa.fixture.mjs';
 
 const batches = f => f.calls.filter(call => call.name === 'joppa_batch').map(call => call.args.operations.map(({command}) => command));
@@ -147,6 +147,25 @@ test('success saves the commit and archives at the saved revision in one batch',
     assert.equal(f.objects.get(address).document.present, false);
     assert.equal(f.objects.get(address).document.data.commit, sha);
   }
+});
+
+test('branch publication releases Tasks for Lander without archiving or selecting them again', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist, f.runId);
+  const artifacts = packageLanding(f, 'branch'), result = {code: 0, status: 'exited'};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.pendingDelivery, true);
+  assert.equal(result.completed, undefined);
+  assert.equal(batches(f).flat().some(command => command.op === 'archive_object'), false);
+  for (const address of ['task:t1', 'task:t2']) {
+    const node = f.objects.get(address);
+    assert.equal(node.document.present, true);
+    assert.equal(node.document.data.assignee, undefined);
+    assert.equal(node.document.data.stage, 'to_review');
+    assert.equal(node.document.data.delivery.head, node.document.data.commit);
+    assert.equal(node.document.data.delivery.target, 'main');
+  }
+  assert.equal((await nextTask(f.run.config, {})).candidate, null);
 });
 
 test('a Task type without a schema question can be claimed and completed', async t => {

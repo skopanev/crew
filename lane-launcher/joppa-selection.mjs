@@ -10,7 +10,7 @@ import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
-import {nodeAssignee, nodeWaiting, nodeStageDone, taskPages, coversFields} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, nodeStageDone, nodePendingDelivery, taskPages, coversFields} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -122,7 +122,7 @@ export async function nextTask(config) {
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
-    const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) &&
+    const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) && !nodePendingDelivery(task) &&
       !nodeAssignee(task) && !nodeWaiting(task) && !(priorities && !priorities.includes(task['data.priority'])) &&
       (!matches || matches.get(task.address) === task.revision);
     // Batch the Task details, then their immediate parents and local dependencies. Deeper reads stay single.

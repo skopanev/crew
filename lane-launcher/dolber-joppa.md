@@ -91,6 +91,13 @@ Completion checks that both authored documents remain unchanged.
 The existing lane runs discovery, implementation or verification, configured checks and independent review.
 
 `delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
+Branch publication keeps each Task present and unassigned. It does not complete or archive the Task.
+Set `pendingDeliveryData` to the native data patch for this handoff, such as a configured waiting stage.
+Crew records `data.repository`, the checked `data.commit`, and `data.delivery` with the branch, head, target and run.
+The delivery state is `pending`. Dolber and the bundled planner leave this execution handoff to Lander.
+Change a Task's pending delivery only through an explicit recovery or a new implementation handoff.
+Branch delivery requires `reviewCommands` and reuses their passing receipt before the branch push.
+Lander runs the full `gateCommands` on the combined target candidate before it completes the Tasks.
 `delivery: "target"` lands the candidate on the configured `targetBranch`.
 `delivery: "requirement"` keeps one branch for each Requirement and repository.
 Each Task uses that branch and merges the current target before implementation.
@@ -150,7 +157,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
 | `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
 | `taskFields` | Optional `repository` and `module` sources: `body:<line label>` or `data:<field.path>` |
-| `reviewCommands` | Optional checks before expert review. A repository value overrides the dispatcher value. Defaults to `gateCommands`; full gates run before push |
+| `reviewCommands` | Checks before expert review. Required for branch and Requirement delivery. A repository value overrides the dispatcher value. Target delivery defaults to `gateCommands` |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
@@ -214,8 +221,8 @@ try {
 ' /absolute/old/run/launch.json
 ```
 
-Expert review uses the receipt for `reviewCommands`. Landing replaces
-`artifacts/gates/current.json` with the full gate receipt before push.
+Expert review uses the receipt for `reviewCommands`. Branch delivery reuses this receipt before its push.
+Target delivery replaces `artifacts/gates/current.json` with the full gate receipt before push.
 Earlier receipts remain in their existing directories.
 Requirement delivery runs full gates only before final target delivery.
 
