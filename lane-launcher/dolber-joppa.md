@@ -27,10 +27,12 @@ An explicit module mismatch remains a refusal. The dashboard shows refused Tasks
 Set `selectionNotify` to send each refusal once through the existing Agntbus MCP endpoint:
 
 ```json
-{"selectionNotify":{"mcpCommand":["/absolute/bin/mcp-remote","http://localhost:<configured-port>/mcp"],"name":"crew/dolber-example","to":"project/crew"}}
+{"selectionNotify":{"mcpCommand":["/absolute/bin/mcp-remote","http://localhost:<configured-port>/mcp","--header","Authorization: Bearer ${CREW_AGNTBUS_TOKEN}"],"tokenFile":"/absolute/private/agntbus.token","to":"project/crew"}}
 ```
 
-Read the endpoint from the host harness configuration. No credentials or model are needed for the local bridge.
+Read the endpoint from the host harness configuration. Provision a separate Agntbus role key on that host.
+Keep the key file outside Git with mode `0600` in a private directory with mode `0700`.
+The MCP child receives the key through its environment. The dispatcher does not use an agent session or a model.
 The dispatcher records confirmed message IDs in `stateDir/selection-alerts.json`. A changed Task revision or reason sends a new message.
 An unavailable bridge shows `SELECTION_NOTIFY_FAILED`. It does not stop other eligible Tasks.
 
