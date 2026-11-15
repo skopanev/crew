@@ -36,8 +36,6 @@ test('discard is opt-in and validates its config value', async t => {
 
 test('the host owns only a directory it creates, and removes an unused one before outcome writes', async t => {
   const f = await fixture(t), record = f.run.discardCheckout;
-  fs.writeFileSync(path.join(f.root, 'bin/docker'), '#!/bin/sh\nexit 1\n', {mode: 0o755});
-  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), '[sync] shared CBM timed out during initialize\n');
   assert.equal(f.identity, `${record.dev}:${record.ino}`);
   const other = {...f.run}; delete other.discardCheckout;
   assert.equal(prepareDiscardCheckout(other, () => {}), '');

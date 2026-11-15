@@ -91,11 +91,10 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     launchGroupGone() &&
     runFolders.size > 0 &&
     startingContainers.every(name => !command('docker', ['ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.Names}}'])) &&
-    (!output.includes('[medulla] ') || [...runFolders].every(folder =>
-      !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}'])));
+    [...runFolders].every(folder => !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}']));
   const startupFailed = result.status === 'failed' && !artifacts && checkoutAbsent && nativeEmpty &&
     contractsUnchanged && (containerFailed || preMedullaFailed);
-  const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged && launchGroupGone() &&
+  const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged && (!run.launchPgid || launchGroupGone()) &&
     ['unused', 'unchanged'].some(kind => output.includes(`run.sh: removed ${kind} worktree: ${checkout}`)) && isPrepareFailure(artifacts, run);
   if (startupFailed || prepareFailed) {
     const releasing = objects.every(unclaimed) ? [] : objects;
