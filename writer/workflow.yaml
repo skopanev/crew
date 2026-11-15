@@ -1,7 +1,7 @@
 version: '2'
 start: prepare
-# The workflow deadline bounds all configured author and critic rounds.
-timeout: 5400
+# Node timeouts and the finite rework count bound the run. A global deadline must not skip claim release.
+timeout: 0
 defaults:
   timeout: 60
 vars:
@@ -225,7 +225,7 @@ nodes:
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The critics did not approve the draft. The author revises it within the configured limit.</signal:REVISE>'
       else
-        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + " reworks. " +
+        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + (if $limit == "1" then " rework. " else " reworks. " end) +
           (.critique | to_entries | map(.key + ": " +
             ((.value.failing[0].reasons[0] // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
           cut -c1-1000 > "$a/failure.txt"

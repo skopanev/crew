@@ -19,7 +19,9 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
 
 A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
-Invalid drafts and critic refusals use the same budget. The workflow deadline still bounds the whole run.
+Invalid drafts and critic refusals use the same budget. Every node keeps its timeout.
+The finite rework count bounds the number of rounds. The author and critic nodes each allow at most 1200 seconds.
+There is no global deadline that can bypass the claim release after a node timeout.
 The `failed` node then records the reason in `failure.txt`, and the shared stage releases the claim with a note.
 
 ## Configuration
