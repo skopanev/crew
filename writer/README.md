@@ -17,7 +17,9 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
 5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
 6. `publish` sends the operations through the shared stage. The stage adds the claim release and refuses operations outside `config.publication`.
 
-A refused draft goes back to the author once, with the findings. A second refusal stops the run.
+A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
+The default permits one rework. Set `2` to permit two reworks after the initial draft.
+Invalid drafts and critic refusals use the same budget. The workflow deadline still bounds the whole run.
 The `failed` node then records the reason in `failure.txt`, and the shared stage releases the claim with a note.
 
 ## Configuration
@@ -33,6 +35,7 @@ See `config.example.json`. The project supplies every native name:
 | `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds` for the shared stage |
 | `vars.TEST_KIND`, `vars.TASK_KIND` | Native kinds of new Tests and of the Tasks that wait for them |
 | `vars.WAITING_STAGE`, `vars.READY_STAGE` | Task stage before and after the Tests are published |
+| `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_CLAUDE_MODEL` | Optional model overrides |
 | `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |
 

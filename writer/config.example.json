@@ -46,7 +46,8 @@
     "TEST_KIND": "test",
     "TASK_KIND": "task",
     "WAITING_STAGE": "waiting_for_tests",
-    "READY_STAGE": "to_implement"
+    "READY_STAGE": "to_implement",
+    "REWORK_LIMIT": 1
   },
   "context": {
     "url": "https://joppa.example.com/api/data",
