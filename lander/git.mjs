@@ -28,8 +28,9 @@ export function remoteHead(checkout, name) {
 }
 export function targetHead(state) {
   const ref = 'refs/heads/' + branch(state.checkout, state.target);
-  git(state.checkout, 'fetch', '--quiet', '--no-write-fetch-head', 'origin', '+' + ref + ':refs/remotes/origin/lander-target');
-  return git(state.checkout, 'rev-parse', 'refs/remotes/origin/lander-target^{commit}');
+  const tracking = 'refs/remotes/origin/' + state.target;
+  git(state.checkout, 'fetch', '--quiet', '--no-write-fetch-head', 'origin', '+' + ref + ':' + tracking);
+  return git(state.checkout, 'rev-parse', tracking + '^{commit}');
 }
 export function create(repo, root, run) {
   require(path.isAbsolute(root), 'WORKTREE_ROOT must be absolute');
