@@ -1,0 +1,72 @@
+version: '2'
+start: prepare
+# Finite stages and one target rebuild. Node timeouts preserve the failure release path.
+timeout: 0
+defaults:
+  timeout: 60
+vars:
+  PLANNING_PYTHON: python3
+  CREW_FLOW_STAGES: ''
+  WORKTREE_ROOT: ''
+  FAILED_DATA: ''
+nodes:
+  prepare:
+    timeout: 300
+    shell: |
+      set -eu
+      [ -n "$WORKTREE_ROOT" ] && [ -n "$FAILED_DATA" ]
+      exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
+    on_signal:
+      PREPARED: build
+      __failed__: failed
+      __default__: failed
+  build:
+    timeout: 18000
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" build'
+    on_signal:
+      BUILT: verify
+      REPORT: publish
+      __failed__: failed
+      __default__: failed
+  verify:
+    timeout: 660
+    shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" verify'
+    on_signal:
+      VERIFIED: push
+      __failed__: failed
+      __default__: failed
+  push:
+    timeout: 18000
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" push'
+    on_signal:
+      REPORT: publish
+      __failed__: failed
+      __default__: failed
+  publish:
+    timeout: 660
+    shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish'
+    on_signal:
+      READY: clean_success
+      BLOCKED: clean_failure
+      __failed__: failed
+      __default__: failed
+  failed:
+    timeout: 660
+    shell: |
+      set -eu
+      if [ -e "$MEDULLA_RUN_DIR/artifacts/result.json" ]; then
+        echo '<signal:BLOCKED>The shared stage already recorded the result.</signal:BLOCKED>'
+      else
+        "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
+      fi
+    on_signal:
+      __default__: clean_failure
+  clean_success:
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
+    on_signal:
+      __default__: __exit_ok__
+      __failed__: __exit_fail__
+  clean_failure:
+    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
+    on_signal:
+      __default__: __exit_fail__

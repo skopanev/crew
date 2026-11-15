@@ -1,0 +1,34 @@
+{
+  "workspace": "example",
+  "url": "https://joppa.example.com/mcp",
+  "mcp_command": ["node", "/absolute/private/joppa-host.cjs"],
+  "runs_folder": "/absolute/private/lander-runs",
+  "workflow": "/absolute/path/to/crew/lander/workflow.yaml",
+  "interval_seconds": 1800,
+  "repeat": true,
+  "selection": {
+    "kind": "task",
+    "assignee": "",
+    "data": {"stage": "awaiting_target", "delivery": {"state": "pending"}}
+  },
+  "order": [{"field": "revision", "direction": "asc"}],
+  "batch": {"size": 5, "by": "data.repository"},
+  "publication": {
+    "file": "operations.json",
+    "allowed_operations": ["save_object", "archive_object", "note"],
+    "create_kinds": [],
+    "update_kinds": ["task"]
+  },
+  "repositories": [{
+    "id": "service",
+    "path": "/absolute/private/service",
+    "targetBranch": "develop",
+    "preflight": "./scripts/setup-local-checks.sh",
+    "gateCommands": ["./scripts/full-checks-in-docker.sh"],
+    "gateTimeoutSeconds": 900
+  }],
+  "vars": {
+    "WORKTREE_ROOT": "/absolute/private/integration-checkouts",
+    "FAILED_DATA": {"stage": "needs_repair", "hold": "LANDER_FAILED"}
+  }
+}
