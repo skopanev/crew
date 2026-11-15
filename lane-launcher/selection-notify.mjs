@@ -31,7 +31,7 @@ export async function reportSelectionIssues(config, issues, {terminal = false} =
   }
   for (const issue of issues) {
     const id = 'selection-' + createHash('sha256').update(JSON.stringify(
-      [config.workspace, config.id, issue, route?.to])).digest('hex');
+      [config.workspace, config.id, issue.task, issue.revision, issue.code, route?.to])).digest('hex');
     if (!terminal && !printed.has(id) && !sent[id]) console.error(formatSelectionIssue(issue));
     printed.add(id);
     if (!route || sent[id]) continue;
