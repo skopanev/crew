@@ -42,6 +42,9 @@ def load_contract(role, project):
             f"config.context.roles.{role} is missing role or process")
     require(not isinstance(binding, dict) or set(binding) <= {"role", "process", "kind"}, "unknown role binding key")
     require(kind is None or isinstance(kind, str) and kind, "role binding kind must be a nonempty string")
+    filters = config()["session"].get("filter_env", config().get("filter_env", {}))
+    require(kind is None or "LANE_MEMORY_PROCESS" in filters.values(),
+            "a typed role binding requires a process filter in session.filter_env")
     reply = memory("session", name, project, process=process)
     require(reply["items"], f"Joppa contract empty: {name}")
     require(kind is None or any(item.get("kind") == kind for item in reply["items"]),

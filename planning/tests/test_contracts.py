@@ -90,6 +90,10 @@ class ContractTests(unittest.TestCase):
                          {"role": "test-reviewer", "process": "review-test-text", "project": "life"})
         with self.assertRaisesRegex(ValueError, "process contract missing: review-test-text"):
             contracts.load_contract("critic", "life")
+        del config["filter_env"]["process"]
+        path.write_text(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "requires a process filter"):
+            contracts.load_contract("critic", "life")
 
 
 if __name__ == "__main__":
