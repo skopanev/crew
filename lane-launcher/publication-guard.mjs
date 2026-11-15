@@ -82,14 +82,20 @@ export async function guardPublications(run, read, ancestor) {
       const target = await object(link.target, true);
       if (schema[target.kind]?.role === 'task') {
         if (target.document.present === true && target.document.data?.stage !== 'done') pending(`${target.address} is not completed`);
-        const sha = target.document.data.commit;
-        if (!sha) continue;
-        if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) invalid(`Dependency commit is invalid: ${target.address}`);
-        let contract;
-        try { contract = taskContract(target.document.data); }
-        catch (error) { invalid(`Dependency Task contract is invalid: ${target.address}: ${error.message}`); }
-        const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
-        const repo = declarations.length === 1 && run.config.repositories.find(repo => repo.id === declarations[0][1].trim());
+        const commit = target.document.data.commit;
+        if (!commit) continue;
+        const parsed = typeof commit === 'string' && /^(?:(\S+)[ \t]+)?([0-9a-f]{40}(?:[0-9a-f]{24})?)$/.exec(commit);
+        if (!parsed) invalid(`Dependency commit is invalid: ${target.address}`);
+        const [, repository, sha] = parsed;
+        let repo;
+        if (repository) repo = run.config.repositories.find(item => item.id === repository);
+        else {
+          let contract;
+          try { contract = taskContract(target.document.data); }
+          catch (error) { invalid(`Dependency Task contract is invalid: ${target.address}: ${error.message}`); }
+          const declarations = [...contract.matchAll(/^Repository:[ \t]*(\S[^\r\n]*)$/gm)];
+          repo = declarations.length === 1 && run.config.repositories.find(item => item.id === declarations[0][1].trim());
+        }
         if (!repo) invalid(`Dependency repository is not configured: ${target.address}`);
         const internal = run.config.delivery === 'requirement' && repo.id === run.repository.id &&
           await requirement(target) === run.requirement;

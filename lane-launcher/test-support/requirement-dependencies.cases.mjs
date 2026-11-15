@@ -49,6 +49,21 @@ test('cross-requirement dependencies wait for the real target branch', async t =
   f.objects.get('work:two').document.data.repository = 'repo';
   f.objects.get('work:two').document.data.steps = null;
   await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
+  const dependency = f.objects.get('work:two');
+  dependency.document.present = false;
+  dependency.document.data.repository = 'unknown';
+  dependency.document.data.commit = `repo ${sha}`;
+  const before = structuredClone(dependency);
+  await publicationReader(config, f.read)(run);
+  assert.deepEqual(dependency, before);
+  dependency.document.data.commit = `unknown ${sha}`;
+  await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
+  dependency.document.data.commit = `repo ${sha} trailing text`;
+  await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_INVALID'});
+  fs.writeFileSync(path.join(repo, 'source'), 'not landed');
+  git(['add', '.']); git(['commit', '-qm', 'unpublished dependency']);
+  dependency.document.data.commit = `repo ${git(['rev-parse', 'HEAD'])}`;
+  await assert.rejects(publicationReader(config, f.read)(run), {code: 'DEPENDENCY_NOT_LANDED'});
 });
 
 test('top-level remote_links enforce access, presence, pinned revision, and satisfaction while failing closed', async () => {
