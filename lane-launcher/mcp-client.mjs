@@ -57,6 +57,7 @@ export function McpClient(argv, options = {}) {
     throw new Error('MCP client needs a command argv array of plain strings');
   }
   this.argv = [...argv];
+  this.env = options.env;
   this.limit = options.maxBytes ?? maxBytes;
   this.defaultTimeoutMs = options.timeoutMs ?? 120_000;
   this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 30_000;
@@ -113,6 +114,7 @@ McpClient.prototype._failAll = function (error) {
 McpClient.prototype._spawn = function () {
   if (this.child) return;
   const child = spawn(this.argv[0], this.argv.slice(1), {
+    env: this.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
     detached: process.platform !== 'win32',

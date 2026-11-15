@@ -11,8 +11,9 @@ export function validateSelectionNotify(route) {
   if (route === undefined || route === null) return;
   if (!route || !Array.isArray(route.mcpCommand) || !route.mcpCommand.length ||
       route.mcpCommand.some(arg => typeof arg !== 'string' || !arg.trim() || arg.includes('\0')) ||
-      ['name', 'to'].some(key => typeof route[key] !== 'string' || !route[key].trim())) {
-    throw new Error('selectionNotify needs mcpCommand, name and to');
+      typeof route.to !== 'string' || !route.to.trim() ||
+      typeof route.tokenFile !== 'string' || !path.isAbsolute(route.tokenFile)) {
+    throw new Error('selectionNotify needs mcpCommand, to and an absolute tokenFile');
   }
 }
 function value(reply) {
@@ -35,21 +36,24 @@ export async function reportSelectionIssues(config, issues, {terminal = false} =
     if (!terminal && !printed.has(id) && !sent[id]) console.error(formatSelectionIssue(issue));
     printed.add(id);
     if (!route || sent[id]) continue;
-    const key = JSON.stringify(route.mcpCommand);
-    if (!clients.has(key)) clients.set(key, new McpClient(route.mcpCommand, {timeoutMs: 15000, handshakeTimeoutMs: 15000}));
-    const client = clients.get(key), session = {harness: 'crew', id: config.id + ':' + config.stateDir};
+    const key = JSON.stringify([route.mcpCommand, route.tokenFile]);
     try {
-      value(await client.request('tools/call', {name: 'agntbus_register', arguments: {_session: session,
-        name: route.name, description: 'Deterministic Dolber selection diagnostics', temporary: false}}));
-      const result = value(await client.request('tools/call', {name: 'agntbus_send', arguments: {_session: session,
+      if (!clients.has(key)) {
+        const token = fs.readFileSync(route.tokenFile, 'utf8').trim();
+        if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Agntbus token file must contain a role key');
+        clients.set(key, new McpClient(route.mcpCommand, {timeoutMs: 15000, handshakeTimeoutMs: 15000,
+          env: {...process.env, CREW_AGNTBUS_TOKEN: token}}));
+      }
+      const client = clients.get(key);
+      const result = value(await client.request('tools/call', {name: 'agntbus_send', arguments: {
         to: route.to, type: 'fyi', id, message: formatSelectionIssue(issue).slice(0, 1800)}}));
       if (!result.message_id || !result.op) throw new Error('Agntbus did not confirm message storage');
       sent[id] = result.message_id;
       fs.mkdirSync(config.stateDir, {recursive: true});
       save(file, sent);
     } catch (error) {
-      client.close(); clients.delete(key);
-      throw new Error('SELECTION_NOTIFY_FAILED: ' + error.message);
+      clients.get(key)?.close(); clients.delete(key);
+      throw new Error('SELECTION_NOTIFY_FAILED: ' + (error.rpcError?.message || error.message));
     }
   }
 }
