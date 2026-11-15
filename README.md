@@ -61,6 +61,6 @@ Host Medulla, Docker, curl, jq, Git credentials, and the shared CBM connector
 must be available. Startup runs `lane-launcher/safe-sync.py`: each configured
 canonical repository is locked, fetched, fast-forwarded to its
 configured branch, and reindexed through the shared CBM connector. Up to four
-repositories refresh in parallel with separate MCP connections. Each repository
+repositories refresh Git in parallel. Their CBM calls use one shared MCP session. Each repository
 lock is held until CBM reports ready for that canonical root.
 Dirty or diverged sources stop startup. Dry runs do not refresh sources or CBM.

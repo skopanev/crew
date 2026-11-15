@@ -55,7 +55,7 @@ def session(connector, image=None):
 
     try:
         call("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
-                            "clientInfo": {"name": "crew-lane-preflight", "version": "1"}})
+                            "clientInfo": {"name": "crew-lane-preflight", "version": "1"}}, timeout=90)
         send({"method": "notifications/initialized"})
         yield call
     finally:
