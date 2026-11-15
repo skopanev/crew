@@ -8,7 +8,7 @@ Each Test must get a yes to every review question that the critic contract gives
 Write one Test for one behavior. Do not write Tests for behavior that the item does not require.
 
 The schema entry of the native Test kind defines the Test fields:
-1. Put every required field except title in data. Crew adds the owner of the selected item when the schema requires it.
+1. Put every required field except title in data. Crew copies the owner of the selected item.
 2. Give a typed field only one of its listed values. Do not send a field that the schema computes.
 3. Keep the title within title_max_length and each data value within field_max_length, when the schema gives them.
 4. Make the title obey the schema test_results name rules, when the schema gives them.
