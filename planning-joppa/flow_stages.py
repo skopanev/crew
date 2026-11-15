@@ -12,6 +12,7 @@ from responses import body_result
 from mcp import Joppa
 from flow_launch import configuration
 import flow_context
+from flow_batch import members
 import flow_publication
 import planning_claims as claims
 import publication
@@ -48,17 +49,20 @@ def prepare():
     for role in (config.get("context") or {}).get("roles", {}):
         require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", role), "invalid context role key")
         contracts[role] = load_contract(role, config["workspace"])
-    publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], selected["address"])
+    for item in members(assignment):
+        publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], item["address"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", {"schema": assignment["schema"],
           "objects": flow_context.objects(assignment)})
-    operations = claims.claim_operations({"joppa": {"objects": {selected["address"]: selected}}},
-        [{"id": selected["address"], "revision": selected["current_revision"]}], claims.marker(target))
+    items = members(assignment)
+    operations = claims.claim_operations({"joppa": {"objects": {item["address"]: item for item in items}}},
+        [{"id": item["address"], "revision": item["current_revision"]} for item in items], claims.marker(target))
     publication.mutate(api, target / "claim.json", "joppa_batch",
                        {"workspace": config["workspace"], "operations": operations})
     claim = read(target / "claim.json")
     flow_context.verify(api, config, assignment, claim)
     assignment["claim_revision"] = claims.claimed_revisions(claim)[selected["address"]]
+    assignment["claim_revisions"] = claims.claimed_revisions(claim)
     write(target / "input.json", assignment)
     for role, contract in contracts.items():
         emit(role + "_contract", contract["content"])
@@ -98,7 +102,13 @@ def main():
         elif command == "publish":
             config = settings()
             flow_publication.publish(client(config), config, artifacts())
-            signal("READY", "Configured workflow output published")
+            result = read(artifacts() / "result.json")
+            signal("READY" if result["status"] == "published" else "BLOCKED",
+                   result.get("reason") or "Configured workflow output published")
+        elif command == "verify":
+            config = settings()
+            flow_context.verify(client(config), config, read(artifacts() / "input.json"), read(artifacts() / "claim.json"))
+            signal("VERIFIED", "Claimed inputs remain current")
         elif command == "fail":
             failure()
         else:

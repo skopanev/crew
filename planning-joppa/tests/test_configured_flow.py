@@ -37,7 +37,7 @@ class Tracker:
             kinds = args.get("kind")
             kinds = [kinds] if isinstance(kinds, str) else kinds
             return {"items": [{"address": node["address"], "revision": node["current_revision"],
-                               "parent": node["document"]["parent"]} for node in self.nodes.values()
+                               "parent": node["document"]["parent"], "data": deepcopy(node["document"]["data"])} for node in self.nodes.values()
                     if (not kinds or node["kind"] in kinds) and
                     ("parent" not in args or node["document"]["parent"] == args["parent"])]}
         assert tool == "joppa_batch", tool

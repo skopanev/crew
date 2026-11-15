@@ -1,7 +1,7 @@
 // Joppa planning queue reads: ready criteria and their Requirement groups.
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
-import {nodeAssignee, nodeWaiting, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeWaiting, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
@@ -64,7 +64,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     .filter(address => address !== task.parent && requirementOf.has(address) &&
       requirementOf.get(address) === requirementOf.get(task.parent))];
   for await (const page of nodePages(read, {kind: kinds('task'), status: NODE_TONES,
-    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'data.hold',
+    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'data.hold', 'data.delivery',
       ...(covers ? [`data.${covers.field}`] : [])]})) {
     for (const task of page.items) {
       if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
@@ -76,7 +76,7 @@ export async function readyCriteria(config, tokenFile, signal) {
           if (task['data.commit']) completed.add(owner);
           continue;
         }
-        if (nodeAssignee(task) || !nodeWaiting(task)) active.add(owner);
+        if (nodeAssignee(task) || nodePendingDelivery(task) || !nodeWaiting(task)) active.add(owner);
         if (!nodeWaiting(task) || nodeAssignee(task)) continue;
         const tasks = blocked.get(owner) || [];
         tasks.push(`${task.address}:${task.revision}`);
@@ -160,6 +160,15 @@ export function flowSettings(config) {
       !['asc', 'desc'].includes(item.direction))) {
     throw new Error('order must list {field, direction} with direction asc or desc');
   }
+  if (config.batch !== undefined) {
+    const batch = config.batch;
+    if (!object(batch) || Object.keys(batch).some(key => !['size', 'by'].includes(key)) ||
+        !Number.isSafeInteger(batch.size) || batch.size < 1 || batch.size > 50 ||
+        batch.by !== undefined && (typeof batch.by !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(batch.by))) {
+      throw new Error('batch needs size from 1 to 50 and optional by field');
+    }
+  }
+  if (config.repeat !== undefined && typeof config.repeat !== 'boolean') throw new Error('repeat must be boolean');
   return {selection: config.selection, exclude: exclude ?? null, order};
 }
 

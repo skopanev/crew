@@ -262,7 +262,7 @@ function blockedPackage(f) {
     url: f.run.config.joppa.url, worktree_root: root, lane_runs_folder: runs, repositories: [{path: f.root}]}}};
 }
 
-function packageLanding(f) {
+function packageLanding(f, delivery = 'target') {
   const remote = path.join(f.root, 'remote.git');
   const git = (args, input) => {
     const result = spawnSync('git', args, {encoding: 'utf8', input, env: {...process.env,
@@ -277,9 +277,10 @@ function packageLanding(f) {
   git(['-C', remote, 'update-ref', 'refs/heads/checked-package', sha]);
   git(['-C', remote, 'config', 'remote.origin.url', remote]);
   f.run.repository.path = remote;
-  f.run.repository.targetBranch = 'main';
+  f.run.repository.targetBranch = delivery === 'target' ? 'checked-package' : 'main';
   f.run.deliveryBranch = 'checked-package';
-  f.run.config.delivery = 'branch';
+  f.run.config.delivery = delivery;
+  if (delivery === 'branch') f.run.config.pendingDeliveryData = {stage: 'to_review'};
   f.run.config.sshDir = f.root;
   const artifacts = path.join(f.root, 'artifacts');
   fs.mkdirSync(artifacts);

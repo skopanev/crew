@@ -11,6 +11,7 @@ import {dependencyCheck} from './dependencies.mjs';
 import {saveNode} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
 import {missingTestNodes, nodeResult} from './test-nodes.mjs';
+import {recordPendingDelivery} from './pending-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 
 export async function finishTask(run, stateFile, result, artifacts) {
@@ -86,6 +87,10 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const findings = fs.existsSync(followups) ? fs.readFileSync(followups, 'utf8').trim() : '';
     await verifySavedContexts();
     const current = await currentTasks(true), runId = path.basename(path.dirname(stateFile));
+    if (run.config.delivery === 'branch' && report.endsWith('landing.txt')) {
+      await recordPendingDelivery({run, objects: current, sha, branch: target, runId, persist, result});
+      return;
+    }
     // Recompute the frozen test bindings and the missing (AC, test) nodes, also for a saved request.
     const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
     const schema = (await read('joppa_tree', {})).schema;

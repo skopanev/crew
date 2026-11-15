@@ -6,6 +6,7 @@ import {validateTestReport} from './test-results.mjs';
 import {validateTaskFilter} from './task-filter.mjs';
 import {validateTaskFields} from './task-contract.mjs';
 import {validateClaimRetries} from './claim-retry.mjs';
+import {validatePendingDelivery} from './pending-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,7 @@ export function validateJoppa(config) {
   validateTaskFilter(config);
   validateTaskFields(config);
   validateClaimRetries(config);
+  validatePendingDelivery(config);
   const url = new URL(joppa.url);
   require((url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
     !url.username && !url.password && !url.search && !url.hash, 'Joppa needs HTTPS or loopback HTTP without URL credentials');
@@ -76,10 +78,10 @@ export function validateJoppa(config) {
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
     require(repo.reviewCommands == null || Array.isArray(repo.reviewCommands) && repo.reviewCommands.length && repo.reviewCommands.every(text),
       'Repository reviewCommands must be a nonempty array of check commands');
-    if (config.delivery === 'requirement') {
+    if (['branch', 'requirement'].includes(config.delivery)) {
       const review = repo.reviewCommands ?? config.reviewCommands;
       require(Array.isArray(review) && review.length && review.every(text),
-        'Requirement delivery needs explicit reviewCommands for lint and focused tests');
+        'Branch and Requirement delivery need explicit reviewCommands for lint and focused tests');
     }
     require(repo.gateTimeoutSeconds == null || (Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0),
       'Repository gateTimeoutSeconds must be a positive integer');

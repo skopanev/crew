@@ -60,7 +60,7 @@ function stageFor(run) {
 }
 
 function statusFor({result, worker}) {
-  return result ? result.code === 0 && result.status === 'exited' ? 'READY' :
+  return result ? result.pendingDelivery ? 'QUEUED' : result.code === 0 && result.status === 'exited' ? 'READY' :
     result.blocked ? 'BLOCKED' : result.status === 'interrupted' ? 'INTERRUPTED' :
     result.error?.startsWith('CLAIM_REFUSED:') ? 'CLAIM_REFUSED' :
     result.error?.startsWith('CLAIM_UNCERTAIN:') ? 'CLAIM_UNCERTAIN' : 'FAILED' :
@@ -122,7 +122,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
   const output = [columns.map(column => cell(column.label, column)).join('  ')];
   for (const row of visible) {
     const success = ['READY', 'DECOMPOSED'].includes(row.status);
-    const tone = row.active ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED', 'HELD'].includes(row.status) ? 'yellow' : 'red';
+    const tone = row.active || row.status === 'QUEUED' ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED', 'HELD'].includes(row.status) ? 'yellow' : 'red';
     const cells = columns.map(column => cell(column.value(row), column));
     output.push(success ? paint('ready', cells.join('  ')) : cells.map((value, index) =>
       columns[index].key === 'status' ? paint(tone, value) : row.active ? value : paint('finished', value)).join('  '));

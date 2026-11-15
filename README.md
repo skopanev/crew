@@ -6,10 +6,12 @@ Medulla workflows for planning Joppa Tasks, implementing them and auditing code 
 
 - [Joppa planning](planning-joppa/README.md): plan one acceptance criterion or Requirement
   and publish scoped Joppa Tasks. [planning](planning/README.md) holds its shared graph.
+  [Writer](writer/README.md) independently reviews Test text before implementation.
 - [Lane](lane/README.md): implement one claimed Joppa Task, check it, review it and
   deliver it. The host worker records the outcome in Joppa.
 - [Dolber](lane-launcher/README.md): select available Joppa Tasks and launch lanes
   within the configured dispatcher limit.
+- [Lander](lander/README.md): integrate checked branches, run full batch checks, and complete only Tasks proven in target ancestry.
 - [Auditor](audit/README.md): send confirmed code and specification deviations to an inbox.
   Missing implementation does not produce findings.
 

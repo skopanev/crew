@@ -41,7 +41,7 @@ nodes:
       # input.json stays complete: review_join reads the waiting Tasks from it.
       view="$(jq -c --arg test "$TEST_KIND" '
         ([.selected.kind, $test] + [.references[]?[]?.kind]) as $kinds |
-        del(.help, .claim_revision) | .children |= map(select(.kind == $test)) |
+        del(.help, .claim_revision, .claim_revisions) | .children |= map(select(.kind == $test)) |
         .schema.types |= with_entries(select(.key as $kind | $kinds | index($kind) != null))' \
         "$MEDULLA_RUN_DIR/artifacts/input.json")"
       case "$view" in *'</signal:var>'*) echo 'writer: reserved signal delimiter in the assignment' >&2; exit 1;; esac

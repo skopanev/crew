@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from common import digest, require, text
+from flow_batch import settings as batch_settings
 
 
 def configuration(path, raw=None):
@@ -39,6 +40,8 @@ def configuration(path, raw=None):
             "publication contains an unsupported scoped operation")
     require(isinstance(config.get("references", []), list) and
             all(isinstance(item, str) and item for item in config.get("references", [])), "references must be field names")
+    batch_settings(config)
+    require(type(config.get("repeat", False)) is bool, "config.repeat must be boolean")
     return config
 
 
