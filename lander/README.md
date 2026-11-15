@@ -34,7 +34,7 @@ No credentials belong in the public configuration example.
 
 The canonical source repository stays unchanged. Repository hooks remain enabled.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
-The configured gate timeout bounds each check. Medulla bounds each stage.
+The configured gate timeout bounds each check and the push, including repository hooks. Medulla bounds each stage.
 
 ## Failures
 
@@ -48,7 +48,7 @@ A failed branch receives `vars.FAILED_DATA`, a cleared delivery field, and an ev
 The patch must use the project's native fields. It cannot override the assignee, commit, repository, or delivery metadata.
 Original remote branches remain available for repair.
 A moved target permits one rebuild and a new full check. A second move leaves the remaining work pending.
-A moved branch is excluded before the push.
+A moved or unavailable branch is excluded before the push. Its pending delivery stays unchanged with an evidence note.
 
 A partial landing reports `PARTIAL_LANDING`. Landed Tasks are archived, and excluded Tasks retain the repair evidence.
 An uncertain native write requires receipt recovery before another claim.

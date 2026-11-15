@@ -39,7 +39,7 @@ function output(state, landed = []) {
           ' is in target ancestry. Tested candidate: ' + state.checked.commit}});
       continue;
     }
-    if (state.failed[address]) operations.push({command: {op: 'save_object', kind: item.kind,
+    if (state.failed[address] && !['BRANCH_MOVED', 'BRANCH_UNAVAILABLE'].includes(state.failed[address])) operations.push({command: {op: 'save_object', kind: item.kind,
       id: address.slice(address.indexOf(':') + 1), revision: assignment.claim_revisions[address],
       data: {...failedData, delivery: null}, reason: 'Lander excluded this branch: ' + reason}});
     operations.push({command: {op: 'note', target: address,
@@ -97,11 +97,12 @@ function push() {
     if (state.pending || !state.accepted.length) { output(state); signal('REPORT', state.pending || 'No branch can land.'); return; }
     // A rebuilt candidate needs a new input fence, not an old approval.
     if (rebuild) verifiedInputs();
+    require(state.checked?.passed === true, 'The push needs a candidate that passed the full configured gates');
     git(state.checkout, 'reset', '--hard', state.checked.commit);
     const log = fs.openSync(path.join(root, 'push-' + pass + '.log'), 'a');
     let result;
     try { result = spawnSync('bash', [path.join(tooling, 'lane/bin/land.sh'), state.target],
-      {cwd: state.checkout, env: environment(state, repo, state.checked.attempt), timeout: 180000,
+      {cwd: state.checkout, env: environment(state, repo, state.checked.attempt), timeout: (repo.gateTimeoutSeconds || 900) * 1000,
         stdio: ['ignore', log, log]}); }
     finally { fs.closeSync(log); }
     const after = targetHead(state);

@@ -61,6 +61,7 @@ nodes:
       fi
     on_signal:
       __default__: clean_failure
+      __failed__: clean_failure
   clean_success:
     shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
     on_signal:
@@ -70,3 +71,4 @@ nodes:
     shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
     on_signal:
       __default__: __exit_fail__
+      __failed__: __exit_fail__
