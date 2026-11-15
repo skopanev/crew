@@ -43,6 +43,7 @@ A red baseline leaves all branches pending. It does not identify a faulty Task.
 For a green baseline, Lander checks branches separately and then builds a passing combination.
 An interaction failure names an incompatible combination. It does not accuse a branch that passed alone.
 Previously checked exact candidates reuse their receipts.
+After a cached candidate is restored, its configured setup restores ignored dependencies before the push. Full checks do not repeat.
 
 A failed branch receives `vars.FAILED_DATA`, a cleared delivery field, and an evidence note.
 The patch must use the project's native fields. It cannot override the assignee, commit, repository, or delivery metadata.

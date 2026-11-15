@@ -37,11 +37,14 @@ function fixture(t, gate = 'test ! -e bad.txt') {
 }
 test('a green batch runs the full gates once and reuses the exact receipt', t => {
   const f = fixture(t), heads = f.pins(['one', 'two']);
+  f.repo.preflight = 'printf "node_modules/\\n" > .git/info/exclude; mkdir -p node_modules; touch node_modules/ready';
+  f.repo.gateCommands[0] += '; test -f node_modules/ready';
   let result = candidate(f.state, f.repo, heads, f.root);
   assert.equal(result.checked.passed, true); assert.equal(result.accepted.length, 2);
   assert.equal(f.calls(), 1);
   result = candidate(f.state, f.repo, heads, f.root);
   assert.equal(result.checked.passed, true); assert.equal(f.calls(), 1);
+  assert.equal(fs.existsSync(path.join(f.state.checkout, 'node_modules/ready')), true);
   cleanup(f.state, path.join(f.root, 'candidates'));
   assert.equal(fs.existsSync(f.state.checkout), false);
 });

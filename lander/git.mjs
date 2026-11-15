@@ -71,12 +71,22 @@ export function environment(state, repo, attempt) {
     gate_timeout_seconds: String(repo.gateTimeoutSeconds || 900), VERIFY_ONLY: 'false',
     LANE_TEST_BINDINGS_REQUIRED: 'false'};
 }
+function prepare(state, repo, attempt, log) {
+  return !repo.preflight || spawnSync('bash', ['-lc', repo.preflight],
+    {cwd: state.checkout, env: environment(state, repo, attempt), timeout: (repo.gateTimeoutSeconds || 900) * 1000,
+      stdio: ['ignore', log, log]}).status === 0;
+}
 export function check(state, repo, heads, root) {
   const key = JSON.stringify([state.base, heads.map(item => item.head)]);
   const cached = state.cache[key];
   if (cached) {
     git(state.checkout, 'reset', '--hard', cached.commit);
     git(state.checkout, 'clean', '-fdx');
+    if (cached.passed && repo.preflight) {
+      const log = fs.openSync(path.join(cached.attempt, 'output.log'), 'a');
+      try { if (!prepare(state, repo, cached.attempt, log)) return {...cached, passed: false}; }
+      finally { fs.closeSync(log); }
+    }
     return cached;
   }
   const merged = merge(state, heads);
@@ -88,9 +98,7 @@ export function check(state, repo, heads, root) {
   const env = environment(state, repo, attempt);
   let passed;
   try {
-    const setup = !repo.preflight || spawnSync('bash', ['-lc', repo.preflight],
-      {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * 1000, stdio: ['ignore', log, log]}).status === 0;
-    passed = setup && spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
+    passed = prepare(state, repo, attempt, log) && spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
       {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * repo.gateCommands.length * 1000 + 10000,
         stdio: ['ignore', log, log]}).status === 0;
   } finally { fs.closeSync(log); }
