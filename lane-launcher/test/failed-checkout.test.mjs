@@ -49,6 +49,27 @@ test('the host owns only a directory it creates, and removes an unused one befor
   assert.equal(f.lines.length, 1, 'an already absent checkout is a silent no-op');
 });
 
+test('a removed unrelated Docker container does not retain a startup claim', async t => {
+  const f = await fixture(t);
+  fs.writeFileSync(path.join(f.root, 'bin/docker'), `#!/usr/bin/env node
+if (process.argv[2] === 'ps') console.log(process.argv.includes('--filter') ? '' : 'live\\nvanished');
+else { console.log(process.env.DOCKER_ROWS);
+  console.error('Error: No such object: vanished'); process.exitCode = 1; }
+`, {mode: 0o755});
+  process.env.DOCKER_ROWS = JSON.stringify([{Id: 'live', Config: {Labels: {}}, Mounts: [{Source: f.checkout}]}]);
+  removeEmptyDiscardCheckout(f.run, f.announce);
+  assert.equal(fs.existsSync(f.checkout), true, 'A surviving writer still prevents removal');
+  process.env.DOCKER_ROWS = JSON.stringify([{Id: 'live', Config: {Labels: {}}, Mounts: []}]);
+  removeEmptyDiscardCheckout(f.run, f.announce);
+  assert.equal(fs.existsSync(f.checkout), false);
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), '[sync] shared CBM timed out during initialize\n');
+  const result = {status: 'failed', code: 75};
+  await finishTask(f.run, f.stateFile, result, null);
+  assert.equal(result.released, true);
+  assert.equal(result.held, false);
+  assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
+});
+
 test('uncertain, active, pre-existing and replaced checkouts are preserved', async t => {
   const f = await fixture(t);
   fs.writeFileSync(path.join(f.checkout, 'work.txt'), 'implementation');
