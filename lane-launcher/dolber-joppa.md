@@ -98,6 +98,8 @@ The delivery state is `pending`. Dolber and the bundled planner leave this execu
 Change a Task's pending delivery only through an explicit recovery or a new implementation handoff.
 Branch delivery requires `reviewCommands` and reuses their passing receipt before the branch push.
 Lander runs the full `gateCommands` on the combined target candidate before it completes the Tasks.
+A pending Task leaves this handoff when Lander archives it after landing, or an operator explicitly clears `data.delivery`.
+A failed branch clears this field with the configured failure patch. It can then return to planning or development.
 `delivery: "target"` lands the candidate on the configured `targetBranch`.
 `delivery: "requirement"` keeps one branch for each Requirement and repository.
 Each Task uses that branch and merges the current target before implementation.

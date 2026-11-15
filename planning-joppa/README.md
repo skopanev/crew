@@ -46,10 +46,12 @@ An uncertain write retains its receipt and requires recovery. A workflow result 
 A finished run records the revision it left, so its own claim release does not cause another automatic attempt.
 Set `batch` to `{ "size": 5, "by": "data.repository" }` to claim up to five matching items of one configured group.
 The first selected item anchors the group. `order` sorts the other members. Omit `by` to use one group.
+The native selection filter controls every member, including stage and hold fields. Crew adds no implicit hold filter.
 The assignment adds `items` and `claim_revisions`. The entire batch is claimed in one transaction.
 Publication can update or archive those claimed items. It clears every claim in the same transaction.
 An archive uses the saved revision of its preceding claim release. New objects can belong to any claimed item.
-The run records every final item revision, so no other member gets selected again by revision deduplication.
+The run records every final item revision. With `repeat: false`, revision deduplication excludes previously attempted batch anchors.
+Another eligible anchor can still include those items as batch members when they match the native selection filter.
 Set `repeat: true` for a scheduled deterministic flow that must revisit pending work after each configured interval.
 The default is false. Unknown mutation outcomes always hold the dispatcher, including when repeat is true.
 The publication envelope can add `outcome: { "status": "blocked", "reason_code": "BASELINE_RED", "reason": "..." }`.

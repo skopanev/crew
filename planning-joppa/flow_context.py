@@ -40,8 +40,9 @@ def load(api, config, address):
     help = api.call("joppa_help", {"workspace": workspace, "op": "save_object"})
     selected = object_read(api, workspace, address)
     batch = flow_batch.settings(config)
-    rows = pages(api, workspace, {**config["selection"], "fields": ["revision", "data",
-                 *[item["field"] for item in config.get("order", [])]] if batch else ["revision"]})
+    fields = ["revision", *([batch["by"]] if batch and batch.get("by") else []),
+              *[item["field"] for item in config.get("order", [])]]
+    rows = pages(api, workspace, {**config["selection"], "fields": list(dict.fromkeys(fields)) if batch else ["revision"]})
     candidates = list(rows) if batch else None
     row = next((item for item in candidates if item.get("address") == address), None) if batch else \
           next((item for item in rows if item.get("address") == address), None)

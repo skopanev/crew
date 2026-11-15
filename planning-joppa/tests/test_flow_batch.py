@@ -27,7 +27,12 @@ class AtomicTracker(Tracker):
 
     def call(self, tool, args):
         if tool != "joppa_batch":
-            return super().call(tool, args)
+            result = super().call(tool, args)
+            if tool == "joppa_objects" and not args.get("address"):
+                from flow_batch import field
+                result["items"] = [{"address": row["address"], **{key: field(row, key)
+                    for key in args["fields"]}} for row in result["items"]]
+            return result
         if self.move_before_claim:
             self.nodes["work:t2"]["current_revision"] += 1
         nodes, results, refs = deepcopy(self.nodes), [], {}
