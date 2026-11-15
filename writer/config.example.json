@@ -54,8 +54,8 @@
     "token_file": "/absolute/private/joppa-read-key",
     "root": "memory:configured-root",
     "roles": {
-      "author": "writer-author",
-      "critic": "writer-critic"
+      "author": {"role": "writer-author", "process": "write-tests", "kind": "process"},
+      "critic": {"role": "writer-critic", "process": "review-tests", "kind": "process"}
     },
     "filter_env": {
       "role": "LANE_MEMORY_ROLE",

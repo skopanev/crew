@@ -36,6 +36,12 @@ See `config.example.json`. The project supplies every native name:
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_CLAUDE_MODEL` | Optional model overrides |
 | `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |
 
+A role binding can name `{role, process, kind}` when these names differ.
+`role` and `process` supply their separate configured memory filters.
+`kind` requires a contract node of that kind in the reply. Common rules alone cannot satisfy this check.
+A string keeps the previous behavior: it supplies the same role and process name.
+The configured flow checks its live role contracts before it claims an item or starts an agent.
+
 ## Test fields
 
 The schema entry of `TEST_KIND` supplies every rule. Writer has no own limit:

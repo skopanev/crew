@@ -77,6 +77,20 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(self.server.requests[0]["query"], "panel sign-in")
         self.assertEqual(self.server.requests[0]["filter"], {"project": "life"})
 
+    def test_distinct_role_and_process_filters_require_the_process_contract(self):
+        path = Path(os.environ["LANE_MEMORY_CONFIG"])
+        config = json.loads(path.read_text())
+        config["roles"]["critic"] = {"role": "test-reviewer", "process": "review-test-text", "kind": "procedure"}
+        path.write_text(json.dumps(config))
+        self.server.replies.extend([
+            {"items": [{"address": "procedure:p", "kind": "procedure", "revision": 2, "body": "Five review questions."}]},
+            {"items": [{"address": "rule:r", "kind": "rule", "revision": 1, "body": "General rules."}]}])
+        self.assertIn("Five review questions", contracts.load_contract("critic", "life")["content"])
+        self.assertEqual(self.server.requests[0]["filter"],
+                         {"role": "test-reviewer", "process": "review-test-text", "project": "life"})
+        with self.assertRaisesRegex(ValueError, "process contract missing: review-test-text"):
+            contracts.load_contract("critic", "life")
+
 
 if __name__ == "__main__":
     unittest.main()

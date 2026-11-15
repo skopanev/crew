@@ -11,10 +11,10 @@ ROLES = ("researcher", "designer", "critic")
 DATA = Path(__file__).resolve().parents[1] / "lane" / "hooks" / "joppa-data.sh"
 
 
-def memory(mode, role, project, query=None):
+def memory(mode, role, project, query=None, process=None):
     """The validated reply of one read, with the role, process and project filters of this caller."""
     env = {k: v for k, v in os.environ.items() if k not in ("LANE_MEMORY_ROLE", "LANE_MEMORY_PROCESS")}
-    env.update({"LANE_MEMORY_PROJECT": project}, **({"LANE_MEMORY_ROLE": role, "LANE_MEMORY_PROCESS": role} if role else {}))
+    env.update({"LANE_MEMORY_PROJECT": project}, **({"LANE_MEMORY_ROLE": role, "LANE_MEMORY_PROCESS": process or role} if role else {}))
     reply = json.loads(run(["bash", str(DATA), mode] + ([query] if query is not None else []), timeout=120, env=env))
     require(isinstance(reply.get("items"), list), f"Joppa {mode} reply has no items")
     return reply
@@ -34,10 +34,18 @@ def render(reply, mode):
 
 def load_contract(role, project):
     # The process name is configuration; this code names only the workflow role.
-    name = (config().get("roles") or {}).get(role)
-    require(isinstance(name, str) and name, f"config.context.roles.{role} is missing")
-    reply = memory("session", name, project)
+    binding = (config().get("roles") or {}).get(role)
+    name = binding.get("role") if isinstance(binding, dict) else binding
+    process = binding.get("process") if isinstance(binding, dict) else name
+    kind = binding.get("kind") if isinstance(binding, dict) else None
+    require(isinstance(name, str) and name and isinstance(process, str) and process,
+            f"config.context.roles.{role} is missing role or process")
+    require(not isinstance(binding, dict) or set(binding) <= {"role", "process", "kind"}, "unknown role binding key")
+    require(kind is None or isinstance(kind, str) and kind, "role binding kind must be a nonempty string")
+    reply = memory("session", name, project, process=process)
     require(reply["items"], f"Joppa contract empty: {name}")
+    require(kind is None or any(item.get("kind") == kind for item in reply["items"]),
+            f"Joppa process contract missing: {process}; common rules alone are insufficient")
     content = text(render(reply, "session"), f"Joppa {name} content")
     ids = []
     shown = ["body"] + [f for f in fields("session") if f not in ("title", "address", "kind", "revision")]

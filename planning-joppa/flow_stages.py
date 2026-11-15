@@ -44,6 +44,10 @@ def prepare():
     api = client(config)
     assignment = flow_context.load(api, config, os.environ["PLANNING_JOPPA_ITEM"])
     selected = assignment["selected"]
+    contracts = {}
+    for role in (config.get("context") or {}).get("roles", {}):
+        require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", role), "invalid context role key")
+        contracts[role] = load_contract(role, config["workspace"])
     publication.ensure_recovered(config["runs_folder"], target, config["url"], config["workspace"], selected["address"])
     write(target / "input.json", assignment)
     write(target / "joppa-snapshot.json", {"schema": assignment["schema"],
@@ -56,11 +60,8 @@ def prepare():
     flow_context.verify(api, config, assignment, claim)
     assignment["claim_revision"] = claims.claimed_revisions(claim)[selected["address"]]
     write(target / "input.json", assignment)
-    contracts = {}
-    for role in (config.get("context") or {}).get("roles", {}):
-        require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", role), "invalid context role key")
-        contracts[role] = load_contract(role, config["workspace"])
-        emit(role + "_contract", contracts[role]["content"])
+    for role, contract in contracts.items():
+        emit(role + "_contract", contract["content"])
     write(target / "contracts.json", contracts)
     emit("assignment", assignment)
     signal("PREPARED", "Selected object, configured context and execution claim are ready")
