@@ -11,6 +11,7 @@ import {formatDependencyIssue} from './dependencies.mjs';
 import {configFrom, dolberIdentity} from './launcher-config.mjs';
 import {configReloader} from './config-reload.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
+import {reportSelectionIssues} from './selection-notify.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -94,6 +95,7 @@ export async function tick(config, display = null) {
   print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
   if (active >= config.limit) { if (display) display.message = ''; return; }
   const selected = await nextTask(config);
+  const selectionIssues = selected.selectionIssues || [];
   const candidate = selected.candidate;
   const dependencyIssues = selected.dependencyIssues || [];
   const dependencySummary = dependencyIssues.length ? ` · ${dependencyIssues.length} DEPENDENCY_STALE_PIN` : '';
@@ -102,7 +104,7 @@ export async function tick(config, display = null) {
     throw new Error('A new Joppa lane must contain exactly its selected Task');
   }
   if (display) display.counts = {open: selected.available, ready: String(selected.available), held: selected.held,
-    blocked: candidate === null && selected.available > 0, dependencyIssues};
+    blocked: candidate === null && selected.available > 0, dependencyIssues, selectionIssues};
   else {
     print(`Joppa Tasks [workspace=${config.workspace}, repositories=${config.repositories.map(repo => repo.id).join(',')}]: ${selected.available} available · ${selected.held} held Tasks${dependencySummary}`);
     for (const issue of dependencyIssues.slice(0, 5)) print(formatDependencyIssue(issue));
@@ -110,6 +112,8 @@ export async function tick(config, display = null) {
     print(`  repositories: ${config.repositories.map(repo => repo.id).join(', ')}` +
       (config.joppa.filter ? `\n  filter: ${JSON.stringify(config.joppa.filter)}` : ''));
   }
+  try { await reportSelectionIssues(config, selectionIssues, {terminal: Boolean(display)}); }
+  catch (error) { if (display) display.error = error.message; else console.error(error.message); }
   if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');
   print(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);

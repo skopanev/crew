@@ -4,6 +4,7 @@ import path from 'node:path';
 import {readRun, alive, runDirectories} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
+import {formatSelectionIssue} from './selection-notify.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -182,6 +183,8 @@ export function createDashboard(config, paint) {
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)
       .map(line => paint('yellow', line))));
+    footer.unshift(...(counts?.selectionIssues || []).slice(0, 1)
+      .flatMap(issue => wrap(formatSelectionIssue(issue), width).map(line => paint('red', line))));
     const rows = runs.slice(0, 30).map(run => {
       const {result, worker} = run;
       const status = statusFor(run);

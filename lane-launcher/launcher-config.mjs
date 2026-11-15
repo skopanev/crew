@@ -8,6 +8,7 @@ import {validateJoppa} from './joppa.mjs';
 import {validateContext} from './context-config.mjs';
 import {defaultHooks, validateHooks} from './hooks-config.mjs';
 import {defaultWorkflow, validateWorkflow} from './workflow-config.mjs';
+import {validateSelectionNotify} from './selection-notify.mjs';
 
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
@@ -18,6 +19,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
     ...(bytes ? JSON.parse(bytes.toString('utf8')) : read(file))};
   // Saved run state records the source; operator recovery checks it.
   config.source = 'joppa';
+  validateSelectionNotify(config.selectionNotify);
   config.delivery ??= 'branch';
   validateJoppa(config);
   config.gateCommands = config.repositories[0].gateCommands;

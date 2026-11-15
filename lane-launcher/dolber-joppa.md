@@ -22,6 +22,18 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
+A Task without a module uses the repository's only configured module. Multiple modules need an explicit choice.
+An explicit module mismatch remains a refusal. The dashboard shows refused Tasks and their reason.
+Set `selectionNotify` to send each refusal once through the existing Agntbus MCP endpoint:
+
+```json
+{"selectionNotify":{"mcpCommand":["/absolute/bin/mcp-remote","http://localhost:<configured-port>/mcp"],"name":"crew/dolber-example","to":"project/crew"}}
+```
+
+Read the endpoint from the host harness configuration. No credentials or model are needed for the local bridge.
+The dispatcher records confirmed message IDs in `stateDir/selection-alerts.json`. A changed Task revision or reason sends a new message.
+An unavailable bridge shows `SELECTION_NOTIFY_FAILED`. It does not stop other eligible Tasks.
+
 Set `joppa.claimRetryDelaysSeconds` to retry a claim after a transport failure, for example `[5, 15, 35]`.
 The list gives the delays and the maximum retry count. Omit it, or use `[]`, for no retries.
 Each delay must be a positive integer that fits a Node.js timer.
