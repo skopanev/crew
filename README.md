@@ -48,7 +48,7 @@ private `token_file`, role map, type selections, fields and filter bindings.
 The key must be a workspace Read key (`jpr_`), not an MCP or mutation token.
 SessionStart reads the complete contract. Prompt and tool hooks query scoped memory.
 A failed baseline or a response above `max_chars` stops the agent without truncation.
-No Equill binary, bridge or local store is required.
+Crew reads context directly from the configured Joppa endpoint.
 
 `roles/*.jsonl` retain the earlier recovery drafts. Runtime does not read them.
 Git pushes do not export context or credentials. Joppa stores the current contracts.
