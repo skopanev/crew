@@ -60,8 +60,19 @@ export function writerGone(run, checkout) {
   const folders = new Set([run.runFolder, exists(run.runFolder) ? fs.realpathSync(run.runFolder) : null].filter(Boolean));
   const ids = command('docker', ['ps', '-q', '--no-trunc']).split('\n').filter(Boolean);
   if (!ids.length) return true;
-  return !JSON.parse(command('docker', ['inspect', ...ids])).some(row =>
-    folders.has(row.Config?.Labels?.['medulla.runs_under']) || (row.Mounts || []).some(mount => mount.Source === checkout));
+  let rows;
+  try { rows = JSON.parse(command('docker', ['inspect', ...ids])); }
+  catch (error) {
+    // Docker can remove an unrelated container between ps and inspect. Keep the surviving rows.
+    const missing = String(error.stderr || '').trim().split('\n').map(line =>
+      /^Error: no such object: ([a-z0-9]+)$/i.exec(line.trim())?.[1]);
+    if (error.status !== 1 || !missing.length || missing.some(id => !id || !ids.includes(id))) throw error;
+    rows = JSON.parse(String(error.stdout));
+    require(Array.isArray(rows) && rows.length + missing.length === ids.length &&
+      rows.every(row => ids.includes(row.Id) && !missing.includes(row.Id)), 'Docker inspection is incomplete');
+  }
+  return !rows.some(row => folders.has(row.Config?.Labels?.['medulla.runs_under']) ||
+    (row.Mounts || []).some(mount => mount.Source === checkout));
 }
 
 // Record the retained checkout in the failed launch state. Null when it cannot be proven.
