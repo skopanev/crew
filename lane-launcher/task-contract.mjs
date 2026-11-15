@@ -48,7 +48,7 @@ export function taskModuleChoice(config, repo, data) {
     return repo.modules[0];
   }
   const module = repo.modules.find(item => item.name === values[0]);
-  require(module, 'Task module is not configured');
+  require(module, `Task module is not configured: declared ${values[0]}, configured ${repo.modules.map(item => item.name).join(', ')}`);
   return module;
 }
 

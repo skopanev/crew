@@ -30,6 +30,9 @@ test('missing Module uses the only module or the whole repository, while explici
       assert.deepEqual(object, before);
       object.document.data.body += '\nModule: unknown';
       assert.throws(() => taskInput(config, object), /Task module is not configured/);
+      const refusal = (await nextTask(config)).selectionIssues.find(issue => issue.task === object.address);
+      assert.equal(refusal.revision, object.current_revision);
+      assert.match(refusal.message, /declared unknown, configured/);
     }
   }
   object.document.data = {...original, body: 'Goal: required change\nRepository: app'};

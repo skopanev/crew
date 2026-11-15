@@ -109,7 +109,7 @@ export async function nextTask(config) {
     run.finalizeOnly ? [{address: run.task}] : run.claim ? claimTasks(run) : runTasks(run)).map(task => task.address));
   const finalizing = new Set(reservations.filter(run => run.finalizeOnly).map(run =>
     `${run.requirement}\n${run.repositoryId || run.repository?.id || run.claim?.ticket?.repository}`));
-  const dependencyIssues = new Map();
+  const dependencyIssues = new Map(), selectionIssues = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     const read = passReader(config, worker);
@@ -164,7 +164,8 @@ export async function nextTask(config) {
         } catch (error) {
           if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
           if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID'].includes(error.code)) {
-            console.error(`${task.address}: ${error.message}; skipping this Task`);
+            selectionIssues.set(task.address, {task: task.address, revision: task.revision,
+              code: error.code, message: error.message});
             continue;
           }
           throw error;
@@ -181,7 +182,8 @@ export async function nextTask(config) {
       const candidate = await finalizationCandidate({config, worker,
         read: (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}),
         object, group, rows: inventory, occupied: finalizing, runs});
-      if (candidate) return {candidate, worker, available: available + 1, held, dependencyIssues: [...dependencyIssues.values()]};
+      if (candidate) return {candidate, worker, available: available + 1, held,
+        dependencyIssues: [...dependencyIssues.values()], selectionIssues: [...selectionIssues.values()]};
     }
     while (eligible.length) {
       const first = eligible[0];
@@ -211,10 +213,10 @@ export async function nextTask(config) {
       }
       return {candidate: {id: task.address, title: task.title, revision: task.revision,
         tasks, requirement: task.requirement, repository: task.repository}, worker, available, held,
-        dependencyIssues: [...dependencyIssues.values()]};
+        dependencyIssues: [...dependencyIssues.values()], selectionIssues: [...selectionIssues.values()]};
     }
   }
-  return {candidate: null, available, held, dependencyIssues: [...dependencyIssues.values()]};
+  return {candidate: null, available, held, dependencyIssues: [...dependencyIssues.values()], selectionIssues: [...selectionIssues.values()]};
 }
 
 const taskOrder = task => Number(/^\[(\d+)\]\s/.exec(task.title || '')?.[1] || Number.MAX_SAFE_INTEGER);
