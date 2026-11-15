@@ -121,6 +121,35 @@ for line in sys.stdin:
             self.assertEqual(child.returncode, 0, err)
         self.assertEqual(self.events.read_text(), 'start\ndone\nstart\ndone\n')
 
+    def test_two_repositories_use_one_cbm_session(self):
+        second = self.source / 'second'
+        self.git('clone', '-b', 'main', str(self.origin), str(second))
+        self.env['LANE_REPOSITORIES_JSON'] = json.dumps([*self.configured,
+            {**self.configured[0], 'id': 'second', 'path': str(second), 'cbmProject': 'second'}])
+        self.connector.write_text('''import json,os,sys
+roots={}
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ if r['method']=='initialize':
+  with open(os.environ['SYNC_EVENTS'],'a') as f: f.write('initialize\\n')
+  result={}
+ else:
+  args=r['params']['arguments'];name=r['params']['name']
+  if name=='index_repository':
+   roots[args['name']]=args['repo_path']
+   with open(os.environ['SYNC_EVENTS'],'a') as f: f.write(args['name']+'\\n')
+   value={'status':'indexed','project':args['name']}
+  else: value={'status':'ready','root_path':roots[args['project']]}
+  result={'structuredContent':value}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
+''')
+        child = self.launch()
+        out, err = child.communicate(timeout=15)
+        self.assertEqual(child.returncode, 0, err)
+        self.assertEqual(sorted(self.events.read_text().splitlines()), ['app', 'initialize', 'second'])
+        self.assertIn('shared CBM connected · init', out)
+
     def test_detached_checkout_preserves_unrelated_divergent_local_target(self):
         base = self.git('-C', str(self.repo), 'rev-parse', 'HEAD')
         (self.repo / 'file.txt').write_text('local branch commit\n')

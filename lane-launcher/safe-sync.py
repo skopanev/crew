@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from pathlib import Path
 
 session = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'lane/bridge/cbm-probe.py'))['session']
@@ -86,17 +87,22 @@ def main(root, connector, image=None):
     if any(not p.is_relative_to(root) or not (p / '.git').is_dir() for p in settings):
         raise RuntimeError('Configured repositories must be Git directories inside sourceRoot')
     repos = sorted(settings)
-    def refresh(repo):
-        # Each worker owns its MCP stream and repository lock.
-        with session(connector, image=image) as call:
-            sync(repo, call, settings[repo])
-    with ThreadPoolExecutor(max_workers=min(4, len(repos))) as pool:
-        futures = [(repo, pool.submit(refresh, repo)) for repo in repos]
-        failures = []
-        for repo, future in futures:
-            error = future.exception()
-            if error is not None:
-                failures.append((repo, error))
+    connected = time.monotonic()
+    print('[sync] connecting shared CBM', flush=True)
+    with session(connector, image=image) as call:
+        print(f'[sync] shared CBM connected · init {time.monotonic() - connected:.1f}s', flush=True)
+        rpc_lock = Lock()
+        def shared_call(*args, **kwargs):
+            # One MCP stream has one request in flight. Git refresh remains parallel.
+            with rpc_lock:
+                return call(*args, **kwargs)
+        with ThreadPoolExecutor(max_workers=min(4, len(repos))) as pool:
+            futures = [(repo, pool.submit(sync, repo, shared_call, settings[repo])) for repo in repos]
+            failures = []
+            for repo, future in futures:
+                error = future.exception()
+                if error is not None:
+                    failures.append((repo, error))
     if failures:
         message = '; '.join(f'{repo.name}: {error}' for repo, error in failures)
         error_type = TimeoutError if all(isinstance(error, TimeoutError)
