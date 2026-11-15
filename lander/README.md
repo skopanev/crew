@@ -49,6 +49,7 @@ The patch must use the project's native fields. It cannot override the assignee,
 Original remote branches remain available for repair.
 A moved target permits one rebuild and a new full check. A second move leaves the remaining work pending.
 A moved or unavailable branch is excluded before the push. Its pending delivery stays unchanged with an evidence note.
+With `repeat: true`, Lander retries that pending head each interval until the producer records a current reviewed head.
 
 A partial landing reports `PARTIAL_LANDING`. Landed Tasks are archived, and excluded Tasks retain the repair evidence.
 An uncertain native write requires receipt recovery before another claim.
