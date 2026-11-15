@@ -32,6 +32,6 @@ fi
 if $cbm_ready; then
   say 'run.sh: shared codebase memory connected'
 else
-  cbm_connector="" cbm_project=""
+  cbm_connector="" cbm_project="unavailable. Use rg and file reads"
   say 'run.sh: optional CBM unavailable. Continue with source search and file reads.'
 fi

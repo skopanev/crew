@@ -35,8 +35,10 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   if (typeof config.cbmRequired !== 'boolean') throw new Error('cbmRequired must be true or false');
   if (!Number.isSafeInteger(config.cbmInitializeTimeoutSeconds) || config.cbmInitializeTimeoutSeconds < 1) throw new Error('cbmInitializeTimeoutSeconds must be positive');
   if (!config.env || typeof config.env !== 'object' || Array.isArray(config.env) || Object.entries(config.env).some(([key, value]) =>
-    !/^[A-Z_][A-Z0-9_]*$/.test(key) || /^(MEDULLA_|LANE_|CBM_)/.test(key) ||
-    ['TOOLING_ROOT', 'TARGET_BRANCH', 'DELIVERY', 'IMAGE'].includes(key) || typeof value !== 'string' || value.includes('\0'))) {
+    !/^[A-Z_][A-Z0-9_]*$/.test(key) || /^(MEDULLA_|LANE_|CBM_|REQUIREMENT_|DELIVERY(?:_|$))/.test(key) ||
+    ['TOOLING_ROOT', 'TARGET_BRANCH', 'IMAGE', 'TICKET_SOURCE', 'LAUNCH_CLAIM_FILE', 'SCOUT_ENABLED',
+      'FINALIZE_ONLY', 'JOPPA_READER_COMMAND_JSON', 'REPOSITORY_PREFLIGHT', 'GIT_SSH_COMMAND', 'REVIEWERS_JSON'].includes(key) ||
+    typeof value !== 'string' || value.includes('\0'))) {
     throw new Error('env must map runtime variable names to strings without host-owned overrides');
   }
   if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
