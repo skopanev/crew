@@ -52,10 +52,10 @@ jq --arg title "$title" --arg root "$TOOLING_ROOT" '
 python3 - "$home" <<'PYCONFIG'
 import json, os, pathlib, sys
 home = pathlib.Path(sys.argv[1])
-connector = os.environ['CBM_MCP_COMMAND']
-server = {"command": "python3", "args": [connector]}
+connector = os.environ.get('CBM_MCP_COMMAND', '')
+servers = {"codebase-memory": {"command": "python3", "args": [connector]}} if connector else {}
 (home / 'config.toml').write_text(
     '[mcp_servers.codebase-memory]\ncommand = "python3"\nargs = ' +
-    json.dumps([connector]) + '\n')
-(home / 'mcp.json').write_text(json.dumps({"mcpServers": {"codebase-memory": server}}))
+    json.dumps([connector]) + '\n' if connector else '')
+(home / 'mcp.json').write_text(json.dumps({"mcpServers": servers}))
 PYCONFIG

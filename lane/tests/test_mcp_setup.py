@@ -133,6 +133,12 @@ class McpSetupTests(unittest.TestCase):
             self.assertEqual(codex['codebase-memory'], {
                 'command': 'python3', 'args': [str(root / 'shared connector.py')]})
             self.assertEqual(auth.read_text(), 'fixture broker auth')
+            env['CBM_MCP_COMMAND'] = ''
+            subprocess.run(['bash', str(LANE / 'hooks/codex-home.sh'), str(home), str(settings)],
+                           env=env, check=True, capture_output=True)
+            self.assertEqual(tomllib.loads((home / 'config.toml').read_text()).get('mcp_servers', {}), {})
+            self.assertEqual(json.loads((home / 'mcp.json').read_text())['mcpServers'], {})
+            self.assertEqual(auth.read_text(), 'fixture broker auth')
 
     def test_injected_hooks_bind_joppa_memory_hook_for_both_harnesses(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -53,10 +53,11 @@ export function checkoutState(checkout, executionId) {
 }
 
 // The old lane process group and every container of its run or with this checkout mounted are gone.
-export function writerGone(run, checkout) {
+export function writerGone(run, checkout, beforeWorkflow = false) {
   if (!Number.isSafeInteger(run.launchPgid) || run.launchPgid <= 1) return false;
   try { process.kill(-run.launchPgid, 0); return false; }
   catch (error) { if (error.code !== 'ESRCH') throw error; }
+  if (beforeWorkflow) return true;
   const folders = new Set([run.runFolder, exists(run.runFolder) ? fs.realpathSync(run.runFolder) : null].filter(Boolean));
   const ids = command('docker', ['ps', '-q', '--no-trunc']).split('\n').filter(Boolean);
   if (!ids.length) return true;

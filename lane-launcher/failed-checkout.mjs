@@ -31,8 +31,12 @@ export function removeEmptyDiscardCheckout(run, announce) {
   const record = run.discardCheckout;
   if (!record || run.config.discardFailedWorktree !== true) return;
   try {
+    let beforeWorkflow = false;
+    const log = path.join(path.dirname(run.runFolder), 'output.log');
+    if (fs.existsSync(log)) beforeWorkflow = !fs.readFileSync(log, 'utf8').includes('[medulla] ') &&
+      (!fs.existsSync(run.runFolder) || fs.readdirSync(run.runFolder).every(name => name === 'launch-claim.json'));
     if (record.path !== checkoutPath(run) || !matches(record, record.path) || fs.readdirSync(record.path).length ||
-        run.launchPgid && !writerGone(run, record.path)) return;
+        run.launchPgid && !writerGone(run, record.path, beforeWorkflow)) return;
     fs.rmdirSync(record.path);
     record.removed = true;
     announce(`run.sh: removed unused worktree: ${record.path}`);

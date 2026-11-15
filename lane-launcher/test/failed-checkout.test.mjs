@@ -36,6 +36,8 @@ test('discard is opt-in and validates its config value', async t => {
 
 test('the host owns only a directory it creates, and removes an unused one before outcome writes', async t => {
   const f = await fixture(t), record = f.run.discardCheckout;
+  fs.writeFileSync(path.join(f.root, 'bin/docker'), '#!/bin/sh\nexit 1\n', {mode: 0o755});
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), '[sync] shared CBM timed out during initialize\n');
   assert.equal(f.identity, `${record.dev}:${record.ino}`);
   const other = {...f.run}; delete other.discardCheckout;
   assert.equal(prepareDiscardCheckout(other, () => {}), '');
@@ -51,6 +53,7 @@ test('the host owns only a directory it creates, and removes an unused one befor
 
 test('a removed unrelated Docker container does not retain a startup claim', async t => {
   const f = await fixture(t);
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), '[medulla] session container medulla-sess-fixture starting\n');
   fs.writeFileSync(path.join(f.root, 'bin/docker'), `#!/usr/bin/env node
 if (process.argv[2] === 'ps') console.log(process.argv.includes('--filter') ? '' : 'live\\nvanished');
 else { console.log(process.env.DOCKER_ROWS);
@@ -68,6 +71,22 @@ else { console.log(process.env.DOCKER_ROWS);
   assert.equal(result.released, true);
   assert.equal(result.held, false);
   assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
+});
+
+for (const harness of [null, 'codex']) test('checkout setup failure releases only without agent work: ' + harness, async t => {
+  const f = await fixture(t);
+  fs.rmdirSync(f.checkout); f.run.discardCheckout.removed = true;
+  const native = path.join(f.run.runFolder, 'native'); fs.mkdirSync(path.join(native, 'artifacts'), {recursive: true});
+  fs.writeFileSync(path.join(native, 'journal.jsonl'), [
+    {node: 'prepare', signal: 'READY'},
+    {node: 'create_worktree', signal: '__failed__', harness, model: harness ? 'model' : null},
+    {node: 'notify_failure', signal: '__timeout__'}].map(JSON.stringify).join('\n'));
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'),
+    '[medulla] step 2 | create_worktree\nrun.sh: removed unchanged worktree: ' + f.checkout + '\n');
+  const result = {status: 'failed', code: 2};
+  await finishTask(f.run, f.stateFile, result, null);
+  if (harness) { assert.equal(result.held, true); assert.ok(f.objects.get('task:t1').document.data.assignee); }
+  else { assert.equal(result.released, true); assert.equal(f.objects.get('task:t1').document.data.assignee, undefined); }
 });
 
 test('uncertain, active, pre-existing and replaced checkouts are preserved', async t => {

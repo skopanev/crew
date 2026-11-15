@@ -163,6 +163,13 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 Only configured repositories enter Git and CBM refresh.
 Set each repository's `cbmProject` to the canonical project name returned by CBM.
 Startup requires that name and the indexed root path to match the configured repository.
+`cbmRequired` defaults to `true`. Set it to `false` to continue with source reads when CBM is unavailable.
+Git freshness checks remain mandatory. An unavailable optional connector is not attached to the agents.
+`cbmInitializeTimeoutSeconds` sets the connection budget and defaults to 90.
+`env` maps uppercase variable names to strings exported inside the workflow. Host-owned variable overrides are refused.
+For a shared Bun cache, append its absolute host path to `readWriteDirs` and set `env.BUN_INSTALL_CACHE_DIR`.
+The container path is `/workspace/<host directory basename>`. A host cache named `bun` therefore uses `/workspace/bun`.
+Cache mounts need write access. Keep them outside the canonical source repositories.
 `worktreeRoot` sets the checkout directory inside `sourceRoot`. Each Task has a stable execution ID.
 The table shows the full Task address, stage or reason code, run ID, start time and duration.
 
