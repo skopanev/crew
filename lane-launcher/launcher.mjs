@@ -112,13 +112,15 @@ export async function tick(config, display = null) {
     print(`  repositories: ${config.repositories.map(repo => repo.id).join(', ')}` +
       (config.joppa.filter ? `\n  filter: ${JSON.stringify(config.joppa.filter)}` : ''));
   }
-  try { await reportSelectionIssues(config, selectionIssues, {terminal: Boolean(display)}); }
-  catch (error) { if (display) display.error = error.message; else console.error(error.message); }
-  if (!candidate) { if (display) display.message = 'No ready tickets'; return; }
+  const report = async () => {
+    try { await reportSelectionIssues(config, selectionIssues, {terminal: Boolean(display)}); }
+    catch (error) { if (display) display.error = error.message; else console.error(error.message); }
+  };
+  if (!candidate) { if (display) display.message = 'No ready tickets'; await report(); return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');
   print(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
   if (!display && candidate.title) print(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
-  if (!config.launchLanes) return;
+  if (!config.launchLanes) { await report(); return; }
   const dir = path.join(config.stateDir, 'runs', randomUUID());
   fs.mkdirSync(dir, {recursive: true, mode: 0o700});
   const runFolder = path.join(fs.realpathSync(dir), 'lane');
@@ -154,6 +156,7 @@ export async function tick(config, display = null) {
   herdr(config, ['pane', 'run', run.pane,
     `${quote(process.execPath)} ${quote(path.join(here, 'worker.mjs'))} ${quote(stateFile)}`]);
   print(display ? '' : `started ${candidate.id} in ${run.pane}; logs: ${dir}`);
+  await report();
 }
 
 export async function main(argv) {
