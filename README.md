@@ -50,7 +50,6 @@ SessionStart reads the complete contract. Prompt and tool hooks query scoped mem
 A failed baseline or a response above `max_chars` stops the agent without truncation.
 Crew reads context directly from the configured Joppa endpoint.
 
-`roles/*.jsonl` retain the earlier recovery drafts. Runtime does not read them.
 Git pushes do not export context or credentials. Joppa stores the current contracts.
 
 The default runtime user is `501:501`. Browser downloads remain part of the project setup.

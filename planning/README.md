@@ -35,7 +35,6 @@ Set `context.roles.researcher`, `context.roles.designer` and `context.roles.crit
 The shared HTTP adapter reads their contracts from Joppa with a workspace Read key.
 Set the endpoint, memory root, kinds, fields and filter bindings in `context`.
 There is no local store or snapshot fallback. Empty contract reads stop planning.
-`roles/*.jsonl` retain recovery drafts and are not runtime inputs.
 
 ## Что выполняется
 

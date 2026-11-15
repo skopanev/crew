@@ -32,7 +32,6 @@ SessionStart loads the complete required role contract.
 Prompt and tool hooks request relevant additional memory.
 Required context failures stop the agent. Oversized responses fail instead of losing text through truncation.
 Confirmed lessons remain separate from an agent's unverified explanation.
-The local `roles/*.jsonl` files retain recovery drafts. Runtime reads the current Joppa records.
 Push hooks do not export private project context or credentials.
 
 CBM supplies code relationships and search results.
