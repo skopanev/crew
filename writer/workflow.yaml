@@ -102,7 +102,7 @@ nodes:
         ($type.fields // {}) as $fields |
         ($type.required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end) as $required |
         ([$in.children[]? | select(.kind == $test) | .document.data.title]) as $existing |
-        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting)] | length) as $tasks |
+        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null)] | length) as $tasks |
         def fits($limit): $limit == null or length <= $limit;
         def name_ok: type == "string" and length > 0 and (explode | all(. >= 32)) and
           fits($type.title_max_length) and fits($rules.name.max_length) and
@@ -210,7 +210,7 @@ nodes:
           [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
             parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
             data: (.data + $owner + {title})}}] +
-          [$in.children[] | select(.kind == $task and .document.data.stage == $waiting) |
+          [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null) |
             {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
               data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}])}
         else {approved: false, critique: ($reviews | map_values(if valid then
