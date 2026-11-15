@@ -30,16 +30,23 @@ function isImplementTimeout(artifacts) {
   }
 }
 
-function isPrepareFailure(artifacts) {
-  if (!artifacts) return false;
+function isPrepareFailure(artifacts, run) {
   try {
-    const origin = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8'));
+    if (!artifacts) {
+      const folders = fs.readdirSync(run.runFolder).map(name => path.join(run.runFolder, name))
+        .filter(folder => fs.existsSync(path.join(folder, 'journal.jsonl')));
+      if (folders.length !== 1) return false;
+      artifacts = path.join(folders[0], 'artifacts');
+    }
     const journal = fs.readFileSync(path.join(path.dirname(artifacts), 'journal.jsonl'), 'utf8')
       .trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    const originFile = path.join(artifacts, 'origin.json');
+    const origin = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8')) :
+      journal.filter(row => row.node !== 'notify_failure').at(-1);
     const preparation = journal.filter(row => row.node === 'prepare');
-    return origin.node === 'prepare' && ['__failed__', '__timeout__', '__default__'].includes(origin.signal) &&
-      journal.every(row => ['prepare', 'notify_failure'].includes(row.node)) && preparation.length === 1 &&
-      journal[0].node === 'prepare' && preparation[0].signal === origin.signal;
+    return ['prepare', 'create_worktree'].includes(origin?.node) && ['__failed__', '__timeout__', '__default__'].includes(origin.signal) &&
+      journal.every(row => ['prepare', 'create_worktree', 'notify_failure'].includes(row.node) && !row.harness && !row.model) &&
+      preparation.length === 1 && journal.filter(row => row.node === 'create_worktree').length <= 1 && journal[0].node === 'prepare';
   } catch { return false; }
 }
 
@@ -84,11 +91,12 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
     launchGroupGone() &&
     runFolders.size > 0 &&
     startingContainers.every(name => !command('docker', ['ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.Names}}'])) &&
-    [...runFolders].every(folder => !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}']));
+    (!output.includes('[medulla] ') || [...runFolders].every(folder =>
+      !command('docker', ['ps', '-a', '--filter', `label=medulla.runs_under=${folder}`, '--format', '{{.Names}}'])));
   const startupFailed = result.status === 'failed' && !artifacts && checkoutAbsent && nativeEmpty &&
     contractsUnchanged && (containerFailed || preMedullaFailed);
-  const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged &&
-    output.includes(`run.sh: removed unused worktree: ${checkout}`) && isPrepareFailure(artifacts);
+  const prepareFailed = result.status === 'failed' && checkoutAbsent && contractsUnchanged && launchGroupGone() &&
+    ['unused', 'unchanged'].some(kind => output.includes(`run.sh: removed ${kind} worktree: ${checkout}`)) && isPrepareFailure(artifacts, run);
   if (startupFailed || prepareFailed) {
     const releasing = objects.every(unclaimed) ? [] : objects;
     require(!releasing.length || objects.every(owned), 'PACKAGE_RELEASE_UNCONFIRMED: Task ownership differs within the package');

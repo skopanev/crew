@@ -11,7 +11,7 @@ import {defaultWorkflow, validateWorkflow} from './workflow-config.mjs';
 
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
-    discardFailedWorktree: false,
+    discardFailedWorktree: false, cbmRequired: true, cbmInitializeTimeoutSeconds: 90, env: {},
     readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
@@ -32,6 +32,13 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');
   if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
   if (typeof config.discardFailedWorktree !== 'boolean') throw new Error('discardFailedWorktree must be true or false');
+  if (typeof config.cbmRequired !== 'boolean') throw new Error('cbmRequired must be true or false');
+  if (!Number.isSafeInteger(config.cbmInitializeTimeoutSeconds) || config.cbmInitializeTimeoutSeconds < 1) throw new Error('cbmInitializeTimeoutSeconds must be positive');
+  if (!config.env || typeof config.env !== 'object' || Array.isArray(config.env) || Object.entries(config.env).some(([key, value]) =>
+    !/^[A-Z_][A-Z0-9_]*$/.test(key) || /^(MEDULLA_|LANE_|CBM_)/.test(key) ||
+    ['TOOLING_ROOT', 'TARGET_BRANCH', 'DELIVERY', 'IMAGE'].includes(key) || typeof value !== 'string' || value.includes('\0'))) {
+    throw new Error('env must map runtime variable names to strings without host-owned overrides');
+  }
   if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
   if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
     throw new Error('image must be a Docker image reference');

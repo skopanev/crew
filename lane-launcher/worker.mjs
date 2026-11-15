@@ -165,6 +165,7 @@ try {
   child = spawn('bash', [script, ...run.args], {cwd: path.dirname(path.dirname(script)),
     env: {...process.env, LANE_RUNS_FOLDER: run.runFolder,
       LANE_SOURCE: 'joppa', LANE_REPOSITORY_JSON: JSON.stringify(run.repository),
+      LANE_CBM_REQUIRED: String(run.config.cbmRequired ?? true), LANE_CBM_INIT_TIMEOUT_S: String(run.config.cbmInitializeTimeoutSeconds ?? 90),
       LANE_REPOSITORIES_JSON: JSON.stringify(run.config.repositories), LANE_WORKTREE_ROOT: run.config.worktreeRoot,
       LANE_DELIVERY: run.config.delivery, LANE_DELIVERY_BRANCH: run.deliveryBranch || '',
       LANE_REQUIREMENT_BRANCH: run.requirementDelivery?.branch || '',

@@ -113,6 +113,29 @@ for line in sys.stdin:
         self.assertIn('no configured repositories', err)
         self.assertFalse(self.events.exists())
 
+    def test_optional_cbm_timeout_still_refreshes_git_and_refuses_dirty_sources(self):
+        self.connector.write_text('import time; time.sleep(2)\n')
+        self.env.update(LANE_CBM_REQUIRED='false', LANE_CBM_INIT_TIMEOUT_S='0.05')
+        (self.seed / 'file.txt').write_text('fresh\n')
+        self.commit(self.seed, 'fresh')
+        self.git('-C', str(self.seed), 'push', 'origin', 'main')
+        child = self.launch()
+        out, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 76, err)
+        self.assertEqual((self.repo / 'file.txt').read_text(), 'fresh\n')
+        self.assertIn('CBM skipped', out)
+        self.assertFalse(self.events.exists())
+        (self.repo / 'file.txt').write_text('local edit\n')
+        child = self.launch()
+        _, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 2, err)
+        self.assertIn('local changes', err)
+        self.assertEqual((self.repo / 'file.txt').read_text(), 'local edit\n')
+        del self.env['LANE_CBM_REQUIRED']
+        child = self.launch()
+        _, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 75, err)
+
     def test_two_launches_queue_until_git_and_cbm_are_done(self):
         first = self.launch()
         second = self.launch()
