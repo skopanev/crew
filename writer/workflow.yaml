@@ -200,7 +200,7 @@ nodes:
           (.missing | type == "array" and length == 0);
         ($in.schema.types[$test].required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end)
           as $required |
-        (if ($required | index("owner")) != null and $in.selected.document.data.owner
+        (if $in.selected.document.data.owner
          then {owner: $in.selected.document.data.owner} else {} end) as $owner |
         if all($reviews[]; clean) then {approved: true, operations: (
           [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,

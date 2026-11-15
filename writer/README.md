@@ -46,7 +46,7 @@ The configured flow checks its live role contracts before it claims an item or s
 
 The schema entry of `TEST_KIND` supplies every rule. Writer has no own limit:
 
-- every required field, except `title`, in the Test data. Crew copies the owner of the selected item when the schema requires an owner.
+- every required field, except `title`, in the Test data. Crew copies the selected item's owner as the new Test owner.
 - one listed value for each typed field, and no field that the schema computes.
 - `title_max_length`, `field_max_length`, `test_results.max_tests` and the `test_results.name` rules, when the schema gives them.
 - at most 98 operations for new Tests and Task updates. This is the host batch limit.
