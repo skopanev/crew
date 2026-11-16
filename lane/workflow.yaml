@@ -363,7 +363,7 @@ nodes:
       if [ "$REPAIR_BASELINE_ENABLED" = true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
         printf 'Repair baseline started.\n' > "$MEDULLA_RUN_DIR/artifacts/repair-baseline.txt"
         repair_setup() {
-          if (export LANE_SETUP_REQUIRED=true; source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"); then return 0; fi
+          if LANE_SETUP_REQUIRED=true bash -euo pipefail "$TOOLING_ROOT/lane/bin/setup-worktree.sh"; then return 0; fi
           echo '<signal:REPAIR_BASELINE_FAILED>Repair dependencies are unavailable; see dependency setup logs.</signal:REPAIR_BASELINE_FAILED>'
           return 1
         }
