@@ -139,6 +139,11 @@ try {
   fs.mkdirSync(run.runFolder, {recursive: true});
   // A retained checkout of this Task runs only after validation. Otherwise run.sh refuses it with exit 73.
   const reuseHead = run.finalizeOnly ? '' : await prepareReuse(run, dir, announce, () => save(stateFile, run));
+  if (run.config.discardFailedWorktree === true && !run.finalizeOnly) {
+    run.recoveryBase = await repositoryGit(run.config, run.repository,
+      ['rev-parse', '--verify', `refs/remotes/origin/${run.repository.targetBranch}^{commit}`]);
+    save(stateFile, run);
+  }
   const ownedCheckout = prepareDiscardCheckout(run, () => save(stateFile, run));
   const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
   const delivery = run.requirementDelivery && {plan: run.requirementDelivery,

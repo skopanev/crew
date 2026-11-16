@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {randomUUID, createHash} from 'node:crypto';
-import {save} from './runtime.mjs';
+import {save, command} from './runtime.mjs';
 import {checkoutPath, writerGone, laneGit} from './retained-checkout.mjs';
 
 const stat = file => { try { return fs.lstatSync(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
@@ -54,7 +54,10 @@ function saveRecovery(run, checkout, artifacts) {
   const git = laneGit(checkout);
   const recorded = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
   require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(recorded), 'Recovery base is invalid');
-  const base = git('merge-base', recorded, 'HEAD');
+  const target = run.recoveryBase || command('git', ['-C', run.repository.path, 'rev-parse', '--verify',
+    `refs/remotes/origin/${run.repository.targetBranch}^{commit}`]);
+  require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(target), 'Host recovery base is invalid');
+  const base = git('merge-base', '--octopus', recorded, 'HEAD', target);
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-recovery-'));
   const pending = patch + '.' + randomUUID() + '.tmp';
   try {
@@ -62,6 +65,8 @@ function saveRecovery(run, checkout, artifacts) {
     const index = laneGit(checkout, {env});
     index('read-tree', base);
     index('add', '-A', '--', '.');
+    require(!index('ls-files', '--stage', '-z').split('\0').some(row => row.startsWith('160000 ')),
+      'Recovery patch cannot preserve a nested repository; checkout retained');
     const tree = index('write-tree');
     const fd = fs.openSync(pending, 'wx', 0o600);
     try {
