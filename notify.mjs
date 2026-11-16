@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {reportSelectionIssues} from './lane-launcher/selection-notify.mjs';
 
 const events = new Set(['READY', 'QUEUED', 'FAILED', 'BLOCKED', 'TIMEOUT']);
 const clean = value => String(value ?? '').replace(/[\r\n|\x00-\x1f\x7f]/g, ' ').trim();
@@ -93,6 +94,7 @@ export function completionEvent(run, result, artifacts) {
   const saved = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8')) : {};
   const origin = {node: saved.node || legacy?.[1], signal: saved.signal || legacy?.[2],
     message: saved.message || legacy?.[3] || detail};
+  if (origin.signal === 'OVER_TIME') return {...event, node: origin.node, signal: origin.signal, summary: origin.message};
   const runDir = path.dirname(artifacts);
   const journalFile = path.join(runDir, 'journal.jsonl');
   const journal = fs.existsSync(journalFile) ? fs.readFileSync(journalFile, 'utf8')
@@ -120,8 +122,17 @@ export function completionEvent(run, result, artifacts) {
 }
 
 export async function notifyCompletion(run, result, artifacts) {
+  if (!run.config.notify && !run.config.selectionNotify) return false;
+  const event = completionEvent(run, result, artifacts);
+  if (event.signal === 'OVER_TIME' && run.config.selectionNotify) {
+    const patch = artifacts && path.join(artifacts, 'recovery.patch');
+    await reportSelectionIssues(run.config, (run.claim?.tasks || [{address: run.task, revision: run.taskRevision}]).map(task => ({
+      code: 'OVER_TIME', task: task.address, revision: task.revision,
+      message: `Run: ${event.runId}. Artifacts: ${artifacts || run.runFolder}. Recovery: ${patch && fs.existsSync(patch) ? patch : 'checkout retained; inspect cleanup outcome'}.`,
+    })));
+  }
   if (!run.config.notify) return false;
-  return notify(run.config, completionEvent(run, result, artifacts));
+  return notify(run.config, event);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {

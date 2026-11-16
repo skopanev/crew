@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {McpClient, JoppaTransportError} from './mcp-client.mjs';
+import {setTimeout as sleep} from 'node:timers/promises';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const maxBytes = 8 * 1024 * 1024;
@@ -68,6 +69,22 @@ export const DETAIL_FIELDS = Object.freeze(['revision', 'parent', 'data', 'prese
 // A revision read keeps the native historical detail: it carries current_revision, which the selection omits.
 const detailRead = args => args.address && !args.address.includes(',') && !args.history && !args.relations_of &&
   !args.in_relation && !args.fields && !args.revision;
+
+// Only reads can restart after a lost reply. Writes use their durable request receipt.
+export async function readJoppa(url, tokenFile, tool, arguments_, options = {}) {
+  if (!['joppa_objects', 'joppa_tree', 'joppa_help', 'joppa_search'].includes(tool)) throw new Error('Read retry refuses mutations');
+  for (let attempt = 0; ; attempt++) {
+    try { return await callJoppa(url, tokenFile, tool, arguments_, options); }
+    catch (error) {
+      if (options.signal?.aborted) throw error;
+      if (error.rejected || !(error instanceof JoppaTransportError) && error.rpcError?.code !== -32000 &&
+          !/^Joppa MCP HTTP (408|429|5\d\d)$/.test(error.message)) throw error;
+      if (attempt === 2) { error.code = 'JOPPA_UNAVAILABLE'; throw error; }
+      console.error(`JOPPA_READ_RETRY: ${tool}, attempt ${attempt + 2} of 3`);
+      await sleep([2000, 5000][attempt], undefined, {signal: options.signal});
+    }
+  }
+}
 
 export async function callJoppa(url, tokenFile, tool, arguments_, options = {}) {
   if (tool === 'joppa_objects' && detailRead(arguments_)) {

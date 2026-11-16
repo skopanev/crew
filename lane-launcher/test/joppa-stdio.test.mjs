@@ -234,6 +234,14 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
     return spawnSync(process.execPath, [checker, '--tasks'], {env, encoding: 'utf8', timeout: 10_000});
   };
   assert.equal(check().status, 0);
+  state.transportFailures = 2;
+  assert.equal(check().status, 0, 'A read retries two lost replies before confirming the unchanged contract');
+  state.transportFailures = 3;
+  const unavailable = check();
+  assert.equal(unavailable.status, 75);
+  assert.match(unavailable.stderr, /JOPPA_UNAVAILABLE: Joppa MCP transport failed/);
+  assert.doesNotMatch(unavailable.stderr, /REQUIREMENT_CHANGED/);
+  delete state.transportFailures;
   link.status.current_revision = 3;
   assert.equal(check().status, 0);
   for (const status of [{satisfied: false}, {access: false}, {present: false},

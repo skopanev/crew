@@ -2,7 +2,7 @@
 // Recheck the live unit before requirement publication or under the target lock. A read failure must prevent a push.
 import fs from 'node:fs';
 import path from 'node:path';
-import {callJoppa} from '../../lane-launcher/joppa-api.mjs';
+import {readJoppa} from '../../lane-launcher/joppa-api.mjs';
 import {contractDigest} from '../../lane-launcher/joppa.mjs';
 import {contextDigest} from '../../lane-launcher/joppa-common.mjs';
 import {nodeAssignee, nodeWaiting} from '../../lane-launcher/joppa-nodes.mjs';
@@ -40,12 +40,12 @@ try {
     if (tool === 'joppa_objects' && text(toolArgs?.address) && !toolArgs.parent) {
       const key = JSON.stringify([toolArgs.workspace || input.workspace, toolArgs.address]);
       if (!objectCache.has(key)) {
-        objectCache.set(key, callJoppa(input.config.joppa.url,
+        objectCache.set(key, readJoppa(input.config.joppa.url,
           process.env.REQUIREMENT_READER_FILE, tool, {workspace: input.workspace, ...toolArgs}, {mcpCommand}));
       }
       return objectCache.get(key);
     }
-    return callJoppa(input.config.joppa.url,
+    return readJoppa(input.config.joppa.url,
       process.env.REQUIREMENT_READER_FILE, tool, {workspace: input.workspace, ...toolArgs}, {mcpCommand});
   };
 
@@ -112,6 +112,7 @@ try {
     console.log('Task contracts and dependencies are current.');
   }
 } catch (error) {
-  console.error(`REQUIREMENT_CHANGED: ${error.message}`);
-  process.exitCode = 1;
+  const unavailable = error.code === 'JOPPA_UNAVAILABLE';
+  console.error(`${unavailable ? 'JOPPA_UNAVAILABLE' : 'REQUIREMENT_CHANGED'}: ${error.message}`);
+  process.exitCode = unavailable ? 75 : 1;
 }

@@ -49,15 +49,17 @@ function saveRecovery(run, checkout, artifacts) {
   const folder = fs.realpathSync(artifacts);
   require(folder.startsWith(root + path.sep), 'Recovery artifacts escape the run folder');
   const patch = path.join(folder, 'recovery.patch'), failure = path.join(folder, 'failure.txt');
-  require(!stat(patch), 'Recovery patch already exists; checkout preserved');
+  const existing = stat(patch);
+  require(!existing || existing.isFile() && !existing.isSymbolicLink(), 'Recovery patch is not a plain file');
   require(!stat(failure) || stat(failure).isFile() && !stat(failure).isSymbolicLink(), 'Failure report is not a plain file');
   const git = laneGit(checkout);
   const recorded = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
   require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(recorded), 'Recovery base is invalid');
-  const target = run.recoveryBase || command('git', ['-C', run.repository.path, 'rev-parse', '--verify',
+  const previous = existing && stat(failure) && fs.readFileSync(failure, 'utf8').match(/Recovery base: ([0-9a-f]{40}(?:[0-9a-f]{24})?)\b/g)?.at(-1)?.slice('Recovery base: '.length);
+  const target = previous || run.recoveryBase || command('git', ['-C', run.repository.path, 'rev-parse', '--verify',
     `refs/remotes/origin/${run.repository.targetBranch}^{commit}`]);
   require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(target), 'Host recovery base is invalid');
-  const base = git('merge-base', '--octopus', recorded, 'HEAD', target);
+  const base = previous || git('merge-base', '--octopus', recorded, 'HEAD', target);
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-recovery-'));
   const pending = patch + '.' + randomUUID() + '.tmp';
   try {
@@ -68,6 +70,12 @@ function saveRecovery(run, checkout, artifacts) {
     require(!index('ls-files', '--stage', '-z').split('\0').some(row => row.startsWith('160000 ')),
       'Recovery patch cannot preserve a nested repository; checkout retained');
     const tree = index('write-tree');
+    if (existing) {
+      index('read-tree', base);
+      if (existing.size) index('apply', '--cached', '--binary', patch);
+      require(index('write-tree') === tree, 'Existing recovery patch does not restore the current checkout');
+      return patch;
+    }
     const fd = fs.openSync(pending, 'wx', 0o600);
     try {
       laneGit(checkout, {env, stdio: ['ignore', fd, 'pipe']})('diff', '--cached', '--binary', '--full-index',
@@ -100,10 +108,9 @@ export function discardFailedCheckout(run, stateFile, announce, artifacts = null
       'Discard checkout path changed');
     require(matches(record, record.path), 'Discard checkout identity changed');
     require(writerGone(run, record.path), 'A lane process or container can still write the checkout');
-    const discarded = path.join(path.dirname(record.path), `.discard-${path.basename(path.dirname(stateFile))}`);
-    require(!stat(discarded), 'Discard destination already exists');
     const patch = saveRecovery(run, record.path, artifacts);
     announce(`[lane] Recovery patch saved: ${patch}`);
+    const discarded = fs.mkdtempSync(path.join(path.dirname(record.path), '.discard-'));
     fs.renameSync(record.path, discarded);
     record.discardedPath = discarded;
     save(stateFile, run);

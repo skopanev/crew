@@ -14,6 +14,15 @@ export function failureDetails(run, announce) {
   try {
     // Only inspect run artifacts, never recurse into retained worktrees.
     const root = run.runFolder;
+    for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
+      const folder = path.join(root, name), outcome = path.join(folder, 'outcome.json');
+      if (!fs.existsSync(outcome) || read(outcome)?.error?.code !== 'E_DEADLINE') continue;
+      const target = path.join(folder, 'artifacts');
+      fs.mkdirSync(target, {recursive: true, mode: 0o700});
+      const message = 'Workflow time limit exceeded. Preserve the candidate and reports for manual landing.';
+      save(path.join(target, 'origin.json'), {node: read(outcome).error.node || 'workflow', signal: 'OVER_TIME', message});
+      fs.appendFileSync(path.join(target, 'failure.txt'), '\nOVER_TIME: ' + message + '\n', {mode: 0o600});
+    }
     artifacts = fs.existsSync(root) ? fs.readdirSync(root)
       .map(name => path.join(root, name, 'artifacts'))
       .filter(folder => fs.existsSync(path.join(folder, 'failure.txt')))

@@ -1,6 +1,6 @@
 // Transport, receipt identities, and authored contract checks.
 import {createHash, randomUUID} from 'node:crypto';
-import {callJoppa} from './joppa-api.mjs';
+import {callJoppa, readJoppa} from './joppa-api.mjs';
 import {remoteDependencyBlocker} from './dependencies.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 export const executionId = address => 'joppa-' + createHash('sha256').update(address).digest('hex').slice(0, 32);
@@ -35,7 +35,8 @@ export function verifyRemoteDependencies(object) {
 }
 
 export function api(config, worker, tool, arguments_, {signal} = {}) {
-  return callJoppa(config.joppa.url, worker.tokenFile, tool, arguments_, {signal, mcpCommand: config.joppa.mcpCommand});
+  const call = ['joppa_objects', 'joppa_tree', 'joppa_help', 'joppa_search'].includes(tool) ? readJoppa : callJoppa;
+  return call(config.joppa.url, worker.tokenFile, tool, arguments_, {signal, mcpCommand: config.joppa.mcpCommand});
 }
 
 export const hasRecoveryCheckpoint = recovery => Boolean(recovery?.task || recovery?.ref || recovery?.sha);

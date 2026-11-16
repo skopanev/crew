@@ -11,6 +11,7 @@ import {formatContexts, formatRecoveryNote, taskInput} from '../joppa-input.mjs'
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 import {fakeDocker, stoppedPgid, laneCheckout, git} from '../test-support/retained-checkout.fixture.mjs';
+import {failureDetails} from '../worker-outcome.mjs';
 
 async function fixture(t) {
   const f = await packageFixture(t);
@@ -166,6 +167,29 @@ test('a confirmed timeout saves recoverable work before discarding its private b
   assert.deepEqual(fs.readFileSync(path.join(restore, 'new binary.bin')), Buffer.from([0, 255, 7, 0, 128]));
   assert.equal(fs.existsSync(path.join(restore, 'node_modules')), false);
   assert.ok(prepareDiscardCheckout({...f.run, discardCheckout: undefined}, () => {}));
+});
+
+test('a workflow deadline blocks with OVER_TIME and preserves work despite an occupied discard name', async t => {
+  const f = await fixture(t);
+  laneCheckout(f.checkout, f.run.executionId);
+  const base = git(f.checkout, 'rev-parse', 'HEAD');
+  f.run.recoveryBase = base;
+  fs.writeFileSync(path.join(f.checkout, 'changed.txt'), 'recover this work\n');
+  const native = path.join(f.run.runFolder, 'deadline');
+  fs.mkdirSync(native, {recursive: true});
+  fs.writeFileSync(path.join(native, 'outcome.json'), JSON.stringify({outcome: 'crashed', error: {code: 'E_DEADLINE'}}));
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), 'E_DEADLINE: workflow timeout exhausted\n');
+  const occupied = path.join(path.dirname(f.checkout), `.discard-${f.runId}`);
+  fs.writeFileSync(occupied, 'unrelated data');
+  const artifacts = failureDetails(f.run, f.announce), result = {status: 'failed', code: 1};
+  await finishTask(f.run, f.stateFile, result, artifacts);
+  assert.equal(result.blockConfirmed, true);
+  assert.equal(f.objects.get('task:t1').document.data.hold, 'OVER_TIME');
+  f.run.result = result;
+  discardFailedCheckout(f.run, f.stateFile, f.announce, artifacts);
+  assert.equal(fs.existsSync(f.checkout), false);
+  assert.equal(fs.readFileSync(occupied, 'utf8'), 'unrelated data');
+  assert.ok(fs.readFileSync(path.join(artifacts, 'recovery.patch'), 'utf8').includes('recover this work'));
 });
 
 test('discard mode restores neither a retained checkout nor a prior recovery checkpoint', async t => {

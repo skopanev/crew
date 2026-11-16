@@ -25,6 +25,9 @@ for await(const line of createInterface({input:process.stdin})) {
    {structuredContent:{workspace:r.params.arguments.workspace,schema:{types:{}},actor:'existing-user'}};
   if(process.argv[3]) {
    const state=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+   if(r.params.name==='joppa_objects' && state.transportFailures>0){
+    state.transportFailures--;fs.writeFileSync(process.argv[3],JSON.stringify(state));process.exit(4);
+   }
    let value=r.params.name==='joppa_tree'?state.tree:
     state.responses?.[r.params.name] ?? state.objects[r.params.arguments.address];
    if(state.compact && r.params.name==='joppa_objects' && value?.document) {
