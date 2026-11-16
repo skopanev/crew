@@ -122,6 +122,17 @@ class FlowBatchTests(unittest.TestCase):
         flow_stages.prepare()
         self.assertEqual(len(read(self.target / "input.json")["items"]), 3)
 
+    def test_whole_branch_units_fit_the_native_claim_limit(self):
+        self.config["batch"].update(min_size=2, unit_field="data.delivery.branch")
+        self.api.nodes = {"work:t%03d" % i: item("work:t%03d" % i, "criterion:a", {
+            "title": "Task", "repository": "service", "delivery": {"branch": "one" if i < 40 else "two" if i < 60 else "three"}})
+            for i in range(70)}
+        os.environ["PLANNING_JOPPA_ITEM"] = "work:t000"
+        flow_stages.prepare()
+        rows = read(self.target / "input.json")["items"]
+        self.assertEqual(len(rows), 50)
+        self.assertEqual({row["document"]["data"]["delivery"]["branch"] for row in rows}, {"one", "three"})
+
     def test_blocked_business_outcome_releases_all_items_without_archiving(self):
         flow_stages.prepare()
         write(self.target / "operations.json", {"operations": [],

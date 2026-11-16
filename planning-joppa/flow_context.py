@@ -76,8 +76,6 @@ def load(api, config, address):
             if batch.get("by") and flow_batch.field(candidate, batch["by"]) != group:
                 continue
             unit = flow_batch.field(candidate, unit_field) if unit_field else None
-            if unit_field and unit not in units and len(units) == batch["size"]:
-                continue
             item = object_read(api, workspace, candidate["address"])
             require(item["current_revision"] == candidate["revision"], "batch item changed during selection")
             require(not batch.get("by") or flow_batch.field(item, batch["by"]) == group,
@@ -89,7 +87,7 @@ def load(api, config, address):
                 units.add(unit)
             items.append(item)
             seen.add(item["address"])
-        require(len(items) <= 50, "batch exceeds the native 50-item claim limit")
+        items = flow_batch.select(batch, items)
         require(flow_batch.ready(batch, items), "batch waits for its configured minimum or age")
         assignment["items"] = items
     return assignment

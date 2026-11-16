@@ -26,6 +26,26 @@ export function batchField(item, name) {
 
 export const batchProjection = name => name.startsWith('data.') ? name.split('.').slice(0, 2).join('.') : name;
 
+export function batchItems(batch, rows) {
+  if (!batch.unit_field) return rows.slice(0, batch.size);
+  const units = new Map();
+  for (const row of rows) {
+    const unit = batchField(row, batch.unit_field);
+    if (typeof unit !== 'string' || !unit) throw new Error('batch item lacks its unit field');
+    if (!units.has(unit)) units.set(unit, []);
+    units.get(unit).push(row);
+  }
+  const selected = [];
+  let count = 0;
+  for (const members of units.values()) {
+    if (!count && members.length > 50) throw new Error('batch anchor unit exceeds the native 50-item claim limit');
+    if (count === batch.size) break;
+    if (selected.length + members.length > 50) continue;
+    selected.push(...members); count++;
+  }
+  return selected;
+}
+
 export function batchReady(batch, rows, now = Date.now()) {
   const size = batch?.unit_field ? new Set(rows.map(row => batchField(row, batch.unit_field))).size : rows.length;
   if (!batch || size >= (batch.min_size ?? 1)) return true;

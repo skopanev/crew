@@ -8,6 +8,7 @@ import {configReloader} from '../config-reload.mjs';
 import {plannerConfig} from '../../planning-joppa/planner-config.mjs';
 import {plannerRows} from '../../planning-joppa/run-rows.mjs';
 import {nextConfiguredItem} from '../../planning-joppa/queue.mjs';
+import {batchItems} from '../../planning-joppa/flow-batch.mjs';
 import {pause, plannerFixture} from '../test-support/config-reload.fixture.mjs';
 
 const count = (text, pattern) => (text.match(pattern) || []).length;
@@ -192,4 +193,10 @@ test('configured batches wait for distinct units or the oldest timestamp within 
   assert.equal((await nextConfiguredItem(config, f.config.token_file, undefined, row => row.address === 'ac:a2')).next, null);
   f.objects.get('ac:a2').document.data.repository = 'other';
   assert.equal((await nextConfiguredItem(config, f.config.token_file)).next.address, 'ac:a2');
+  const rows = [40, 20, 10].flatMap((count, branch) => Array.from({length: count}, (_, id) =>
+    ({id, 'data.delivery': {branch: String(branch)}})));
+  const packed = batchItems(config.batch, rows);
+  assert.equal(packed.length, 50);
+  assert.deepEqual([...new Set(packed.map(row => row['data.delivery'].branch))], ['0', '2']);
+  assert.throws(() => batchItems(config.batch, Array.from({length: 51}, () => rows[0])), /anchor unit exceeds/);
 });

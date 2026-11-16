@@ -69,6 +69,26 @@ def members(assignment):
     return assignment.get("items") or [assignment["selected"]]
 
 
+def select(batch, rows):
+    if not batch.get("unit_field"):
+        return rows[:batch["size"]]
+    units = {}
+    for row in rows:
+        unit = field(row, batch["unit_field"])
+        require(isinstance(unit, str) and unit, "batch item lacks its unit field")
+        units.setdefault(unit, []).append(row)
+    selected, count = [], 0
+    for items in units.values():
+        require(count or len(items) <= 50, "batch anchor unit exceeds the native 50-item claim limit")
+        if count == batch["size"]:
+            break
+        if len(selected) + len(items) > 50:
+            continue
+        selected.extend(items)
+        count += 1
+    return selected
+
+
 def ready(batch, rows):
     size = len({field(row, batch["unit_field"]) for row in rows}) if batch.get("unit_field") else len(rows)
     if size >= batch.get("min_size", 1):

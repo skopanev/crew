@@ -3,7 +3,7 @@ import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeWaiting, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
-import {batchSettings, batchField, batchReady, batchProjection} from './flow-batch.mjs';
+import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -213,7 +213,8 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   }
   for (const row of eligible) {
     const group = batch.by ? eligible.filter(item => batchField(item, batch.by) === batchField(row, batch.by)) : eligible;
-    if (batchReady(batch, group)) return {count: rows.length, next: row};
+    const items = batchItems(batch, group);
+    if (batchReady(batch, items)) return {count: rows.length, next: items[0]};
   }
   return {count: rows.length, next: null};
 }
