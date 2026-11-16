@@ -732,7 +732,7 @@ nodes:
     shell: |
       set -euo pipefail
       if [ -n "${MEDULLA_TIMEOUT_S:-}" ]; then
-        export LANE_LANDING_DEADLINE="$(( $(date +%s) + ${MEDULLA_TIMEOUT_S%%.*} ))"
+        export LANE_LANDING_DEADLINE="$(( $(date +%s) + ${MEDULLA_TIMEOUT_S%%.*} - 1 ))"
         if [ "${MEDULLA_TIMEOUT_S%%.*}" -lt "${PUBLISH_RESERVE_SECONDS:-240}" ]; then
           echo '<signal:PUBLISH_BUDGET_LOW>No publication started; the workflow needs more time for landing and completion.</signal:PUBLISH_BUDGET_LOW>'
           exit 0
