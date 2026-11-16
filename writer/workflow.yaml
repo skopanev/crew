@@ -17,6 +17,7 @@ vars:
   TASK_KIND: ''
   WAITING_STAGE: ''
   READY_STAGE: ''
+  APPROVAL_REVISION_FIELD: ''
   REWORK_LIMIT: '1'
   round: '1'
   draft: ''
@@ -27,7 +28,7 @@ nodes:
     timeout: 300
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
+      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE APPROVAL_REVISION_FIELD; do
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
@@ -36,7 +37,13 @@ nodes:
       esac
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
-      "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare
+      prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
+      jq -e --arg field "$APPROVAL_REVISION_FIELD" '.selected as $item | ($item.current_revision | type == "number") and
+        $item.current_revision > 0 and $item.document.data[$field] == $item.current_revision' \
+        "$MEDULLA_RUN_DIR/artifacts/input.json" >/dev/null || {
+        echo 'The selected item needs approval of its current revision.' > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+        exit 2
+      }
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
       # input.json stays complete: review_join reads the waiting Tasks from it.
       view="$(jq -c --arg test "$TEST_KIND" '
@@ -45,6 +52,7 @@ nodes:
         .schema.types |= with_entries(select(.key as $kind | $kinds | index($kind) != null))' \
         "$MEDULLA_RUN_DIR/artifacts/input.json")"
       case "$view" in *'</signal:var>'*) echo 'writer: reserved signal delimiter in the assignment' >&2; exit 1;; esac
+      printf '%s\n' "$prepared"
       printf '<signal:var key=writer_assignment>%s</signal:var>\n' "$view"
     on_signal:
       PREPARED: author
@@ -102,7 +110,8 @@ nodes:
         ($type.fields // {}) as $fields |
         ($type.required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end) as $required |
         ([$in.children[]? | select(.kind == $test) | .document.data.title]) as $existing |
-        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null)] | length) as $tasks |
+        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
+          ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == ""))] | length) as $tasks |
         def fits($limit): $limit == null or length <= $limit;
         def name_ok: type == "string" and length > 0 and (explode | all(. >= 32)) and
           fits($type.title_max_length) and fits($rules.name.max_length) and
@@ -210,7 +219,8 @@ nodes:
           [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
             parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
             data: (.data + $owner + {title})}}] +
-          [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null) |
+          [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
+          ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == "")) |
             {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
               data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}])}
         else {approved: false, critique: ($reviews | map_values(if valid then
