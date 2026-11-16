@@ -27,6 +27,12 @@ python3 "$(dirname "${BASH_SOURCE[0]}")/gates.py" verify
 before="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || {
   echo 'lane-push: target read failed before publication' >&2; exit 2; }
 echo "lane-push: HEAD=$sha target=$target before=${before:-<ветки нет>}"
+# A no-new-red proof holds only for the exact target that its red baseline checked.
+if [[ "${NO_NEW_RED:-}" == last && ! -e "${MEDULLA_RUN_DIR:-}/artifacts/gates/current.json" ]]; then
+  checked_base="$(python3 "$(dirname "${BASH_SOURCE[0]}")/no_new_red.py" base "$MEDULLA_RUN_DIR/artifacts/gates/no-new-red.json")"
+  [[ -n "$before" && "$before" == "$checked_base" ]] || {
+    echo "lane-push: target $target is not the checked red baseline $checked_base" >&2; exit 3; }
+fi
 
 if [[ -n "$before" ]] && ! git merge-base --is-ancestor "$before" "$sha" 2>/dev/null; then
   echo "lane-push: ОТКАЗ — вершина $target ушла на $before, её нет в истории кандидата." >&2

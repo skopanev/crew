@@ -69,11 +69,13 @@ export function environment(state, repo, attempt) {
   return {...process.env, MEDULLA_RUN_DIR: attempt, ticket_id: 'lander-' + process.env.MEDULLA_RUN_ID,
     project_dir: repo.path, module_name: '.', gate_commands: JSON.stringify(repo.gateCommands),
     gate_timeout_seconds: String(repo.gateTimeoutSeconds || 900), VERIFY_ONLY: 'false',
-    LANE_TEST_BINDINGS_REQUIRED: 'false'};
+    LANE_TEST_BINDINGS_REQUIRED: 'false',
+    ...(repo.noNewRed ? {NO_NEW_RED: 'last', test_report: JSON.stringify(repo.testReport)} : {})};
 }
 function runGate(state, repo, attempt, log, commands) {
   fs.mkdirSync(path.join(attempt, 'artifacts'), {recursive: true});
-  const env = {...environment(state, repo, attempt), gate_commands: JSON.stringify(commands)};
+  const env = {...environment(state, repo, attempt), gate_commands: JSON.stringify(commands),
+    ...(commands === repo.gateCommands ? {} : {test_report: ''})};
   const process = spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
     {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * commands.length * 1000 + 30000,
       stdio: ['ignore', log, log]});
@@ -85,7 +87,7 @@ function runGate(state, repo, attempt, log, commands) {
   const infrastructure = process.status === 124 || receipt?.checks?.some(check => check.timed_out || check.exit_code === 124) ? 'GATE_TIMEOUT' :
     process.error || process.signal || [125, 126, 127, 130, 137, 143].includes(process.status) || !receipt || receipt.checks?.some(check =>
       [125, 126, 127, 130, 137, 143].includes(check.exit_code)) ? 'GATE_INTERRUPTED' : undefined;
-  return {passed: !infrastructure && process.status === 0 && receipt.passed === true,
+  return {passed: !infrastructure && process.status === 0 && receipt.passed === true, receipt: files[0] || null,
     ...(infrastructure ? {infrastructure, retainCheckout: infrastructure === 'GATE_INTERRUPTED' ||
       Boolean(receipt?.checks?.some(check => check.timed_out && check.termination_confirmed !== true))} : {})};
 }
@@ -99,7 +101,7 @@ export function check(state, repo, heads, root) {
   if (cached) {
     git(state.checkout, 'reset', '--hard', cached.commit);
     git(state.checkout, 'clean', '-fdx');
-    if (cached.passed && repo.preflight) {
+    if ((cached.passed || cached.tolerated) && repo.preflight) {
       const log = fs.openSync(path.join(cached.attempt, 'output.log'), 'a');
       try { const setup = prepare(state, repo, cached.attempt, log); if (!setup.passed) return {...cached, ...setup}; }
       finally { fs.closeSync(log); }
@@ -134,6 +136,15 @@ function merge(state, heads) {
   }
   return {};
 }
+// Opt-in: on a red target, a candidate passes when its designated test command adds no failure.
+function tolerates(state, baseline, result) {
+  if (!baseline.receipt || !result.receipt || result.infrastructure || result.conflict) return false;
+  const value = spawnSync('python3', [path.join(tooling, 'lane/bin/no_new_red.py'), 'compare', baseline.receipt, result.receipt],
+    {cwd: state.checkout, encoding: 'utf8', timeout: 120000});
+  if (value.status !== 0) { result.noNewRed = (value.stderr || 'comparison failed').trim().slice(0, 500); return false; }
+  Object.assign(result, {tolerated: JSON.parse(value.stdout).tolerated, baseline: baseline.receipt});
+  return true;
+}
 export function candidate(state, repo, heads, root) {
   let accepted = [], failed = {};
   for (const item of heads) {
@@ -147,19 +158,22 @@ export function candidate(state, repo, heads, root) {
   if (checked.passed) return {accepted, failed, checked};
   const baseline = check(state, repo, [], root);
   if (baseline.infrastructure) return interrupted(baseline);
-  if (!baseline.passed) return {accepted: [], failed: {}, pending: 'BASELINE_RED', checked: baseline};
+  const red = !baseline.passed && Boolean(repo.noNewRed) && tolerates(state, baseline, baseline);
+  if (!baseline.passed && !red) return {accepted: [], failed: {}, pending: 'BASELINE_RED', checked: baseline};
+  const green = result => result.passed || red && tolerates(state, baseline, result);
+  if (green(checked)) return {accepted, failed, checked};
   const alone = [];
   for (const item of accepted) {
     const result = check(state, repo, [item], root);
     if (result.infrastructure) return interrupted(result);
-    if (!result.passed) failed[item.address] = 'BRANCH_GATE_FAIL';
+    if (!green(result)) failed[item.address] = 'BRANCH_GATE_FAIL';
     else alone.push(item);
   }
   accepted = [];
   for (const item of alone) {
     const result = check(state, repo, [...accepted, item], root);
     if (result.infrastructure) return interrupted(result);
-    if (result.passed) accepted.push(item);
+    if (green(result)) accepted.push(item);
     else failed[item.address] = result.conflict ? 'INTERACTION_CONFLICT' : 'INTERACTION_FAIL';
   }
   checked = check(state, repo, accepted, root);

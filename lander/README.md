@@ -44,6 +44,28 @@ The configured gate timeout bounds each check and the push, including repository
 
 A red combined check first requires a target baseline check.
 A red baseline leaves all branches pending. It does not identify a faulty Task.
+
+### No new red (opt-in)
+
+A repository can allow landing on a red target when the candidate adds no test failure:
+
+```json
+"testReport": {"path": "junit/report.xml", "format": "junit", "identity": "{classname}.{name}"},
+"noNewRed": {"testCommand": "<the exact last entry of gateCommands>"}
+```
+
+The last gate command is the designated test command. Every earlier command must pass.
+Its runner must write a complete fresh JUnit report to `$CREW_TEST_REPORT_DIR/<path>`.
+Exit 0 means every test passed. Exit 1 means the run completed with test failures only.
+Any other exit, a timeout, a missing, stale or ambiguous report, or a report that disagrees with the exit refuses.
+
+`lane/bin/no_new_red.py` compares the candidate receipt with the red baseline receipt of the same target tree:
+the same commands, report settings and scope; every test executed on the baseline is executed on the candidate;
+no new skipped test; the candidate failures are a subset of the baseline failures.
+The batch, the separate branch checks, the combinations and a target rebuild use the same comparison.
+Before the push, `gates.py verify` compares both receipts again from a digest-bound proof,
+and `land.sh` refuses unless the target still equals the baseline target. Tests do not run again for the proof.
+Lander records nothing as an accepted test result. Without `noNewRed`, a red baseline stays `BASELINE_RED`.
 For a green baseline, Lander checks branches separately and then builds a passing combination.
 An interaction failure names an incompatible combination. It does not accuse a branch that passed alone.
 Previously checked exact candidates reuse their receipts.

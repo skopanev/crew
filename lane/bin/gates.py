@@ -15,6 +15,7 @@ import tempfile
 import time
 import uuid
 
+import no_new_red
 import test_bindings
 import test_report
 
@@ -214,9 +215,10 @@ def run(root):
     report = test_report.finish(report_state, run_started)
     if report is not None:
         receipt["test_report"] = report
-    receipt["passed"] = (len(receipt["checks"]) == len(commands)
-                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"])
-                         and unchanged(tree) and git("rev-parse", "HEAD") == base)
+    # no_new_red reads this flag for a receipt whose last test command failed.
+    receipt["unchanged"] = unchanged(tree) and git("rev-parse", "HEAD") == base
+    receipt["passed"] = (len(receipt["checks"]) == len(commands) and receipt["unchanged"]
+                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"]))
     path = folder / "receipt.json"
     with path.open("x") as output:
         json.dump(receipt, output, indent=2)
@@ -232,12 +234,13 @@ def run(root):
 
 
 def verify(root):
-    pointer = json.loads((root / "current.json").read_text())
+    # Without a passing receipt, an opted-in Lander push may present a checked no-new-red proof.
+    pointer, proof = no_new_red.pointer(root, test_report.config())
     path = Path(pointer["receipt"]).resolve()
     if not path.is_relative_to(root.resolve()) or digest(path) != pointer["sha256"]:
         raise ValueError("gate receipt is outside this run or has changed")
     receipt = json.loads(path.read_text())
-    if not receipt["passed"] or receipt["commands"] != plan():
+    if not (receipt["passed"] or proof) or receipt["commands"] != plan():
         raise ValueError("no passing receipt for the declared gate plan")
     if any(receipt.get(key) != value for key, value in identity().items()):
         raise ValueError("gate receipt belongs to another task, run, or repository scope")
@@ -255,7 +258,7 @@ def verify(root):
         raise ValueError("missing gate results")
     for command, check in zip(receipt["commands"], receipt["checks"]):
         log = Path(check["log"]).resolve()
-        if (check["command"] != command or check["exit_code"] != 0
+        if (check["command"] != command or check["exit_code"] not in ((0, 1) if proof and check is receipt["checks"][-1] else (0,))
                 or (isinstance(command, dict) and check.get("stdout_matches") is not True)
                 or not log.is_relative_to(path.parent) or digest(log) != check["sha256"]):
             raise ValueError("gate result or log does not match the receipt")

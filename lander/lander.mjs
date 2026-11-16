@@ -22,6 +22,9 @@ function settings() {
   require(repo.preflight == null || typeof repo.preflight === 'string', 'Repository preflight must be a shell command');
   require(repo.gateTimeoutSeconds == null || Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0,
     'Repository gateTimeoutSeconds must be positive');
+  require(repo.noNewRed == null || repo.noNewRed?.testCommand === repo.gateCommands.at(-1) &&
+    Object.keys(repo.noNewRed).length === 1 && repo.testReport && typeof repo.testReport === 'object',
+  'Repository noNewRed must name the last gate command as testCommand and needs testReport');
   const failedData = JSON.parse(process.env.FAILED_DATA || '{}');
   require(failedData && typeof failedData === 'object' && !Array.isArray(failedData) && Object.keys(failedData).length &&
     !Object.keys(failedData).some(key => ['assignee', 'commit', 'repository', 'delivery', 'acceptance'].includes(key)),
@@ -72,6 +75,12 @@ function build() {
   if (state.pending || !state.accepted.length) { output(state); signal('REPORT', state.pending || 'No branch can land.'); }
   else signal('BUILT', 'Combined candidate passed the full configured gates.');
 }
+// gates.py verify compares both receipts again before land.sh pushes.
+function proof(checked) {
+  const sha = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  write(path.join(checked.attempt, 'artifacts/gates/no-new-red.json'), {candidate: checked.receipt,
+    candidate_sha256: sha(checked.receipt), baseline: checked.baseline, baseline_sha256: sha(checked.baseline)});
+}
 function verifiedInputs() {
   const result = spawnSync(process.env.PLANNING_PYTHON || 'python3', [process.env.CREW_FLOW_STAGES, 'verify'], {stdio: 'inherit'});
   require(result.status === 0, 'Claimed inputs changed before target publication');
@@ -97,8 +106,10 @@ function push() {
     if (state.pending || !state.accepted.length) { output(state); signal('REPORT', state.pending || 'No branch can land.'); return; }
     // A rebuilt candidate needs a new input fence, not an old approval.
     if (rebuild) verifiedInputs();
-    require(state.checked?.passed === true, 'The push needs a candidate that passed the full configured gates');
+    require(state.checked?.passed === true || Boolean(repo.noNewRed && state.checked?.tolerated),
+      'The push needs a candidate that passed the full configured gates or added no failure on a red target');
     git(state.checkout, 'reset', '--hard', state.checked.commit);
+    if (!state.checked.passed) proof(state.checked);
     const log = fs.openSync(path.join(root, 'push-' + pass + '.log'), 'a');
     let result;
     try { result = spawnSync('bash', [path.join(tooling, 'lane/bin/land.sh'), state.target],
