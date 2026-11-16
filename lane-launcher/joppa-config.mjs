@@ -88,6 +88,7 @@ export function validateJoppa(config) {
     require(repo.coderTimeoutSeconds == null || (Number.isSafeInteger(repo.coderTimeoutSeconds) && repo.coderTimeoutSeconds > 0),
       'Repository coderTimeoutSeconds must be a positive integer');
     require(Array.isArray(repo.testCommand) && repo.testCommand.length && repo.testCommand.every(text), 'Repository needs testCommand');
+    require(repo.repairBaseline == null || typeof repo.repairBaseline === 'boolean', 'repairBaseline must be a boolean');
     require(repo.preflight === null || (text(repo.preflight) && !path.isAbsolute(repo.preflight) &&
       inside(path.resolve(folder, repo.preflight), folder)), 'Repository needs preflight: relative executable path or null');
     if (repo.afterLand != null) {

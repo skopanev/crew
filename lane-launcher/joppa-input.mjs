@@ -114,6 +114,7 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   // Selection, claim and delivery share this resolver. An unknown or several possible repositories stop here.
   const repo = taskRepositoryChoice(config, data);
   require(repo, 'Task repository is not configured or not unique');
+  const repair = repairInput(data);
   const configuredModule = taskModuleChoice(config, repo, data);
   const module = configuredModule.name, modulePath = configuredModule.path;
   const modulePaths = configuredModule.paths || [modulePath];
@@ -122,7 +123,7 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
     body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
-    ...repairInput(data),
+    ...(repo.repairBaseline === true ? repair : {}),
     ...(testAcceptance(object, covers) ? {testAcceptance: testAcceptance(object, covers)} : {}),
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,

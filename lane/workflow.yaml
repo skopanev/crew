@@ -35,7 +35,7 @@ vars:
   LANE_MEMORY_gitfix_ROLE: ''
   SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
-  REPAIR_BASELINE_RED: 'false'
+  REPAIR_BASELINE_ENABLED: 'false'
   LANE_SHARED_LOCK_DIR: ''
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
@@ -67,6 +67,7 @@ nodes:
       REQUIREMENT_READY: create_worktree
       RESUME: create_worktree
       SCOUT_SKIPPED: create_worktree
+      REPAIR_READY: create_worktree
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -117,6 +118,10 @@ nodes:
         done
         [ ! -d "$inputs/prior" ] || cp -R "$inputs/prior" "$MEDULLA_RUN_DIR/artifacts/prior"
         echo '<signal:RESUME>Continue the confirmed retained candidate for this Task.</signal:RESUME>'
+        exit 0
+      fi
+      if [ "$REPAIR_BASELINE_ENABLED" = true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+        echo '<signal:REPAIR_READY>Check the recorded repair tests on the fresh target.</signal:REPAIR_READY>'
         exit 0
       fi
       if [ "$SCOUT_ENABLED" = false ]; then
@@ -215,12 +220,13 @@ nodes:
       NO_TARGET_BRANCH: notify_failure
       BRANCH_HAS_WORK: notify_failure
       RETAINED_CHANGED: notify_failure
+      REPAIR_BASELINE_FAILED: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
     shell: |
       set -euo pipefail
-      if [ "$REPAIR_BASELINE_RED" = true ]; then MEDULLA_LAST_SIGNAL=OK; fi
+      worktree_started=$SECONDS
       if jq -e '.ticket.retained != null' "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null; then
         bash "$TOOLING_ROOT/lane/bin/retained-worktree.sh"
         exit 0
@@ -354,17 +360,27 @@ nodes:
       task_base="$(git rev-parse HEAD)"
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
-      if jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
-        source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+      if [ "$REPAIR_BASELINE_ENABLED" = true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+        printf 'Repair baseline started.\n' > "$MEDULLA_RUN_DIR/artifacts/repair-baseline.txt"
+        repair_setup() {
+          if (export LANE_SETUP_REQUIRED=true; source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"); then return 0; fi
+          echo '<signal:REPAIR_BASELINE_FAILED>Repair dependencies are unavailable; see dependency setup logs.</signal:REPAIR_BASELINE_FAILED>'
+          return 1
+        }
+        repair_setup || exit 0
+        export REPAIR_BASELINE_TIMEOUT_S=$(( ${MEDULLA_TIMEOUT_S:-900} - (SECONDS - worktree_started) - 10 ))
         baseline_rc=0
         node "$TOOLING_ROOT/lane/bin/repair-baseline.mjs" || baseline_rc=$?
         [ "$baseline_rc" -ne 0 ] || exit 0
-        [ "$baseline_rc" -eq 3 ] || exit "$baseline_rc"
-        # A measured failing baseline overrides a scout DUPLICATE diagnosis.
-        echo '<signal:var key=REPAIR_BASELINE_RED>true</signal:var>'
-        MEDULLA_LAST_SIGNAL=OK
-        if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
-        [ -z "${recovery_note:-}" ] || source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+        if [ "$baseline_rc" -ne 3 ]; then
+          echo '<signal:REPAIR_BASELINE_FAILED>Repair baseline did not complete; see artifacts/repair-baseline.txt.</signal:REPAIR_BASELINE_FAILED>'
+          exit 0
+        fi
+        MEDULLA_LAST_SIGNAL=REPAIR_READY
+        restore_recovery
+        if [ -n "${recovery_note:-}" ]; then repair_setup || exit 0; fi
+        printf '<signal:READY>Implement the recorded failing repair tests.%s</signal:READY>\n' "${recovery_note:-}"
+        exit 0
       else
         if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
         source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
@@ -616,8 +632,10 @@ nodes:
       Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
       {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
       {{var:RUN_ARTIFACTS}}/test-bindings.json if present;
+      {{var:RUN_ARTIFACTS}}/ticket-checks.json and repair-baseline.txt if present;
       {{var:RUN_ARTIFACTS}}/diff.patch.
       Check that each bound test verifies its criterion check.
+      For a repair verification, check that the recorded test files cover the Task contract.
       Read {{var:RUN_ARTIFACTS}}/ticket.json. If it has tasks, review every Task contract and its writable roots.
       Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
       ## FINDINGS

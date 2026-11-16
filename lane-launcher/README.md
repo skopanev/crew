@@ -207,11 +207,15 @@ it cannot replace the configured runner with arbitrary shell commands.
 The launcher rejects an empty runner before selecting or claiming a Task.
 
 For a test repair, set `data.repair.tests` to exact test file paths in the repository.
+Enable `repairBaseline: true` in its repository config. The default is false.
 The lane runs these files with `testCommand` on the fresh target before restoring earlier changes.
 Passing tests use the existing verification path, including repository gates and expert review.
 Failing tests proceed to implementation. Missing files or an incomplete baseline stop the lane.
 Only packages whose Tasks all declare repair tests use this baseline.
-Use the repository gate as `testCommand` when tests need separate database groups.
+The runner receives `./<file>` arguments. It must return 0 only when every requested file executes passing tests.
+It must return 1 for a failing test, including an import or syntax failure in that test.
+It must return 2 or higher for runner errors, empty runs, missing files or skipped tests.
+Enable this option only after verifying that the configured runner meets this contract.
 
 ## Notifications
 

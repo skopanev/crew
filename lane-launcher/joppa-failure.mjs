@@ -44,6 +44,8 @@ function isPrepareFailure(artifacts, run) {
     const origin = fs.existsSync(originFile) ? JSON.parse(fs.readFileSync(originFile, 'utf8')) :
       journal.filter(row => row.node !== 'notify_failure').at(-1);
     const preparation = journal.filter(row => row.node === 'prepare');
+    // A started repair check is Task work. A timeout must not release it for immediate retry.
+    if (fs.existsSync(path.join(artifacts, 'repair-baseline.txt'))) return false;
     return ['prepare', 'create_worktree'].includes(origin?.node) && ['__failed__', '__timeout__', '__default__'].includes(origin.signal) &&
       journal.every(row => ['prepare', 'create_worktree', 'notify_failure'].includes(row.node) && !row.harness && !row.model) &&
       preparation.length === 1 && journal.filter(row => row.node === 'create_worktree').length <= 1 && journal[0].node === 'prepare';

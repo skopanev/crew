@@ -269,6 +269,7 @@ medulla \
   --var "review_commands=$review_json" \
   --var "gate_timeout_seconds=$gate_timeout" \
   --var "test_report=$(jq -c '.testReport // empty' <<<"$LANE_REPOSITORY_JSON")" \
+  --var "REPAIR_BASELINE_ENABLED=$(jq -r '.repairBaseline // false' <<<"$LANE_REPOSITORY_JSON")" \
   --var "LANE_SHARED_LOCK_DIR=${shared_lock_dir:+/workspace/$(basename "$shared_lock_dir")}" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
