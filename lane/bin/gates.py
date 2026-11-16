@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Run declared checks and bind their receipts to the candidate Git tree.
-
-These are local run artifacts, not a Joppa Attempt or an acceptance verdict.
-The launcher supplies gate_commands as a JSON array; model prose is never proof.
-"""
+"""Run declared checks and bind receipts to the candidate Git tree."""
 
 import hashlib
 import json
@@ -119,6 +115,26 @@ def unchanged(tree):
             and not git("ls-files", "--others", "--exclude-standard"))
 
 
+def stop_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    return False
+
+
 def run(root):
     # Invalidate the old pass before parsing the new plan or invoking any check.
     current = root / "current.json"
@@ -149,10 +165,19 @@ def run(root):
                "checks": [], "passed": False}
     # Opt-in: commands write the configured JUnit report into a fresh folder.
     report_state, run_started = test_report.begin(folder), time.time()
+    active = None
+    def interrupted(signum, _frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if active is not None:
+            stop_group(active)
+        raise SystemExit(128 + signum)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
     for index, command in enumerate(commands):
         log = folder / f"{index + 1}.log"
         started = time.time()
-        timed_out = False
+        timed_out, terminated = False, None
         structured = isinstance(command, dict)
         stdout_matches = True
         argv = command["argv"] if structured else ["bash", "-euo", "pipefail", "-c", command]
@@ -161,12 +186,16 @@ def run(root):
                                        env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"} if structured else None,
                                        stdout=output, stderr=errors if structured else subprocess.STDOUT,
                                        start_new_session=True)
+            active = process
             try:
                 rc = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                active = None
+                terminated = stop_group(process)
                 process.wait()
                 timed_out, rc = True, 124
+            finally:
+                active = None
             if structured:
                 output.flush()
                 if "stdout" in command:
@@ -175,6 +204,7 @@ def run(root):
                 output.write(errors.read())
         receipt["checks"].append({"command": command, "cwd": who["cwd"],
                                   "exit_code": rc, "timed_out": timed_out,
+                                  "termination_confirmed": terminated and process.returncode not in (125, -9),
                                   "stdout_matches": stdout_matches,
                                   "started_at": started, "finished_at": time.time(),
                                   "log": str(log), "sha256": digest(log)})

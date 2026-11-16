@@ -71,10 +71,27 @@ export function environment(state, repo, attempt) {
     gate_timeout_seconds: String(repo.gateTimeoutSeconds || 900), VERIFY_ONLY: 'false',
     LANE_TEST_BINDINGS_REQUIRED: 'false'};
 }
+function runGate(state, repo, attempt, log, commands) {
+  fs.mkdirSync(path.join(attempt, 'artifacts'), {recursive: true});
+  const env = {...environment(state, repo, attempt), gate_commands: JSON.stringify(commands)};
+  const process = spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
+    {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * commands.length * 1000 + 30000,
+      stdio: ['ignore', log, log]});
+  const folder = path.join(attempt, 'artifacts/gates');
+  const files = fs.existsSync(folder) ? fs.readdirSync(folder).map(name => path.join(folder, name, 'receipt.json'))
+    .filter(file => fs.existsSync(file)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs) : [];
+  let receipt;
+  try { receipt = files.length ? read(files[0]) : null; } catch { receipt = null; }
+  const infrastructure = process.status === 124 || receipt?.checks?.some(check => check.timed_out || check.exit_code === 124) ? 'GATE_TIMEOUT' :
+    process.error || process.signal || [125, 126, 127, 130, 137, 143].includes(process.status) || !receipt || receipt.checks?.some(check =>
+      [125, 126, 127, 130, 137, 143].includes(check.exit_code)) ? 'GATE_INTERRUPTED' : undefined;
+  return {passed: !infrastructure && process.status === 0 && receipt.passed === true,
+    ...(infrastructure ? {infrastructure, retainCheckout: infrastructure === 'GATE_INTERRUPTED' ||
+      Boolean(receipt?.checks?.some(check => check.timed_out && check.termination_confirmed !== true))} : {})};
+}
 function prepare(state, repo, attempt, log) {
-  return !repo.preflight || spawnSync('bash', ['-lc', repo.preflight],
-    {cwd: state.checkout, env: environment(state, repo, attempt), timeout: (repo.gateTimeoutSeconds || 900) * 1000,
-      stdio: ['ignore', log, log]}).status === 0;
+  if (!repo.preflight) return {passed: true};
+  return runGate(state, repo, fs.mkdtempSync(path.join(attempt, 'setup-')), log, [repo.preflight]);
 }
 export function check(state, repo, heads, root) {
   const key = JSON.stringify([state.base, heads.map(item => item.head)]);
@@ -84,7 +101,7 @@ export function check(state, repo, heads, root) {
     git(state.checkout, 'clean', '-fdx');
     if (cached.passed && repo.preflight) {
       const log = fs.openSync(path.join(cached.attempt, 'output.log'), 'a');
-      try { if (!prepare(state, repo, cached.attempt, log)) return {...cached, passed: false}; }
+      try { const setup = prepare(state, repo, cached.attempt, log); if (!setup.passed) return {...cached, ...setup}; }
       finally { fs.closeSync(log); }
     }
     return cached;
@@ -95,14 +112,12 @@ export function check(state, repo, heads, root) {
   const attempt = path.join(root, 'checks', String(Object.keys(state.cache).length + 1));
   fs.mkdirSync(path.join(attempt, 'artifacts'), {recursive: true});
   const log = fs.openSync(path.join(attempt, 'output.log'), 'a');
-  const env = environment(state, repo, attempt);
-  let passed;
+  let result;
   try {
-    passed = prepare(state, repo, attempt, log) && spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
-      {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * repo.gateCommands.length * 1000 + 10000,
-        stdio: ['ignore', log, log]}).status === 0;
+    const setup = prepare(state, repo, attempt, log);
+    result = setup.passed ? runGate(state, repo, attempt, log, repo.gateCommands) : setup;
   } finally { fs.closeSync(log); }
-  const result = {passed, commit, attempt};
+  result = {...result, commit, attempt};
   state.cache[key] = result;
   return result;
 }
@@ -127,25 +142,36 @@ export function candidate(state, repo, heads, root) {
     else accepted.push(item);
   }
   let checked = check(state, repo, accepted, root);
+  const interrupted = result => ({accepted: [], failed, pending: result.infrastructure, checked: result});
+  if (checked.infrastructure) return interrupted(checked);
   if (checked.passed) return {accepted, failed, checked};
   const baseline = check(state, repo, [], root);
+  if (baseline.infrastructure) return interrupted(baseline);
   if (!baseline.passed) return {accepted: [], failed: {}, pending: 'BASELINE_RED', checked: baseline};
-  const alone = accepted.filter(item => {
+  const alone = [];
+  for (const item of accepted) {
     const result = check(state, repo, [item], root);
+    if (result.infrastructure) return interrupted(result);
     if (!result.passed) failed[item.address] = 'BRANCH_GATE_FAIL';
-    return result.passed;
-  });
+    else alone.push(item);
+  }
   accepted = [];
   for (const item of alone) {
     const result = check(state, repo, [...accepted, item], root);
+    if (result.infrastructure) return interrupted(result);
     if (result.passed) accepted.push(item);
     else failed[item.address] = result.conflict ? 'INTERACTION_CONFLICT' : 'INTERACTION_FAIL';
   }
   checked = check(state, repo, accepted, root);
+  if (checked.infrastructure) return interrupted(checked);
   return {accepted, failed, checked};
 }
 export function cleanup(state, root) {
   if (!state?.checkout || !fs.existsSync(state.checkout)) return;
+  if (state.checked?.retainCheckout) {
+    console.error('Lander checkout retained after incomplete checks: ' + state.checkout);
+    return;
+  }
   const stat = fs.lstatSync(state.checkout);
   require(path.dirname(state.checkout) === root && stat.isDirectory() && !stat.isSymbolicLink() &&
     stat.dev === state.dev && stat.ino === state.ino, 'Lander checkout identity changed');

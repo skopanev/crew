@@ -45,7 +45,7 @@ export async function report(config, now = Date.now()) {
       durations.push({branch: data.delivery.branch, seconds: Math.round((finished - pushed) / 1000)});
     }
   }
-  const counts = Object.fromEntries(['LANDED', 'PARTIAL_LANDING', 'BASELINE_RED'].map(code =>
+  const counts = Object.fromEntries([...new Set(['LANDED', 'PARTIAL_LANDING', 'BASELINE_RED', ...runs.map(run => run.code)])].map(code =>
     [code, runs.filter(run => run.code === code).length]));
   return {at: new Date(now).toISOString(), window_seconds: 3600, pending_branches: branches.size,
     pending_without_timestamp: [...branches.values()].filter(item => !Number.isFinite(Date.parse(item.pushed_at))).length,
