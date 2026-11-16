@@ -10,7 +10,7 @@ import {claimTask, finishTask, contractDigest} from '../joppa.mjs';
 import {formatContexts, formatRecoveryNote, taskInput} from '../joppa-input.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
-import {fakeDocker, stoppedPgid} from '../test-support/retained-checkout.fixture.mjs';
+import {fakeDocker, stoppedPgid, laneCheckout, git} from '../test-support/retained-checkout.fixture.mjs';
 
 async function fixture(t) {
   const f = await packageFixture(t);
@@ -19,6 +19,7 @@ async function fixture(t) {
   f.run.tasks = [f.run.tasks[0]];
   await claimTask(f.run, f.persist, f.runId);
   const identity = prepareDiscardCheckout(f.run, f.persist), checkout = f.run.discardCheckout.path;
+  fs.mkdirSync(f.run.runFolder, {recursive: true});
   f.run.launchPgid = stoppedPgid();
   const lines = [], announce = line => lines.push(line);
   return {...f, identity, checkout, lines, announce};
@@ -109,11 +110,18 @@ test('uncertain, active, pre-existing and replaced checkouts are preserved', asy
   assert.match(f.run.discardCheckout.error, /identity changed/);
 });
 
-test('a confirmed timeout keeps findings in Joppa and discards its private branch without checkpointing', async t => {
+test('a confirmed timeout saves recoverable work before discarding its private branch', async t => {
   const f = await fixture(t);
-  fs.mkdirSync(path.join(f.checkout, '.git/refs/heads'), {recursive: true});
-  fs.writeFileSync(path.join(f.checkout, '.git/refs/heads/ticket-test'), 'local commit');
-  fs.writeFileSync(path.join(f.checkout, 'work.txt'), 'implementation');
+  laneCheckout(f.checkout, f.run.executionId);
+  const base = fs.readFileSync(path.join(f.checkout, '.git/lane-base'), 'utf8').trim();
+  fs.writeFileSync(path.join(f.checkout, 'staged.txt'), 'staged\n');
+  git(f.checkout, 'add', 'staged.txt');
+  fs.writeFileSync(path.join(f.checkout, 'a.txt'), 'committed and uncommitted  \n');
+  fs.writeFileSync(path.join(f.checkout, 'staged.txt'), 'staged then edited\n');
+  fs.writeFileSync(path.join(f.checkout, 'new binary.bin'), Buffer.from([0, 255, 7, 0, 128]));
+  const restore = path.join(f.root, 'restore');
+  git(f.checkout, 'clone', '-q', '--no-hardlinks', f.checkout, restore);
+  git(restore, 'checkout', '-q', '--detach', base);
   const artifacts = path.join(f.run.runFolder, 'm1/artifacts');
   fs.mkdirSync(artifacts, {recursive: true});
   fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Coder exceeded the node deadline.\n');
@@ -135,11 +143,23 @@ test('a confirmed timeout keeps findings in Joppa and discards its private branc
   assert.equal(note.text.includes('\uFFFD'), false);
   assert.ok(note.text.includes(`Full review: ${artifacts}/panel-findings.txt`));
   f.run.result = result; f.persist();
-  discardFailedCheckout(f.run, f.stateFile, f.announce);
+  const realIndex = fs.readFileSync(path.join(f.checkout, '.git/index'));
+  discardFailedCheckout(f.run, f.stateFile, line => {
+    if (line.includes('Recovery patch saved:')) assert.deepEqual(fs.readFileSync(path.join(f.checkout, '.git/index')), realIndex);
+    f.announce(line);
+  }, artifacts);
   assert.equal(fs.existsSync(f.checkout), false);
   assert.equal(fs.existsSync(f.run.discardCheckout.discardedPath), false);
   assert.equal(f.run.discardCheckout.removed, true);
   assert.equal(fs.existsSync(path.join(artifacts, 'panel-findings.txt')), true);
+  const patch = path.join(artifacts, 'recovery.patch');
+  assert.equal(fs.statSync(patch).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8'), /Recovery patch: .*recovery\.patch/);
+  git(restore, 'apply', '--binary', patch);
+  assert.equal(fs.readFileSync(path.join(restore, 'a.txt'), 'utf8'), 'committed and uncommitted  \n');
+  assert.equal(fs.readFileSync(path.join(restore, 'staged.txt'), 'utf8'), 'staged then edited\n');
+  assert.deepEqual(fs.readFileSync(path.join(restore, 'new binary.bin')), Buffer.from([0, 255, 7, 0, 128]));
+  assert.equal(fs.existsSync(path.join(restore, 'node_modules')), false);
   assert.ok(prepareDiscardCheckout({...f.run, discardCheckout: undefined}, () => {}));
 });
 
@@ -156,9 +176,20 @@ test('discard mode restores neither a retained checkout nor a prior recovery che
 
 test('a failed removal frees the ticket path and preserves the remaining files', async t => {
   const f = await fixture(t);
+  laneCheckout(f.checkout, f.run.executionId);
   fs.writeFileSync(path.join(f.checkout, 'work.txt'), 'implementation');
   f.run.result = {status: 'failed', code: 2, blockConfirmed: true};
-  const remove = t.mock.method(fs, 'rmSync', () => { throw Object.assign(new Error('permission denied'), {code: 'EACCES'}); });
+  const baseFile = path.join(f.checkout, '.git/lane-base'), base = fs.readFileSync(baseFile);
+  fs.unlinkSync(baseFile);
+  discardFailedCheckout(f.run, f.stateFile, f.announce);
+  assert.equal(fs.existsSync(f.checkout), true, 'A missing recovery base must prevent deletion');
+  assert.match(f.run.discardCheckout.error, /lane-base/);
+  fs.writeFileSync(baseFile, base);
+  const original = fs.rmSync;
+  const remove = t.mock.method(fs, 'rmSync', (file, options) => {
+    if (file === f.run.discardCheckout.discardedPath) throw Object.assign(new Error('permission denied'), {code: 'EACCES'});
+    return original(file, options);
+  });
   try { discardFailedCheckout(f.run, f.stateFile, f.announce); }
   finally { remove.mock.restore(); }
   assert.equal(fs.existsSync(f.checkout), false);
