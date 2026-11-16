@@ -128,7 +128,10 @@ class FlowBatchTests(unittest.TestCase):
             "title": "Task", "repository": "service", "delivery": {"branch": "one" if i < 40 else "two" if i < 60 else "three"}})
             for i in range(70)}
         os.environ["PLANNING_JOPPA_ITEM"] = "work:t000"
-        flow_stages.prepare()
+        with patch.object(self.api, "call", wraps=self.api.call) as calls:
+            flow_stages.prepare()
+        reads = [call.args[1].get("address") for call in calls.call_args_list if call.args[0] == "joppa_objects"]
+        self.assertFalse(any("work:t%03d" % i in reads for i in range(40, 60)))
         rows = read(self.target / "input.json")["items"]
         self.assertEqual(len(rows), 50)
         self.assertEqual({row["document"]["data"]["delivery"]["branch"] for row in rows}, {"one", "three"})

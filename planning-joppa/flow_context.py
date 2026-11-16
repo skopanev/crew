@@ -64,30 +64,29 @@ def load(api, config, address):
     if batch:
         group = flow_batch.field(selected, batch["by"]) if batch.get("by") else None
         require(not batch.get("by") or group is not None, "selected item lacks batch.by field")
-        items, seen = [selected], {address}
-        unit_field = batch.get("unit_field")
-        units = {flow_batch.field(selected, unit_field)} if unit_field else set()
-        require(not unit_field or None not in units, "selected item lacks batch.unit_field")
-        for candidate in flow_batch.ordered(candidates, config):
-            if not unit_field and len(items) == batch["size"]:
+        candidates = [row, *[candidate for candidate in flow_batch.ordered(candidates, config)
+            if candidate["address"] != address and (not batch.get("by") or flow_batch.field(candidate, batch["by"]) == group)]]
+        checked = {address}
+        while True:
+            packed = flow_batch.select(batch, candidates)
+            excluded = set()
+            if config.get("exclude_children") is not None:
+                for candidate in packed:
+                    if candidate["address"] not in checked and children(api, config, candidate, config["exclude_children"]):
+                        excluded.add(candidate["address"])
+                    checked.add(candidate["address"])
+            if not excluded:
                 break
-            if candidate["address"] in seen:
-                continue
-            if batch.get("by") and flow_batch.field(candidate, batch["by"]) != group:
-                continue
-            unit = flow_batch.field(candidate, unit_field) if unit_field else None
-            item = object_read(api, workspace, candidate["address"])
+            candidates = [candidate for candidate in candidates if candidate["address"] not in excluded]
+        items = []
+        for candidate in packed:
+            item = selected if candidate["address"] == address else object_read(api, workspace, candidate["address"])
             require(item["current_revision"] == candidate["revision"], "batch item changed during selection")
             require(not batch.get("by") or flow_batch.field(item, batch["by"]) == group,
                     "batch grouping changed during selection")
-            if config.get("exclude_children") is not None and children(api, config, item, config["exclude_children"]):
-                continue
-            if unit_field:
-                require(unit is not None and flow_batch.field(item, unit_field) == unit, "batch unit changed during selection")
-                units.add(unit)
+            require(not batch.get("unit_field") or flow_batch.field(item, batch["unit_field"]) ==
+                    flow_batch.field(candidate, batch["unit_field"]), "batch unit changed during selection")
             items.append(item)
-            seen.add(item["address"])
-        items = flow_batch.select(batch, items)
         require(flow_batch.ready(batch, items), "batch waits for its configured minimum or age")
         assignment["items"] = items
     return assignment

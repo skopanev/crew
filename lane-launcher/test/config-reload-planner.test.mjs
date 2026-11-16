@@ -199,4 +199,14 @@ test('configured batches wait for distinct units or the oldest timestamp within 
   assert.equal(packed.length, 50);
   assert.deepEqual([...new Set(packed.map(row => row['data.delivery'].branch))], ['0', '2']);
   assert.throws(() => batchItems(config.batch, Array.from({length: 51}, () => rows[0])), /anchor unit exceeds/);
+  const template = structuredClone(f.objects.get('ac:a1'));
+  f.objects.delete('ac:a1'); f.objects.delete('ac:a2');
+  for (let index = 0; index < 55; index++) {
+    const node = structuredClone(template), old = index >= 45;
+    node.address = `ac:${old ? 'b' : 'a'}${index}`;
+    node.document.data.delivery = {branch: old ? 'aged' : 'fresh',
+      pushed_at: new Date(Date.now() - (old ? 901_000 : 0)).toISOString()};
+    f.objects.set(node.address, node);
+  }
+  assert.match((await nextConfiguredItem(config, f.config.token_file)).next.address, /^ac:b/);
 });

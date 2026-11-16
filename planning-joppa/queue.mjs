@@ -168,7 +168,7 @@ export function flowSettings(config) {
 
 const compare = order => (a, b) => {
   for (const {field, direction} of order) {
-    const left = a[field] ?? null, right = b[field] ?? null;
+    const left = batchField(a, field) ?? null, right = batchField(b, field) ?? null;
     if (left === right) continue;
     if (left === null || right === null) return left === null ? 1 : -1;
     const result = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right));
@@ -213,7 +213,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   }
   for (const row of eligible) {
     const group = batch.by ? eligible.filter(item => batchField(item, batch.by) === batchField(row, batch.by)) : eligible;
-    const items = batchItems(batch, group);
+    const items = batchItems(batch, [row, ...group.filter(item => item !== row)]);
     if (batchReady(batch, items)) return {count: rows.length, next: items[0]};
   }
   return {count: rows.length, next: null};
