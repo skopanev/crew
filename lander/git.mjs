@@ -70,12 +70,13 @@ export function environment(state, repo, attempt) {
     project_dir: repo.path, module_name: '.', gate_commands: JSON.stringify(repo.gateCommands),
     gate_timeout_seconds: String(repo.gateTimeoutSeconds || 900), VERIFY_ONLY: 'false',
     LANE_TEST_BINDINGS_REQUIRED: 'false',
-    ...(repo.noNewRed ? {NO_NEW_RED: 'last', test_report: JSON.stringify(repo.testReport)} : {})};
+    // An inherited host flag must not enable the comparison for another repository.
+    NO_NEW_RED: '', ...(repo.noNewRed ? {NO_NEW_RED: 'last', test_report: JSON.stringify(repo.testReport)} : {})};
 }
 function runGate(state, repo, attempt, log, commands) {
   fs.mkdirSync(path.join(attempt, 'artifacts'), {recursive: true});
   const env = {...environment(state, repo, attempt), gate_commands: JSON.stringify(commands),
-    ...(commands === repo.gateCommands ? {} : {test_report: ''})};
+    ...(commands === repo.gateCommands ? {} : {test_report: '', NO_NEW_RED: ''})};
   const process = spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
     {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * commands.length * 1000 + 30000,
       stdio: ['ignore', log, log]});
@@ -103,7 +104,7 @@ export function check(state, repo, heads, root) {
     git(state.checkout, 'clean', '-fdx');
     if ((cached.passed || cached.tolerated) && repo.preflight) {
       const log = fs.openSync(path.join(cached.attempt, 'output.log'), 'a');
-      try { const setup = prepare(state, repo, cached.attempt, log); if (!setup.passed) return {...cached, ...setup}; }
+      try { const setup = prepare(state, repo, cached.attempt, log); if (!setup.passed) return {...cached, ...setup, tolerated: undefined, baseline: undefined}; }
       finally { fs.closeSync(log); }
     }
     return cached;
@@ -178,6 +179,8 @@ export function candidate(state, repo, heads, root) {
   }
   checked = check(state, repo, accepted, root);
   if (checked.infrastructure) return interrupted(checked);
+  // A restored candidate whose setup now fails cannot keep an earlier approval.
+  if (accepted.length && !green(checked)) return {accepted: [], failed, pending: 'CANDIDATE_NOT_GREEN', checked};
   return {accepted, failed, checked};
 }
 export function cleanup(state, root) {

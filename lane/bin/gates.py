@@ -218,7 +218,8 @@ def run(root):
     # no_new_red reads this flag for a receipt whose last test command failed.
     receipt["unchanged"] = unchanged(tree) and git("rev-parse", "HEAD") == base
     receipt["passed"] = (len(receipt["checks"]) == len(commands) and receipt["unchanged"]
-                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"]))
+                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"])
+                         and no_new_red.green(folder / "receipt.json", receipt))
     path = folder / "receipt.json"
     with path.open("x") as output:
         json.dump(receipt, output, indent=2)
@@ -240,7 +241,7 @@ def verify(root):
     if not path.is_relative_to(root.resolve()) or digest(path) != pointer["sha256"]:
         raise ValueError("gate receipt is outside this run or has changed")
     receipt = json.loads(path.read_text())
-    if not (receipt["passed"] or proof) or receipt["commands"] != plan():
+    if not (proof or receipt["passed"] and no_new_red.green(path, receipt)) or receipt["commands"] != plan():
         raise ValueError("no passing receipt for the declared gate plan")
     if any(receipt.get(key) != value for key, value in identity().items()):
         raise ValueError("gate receipt belongs to another task, run, or repository scope")

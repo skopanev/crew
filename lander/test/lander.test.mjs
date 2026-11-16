@@ -145,3 +145,26 @@ test('no-new-red stays closed without a complete report or with an incomplete te
   const crashed = redTarget(t, JUNIT.replace('exit 1;', 'exit 2;'));
   assert.equal(candidate(crashed.state, crashed.repo, crashed.pins(['two']), crashed.root).pending, 'BASELINE_RED');
 });
+test('no-new-red requires a complete green report for a passing exit 0, in run and in verify', t => {
+  const lying = redTarget(t, JUNIT.replace(`grep -q '<failure' "$r" && exit 1; exit 0`, 'exit 0'));
+  const result = candidate(lying.state, lying.repo, lying.pins(['two']), lying.root);
+  assert.equal(result.pending, 'BASELINE_RED'); assert.equal(result.checked.passed, false);
+  // A pass recorded without the opt-in is refused once the opt-in applies.
+  const plain = fixture(t), passed = candidate(plain.state, plain.repo, plain.pins(['two']), plain.root).checked;
+  assert.equal(passed.passed, true);
+  Object.assign(plain.repo, {noNewRed: {testCommand: plain.repo.gateCommands[0]},
+    testReport: {path: 'r.xml', format: 'junit', identity: '{classname}.{name}'}});
+  const verified = spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'verify'],
+    {cwd: plain.state.checkout, env: environment(plain.state, plain.repo, passed.attempt), encoding: 'utf8'});
+  assert.notEqual(verified.status, 0); assert.match(verified.stderr, /no passing receipt/);
+  assert.equal(environment(plain.state, {...plain.repo, noNewRed: undefined}, passed.attempt).NO_NEW_RED, '');
+});
+test('a cached tolerated candidate whose setup fails loses its approval', t => {
+  const f = redTarget(t), heads = f.pins(['two']);
+  f.repo.preflight = 'true';
+  assert.deepEqual(candidate(f.state, f.repo, heads, f.root).checked.tolerated, ['c.legacy']);
+  f.repo.preflight = 'exit 3';
+  const result = candidate(f.state, f.repo, heads, f.root);
+  assert.deepEqual(result.accepted, []); assert.equal(result.checked.tolerated, undefined);
+  assert.ok(result.pending);
+});

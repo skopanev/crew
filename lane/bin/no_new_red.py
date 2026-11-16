@@ -27,10 +27,10 @@ def git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], text=True, capture_output=True, timeout=120)
 
 
-def load(path):
+def load(path, receipt=None):
     """Return a validated receipt and its test outcomes by identity."""
     path = Path(path).resolve()
-    receipt = json.loads(path.read_text())
+    receipt = receipt or json.loads(path.read_text())
     commands, checks = receipt.get("commands"), receipt.get("checks")
     if not isinstance(commands, list) or not commands or not isinstance(checks, list) or len(checks) != len(commands):
         refuse(f"incomplete gate plan in {path}")
@@ -58,6 +58,16 @@ def load(path):
     if failed != (checks[-1]["exit_code"] == 1):
         refuse(f"test command exit {checks[-1]['exit_code']} disagrees with its report in {path}")
     return receipt, outcomes
+
+
+def green(path, receipt):
+    """Under the opt-in, a pass also needs a complete, fresh report without failures."""
+    if os.environ.get("NO_NEW_RED") != "last":
+        return True
+    try:
+        return "fail" not in load(path, receipt)[1].values()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def compare(baseline_path, candidate_path, checkout):
