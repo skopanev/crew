@@ -114,6 +114,10 @@ test('a confirmed timeout saves recoverable work before discarding its private b
   const f = await fixture(t);
   laneCheckout(f.checkout, f.run.executionId);
   const base = fs.readFileSync(path.join(f.checkout, '.git/lane-base'), 'utf8').trim();
+  f.run.recoveryBase = base;
+  fs.writeFileSync(path.join(f.checkout, 'committed.txt'), 'private commit\n');
+  git(f.checkout, 'add', 'committed.txt'); git(f.checkout, 'commit', '-qm', 'private work');
+  fs.writeFileSync(path.join(f.checkout, '.git/lane-base'), git(f.checkout, 'rev-parse', 'HEAD'));
   fs.writeFileSync(path.join(f.checkout, 'staged.txt'), 'staged\n');
   git(f.checkout, 'add', 'staged.txt');
   fs.writeFileSync(path.join(f.checkout, 'a.txt'), 'committed and uncommitted  \n');
@@ -156,6 +160,7 @@ test('a confirmed timeout saves recoverable work before discarding its private b
   assert.equal(fs.statSync(patch).mode & 0o777, 0o600);
   assert.match(fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8'), /Recovery patch: .*recovery\.patch/);
   git(restore, 'apply', '--binary', patch);
+  assert.equal(fs.readFileSync(path.join(restore, 'committed.txt'), 'utf8'), 'private commit\n');
   assert.equal(fs.readFileSync(path.join(restore, 'a.txt'), 'utf8'), 'committed and uncommitted  \n');
   assert.equal(fs.readFileSync(path.join(restore, 'staged.txt'), 'utf8'), 'staged then edited\n');
   assert.deepEqual(fs.readFileSync(path.join(restore, 'new binary.bin')), Buffer.from([0, 255, 7, 0, 128]));
@@ -180,11 +185,18 @@ test('a failed removal frees the ticket path and preserves the remaining files',
   fs.writeFileSync(path.join(f.checkout, 'work.txt'), 'implementation');
   f.run.result = {status: 'failed', code: 2, blockConfirmed: true};
   const baseFile = path.join(f.checkout, '.git/lane-base'), base = fs.readFileSync(baseFile);
+  f.run.recoveryBase = base.toString().trim();
   fs.unlinkSync(baseFile);
   discardFailedCheckout(f.run, f.stateFile, f.announce);
   assert.equal(fs.existsSync(f.checkout), true, 'A missing recovery base must prevent deletion');
   assert.match(f.run.discardCheckout.error, /lane-base/);
   fs.writeFileSync(baseFile, base);
+  const nested = path.join(f.checkout, 'nested');
+  laneCheckout(nested, 'nested');
+  discardFailedCheckout(f.run, f.stateFile, f.announce);
+  assert.equal(fs.existsSync(nested), true, 'A nested repository must prevent deletion');
+  assert.match(f.run.discardCheckout.error, /nested repository/);
+  fs.rmSync(nested, {recursive: true});
   const original = fs.rmSync;
   const remove = t.mock.method(fs, 'rmSync', (file, options) => {
     if (file === f.run.discardCheckout.discardedPath) throw Object.assign(new Error('permission denied'), {code: 'EACCES'});
