@@ -208,6 +208,7 @@ The launcher rejects an empty runner before selecting or claiming a Task.
 
 For a test repair, set `data.repair.tests` to exact test file paths in the repository.
 Enable `repairBaseline: true` in its repository config. The default is false.
+Target and branch delivery can use this baseline. Requirement delivery keeps its existing workflow.
 The lane runs these files with `testCommand` on the fresh target before restoring earlier changes.
 Passing tests use the existing verification path, including repository gates and expert review.
 Failing tests proceed to implementation. Missing files or an incomplete baseline stop the lane.

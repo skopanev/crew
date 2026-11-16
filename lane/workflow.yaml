@@ -120,7 +120,7 @@ nodes:
         echo '<signal:RESUME>Continue the confirmed retained candidate for this Task.</signal:RESUME>'
         exit 0
       fi
-      if [ "$REPAIR_BASELINE_ENABLED" = true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+      if [ "$REPAIR_BASELINE_ENABLED" = true ] && [ -z "${REQUIREMENT_BRANCH:-}" ] && [ "$FINALIZE_ONLY" != true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
         echo '<signal:REPAIR_READY>Check the recorded repair tests on the fresh target.</signal:REPAIR_READY>'
         exit 0
       fi
@@ -360,7 +360,7 @@ nodes:
       task_base="$(git rev-parse HEAD)"
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
-      if [ "$REPAIR_BASELINE_ENABLED" = true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+      if [ "$REPAIR_BASELINE_ENABLED" = true ] && [ -z "${REQUIREMENT_BRANCH:-}" ] && [ "$FINALIZE_ONLY" != true ] && jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
         printf 'Repair baseline started.\n' > "$MEDULLA_RUN_DIR/artifacts/repair-baseline.txt"
         repair_setup() {
           if LANE_SETUP_REQUIRED=true bash -euo pipefail "$TOOLING_ROOT/lane/bin/setup-worktree.sh"; then return 0; fi
@@ -368,7 +368,8 @@ nodes:
           return 1
         }
         repair_setup || exit 0
-        export REPAIR_BASELINE_TIMEOUT_S=$(( ${MEDULLA_TIMEOUT_S:-900} - (SECONDS - worktree_started) - 10 ))
+        repair_node_seconds="${MEDULLA_TIMEOUT_S:-900}"
+        export REPAIR_BASELINE_TIMEOUT_S=$(( ${repair_node_seconds%%.*} - (SECONDS - worktree_started) - 10 ))
         baseline_rc=0
         node "$TOOLING_ROOT/lane/bin/repair-baseline.mjs" || baseline_rc=$?
         [ "$baseline_rc" -ne 0 ] || exit 0
