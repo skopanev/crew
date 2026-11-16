@@ -2,6 +2,7 @@
 // The failed launch state records the checkout; a later claim of that Task reuses it only on an exact match.
 import fs from 'node:fs';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {command, readRun, runDirectories} from './runtime.mjs';
 import {api, claimTasks, contractDigest} from './joppa-common.mjs';
 import {heldBy} from './joppa-claims.mjs';
@@ -21,7 +22,7 @@ const workflowUnchanged = run => /^[0-9a-f]{64}$/.test(run.workflow?.digest || '
   supportsRetainedCheckout(run.workflow.file) && workflowDigest(run.workflow.file) === run.workflow.digest;
 
 // Git for an agent-written checkout. Refuse redirecting or executable configuration before any Git command.
-function laneGit(checkout) {
+export function laneGit(checkout, options = {}) {
   const stat = fs.lstatSync(checkout);
   require(stat.isDirectory() && fs.realpathSync(checkout) === checkout, 'checkout is not a plain directory');
   const dotGit = path.join(checkout, '.git');
@@ -35,8 +36,13 @@ function laneGit(checkout) {
     .split('\n').filter(key => /^(filter|include|includeif)\.|^extensions\.worktreeconfig$/i.test(key));
   require(!keys.length, `checkout .git/config sets ${keys.join(', ')}`);
   // Explicit paths: a local core.worktree or hook setting written by an agent must not steer host Git.
-  return (...args) => command('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
-    '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args]);
+  return (...args) => {
+    const output = execFileSync('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
+      '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
+    {cwd: checkout, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'], ...options});
+    return typeof output === 'string' ? output.trim() : output;
+  };
 }
 
 // Throw on anything but a clean lane branch with a commit above lane-base.

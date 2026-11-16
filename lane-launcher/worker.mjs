@@ -235,7 +235,7 @@ try {
   process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);
   save(stateFile, run);
   // Opt-in test evidence after the completed result is durable. It never changes that result.
-  discardFailedCheckout(run, stateFile, announce);
+  discardFailedCheckout(run, stateFile, announce, artifacts);
   if (result.completed) {
     await publishLandedResults({run, stateFile, result, artifacts, announce});
     run.result.testResults = result.testResults;
