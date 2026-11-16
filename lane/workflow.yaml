@@ -35,6 +35,7 @@ vars:
   LANE_MEMORY_gitfix_ROLE: ''
   SCOUT_SOURCE: ''
   VERIFY_ONLY: 'false'
+  REPAIR_BASELINE_RED: 'false'
   LANE_SHARED_LOCK_DIR: ''
   ticket_test_command: '[]'
   TICKET_CHECKS: '[]'
@@ -219,6 +220,7 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
+      if [ "$REPAIR_BASELINE_RED" = true ]; then MEDULLA_LAST_SIGNAL=OK; fi
       if jq -e '.ticket.retained != null' "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null; then
         bash "$TOOLING_ROOT/lane/bin/retained-worktree.sh"
         exit 0
@@ -352,8 +354,21 @@ nodes:
       task_base="$(git rev-parse HEAD)"
       # This is the checkout base until land.sh replaces it with the pre-push target tip.
       git rev-parse HEAD > .git/lane-base
-      if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
-      source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+      if jq -e '.repair.tests | type == "array"' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+        source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+        baseline_rc=0
+        node "$TOOLING_ROOT/lane/bin/repair-baseline.mjs" || baseline_rc=$?
+        [ "$baseline_rc" -ne 0 ] || exit 0
+        [ "$baseline_rc" -eq 3 ] || exit "$baseline_rc"
+        # A measured failing baseline overrides a scout DUPLICATE diagnosis.
+        echo '<signal:var key=REPAIR_BASELINE_RED>true</signal:var>'
+        MEDULLA_LAST_SIGNAL=OK
+        if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
+        [ -z "${recovery_note:-}" ] || source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+      else
+        if [ -z "${REQUIREMENT_BRANCH:-}" ]; then restore_recovery; fi
+        source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+      fi
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
         if [ "$FINALIZE_ONLY" = true ]; then
           printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$MEDULLA_RUN_DIR/artifacts/reviewed-tree.txt"

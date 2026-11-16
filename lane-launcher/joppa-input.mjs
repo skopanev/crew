@@ -10,6 +10,7 @@ export function packageInput(run, inputs) {
     source: 'joppa', requirement: run.requirement, repository: inputs[0].repo.id,
     module: tasks[0].module, modulePaths: [...new Set(tasks.flatMap(task => task.modulePaths))],
     tasks, executionOrder: tasks.map(task => task.address),
+    ...(tasks.every(task => task.repair) ? {repair: {tests: [...new Set(tasks.flatMap(task => task.repair.tests))]}} : {}),
     body: ['Execute these Tasks in the listed order in one checkout. Keep each Task within its own contract and writable roots.',
       'Run one workflow, required gates, independent review, and landing for the complete package.',
       'Report each Task address, result, and check evidence in coder-report.txt. Review every Task before landing.',
@@ -19,6 +20,16 @@ export function packageInput(run, inputs) {
 
 const RECOVERY_HEADER = 'CREW_RECOVERY_CHECKPOINT';
 export const formatContexts = contexts => (contexts || []).map(item => `${item.address}=${item.digest}`).join(',');
+
+function repairInput(data) {
+  if (data.repair === undefined) return {};
+  const tests = data.repair?.tests;
+  require(Array.isArray(tests) && tests.length > 0 && tests.every(file => text(file) &&
+    !file.startsWith('/') && !file.startsWith('-') && !/[\\\0\r\n]/.test(file) &&
+    !file.split('/').some(part => !part || part === '..' || part === '.')),
+  'REPAIR_INVALID: data.repair.tests needs repository-relative test file paths');
+  return {repair: {tests: [...new Set(tests)]}};
+}
 
 export function formatRecoveryNote({task, digest, contexts, ref, sha, tree, base, node = 'implement_code', runId}) {
   return [RECOVERY_HEADER, `Task: ${task}`, `Digest: ${digest}`, `Contexts: ${contexts}`,
@@ -111,6 +122,7 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
     body: contract, module: modulePath, moduleId: module, modulePaths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
+    ...repairInput(data),
     ...(testAcceptance(object, covers) ? {testAcceptance: testAcceptance(object, covers)} : {}),
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,

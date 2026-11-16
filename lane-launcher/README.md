@@ -206,6 +206,13 @@ for example `["bun", "run", "test"]`. Scout supplies existing test-file paths;
 it cannot replace the configured runner with arbitrary shell commands.
 The launcher rejects an empty runner before selecting or claiming a Task.
 
+For a test repair, set `data.repair.tests` to exact test file paths in the repository.
+The lane runs these files with `testCommand` on the fresh target before restoring earlier changes.
+Passing tests use the existing verification path, including repository gates and expert review.
+Failing tests proceed to implementation. Missing files or an incomplete baseline stop the lane.
+Only packages whose Tasks all declare repair tests use this baseline.
+Use the repository gate as `testCommand` when tests need separate database groups.
+
 ## Notifications
 
 `notify.mjs` sends completion events directly through the Telegram Bot API.
