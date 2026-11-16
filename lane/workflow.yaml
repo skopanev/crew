@@ -6,6 +6,7 @@ defaults:
 vars:
   RETAINED_CHECKOUT_PROTOCOL: '1'
   REJECT_ROUNDS: '2'
+  PUBLISH_RESERVE_SECONDS: '240'
   ticket_title: ''
   gate_commands: '[]'
   review_commands: ''
@@ -692,6 +693,7 @@ nodes:
       PY
   git_landing:
     env:
+      PUBLISH_RESERVE_SECONDS: '{{var:PUBLISH_RESERVE_SECONDS}}'
       JOPPA_READER_COMMAND_JSON: '{{var:JOPPA_READER_COMMAND_JSON}}'
       REQUIREMENT_READER_FILE: '{{var:REQUIREMENT_READER_FILE}}'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
@@ -715,6 +717,7 @@ nodes:
     timeout: 2400
     on_signal:
       JOPPA_UNAVAILABLE: notify_failure
+      PUBLISH_BUDGET_LOW: notify_failure
       VERIFIED: cleanup
       ALREADY_LANDED: cleanup
       LAND_FAILED: notify_failure
@@ -728,6 +731,13 @@ nodes:
       __default__: cleanup
     shell: |
       set -euo pipefail
+      if [ -n "${MEDULLA_TIMEOUT_S:-}" ]; then
+        export LANE_LANDING_DEADLINE="$(( $(date +%s) + ${MEDULLA_TIMEOUT_S%%.*} ))"
+        if [ "${MEDULLA_TIMEOUT_S%%.*}" -lt "${PUBLISH_RESERVE_SECONDS:-240}" ]; then
+          echo '<signal:PUBLISH_BUDGET_LOW>No publication started; the workflow needs more time for landing and completion.</signal:PUBLISH_BUDGET_LOW>'
+          exit 0
+        fi
+      fi
       cd "${LANE_WORKTREE}" || {
         echo "<signal:LAND_FAILED>worktree is gone</signal:LAND_FAILED>"; exit 0; }
       target="$(bash "${TOOLING_ROOT}/lane/bin/target.sh" "$project_dir")"
@@ -821,6 +831,7 @@ nodes:
           echo '<signal:LAND_FAILED>Final gate receipt is invalid.</signal:LAND_FAILED>'; exit 0; }
         target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
         land
+        [ "$rc" -ne 76 ] || { echo '<signal:PUBLISH_BUDGET_LOW>No publication started; candidate preserved.</signal:PUBLISH_BUDGET_LOW>'; exit 0; }
         case "$rc" in 75|124) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;; esac
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
@@ -850,7 +861,7 @@ nodes:
       project_dir: '{{var:project_dir}}'
       project_name: '{{var:project_name}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 180
+    timeout: 30
     on_signal:
       LANDED: notify_success
       VERIFIED: notify_success
@@ -968,7 +979,7 @@ nodes:
       project_name: '{{var:project_name}}'
       module_name: '{{var:module_name}}'
       ticket_id: '{{var:ticket_id}}'
-    timeout: 1800
+    timeout: 30
     on_signal:
       # Ошибка сохранения отчёта требует разбора уже состоявшейся посадки.
       __failed__: __exit_fail__

@@ -5,6 +5,17 @@ set -euo pipefail
 usage() { echo 'land.sh <target-branch>'; }
 [[ $# -eq 1 && "$1" != -h && "$1" != --help ]] || { usage; exit 2; }
 target="$1"
+budget_check() {
+  if [ -n "${LANE_LANDING_DEADLINE:-}" ]; then
+    reserve="${PUBLISH_RESERVE_SECONDS:-240}"
+    [[ "$LANE_LANDING_DEADLINE" =~ ^[0-9]+$ && "$reserve" =~ ^[0-9]+$ ]] || exit 2
+    if [ "$((LANE_LANDING_DEADLINE - $(date +%s)))" -lt "$reserve" ]; then
+      echo 'PUBLISH_BUDGET_LOW: not enough workflow time remains for publication and completion' >&2
+      exit 76
+    fi
+  fi
+}
+budget_check
 [[ "$target" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || { echo "lane-push: недопустимая ветка: $target" >&2; exit 2; }
 
 git rev-parse --git-dir >/dev/null 2>&1 || { echo 'lane-push: не репозиторий' >&2; exit 2; }
@@ -13,7 +24,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo 'lane-push: не репози�
 
 sha="$(git rev-parse HEAD)"
 python3 "$(dirname "${BASH_SOURCE[0]}")/gates.py" verify
-before="$(git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
+before="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
 echo "lane-push: HEAD=$sha target=$target before=${before:-<ветки нет>}"
 
 if [[ -n "$before" ]] && ! git merge-base --is-ancestor "$before" "$sha" 2>/dev/null; then
@@ -28,8 +39,9 @@ printf '%s\n' "$before" > .git/lane-base
 if [[ "${DELIVERY:-}" != requirement && -n "${JOPPA_READER_COMMAND_JSON:-}${REQUIREMENT_READER_FILE:-}" ]]; then
   timeout --kill-after=5s 60s node "$(dirname "${BASH_SOURCE[0]}")/requirement-current.mjs" --tasks
 fi
-git push origin "$sha:refs/heads/$target"
-after="$(git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
+budget_check
+timeout --kill-after=5s 60s git push origin "$sha:refs/heads/$target"
+after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
 echo "lane-push: after=$after"
 [[ "$after" == "$sha" ]] || { echo 'lane-push: вершина не совпала с кандидатом — проверь вручную' >&2; exit 4; }
 echo "lane-push: OK $target -> $sha"

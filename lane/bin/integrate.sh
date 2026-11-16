@@ -61,6 +61,7 @@ for attempt in 1 2; do
   bash "$TOOLING_ROOT/lane/bin/land.sh" "$target" > "$artifacts/landing-log.txt" 2>&1 || rc=$?
   cat "$artifacts/landing-log.txt"
   [ "$rc" -eq 0 ] && exit 0
+  [ "$rc" -ne 76 ] || fail PUBLISH_BUDGET_LOW 'No publication started; preserve candidate for another landing attempt.'
   case "$rc" in 75|124) fail JOPPA_UNAVAILABLE 'Task context read failed after transport retries; candidate retained.' ;; esac
   [ "$rc" -eq 3 ] || fail LAND_FAILED "Landing exited $rc; see artifacts/landing-log.txt."
   [ "$attempt" -eq 1 ] || fail LAND_FAILED 'TARGET_MOVED: Target moved twice during landing; see artifacts/landing-log.txt.'

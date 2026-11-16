@@ -294,6 +294,11 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], before);
   link.status.satisfied = true;
   fs.writeFileSync(stateFile, JSON.stringify(state));
+  const lowBudget = spawnSync('bash', [path.join(lane, 'bin/land.sh'), 'develop'],
+    {cwd: repo, env: {...env, LANE_LANDING_DEADLINE: String(Math.floor(Date.now() / 1000) + 1)}, encoding: 'utf8', timeout: 10_000});
+  assert.equal(lowBudget.status, 76);
+  assert.match(lowBudget.stderr, /PUBLISH_BUDGET_LOW/);
+  assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], before);
   run('bash', [path.join(lane, 'bin/land.sh'), 'develop']);
   assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], git(['rev-parse', 'HEAD']));
   assert(fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse)
