@@ -24,7 +24,8 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo 'lane-push: не репози�
 
 sha="$(git rev-parse HEAD)"
 python3 "$(dirname "${BASH_SOURCE[0]}")/gates.py" verify
-before="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
+before="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || {
+  echo 'lane-push: target read failed before publication' >&2; exit 2; }
 echo "lane-push: HEAD=$sha target=$target before=${before:-<ветки нет>}"
 
 if [[ -n "$before" ]] && ! git merge-base --is-ancestor "$before" "$sha" 2>/dev/null; then
@@ -37,11 +38,15 @@ fi
 # An empty value means the target does not exist; afterLand must not infer a base.
 printf '%s\n' "$before" > .git/lane-base
 if [[ "${DELIVERY:-}" != requirement && -n "${JOPPA_READER_COMMAND_JSON:-}${REQUIREMENT_READER_FILE:-}" ]]; then
-  timeout --kill-after=5s 60s node "$(dirname "${BASH_SOURCE[0]}")/requirement-current.mjs" --tasks
+  rc=0
+  timeout --kill-after=5s 60s node "$(dirname "${BASH_SOURCE[0]}")/requirement-current.mjs" --tasks || rc=$?
+  case "$rc" in 0) ;; 75|124) exit 75 ;; *) exit 1 ;; esac
 fi
 budget_check
-timeout --kill-after=5s 60s git push origin "$sha:refs/heads/$target"
-after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"
+timeout --kill-after=5s 60s git push origin "$sha:refs/heads/$target" || {
+  echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2; exit 4; }
+after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || {
+  echo 'lane-push: target read failed after publication; inspect target ancestry' >&2; exit 4; }
 echo "lane-push: after=$after"
 [[ "$after" == "$sha" ]] || { echo 'lane-push: вершина не совпала с кандидатом — проверь вручную' >&2; exit 4; }
 echo "lane-push: OK $target -> $sha"

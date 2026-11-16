@@ -112,7 +112,8 @@ export async function recordTaskOutcome({run, stateFile, result, artifacts, anno
   if (artifacts) {
     const file = path.join(artifacts, 'origin.json');
     const origin = fs.existsSync(file) ? read(file) : {};
-    if (origin.signal === 'OVER_TIME' && ['git_landing', 'cleanup', 'notify_success'].includes(origin.node)) {
+    if (origin.signal === 'PUBLICATION_UNCERTAIN' ||
+        origin.signal === 'OVER_TIME' && ['git_landing', 'cleanup', 'notify_success'].includes(origin.node)) {
       result.publicationUncertain = true;
       run.retained = null;
     }

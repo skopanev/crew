@@ -718,6 +718,7 @@ nodes:
     on_signal:
       JOPPA_UNAVAILABLE: notify_failure
       PUBLISH_BUDGET_LOW: notify_failure
+      PUBLICATION_UNCERTAIN: notify_failure
       VERIFIED: cleanup
       ALREADY_LANDED: cleanup
       LAND_FAILED: notify_failure
@@ -808,6 +809,11 @@ nodes:
             > "$MEDULLA_RUN_DIR/artifacts/landing-log.txt" 2>&1 || rc=$?
           printf '%s\n' "$task_base" > .git/lane-base
           cat "$MEDULLA_RUN_DIR/artifacts/landing-log.txt"
+          case "$rc" in
+            75) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;;
+            76) echo '<signal:PUBLISH_BUDGET_LOW>No publication started; candidate preserved.</signal:PUBLISH_BUDGET_LOW>'; exit 0 ;;
+            4) echo '<signal:PUBLICATION_UNCERTAIN>Inspect target ancestry before retry.</signal:PUBLICATION_UNCERTAIN>'; exit 0 ;;
+          esac
           [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Requirement publication exited $rc.</signal:LAND_FAILED>"
           exit 0
         fi
@@ -832,7 +838,10 @@ nodes:
         target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
         land
         [ "$rc" -ne 76 ] || { echo '<signal:PUBLISH_BUDGET_LOW>No publication started; candidate preserved.</signal:PUBLISH_BUDGET_LOW>'; exit 0; }
-        case "$rc" in 75|124) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;; esac
+        case "$rc" in
+          75) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;;
+          4) echo '<signal:PUBLICATION_UNCERTAIN>Inspect target ancestry before retry.</signal:PUBLICATION_UNCERTAIN>'; exit 0 ;;
+        esac
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
       fi

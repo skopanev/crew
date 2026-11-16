@@ -299,6 +299,22 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   assert.equal(lowBudget.status, 76);
   assert.match(lowBudget.stderr, /PUBLISH_BUDGET_LOW/);
   assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], before);
+  const bins = path.join(f.root, 'short-timeout'); fs.mkdirSync(bins);
+  const realTimeout = execFileSync('which', ['timeout'], {encoding: 'utf8'}).trim();
+  fs.writeFileSync(path.join(bins, 'timeout'), `#!/bin/sh
+if [ "$1" = --kill-after=5s ] && [ "$2" = 60s ] && [ "$3" = git ]; then
+  shift 2
+  exec '${realTimeout}' --kill-after=1s 0.1s "$@"
+fi
+exec '${realTimeout}' "$@"
+`, {mode: 0o755});
+  fs.writeFileSync(path.join(repo, '.git/hooks/pre-push'), '#!/bin/sh\nsleep 2\n', {mode: 0o755});
+  const uncertain = spawnSync('bash', [path.join(lane, 'bin/land.sh'), 'develop'],
+    {cwd: repo, env: {...env, PATH: `${bins}:${env.PATH}`}, encoding: 'utf8', timeout: 10_000});
+  assert.equal(uncertain.status, 4);
+  assert.match(uncertain.stderr, /publication outcome is uncertain/);
+  assert.doesNotMatch(uncertain.stderr, /JOPPA_UNAVAILABLE/);
+  fs.unlinkSync(path.join(repo, '.git/hooks/pre-push'));
   run('bash', [path.join(lane, 'bin/land.sh'), 'develop']);
   assert.equal(git(['ls-remote', 'origin', 'refs/heads/develop']).split(/\s/)[0], git(['rev-parse', 'HEAD']));
   assert(fs.readFileSync(f.calls, 'utf8').trim().split('\n').map(JSON.parse)
