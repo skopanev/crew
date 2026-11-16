@@ -16,7 +16,8 @@ Use the native `selection` filter to control eligibility. Crew adds no project o
 
 Use Dolber `delivery: branch`, explicit focused `reviewCommands`, and `pendingDeliveryData` for the waiting stage.
 A successful branch publication keeps the Task live, clears its assignee, and records its repository and checked commit.
-Its `data.delivery` contains `state: pending`, `branch`, `head`, `target`, and the producer run ID.
+Its `data.delivery` contains `state: pending`, `branch`, `head`, `target`, the producer run ID, and `pushed_at`.
+The timestamp records the confirmed branch handoff and stays fixed across publication retries.
 Coder selection skips pending delivery. Only Lander archives a Task after target integration.
 
 The Lander config supplies repository paths, target branches, full gate commands, and an optional setup command.
@@ -33,6 +34,9 @@ No credentials belong in the public configuration example.
 5. Native publication archives only heads proven in target ancestry and releases every claim. Cleanup removes the integration checkout.
 
 The canonical source repository stays unchanged. Repository hooks remain enabled.
+Use `batch.min_size: 3` and `batch.unit_field: "data.delivery.branch"` to wait for three distinct branches.
+Set `batch.max_wait_seconds: 900` and `batch.age_field: "data.delivery.pushed_at"` to flush smaller batches after 15 minutes.
+Set `interval_seconds: 60` to check the queue every minute. All Tasks of each selected branch enter the same claim.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
 The configured gate timeout bounds each check and the push, including repository hooks. Medulla bounds each stage.
 
@@ -55,3 +59,10 @@ With `repeat: true`, Lander retries that pending head each interval until the pr
 A partial landing reports `PARTIAL_LANDING`. Landed Tasks are archived, and excluded Tasks retain the repair evidence.
 An uncertain native write requires receipt recovery before another claim.
 A landed Task does not prove criterion acceptance. The workflow never writes a passing acceptance result.
+
+## Hourly report
+
+Run `node lander/report.mjs /absolute/lander.json` from an existing timer.
+The command only reads the pending queue and local run evidence.
+It prints pending branch counts, batch sizes, outcome codes, and measured push-to-landing seconds for the last hour.
+A missing timestamp remains unmeasured. An unconfirmed native publication remains explicit in the report.

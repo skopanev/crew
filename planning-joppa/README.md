@@ -45,6 +45,12 @@ Reference reads precede the batch. A reference edit inside this interval is not 
 An uncertain write retains its receipt and requires recovery. A workflow result never proves acceptance.
 A finished run records the revision it left, so its own claim release does not cause another automatic attempt.
 Set `batch` to `{ "size": 5, "by": "data.repository" }` to claim up to five matching items of one configured group.
+Set `min_size` to wait for a minimum batch. Polling still uses `interval_seconds`.
+Set `max_wait_seconds` and `age_field` together to release a smaller batch after its oldest timestamp reaches that age.
+Set `unit_field` to count distinct units, such as `data.delivery.branch`, instead of Tasks.
+All matching Tasks of each selected unit enter the same atomic claim, up to 50 Tasks.
+For example, use `size: 3`, `min_size: 3`, `max_wait_seconds: 900`, and `age_field: "data.delivery.pushed_at"`.
+Branch delivery records that timestamp once and preserves it across publication retries.
 The first selected item anchors the group. `order` sorts the other members. Omit `by` to use one group.
 The native selection filter controls every member, including stage and hold fields. Crew adds no implicit hold filter.
 The assignment adds `items` and `claim_revisions`. The entire batch is claimed in one transaction.

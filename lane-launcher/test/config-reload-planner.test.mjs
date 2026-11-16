@@ -178,3 +178,18 @@ test('a configured flow selects one ordered native item, skips excluded and star
       /workflow|selection|exclude_children|order|ac_ids/);
   }
 });
+
+test('configured batches wait for distinct units or the oldest timestamp within their group', async t => {
+  const f = await plannerFixture(t);
+  const config = {...f.config, workflow: '/tmp/workflow.yaml', selection: {kind: 'ac'},
+    batch: {size: 3, min_size: 3, by: 'data.repository', unit_field: 'data.delivery.branch',
+      max_wait_seconds: 900, age_field: 'data.delivery.pushed_at'}};
+  for (const id of ['ac:a1', 'ac:a2']) Object.assign(f.objects.get(id).document.data,
+    {repository: 'service', delivery: {branch: 'same', pushed_at: new Date().toISOString()}});
+  assert.equal((await nextConfiguredItem(config, f.config.token_file)).next, null);
+  f.objects.get('ac:a2').document.data.delivery.pushed_at = new Date(Date.now() - 901_000).toISOString();
+  assert.equal((await nextConfiguredItem(config, f.config.token_file)).next.address, 'ac:a1');
+  assert.equal((await nextConfiguredItem(config, f.config.token_file, undefined, row => row.address === 'ac:a2')).next, null);
+  f.objects.get('ac:a2').document.data.repository = 'other';
+  assert.equal((await nextConfiguredItem(config, f.config.token_file)).next.address, 'ac:a2');
+});

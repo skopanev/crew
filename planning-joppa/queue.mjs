@@ -3,6 +3,7 @@ import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeWaiting, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
+import {batchSettings, batchField, batchReady, batchProjection} from './flow-batch.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -160,14 +161,7 @@ export function flowSettings(config) {
       !['asc', 'desc'].includes(item.direction))) {
     throw new Error('order must list {field, direction} with direction asc or desc');
   }
-  if (config.batch !== undefined) {
-    const batch = config.batch;
-    if (!object(batch) || Object.keys(batch).some(key => !['size', 'by'].includes(key)) ||
-        !Number.isSafeInteger(batch.size) || batch.size < 1 || batch.size > 50 ||
-        batch.by !== undefined && (typeof batch.by !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(batch.by))) {
-      throw new Error('batch needs size from 1 to 50 and optional by field');
-    }
-  }
+  batchSettings(config.batch);
   if (config.repeat !== undefined && typeof config.repeat !== 'boolean') throw new Error('repeat must be boolean');
   return {selection: config.selection, exclude: exclude ?? null, order};
 }
@@ -188,7 +182,9 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   const flow = flowSettings(config);
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
-  const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...flow.order.map(item => item.field)])];
+  const batch = config.batch;
+  const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...flow.order.map(item => item.field),
+    ...[batch?.by, batch?.age_field, batch?.unit_field].filter(Boolean).map(batchProjection)])];
   const rows = [], seen = new Set();
   for await (const page of nodePages(read, {...flow.selection, fields})) {
     for (const row of page.items) {
@@ -201,6 +197,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
     }
   }
   rows.sort(compare(flow.order));
+  const eligible = [];
   for (const row of rows) {
     if (skip(row)) continue;
     let excluded = false;
@@ -209,7 +206,14 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
         if ((excluded = page.items.some(item => item.parent === row.address))) break;
       }
     }
-    if (!excluded) return {count: rows.length, next: row};
+    if (!excluded) {
+      if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row};
+      eligible.push(row);
+    }
+  }
+  for (const row of eligible) {
+    const group = batch.by ? eligible.filter(item => batchField(item, batch.by) === batchField(row, batch.by)) : eligible;
+    if (batchReady(batch, group)) return {count: rows.length, next: row};
   }
   return {count: rows.length, next: null};
 }

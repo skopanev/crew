@@ -108,7 +108,8 @@ function push() {
     const after = targetHead(state);
     if (ancestor(state.checkout, state.checked.commit, after)) {
       const landed = state.accepted.filter(item => ancestor(state.checkout, item.head, after));
-      state.landed = after; write(stateFile, state); output(state, landed); signal('REPORT', 'Target ancestry confirmed.'); return;
+      state.landed = after; state.landed_at = new Date().toISOString();
+      write(stateFile, state); output(state, landed); signal('REPORT', 'Target ancestry confirmed.'); return;
     }
     if (after === state.base || pass === 1) {
       state.pending = result.status === 0 ? 'TARGET_UNCONFIRMED' : 'PUSH_FAILED';

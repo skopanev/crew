@@ -40,7 +40,7 @@ def load(api, config, address):
     help = api.call("joppa_help", {"workspace": workspace, "op": "save_object"})
     selected = object_read(api, workspace, address)
     batch = flow_batch.settings(config)
-    fields = ["revision", *([batch["by"]] if batch and batch.get("by") else []),
+    fields = ["revision", *([flow_batch.projection(batch[key]) for key in ("by", "unit_field", "age_field") if batch.get(key)] if batch else []),
               *[item["field"] for item in config.get("order", [])]]
     rows = pages(api, workspace, {**config["selection"], "fields": list(dict.fromkeys(fields)) if batch else ["revision"]})
     candidates = list(rows) if batch else None
@@ -65,12 +65,18 @@ def load(api, config, address):
         group = flow_batch.field(selected, batch["by"]) if batch.get("by") else None
         require(not batch.get("by") or group is not None, "selected item lacks batch.by field")
         items, seen = [selected], {address}
+        unit_field = batch.get("unit_field")
+        units = {flow_batch.field(selected, unit_field)} if unit_field else set()
+        require(not unit_field or None not in units, "selected item lacks batch.unit_field")
         for candidate in flow_batch.ordered(candidates, config):
-            if len(items) == batch["size"]:
+            if not unit_field and len(items) == batch["size"]:
                 break
             if candidate["address"] in seen:
                 continue
             if batch.get("by") and flow_batch.field(candidate, batch["by"]) != group:
+                continue
+            unit = flow_batch.field(candidate, unit_field) if unit_field else None
+            if unit_field and unit not in units and len(units) == batch["size"]:
                 continue
             item = object_read(api, workspace, candidate["address"])
             require(item["current_revision"] == candidate["revision"], "batch item changed during selection")
@@ -78,8 +84,13 @@ def load(api, config, address):
                     "batch grouping changed during selection")
             if config.get("exclude_children") is not None and children(api, config, item, config["exclude_children"]):
                 continue
+            if unit_field:
+                require(unit is not None and flow_batch.field(item, unit_field) == unit, "batch unit changed during selection")
+                units.add(unit)
             items.append(item)
             seen.add(item["address"])
+        require(len(items) <= 50, "batch exceeds the native 50-item claim limit")
+        require(flow_batch.ready(batch, items), "batch waits for its configured minimum or age")
         assignment["items"] = items
     return assignment
 

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {claimTask, finishTask, releaseTaskClaims, nextTask} from '../joppa.mjs';
 import {packageFixture, packageLanding} from '../test-support/launcher-joppa.fixture.mjs';
+import {recordPendingDelivery} from '../pending-delivery.mjs';
 
 const batches = f => f.calls.filter(call => call.name === 'joppa_batch').map(call => call.args.operations.map(({command}) => command));
 
@@ -152,7 +153,13 @@ test('success saves the commit and archives at the saved revision in one batch',
 test('branch publication releases Tasks for Lander without archiving or selecting them again', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);
+  const objects = ['task:t1', 'task:t2'].map(id => structuredClone(f.objects.get(id)));
   const artifacts = packageLanding(f, 'branch'), result = {code: 0, status: 'exited'};
+  const sha = fs.readFileSync(path.join(artifacts, 'landing.txt'), 'utf8').match(/^Landed SHA: (\S+)$/m)[1];
+  await assert.rejects(recordPendingDelivery({run: f.run, objects, sha,
+    branch: f.run.deliveryBranch || `ticket-${f.run.executionId}`, runId: f.runId, result,
+    persist: () => { throw new Error('Interrupted after saving the request'); }}), /Interrupted/);
+  const timestamp = f.run.pendingDeliveryRequest.operations[0].command.data.delivery.pushed_at;
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.pendingDelivery, true);
   assert.equal(result.completed, undefined);
@@ -164,7 +171,9 @@ test('branch publication releases Tasks for Lander without archiving or selectin
     assert.equal(node.document.data.stage, 'to_review');
     assert.equal(node.document.data.delivery.head, node.document.data.commit);
     assert.equal(node.document.data.delivery.target, 'main');
+    assert.ok(Number.isFinite(Date.parse(node.document.data.delivery.pushed_at)));
   }
+  assert.equal(f.run.pendingDeliveryRequest.operations[0].command.data.delivery.pushed_at, timestamp);
   assert.equal((await nextTask(f.run.config, {})).candidate, null);
 });
 

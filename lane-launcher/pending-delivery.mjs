@@ -16,7 +16,9 @@ export function validatePendingDelivery(config) {
 export async function recordPendingDelivery({run, objects, sha, branch, runId, persist, result}) {
   validatePendingDelivery(run.config);
   require(!run.completionRequest, 'An earlier branch completion request needs recovery before pending delivery');
-  const delivery = {state: 'pending', branch, head: sha, target: run.repository.targetBranch, run: runId};
+  const saved = run.pendingDeliveryRequest?.operations[0]?.command.data.delivery;
+  const delivery = {state: 'pending', branch, head: sha, target: run.repository.targetBranch, run: runId,
+    ...(saved ? saved.pushed_at ? {pushed_at: saved.pushed_at} : {} : {pushed_at: new Date().toISOString()})};
   const changes = {...run.config.pendingDeliveryData, assignee: undefined, commit: sha,
     repository: run.repository.id, delivery};
   const commands = objects.map(node => saveNode(node, changes,

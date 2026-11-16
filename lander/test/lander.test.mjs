@@ -4,8 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {git, create, targetHead, pin, candidate, cleanup} from '../git.mjs';
+import {report} from '../report.mjs';
+import {packageFixture} from '../../lane-launcher/test-support/launcher-joppa.fixture.mjs';
 
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+test('hourly report counts branches once and separates target evidence from publication confirmation', async t => {
+  const f = await packageFixture(t), now = Date.now();
+  const delivery = {state: 'pending', branch: 'ticket-one', head: 'a'.repeat(40), pushed_at: new Date(now - 600_000).toISOString()};
+  for (const id of ['task:t1', 'task:t2']) Object.assign(f.objects.get(id).document.data, {repository: 'service', delivery});
+  const root = path.join(f.root, 'lander'), artifacts = path.join(root, 'run', 'artifacts');
+  fs.mkdirSync(artifacts, {recursive: true});
+  const write = (file, data) => fs.writeFileSync(path.join(artifacts, file), JSON.stringify(data));
+  write('input.json', {items: ['task:t1', 'task:t2'].map(id => f.objects.get(id))});
+  write('lander.json', {landed_at: new Date(now - 60_000).toISOString(), accepted: [{address: 'task:t1'}, {address: 'task:t2'}]});
+  write('result.json', {reason_code: 'LANDED', claim_released: true});
+  const resultFile = path.join(artifacts, 'result.json');
+  fs.utimesSync(resultFile, new Date(now - 60_000), new Date(now - 60_000));
+  const value = await report({workspace: 'fixture', url: f.run.config.joppa.url, token_file: f.run.joppaWorker.tokenFile,
+    selection: {kind: 'task'}, repositories: [{id: 'service'}], runs_folder: root}, now);
+  assert.equal(value.pending_branches, 1);
+  assert.equal(value.runs[0].batch_size, 1);
+  assert.equal(value.outcomes.LANDED, 1);
+  assert.deepEqual(value.push_to_landing, [{branch: 'ticket-one', seconds: 540}]);
+  assert.equal(value.runs[0].publication_confirmed, true);
+});
+
 function fixture(t, gate = 'test ! -e bad.txt') {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-lander-git-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

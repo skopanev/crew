@@ -108,6 +108,20 @@ class FlowBatchTests(unittest.TestCase):
         self.assertTrue(all(not node["document"]["data"].get("assignee") for node in self.api.nodes.values()))
         self.assertEqual(read(self.target / "claim.json")["status"], "rejected")
 
+    def test_branch_units_wait_and_claim_all_tasks_of_an_aged_branch(self):
+        from datetime import datetime, timezone, timedelta
+        self.config["batch"].update(min_size=3, unit_field="data.delivery.branch",
+                                    max_wait_seconds=900, age_field="data.delivery.pushed_at")
+        for address, node in self.api.nodes.items():
+            node["document"]["data"]["delivery"] = {"branch": "one", "pushed_at": datetime.now(timezone.utc).isoformat()}
+        with self.assertRaisesRegex(ValueError, "batch waits"):
+            flow_stages.prepare()
+        self.assertEqual(self.api.batches, [])
+        self.api.nodes["work:t1"]["document"]["data"]["delivery"]["pushed_at"] = \
+            (datetime.now(timezone.utc) - timedelta(seconds=901)).isoformat()
+        flow_stages.prepare()
+        self.assertEqual(len(read(self.target / "input.json")["items"]), 3)
+
     def test_blocked_business_outcome_releases_all_items_without_archiving(self):
         flow_stages.prepare()
         write(self.target / "operations.json", {"operations": [],
