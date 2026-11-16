@@ -42,7 +42,7 @@ export function removeEmptyDiscardCheckout(run, announce) {
 }
 
 // A private index captures the working tree without changing the lane's real index.
-function saveRecovery(run, checkout, artifacts) {
+export function saveRecovery(run, checkout, artifacts) {
   const root = fs.realpathSync(run.runFolder);
   artifacts ||= path.join(root, 'artifacts');
   fs.mkdirSync(artifacts, {recursive: true, mode: 0o700});
@@ -56,10 +56,12 @@ function saveRecovery(run, checkout, artifacts) {
   const recorded = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
   require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(recorded), 'Recovery base is invalid');
   const previous = existing && stat(failure) && fs.readFileSync(failure, 'utf8').match(/Recovery base: ([0-9a-f]{40}(?:[0-9a-f]{24})?)\b/g)?.at(-1)?.slice('Recovery base: '.length);
-  const target = previous || run.recoveryBase || command('git', ['-C', run.repository.path, 'rev-parse', '--verify',
+  const target = run.recoveryBase || command('git', ['-C', run.repository.path, 'rev-parse', '--verify',
     `refs/remotes/origin/${run.repository.targetBranch}^{commit}`]);
   require(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(target), 'Host recovery base is invalid');
-  const base = previous || git('merge-base', '--octopus', recorded, 'HEAD', target);
+  const anchored = git('merge-base', '--octopus', recorded, 'HEAD', target);
+  if (previous) git('merge-base', '--is-ancestor', previous, anchored);
+  const base = previous || anchored;
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-recovery-'));
   const pending = patch + '.' + randomUUID() + '.tmp';
   try {
@@ -110,6 +112,10 @@ export function discardFailedCheckout(run, stateFile, announce, artifacts = null
     require(writerGone(run, record.path), 'A lane process or container can still write the checkout');
     const patch = saveRecovery(run, record.path, artifacts);
     announce(`[lane] Recovery patch saved: ${patch}`);
+    if (result.publicationUncertain) {
+      announce('[lane] Target publication is uncertain; checkout retained for manual inspection');
+      return;
+    }
     const discarded = fs.mkdtempSync(path.join(path.dirname(record.path), '.discard-'));
     fs.renameSync(record.path, discarded);
     record.discardedPath = discarded;

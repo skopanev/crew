@@ -19,8 +19,14 @@ export function failureDetails(run, announce) {
       if (!fs.existsSync(outcome) || read(outcome)?.error?.code !== 'E_DEADLINE') continue;
       const target = path.join(folder, 'artifacts');
       fs.mkdirSync(target, {recursive: true, mode: 0o700});
-      const message = 'Workflow time limit exceeded. Preserve the candidate and reports for manual landing.';
-      save(path.join(target, 'origin.json'), {node: read(outcome).error.node || 'workflow', signal: 'OVER_TIME', message});
+      const node = read(outcome).error.node || 'workflow';
+      const uncertain = ['git_landing', 'cleanup', 'notify_success'].includes(node);
+      const message = 'Workflow time limit exceeded. Preserve the candidate and reports for manual landing.' +
+        (uncertain ? ' Target publication is uncertain. Inspect target ancestry before any retry.' : '');
+      const originFile = path.join(target, 'origin.json');
+      const previous = fs.existsSync(originFile) ? read(originFile) : null;
+      if (previous?.signal === 'OVER_TIME' && fs.existsSync(path.join(target, 'failure.txt'))) continue;
+      save(originFile, {node, signal: 'OVER_TIME', message, ...(previous && previous.signal !== 'OVER_TIME' ? {previous} : {})});
       fs.appendFileSync(path.join(target, 'failure.txt'), '\nOVER_TIME: ' + message + '\n', {mode: 0o600});
     }
     artifacts = fs.existsSync(root) ? fs.readdirSync(root)
@@ -103,6 +109,14 @@ export async function finishFinalization({run, dir, stateFile, result, artifacts
 // Record the Joppa outcome of claimed Tasks. Returns the final result and artifacts folder.
 export async function recordTaskOutcome({run, stateFile, result, artifacts, announce}) {
   removeEmptyDiscardCheckout(run, announce);
+  if (artifacts) {
+    const file = path.join(artifacts, 'origin.json');
+    const origin = fs.existsSync(file) ? read(file) : {};
+    if (origin.signal === 'OVER_TIME' && ['git_landing', 'cleanup', 'notify_success'].includes(origin.node)) {
+      result.publicationUncertain = true;
+      run.retained = null;
+    }
+  }
   try {
     artifacts ||= fs.existsSync(run.runFolder) ? fs.readdirSync(run.runFolder).sort().reverse()
       .map(name => path.join(run.runFolder, name, 'artifacts'))

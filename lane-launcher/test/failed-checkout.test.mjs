@@ -11,7 +11,7 @@ import {formatContexts, formatRecoveryNote, taskInput} from '../joppa-input.mjs'
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 import {fakeDocker, stoppedPgid, laneCheckout, git} from '../test-support/retained-checkout.fixture.mjs';
-import {failureDetails} from '../worker-outcome.mjs';
+import {failureDetails, recordTaskOutcome} from '../worker-outcome.mjs';
 
 async function fixture(t) {
   const f = await packageFixture(t);
@@ -190,6 +190,37 @@ test('a workflow deadline blocks with OVER_TIME and preserves work despite an oc
   assert.equal(fs.existsSync(f.checkout), false);
   assert.equal(fs.readFileSync(occupied, 'utf8'), 'unrelated data');
   assert.ok(fs.readFileSync(path.join(artifacts, 'recovery.patch'), 'utf8').includes('recover this work'));
+});
+
+test('uncertain publication keeps its checkout and cannot adopt a forged recovery base', async t => {
+  const f = await fixture(t);
+  laneCheckout(f.checkout, f.run.executionId);
+  f.run.recoveryBase = git(f.checkout, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(f.checkout, 'private.txt'), 'private work\n');
+  git(f.checkout, 'add', '.'); git(f.checkout, 'commit', '-qm', 'private work');
+  const native = path.join(f.run.runFolder, 'deadline');
+  fs.mkdirSync(native, {recursive: true});
+  fs.writeFileSync(path.join(native, 'outcome.json'), JSON.stringify({error: {code: 'E_DEADLINE', node: 'git_landing'}}));
+  fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), 'E_DEADLINE\n');
+  const artifacts = failureDetails(f.run, f.announce);
+  let result = {status: 'failed', code: 1};
+  ({result} = await recordTaskOutcome({run: f.run, stateFile: f.stateFile, result, artifacts, announce: f.announce}));
+  assert.equal(result.blockConfirmed, true);
+  assert.equal(result.publicationUncertain, true);
+  assert.equal(f.run.retained, null);
+  f.run.result = result;
+  fs.writeFileSync(path.join(artifacts, 'recovery.patch'), '');
+  fs.appendFileSync(path.join(artifacts, 'failure.txt'), '\nRecovery base: ' + git(f.checkout, 'rev-parse', 'HEAD') + '\n');
+  discardFailedCheckout(f.run, f.stateFile, f.announce, artifacts);
+  assert.ok(fs.existsSync(f.checkout), 'A forged HEAD base cannot discard unpublished commits');
+  fs.unlinkSync(path.join(artifacts, 'recovery.patch'));
+  fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'OVER_TIME\n');
+  discardFailedCheckout(f.run, f.stateFile, f.announce, artifacts);
+  assert.ok(fs.existsSync(f.checkout), 'Uncertain target publication retains its checkout even after verified export');
+  const failure = fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8');
+  failureDetails(f.run, f.announce);
+  assert.equal(fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8'), failure);
+  assert.ok(fs.readFileSync(path.join(artifacts, 'recovery.patch'), 'utf8').includes('private work'));
 });
 
 test('discard mode restores neither a retained checkout nor a prior recovery checkpoint', async t => {

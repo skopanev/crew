@@ -1,11 +1,11 @@
 version: '2'
 start: prepare
-timeout: 86400
+timeout: 3600
 defaults:
   timeout: 300
 vars:
   RETAINED_CHECKOUT_PROTOCOL: '1'
-  REJECT_ROUNDS: '3'
+  REJECT_ROUNDS: '2'
   ticket_title: ''
   gate_commands: '[]'
   review_commands: ''
@@ -379,7 +379,7 @@ nodes:
       echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}${recovery_note:-}</signal:READY>"
 
   implement_code:
-    timeout: 7200   # writing the code
+    timeout: 2400
     env:
       LANE_MEMORY_SESSION: 'on'
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
@@ -432,6 +432,7 @@ nodes:
 
   prepare_review:
     env:
+      REJECT_ROUNDS: '{{var:REJECT_ROUNDS}}'
       TARGET_BRANCH: '{{var:TARGET_BRANCH}}'
       DELIVERY: '{{var:DELIVERY}}'
       GIT_SSH_COMMAND: '{{var:GIT_SSH_COMMAND}}'
@@ -454,9 +455,10 @@ nodes:
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_MODULE: '{{var:module_name}}'
-    timeout: 3600
+    timeout: 1800
     on_signal:
       SNAPSHOT: expert_review
+      REVIEW_LOOP: notify_failure
       CONFLICT: git_fix
       LAND_FAILED: notify_failure
       GATE_FAIL: reject_gate
@@ -466,6 +468,11 @@ nodes:
       __default__: notify_failure
     shell: |
       set -euo pipefail
+      passes="$(jq -s '[.[] | select(.node=="expert_review")]|length' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true)"
+      if [ "${passes:-0}" -ge "$(( ${REJECT_ROUNDS:-2} + 1 ))" ]; then
+        echo '<signal:REVIEW_LOOP>Three expert panels already ran. Preserve the candidate and reports for manual review.</signal:REVIEW_LOOP>'
+        exit 0
+      fi
       cd "${LANE_WORKTREE}"
       git add -A
       # Freeze the candidate checked before landing.
@@ -705,8 +712,9 @@ nodes:
       project_dir: '{{var:project_dir}}'
       ticket_id: '{{var:ticket_id}}'
     # Bound final checks, target lock wait and integration retries.
-    timeout: 8100
+    timeout: 2400
     on_signal:
+      JOPPA_UNAVAILABLE: notify_failure
       VERIFIED: cleanup
       ALREADY_LANDED: cleanup
       LAND_FAILED: notify_failure
@@ -744,8 +752,13 @@ nodes:
 
       if [ "${VERIFY_ONLY}" = "true" ] && [ "$DELIVERY" != requirement ]; then
         if [ -n "${JOPPA_READER_COMMAND_JSON:-}${REQUIREMENT_READER_FILE:-}" ]; then
-          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --tasks || {
-            echo '<signal:REQUIREMENT_CHANGED>Task context changed before verification publication.</signal:REQUIREMENT_CHANGED>'; exit 0; }
+          rc=0
+          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --tasks || rc=$?
+          case "$rc" in
+            0) ;;
+            75|124) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;;
+            *) echo '<signal:REQUIREMENT_CHANGED>Task context changed before verification publication.</signal:REQUIREMENT_CHANGED>'; exit 0 ;;
+          esac
         fi
         git diff --cached --quiet HEAD || {
           echo '<signal:LAND_FAILED>verification changed source files</signal:LAND_FAILED>'; exit 0; }
@@ -771,8 +784,13 @@ nodes:
         [ -n "${REQUIREMENT_BRANCH:-}" ] || {
           echo '<signal:LAND_FAILED>Requirement branch is missing.</signal:LAND_FAILED>'; exit 0; }
         if [ "${REQUIREMENT_FINAL:-false}" != true ]; then
-          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --publish || {
-            echo '<signal:REQUIREMENT_CHANGED>Task claim or Requirement context changed before publication.</signal:REQUIREMENT_CHANGED>'; exit 0; }
+          rc=0
+          timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" --publish || rc=$?
+          case "$rc" in
+            0) ;;
+            75|124) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;;
+            *) echo '<signal:REQUIREMENT_CHANGED>Task claim or Requirement context changed before publication.</signal:REQUIREMENT_CHANGED>'; exit 0 ;;
+          esac
           task_base="$(cat .git/lane-base)"
           rc=0
           gate_commands="${review_commands:-$gate_commands}" \
@@ -803,6 +821,7 @@ nodes:
           echo '<signal:LAND_FAILED>Final gate receipt is invalid.</signal:LAND_FAILED>'; exit 0; }
         target="${DELIVERY_BRANCH:-ticket-${ticket_id}}"
         land
+        case "$rc" in 75|124) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;; esac
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
       fi
@@ -1026,6 +1045,7 @@ nodes:
     on_signal:
       VERIFICATION_FAILED: notify_failure
       TOO_MANY_ROUNDS: notify_failure
+      REVIEW_LOOP: notify_failure
       PANEL_REJECTED: implement_code
       __failed__: notify_failure
       __timeout__: notify_failure
@@ -1036,7 +1056,12 @@ nodes:
         printf '<signal:VERIFICATION_FAILED>Existing implementation failed checks or review: %s.</signal:VERIFICATION_FAILED>\n' "${MEDULLA_LAST_MESSAGE:-}"
         exit 0
       fi
-      limit="${REJECT_ROUNDS:-3}"
+      limit="${REJECT_ROUNDS:-2}"
+      passes="$(jq -s '[.[] | select(.node=="expert_review")]|length' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true)"
+      if [ "${passes:-0}" -ge "$((limit + 1))" ]; then
+        echo '<signal:REVIEW_LOOP>Three expert panels already ran. Preserve the candidate and reports for manual review.</signal:REVIEW_LOOP>'
+        exit 0
+      fi
       # Share the repair limit across failed checks and review rounds.
       since="$(jq -r 'select(.node=="git_fix")|.step' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null | tail -1 || true)"
       since="${since:-0}"
@@ -1053,7 +1078,7 @@ nodes:
       } > "$MEDULLA_RUN_DIR/artifacts/rejects.txt" 2>/dev/null || true
 
       # Check the limit before emitting a repair signal.
-      if [ "$done_rounds" -ge "$limit" ]; then
+      if [ "$done_rounds" -gt "$limit" ]; then
         echo "<signal:TOO_MANY_ROUNDS>Checks or review failed ${done_rounds} times. Latest blocker: ${finding}</signal:TOO_MANY_ROUNDS>"
         exit 0
       fi

@@ -13,6 +13,19 @@ from test_failure_outcome import shell_body, WORKFLOW
 
 
 class ReviewPanelTests(unittest.TestCase):
+    def test_three_panel_passes_stop_even_after_a_git_fix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = [{"node": "expert_review", "signal": "__done__", "step": index} for index in (1, 4, 7)]
+            rows.insert(2, {"node": "git_fix", "signal": "OK", "step": 5})
+            (root / "journal.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+            for node in ("prepare_review", "reject_gate"):
+                result = subprocess.run(["bash", "-c", shell_body(node)], env={**os.environ,
+                    "MEDULLA_RUN_DIR": str(root), "REJECT_ROUNDS": "2", "VERIFY_ONLY": "false"},
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("<signal:REVIEW_LOOP>", result.stdout)
+
     def panel(self, report="## FINDINGS\nNONE\nCOVERAGE: assigned behavior and checks\n",
               seats=("architecture", "codereview", "security"), missing=False):
         with tempfile.TemporaryDirectory() as directory:

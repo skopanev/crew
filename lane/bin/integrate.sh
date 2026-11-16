@@ -49,13 +49,19 @@ for attempt in 1 2; do
   python3 "$TOOLING_ROOT/lane/bin/gates.py" verify || fail LAND_FAILED 'Post-rebase gate receipt is invalid.'
   printf '%s\n%s\n' "$(git write-tree)" "$(git rev-parse HEAD)" > "$snapshot"
   if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
-    timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" ||
-      fail REQUIREMENT_CHANGED 'Requirement context changed or could not be read within 60 seconds; final Task checkout retained.'
+    rc=0
+    timeout --kill-after=5s 60s node "$TOOLING_ROOT/lane/bin/requirement-current.mjs" || rc=$?
+    case "$rc" in
+      0) ;;
+      75|124) fail JOPPA_UNAVAILABLE 'Requirement read failed after transport retries; candidate retained.' ;;
+      *) fail REQUIREMENT_CHANGED 'Requirement context changed; final Task checkout retained.' ;;
+    esac
   fi
   rc=0
   bash "$TOOLING_ROOT/lane/bin/land.sh" "$target" > "$artifacts/landing-log.txt" 2>&1 || rc=$?
   cat "$artifacts/landing-log.txt"
   [ "$rc" -eq 0 ] && exit 0
+  case "$rc" in 75|124) fail JOPPA_UNAVAILABLE 'Task context read failed after transport retries; candidate retained.' ;; esac
   [ "$rc" -eq 3 ] || fail LAND_FAILED "Landing exited $rc; see artifacts/landing-log.txt."
   [ "$attempt" -eq 1 ] || fail LAND_FAILED 'TARGET_MOVED: Target moved twice during landing; see artifacts/landing-log.txt.'
   echo 'landing: target moved before push; refreshing once more' >&2
