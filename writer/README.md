@@ -12,11 +12,12 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
 1. `prepare` checks the required vars. The shared flow stage reads the selected item, its references and its direct children, and claims the item.
 2. `author` drafts the new Tests. It sees the selected item, its references, its existing Tests, the author contract and the critic questions.
    Task children stay out of the agent view. The host advances only unassigned Tasks without a hold or delivery.
-   The selected item must be in `vars.READY_STAGE` before the author starts. No approval revision field is required.
+   The shared prepare stage checks that the selected item matches `selection`, such as AC stage `to_prepare`.
 3. `draft_check` checks the draft against the native Test schema. It records the digest of the exact draft bytes.
 4. `critics` runs two independent seats from different vendors in parallel. Each seat scores every Test and the coverage.
 5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
-6. `publish` sends the operations through the shared stage. The stage adds the claim release and refuses operations outside `config.publication`.
+6. `publish` creates the Tests and moves the selected item to `vars.READY_STAGE` in one native transaction.
+   The shared stage releases the claim in that transaction and refuses operations outside `config.publication`.
 
 A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
@@ -35,9 +36,9 @@ See `config.example.json`. The project supplies every native name:
 | `selection`, `order`, `exclude_children` | Native Joppa filters that select one item for each pass |
 | `children` | Native filter for the direct children. Include the Test and Task kinds |
 | `references` | Data fields of the selected item that name related objects |
-| `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds` for the shared stage |
+| `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit updates to the selected kind and Task kind |
 | `vars.TEST_KIND`, `vars.TASK_KIND` | Native kinds of new Tests and of the Tasks that wait for them |
-| `vars.WAITING_STAGE`, `vars.READY_STAGE` | Task stages before and after publication. The selected item must also be in `READY_STAGE` |
+| `vars.WAITING_STAGE`, `vars.READY_STAGE` | Task stages before and after publication. The selected item also moves to `READY_STAGE` |
 | `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_CLAUDE_MODEL` | Optional model overrides |
 | `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |

@@ -37,11 +37,6 @@ nodes:
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
-      jq -e --arg ready "$READY_STAGE" '.selected.document.data.stage == $ready' \
-        "$MEDULLA_RUN_DIR/artifacts/input.json" >/dev/null || {
-        echo 'The selected item is not in the configured ready stage.' > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
-        exit 2
-      }
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
       # input.json stays complete: review_join reads the waiting Tasks from it.
       view="$(jq -c --arg test "$TEST_KIND" '
@@ -220,7 +215,10 @@ nodes:
           [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
           ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == "")) |
             {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
-              data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}])}
+              data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}] +
+          [{command: {op: "save_object", kind: $in.selected.kind,
+            id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
+            data: {stage: $ready}, reason: "Publish the reviewed Tests and prepare this item for implementation."}}])}
         else {approved: false, critique: ($reviews | map_values(if valid then
           {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else
           {invalid: "The review does not match the critic output contract or reviewed another draft."} end))} end')"

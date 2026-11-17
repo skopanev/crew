@@ -10,7 +10,7 @@
   "selection": {
     "kind": "ac",
     "data": {
-      "stage": "to_implement"
+      "stage": "to_prepare"
     },
     "assignee": ""
   },
@@ -39,7 +39,8 @@
       "test"
     ],
     "update_kinds": [
-      "task"
+      "task",
+      "ac"
     ]
   },
   "vars": {
