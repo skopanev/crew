@@ -122,10 +122,16 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
   const cell = (value, column) => clip(value, column.width).padEnd(column.width);
   const output = [columns.map(column => cell(column.label, column)).join('  ')];
   for (const row of visible) {
-    const success = ['READY', 'DECOMPOSED'].includes(row.status);
-    const tone = row.active || row.status === 'QUEUED' ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED', 'HELD'].includes(row.status) ? 'yellow' : 'red';
+    const success = ['READY', 'DECOMPOSED', 'LANDED'].includes(row.status);
+    const codes = [row.status, row.stage].map(value => String(value || '').toUpperCase());
+    const tone = codes.some(code => ['OWNER_STOPPED', 'HOLD', 'HELD'].includes(code)) ? 'gray' :
+      codes.some(code => ['GATE_FAIL', 'OVER_TIME', 'TIMEOUT', 'LAND_FAILED', 'BASELINE_RED'].includes(code)) ? 'red' :
+      codes.some(code => ['QUEUED', 'PENDING_LANDING'].includes(code)) ? 'orange' :
+      row.active ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED'].includes(row.status) ? 'yellow' : 'red';
+    const overtime = new Date(row.end || Date.now()) - new Date(row.start) > 3600000;
     const cells = columns.map(column => cell(column.value(row), column));
-    output.push(success ? paint('ready', cells.join('  ')) : cells.map((value, index) =>
+    output.push(cells.map((value, index) =>
+      columns[index].key === 'time' && overtime ? paint('red', value) : success ? paint('ready', value) :
       columns[index].key === 'status' ? paint(tone, value) : row.active ? value : paint('finished', value)).join('  '));
   }
   if (!rows.length) output.push(clip('No runs yet', width));

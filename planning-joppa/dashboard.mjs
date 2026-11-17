@@ -12,7 +12,7 @@ export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const tones = {blue: '1;34', yellow: '1;33', red: '1;31', ready: '1;38;2;70;230;90', finished: '37'};
+const tones = {blue: '1;34', yellow: '1;33', orange: '38;5;208', gray: '90', red: '1;31', ready: '1;38;2;70;230;90', finished: '37'};
 const paint = (tone, value) => process.stdout.isTTY && !process.env.NO_COLOR ?
   `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
 
