@@ -317,7 +317,7 @@ nodes:
         exit 0
       fi
       # No shared objects, hardlinks, worktree registration or canonical Git writes.
-      git clone --no-hardlinks --no-checkout "$project_dir" "$LANE_WORKTREE"
+      git clone --no-local --no-checkout "$project_dir" "$LANE_WORKTREE"
       cd "$LANE_WORKTREE"
       if [ -f "$project_dir/.git/info/exclude" ]; then
         mkdir -p .git/info
