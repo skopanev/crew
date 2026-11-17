@@ -20,6 +20,7 @@ import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.m
 import {prepareReuse} from './retained-checkout.mjs';
 import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
 import {laneOptionsEnv} from './lane-options.mjs';
+import {stopRunContainers} from './container-cleanup.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -211,6 +212,13 @@ try {
     error: message};
   process.exitCode = 2;
 } finally {
+  if (child) {
+    try { announce(`[lane] stopped run containers: ${stopRunContainers(run.runFolder).length}`); }
+    catch (error) {
+      result.cleanupError = error.message;
+      announce(`[lane] CONTAINER_CLEANUP_FAILED: ${error.message}`);
+    }
+  }
   if (readerDir) fs.rmSync(readerDir, {recursive: true, force: true});
   if (contextDir) fs.rmSync(contextDir, {recursive: true, force: true});
   if (hooksDir) fs.rmSync(hooksDir, {recursive: true, force: true});

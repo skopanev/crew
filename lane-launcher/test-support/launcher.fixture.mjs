@@ -87,7 +87,7 @@ if (args[1] === 'close' && process.env.TEST_RESULT) {
 if (args[0] === 'pane' && ['run', 'close'].includes(args[1])) process.exit(0);
 console.log(JSON.stringify({result}));
 `, {mode: 0o755});
-  fs.writeFileSync(path.join(bins, 'docker'), '#!/bin/sh\nif [ "$TEST_DOCKER_FAILURE" = 1 ]; then exit 1; fi\ncat "$TEST_DOCKER"\n', {mode: 0o755});
+  fs.writeFileSync(path.join(bins, 'docker'), '#!/bin/sh\nif [ "$TEST_DOCKER_FAILURE" = 1 ]; then exit 1; fi\nif [ "$1" = ps ] && [ "$2" = --no-trunc ]; then exit 0; fi\ncat "$TEST_DOCKER"\n', {mode: 0o755});
   for (const bin of ['medulla', 'jq']) fs.writeFileSync(path.join(bins, bin), '#!/bin/sh\nexit 0\n', {mode: 0o755});
   const docker = path.join(root, 'docker.jsonl');
   fs.writeFileSync(docker, '');
