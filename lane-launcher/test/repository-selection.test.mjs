@@ -30,6 +30,10 @@ test('taskFields maps only repository labels or data paths', async t => {
   const f = await setup(t, {launchLanes: false}), object = f.joppa.objects.get('task:t1');
   const original = structuredClone(object.document.data), base = structuredClone(f.config);
   const load = raw => { save(f.configFile, raw); return configFrom(f.configFile, f.env, {dryRun: true}); };
+  const legacy = structuredClone(base);
+  legacy.repositories[0].modules = [{name: 'old', paths: legacy.repositories[0].paths}];
+  delete legacy.repositories[0].paths;
+  assert.throws(() => load(legacy), /Replace modules\[\]\.paths with repositories\[\]\.paths/);
   const input = (config, data) => { object.document.data = {...original, ...data}; return taskInput(config, object).ticket; };
   const whole = load({...base, taskFields: undefined});
   assert.equal(input(whole, {body: 'Goal: change\nRepository: other'}).repository, 'app');

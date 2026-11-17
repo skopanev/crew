@@ -65,7 +65,7 @@ export async function recoverTimeout(run, stateFile, result, artifacts, {claims,
     'Cannot inspect timeout recovery diff', false);
   const changedFiles = diffOutput.split('\0');
   if (changedFiles.at(-1) === '') changedFiles.pop();
-  const roots = claim.ticket?.paths || run.claim.ticket?.paths || [];
+  const roots = claim.ticket?.paths ?? claim.ticket?.modulePaths ?? run.claim.ticket?.paths ?? run.claim.ticket?.modulePaths ?? [];
   require(changedFiles.length > 0 && roots.length > 0 && changedFiles.every(file =>
     file.length > 0 && !/[\r\n]/.test(file) && !file.split('/').includes('..') &&
     roots.some(scope => scope === '.' || file === scope || file.startsWith(scope.replace(/\/+$/, '') + '/'))),

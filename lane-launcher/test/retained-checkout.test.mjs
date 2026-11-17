@@ -10,6 +10,9 @@ import {defaultWorkflow, supportsRetainedCheckout, workflowDigest} from '../work
 
 test('a confirmed GATE_FAIL checkout returns to the coder with prior reports only', async t => {
   const x = await reuseFixture(t);
+  x.prior.claim.ticket.modulePaths = x.prior.claim.ticket.paths;
+  delete x.prior.claim.ticket.paths;
+  x.savePrior();
   const head = git(x.checkout, 'rev-parse', 'HEAD'), lines = [];
   fs.mkdirSync(x.run.runFolder, {recursive: true});
   assert.equal(await prepareReuse(x.run, x.dir, line => lines.push(line), () => {}), head);
