@@ -65,11 +65,11 @@ export async function recoverTimeout(run, stateFile, result, artifacts, {claims,
     'Cannot inspect timeout recovery diff', false);
   const changedFiles = diffOutput.split('\0');
   if (changedFiles.at(-1) === '') changedFiles.pop();
-  const roots = claim.ticket?.modulePaths || run.claim.ticket?.modulePaths || [];
+  const roots = claim.ticket?.paths || run.claim.ticket?.paths || [];
   require(changedFiles.length > 0 && roots.length > 0 && changedFiles.every(file =>
     file.length > 0 && !/[\r\n]/.test(file) && !file.split('/').includes('..') &&
     roots.some(scope => scope === '.' || file === scope || file.startsWith(scope.replace(/\/+$/, '') + '/'))),
-    'Timeout recovery commit is empty or touches files outside Task modulePaths; Task remains held');
+    'Timeout recovery commit is empty or touches files outside Task paths; Task remains held');
   const seq = String(Object.keys(object.annotations?.comments || {}).length + 1).padStart(6, '0');
   const noteId = `recovery-${seq}-${runId}`;
   run.recovery = {task: object.address, digest: claim.digest, contexts, ref, sha: head, tree, base,

@@ -8,7 +8,6 @@ usage: run.sh --ticket-id <id> --project <Joppa workspace> --source-root <worksp
               [--review-command <shell command>]...
               --test-command '["runner", "args"]' [--gate-timeout <seconds>]
               [--coder-timeout <seconds>]
-              [--module <module>]
               [--mount-ro <repo>]... [--mount-rw <dir>]... [--ssh-dir <dir>]
               [--image <image>] [--docker-engine]
               [extra medulla args...]
@@ -18,7 +17,6 @@ usage: run.sh --ticket-id <id> --project <Joppa workspace> --source-root <worksp
   --cbm-mcp-command  native host CBM executable; broker bridges it for this lane.
               The lane uses that service; it never copies or indexes a database.
   --cbm-cache-dir  existing shared CBM store, the same as the active daemon uses.
-  --module    Task module; read from the Joppa Task when omitted
   --image     lane runtime image; defaults to medulla-crew:latest
   --docker-engine  enable the broker box's private Docker engine for tests
   --dispatcher-id  stable Dolber ID; manual lanes use the same ID to share its limit.

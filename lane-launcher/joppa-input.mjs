@@ -1,5 +1,5 @@
 import {contractDigest, executionId} from './joppa-common.mjs';
-import {taskContract, taskBody, taskRepositoryChoice, taskModuleChoice} from './task-contract.mjs';
+import {taskContract, taskBody, taskRepositoryChoice} from './task-contract.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -8,13 +8,13 @@ export function packageInput(run, inputs) {
   const tasks = inputs.map(input => input.ticket);
   return {id: run.executionId, address: run.requirement, title: `${run.requirement}: ${inputs[0].repo.id}`,
     source: 'joppa', requirement: run.requirement, repository: inputs[0].repo.id,
-    module: tasks[0].module, modulePaths: [...new Set(tasks.flatMap(task => task.modulePaths))],
+    paths: [...new Set(tasks.flatMap(task => task.paths))],
     tasks, executionOrder: tasks.map(task => task.address),
     ...(tasks.every(task => task.repair) ? {repair: {tests: [...new Set(tasks.flatMap(task => task.repair.tests))]}} : {}),
     body: ['Execute these Tasks in the listed order in one checkout. Keep each Task within its own contract and writable roots.',
       'Run one workflow, required gates, independent review, and landing for the complete package.',
       'Report each Task address, result, and check evidence in coder-report.txt. Review every Task before landing.',
-      ...tasks.map((task, index) => `Task ${index + 1}: ${task.address}\nWritable roots: ${JSON.stringify(task.modulePaths)}\n${task.body}`)].join('\n\n'),
+      ...tasks.map((task, index) => `Task ${index + 1}: ${task.address}\nWritable roots: ${JSON.stringify(task.paths)}\n${task.body}`)].join('\n\n'),
     acceptance: tasks.map(task => `${task.address}\n${task.acceptance}`).join('\n\n')};
 }
 
@@ -115,17 +115,15 @@ export function taskInput(config, object, contexts = object.contexts, covers = [
   const repo = taskRepositoryChoice(config, data);
   require(repo, 'Task repository is not configured or not unique');
   const repair = repairInput(data);
-  const configuredModule = taskModuleChoice(config, repo, data);
-  const module = configuredModule.name, modulePath = configuredModule.path;
-  const modulePaths = configuredModule.paths || [modulePath];
+  const paths = repo.paths || ['.'];
   const recovery = config.discardFailedWorktree === true ? null : latestRecovery(config, object, contractDigest(object), contexts);
   return {repo, ticket: {id: executionId(object.address), address: object.address, item_id: object.item_id, title: data.title,
-    body: contract, module: modulePath, moduleId: module, modulePaths,
+    body: contract, paths,
     repository: repo.id, revision: object.current_revision, source: 'joppa',
     parent: object.document.parent, links: object.document.links, annotations: object.annotations || {}, acceptance: contract,
     ...(repo.repairBaseline === true ? repair : {}),
     ...(testAcceptance(object, covers) ? {testAcceptance: testAcceptance(object, covers)} : {}),
     ...(object.remote_links?.length ? {remote_links: object.remote_links} : {}),
     ...(recovery ? {recovery: {...recovery,
-      instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(modulePaths)}. Complete only the remaining work.`}} : {})}};
+      instruction: `Resume from checkpoint ${recovery.sha} on ${recovery.ref} (base ${recovery.base}). The checkout already contains this checkpoint. Do not reapply an older recovery patch. Check existing changes against the Task contract. Keep changes within writable roots ${JSON.stringify(paths)}. Complete only the remaining work.`}} : {})}};
 }

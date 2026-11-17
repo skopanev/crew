@@ -59,21 +59,12 @@ export function validateJoppa(config) {
     require(text(repo.targetBranch) && repo.targetBranch !== 'HEAD' && !repo.targetBranch.startsWith('-'), 'Repository needs targetBranch');
     command('git', ['check-ref-format', `refs/heads/${repo.targetBranch}`]);
     require(text(repo.cbmProject), 'Repository needs cbmProject');
-    if (repo.modules === undefined) repo.modules = [{name: repo.id, path: '.'}];
-    require(Array.isArray(repo.modules) && repo.modules.length, 'Repository needs modules: [{name, path}]');
-    const modules = new Set();
-    for (const {name, path: modulePath, paths: modulePaths = [modulePath]} of repo.modules) {
-      require(!modules.has(name), 'Module names must be distinct within their repository');
-      require(text(name) && text(modulePath) && !path.isAbsolute(modulePath) && inside(path.resolve(folder, modulePath), folder),
-        'Module paths must stay inside their repository');
-      require(inside(fs.realpathSync(path.resolve(folder, modulePath)), folder), 'Module symlinks must stay inside their repository');
-      require(Array.isArray(modulePaths) && modulePaths.length, 'Module paths must be a nonempty list');
-      for (const scope of modulePaths) {
-        require(text(scope) && !path.isAbsolute(scope) && !scope.split(/[\\/]/).includes('..') &&
-          inside(path.resolve(folder, scope), folder), 'Module paths must stay inside their repository');
-        require(inside(fs.realpathSync(path.resolve(folder, scope)), folder), 'Module symlinks must stay inside their repository');
-      }
-      modules.add(name);
+    repo.paths ??= ['.'];
+    require(Array.isArray(repo.paths) && repo.paths.length, 'Repository paths must be a nonempty list');
+    for (const scope of repo.paths) {
+      require(text(scope) && !path.isAbsolute(scope) && !scope.split(/[\\/]/).includes('..') &&
+        inside(path.resolve(folder, scope), folder), 'Writable paths must stay inside their repository');
+      require(inside(fs.realpathSync(path.resolve(folder, scope)), folder), 'Writable symlinks must stay inside their repository');
     }
     require(Array.isArray(repo.gateCommands) && repo.gateCommands.length && repo.gateCommands.every(text), 'Repository needs gateCommands');
     require(repo.reviewCommands == null || Array.isArray(repo.reviewCommands) && repo.reviewCommands.length && repo.reviewCommands.every(text),

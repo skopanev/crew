@@ -96,7 +96,7 @@ console.log(JSON.stringify({result}));
     context: joppa.run.config.context, taskFields: joppa.run.config.taskFields,
     joppa: {url: joppa.run.config.joppa.url, workers: [{actor: 'lane-1', tokenFile}]},
     repositories: [{id: 'app', path: repo, targetBranch: 'main', cbmProject: 'app', preflight: null,
-      modules: joppa.run.config.repositories[0].modules, gateCommands: ['true'], reviewCommands: ['true'], testCommand: ['true']}],
+      paths: joppa.run.config.repositories[0].paths, gateCommands: ['true'], reviewCommands: ['true'], testCommand: ['true']}],
     worktreeRoot: path.join(sources, 'worktrees'),
     cbmMcpCommand: path.join(root, 'cbm-mcp.py'), cbmCacheDir: path.join(root, 'cbm-cache'), sshDir: path.join(root, 'ssh'),
     sharedLockDir: path.join(sources, 'locks'),

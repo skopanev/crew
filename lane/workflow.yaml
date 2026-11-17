@@ -52,7 +52,6 @@ nodes:
       LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
       LANE_PATH: '{{var:LANE_PATH}}'   # читает inject.sh, не тело узла
       # codex-home.sh embeds the shared MCP connector in Codex configuration.
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
@@ -169,7 +168,6 @@ nodes:
       LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_scout_ROLE}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
     on_signal:
       OK: create_worktree          # закрытый набор скаута: OK, DUPLICATE, OUT_OF_MODULE, PREMISE_BROKEN
@@ -189,7 +187,6 @@ nodes:
       Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
       Artifacts: {{var:RUN_ARTIFACTS}}.
       Task: {{var:ticket_id}}. Source: {{var:TICKET_SOURCE}}. Workspace: {{var:project_name}}.
-      Module: {{var:module_name}}.
       Source checkout: {{var:SCOUT_SOURCE}}.
       CBM project: {{var:CBM_PROJECT}}.
       Repository checks: {{var:review_commands}}
@@ -268,14 +265,14 @@ nodes:
           fi
           if ! git diff -z --no-renames --name-only "${recovery_base}..${recovery_sha}" \
              | jq -R -s -e --slurpfile ticket "$MEDULLA_RUN_DIR/artifacts/ticket.json" '
-               ($ticket[0].modulePaths // []) as $roots |
+               ($ticket[0].paths // []) as $roots |
                split("\u0000") | (if length > 0 and .[-1] == "" then .[:-1] else . end) |
                length > 0 and ($roots | length > 0) and all(.[]; . as $f |
                  ($f | length > 0) and ($f | test("[\r\n]") | not) and ($f | split("/") | index("..") | not) and
                  any($roots[]; . as $r | $r != "" and ($r == "." or $f == $r or ($f | startswith(($r | sub("/+$"; "")) + "/"))))
                )
              ' >/dev/null; then
-            echo "RECOVERY_VERIFY_FAILED: recovery diff ${recovery_base}..${recovery_sha} is empty or outside modulePaths" >&2
+            echo "RECOVERY_VERIFY_FAILED: recovery diff ${recovery_base}..${recovery_sha} is empty or outside paths" >&2
             exit 1
           fi
           if [ "${MEDULLA_LAST_SIGNAL:-}" != "DUPLICATE" ]; then
@@ -422,7 +419,6 @@ nodes:
       LANE_MEMORY_PROCESS: '{{var:LANE_MEMORY_coder_ROLE}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
@@ -487,7 +483,6 @@ nodes:
       LANE_MEMORY_SESSION: 'on'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
     timeout: 1800
     on_signal:
       SNAPSHOT: expert_review
@@ -606,7 +601,6 @@ nodes:
       LANE_MEMORY_SESSION: 'off'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
     on_signal:
       __done__: expert_review_synthesis
       __failed__: expert_review_synthesis
@@ -1063,7 +1057,6 @@ nodes:
       LANE_MEMORY_SESSION: 'on'
       LANE_MEMORY_TICKET: '{{var:ticket_id}}'
       LANE_MEMORY_PROJECT: '{{var:project_name}}'
-      LANE_MEMORY_MODULE: '{{var:module_name}}'
       CBM_MCP_COMMAND: '{{var:CBM_MCP_COMMAND}}'
       LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:

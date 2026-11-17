@@ -69,7 +69,7 @@ export async function reuseFixture(t, {node = 'implement_code', signal = 'GATE_F
   const digest = contractDigest(task);
   const claim = (assignee, retained) => ({claimed: true, id: executionId, assignee, address: 'task:t1',
     tasks: [{address: 'task:t1', digest}], contexts: [{address: 'ac:a1', digest: 'c1'}],
-    ticket: {id: executionId, modulePaths: ['a.txt'], ...(retained ? {retained} : {})}});
+    ticket: {id: executionId, paths: ['a.txt'], ...(retained ? {retained} : {})}});
   const runDir = name => path.join(config.stateDir, 'runs', name);
   const priorId = randomUUID(), prior = {config, workspace: 'fixture', joppaWorker: f.run.joppaWorker, task: 'task:t1',
     executionId, repository, createdAt: '2026-11-13T10:00:00.000Z', runFolder: path.join(runDir(priorId), 'lane'),

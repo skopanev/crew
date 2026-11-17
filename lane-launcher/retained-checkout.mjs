@@ -166,8 +166,8 @@ export async function retainedCheckout(run, dir) {
     const state = checkoutState(checkout, run.executionId);
     for (const key of ['branch', 'head', 'tree', 'base']) require(state[key] === retained[key], `checkout ${key} changed`);
     const files = laneGit(checkout)('diff', '-z', '--no-renames', '--name-only', `${state.base}..${state.head}`).split('\0').filter(Boolean);
-    require(files.length && files.every(file => within(file, prior.run.claim.ticket?.modulePaths) &&
-      within(file, run.claim.ticket?.modulePaths)), 'checkout changes files outside the Task modulePaths');
+    require(files.length && files.every(file => within(file, prior.run.claim.ticket?.paths) &&
+      within(file, run.claim.ticket?.paths)), 'checkout changes files outside the Task paths');
     // Read the remote as a plain config file. The canonical repository is host configuration.
     const remote = command('git', ['config', '--file', path.join(checkout, '.git', 'config'), '--no-includes', '--get', 'remote.origin.url']);
     require(remote === command('git', ['-C', run.repository.path, 'remote', 'get-url', 'origin']),

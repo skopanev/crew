@@ -59,6 +59,7 @@ test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only
     fs.copyFileSync(path.join(source, file), path.join(folder, file));
   }
   fs.copyFileSync(fileURLToPath(new URL('../../notify.mjs', import.meta.url)), path.join(crew, 'notify.mjs'));
+  fs.symlinkSync(folder, path.join(crew, 'lane-launcher'));
   const config = {...f.config};
   delete config.launchLanes; // Omission must also default to preview.
   save(path.join(folder, 'dolber-joppa.json'), config);

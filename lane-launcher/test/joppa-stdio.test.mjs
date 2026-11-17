@@ -29,7 +29,7 @@ print(json.dumps(data))
   for (const text of [...data.steps, ...data.checks]) assert(body.includes(text));
   const object = {address: 'work:one', historical: false, current_revision: 1,
     document: {present: true, parent: 'criterion:a', links: [], data}};
-  const config = {repositories: [{id: 'service', modules: [{name: 'core', path: 'src'}]}]};
+  const config = {repositories: [{id: 'service', paths: ['src']}]};
   const before = contractDigest(object), ticket = taskInput(config, object).ticket;
   assert.equal(ticket.body, body);
   assert.equal(ticket.acceptance, body);

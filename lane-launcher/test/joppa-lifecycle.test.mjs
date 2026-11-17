@@ -64,7 +64,7 @@ test('claim shows the coder the live tests of its criterion and accepts a struct
   assert(!one.acceptanceTests.some(test => test.address === 'check:gone'));
   assert.deepEqual(two.acceptanceTests, [{address: 'check:other', revision: 2, title: 'other > case'}]);
   assert.equal(two.body, 'Goal: scoped change 2\nModule: m2\n\nHow:\n1. Make the change.');
-  assert.equal(two.moduleId, 'm2');
+  assert.deepEqual(two.paths, f.run.config.repositories[0].paths);
   assert.equal(two.testAcceptance, undefined);
   // Reading tests writes nothing: the claim is the only batch.
   assert.equal(batches(f).length, 1);

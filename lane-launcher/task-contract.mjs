@@ -1,17 +1,16 @@
 const require = (ok, message) => { if (!ok) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
-const SCOPE = ['repository', 'module'];
 // Render the stored Task without changing its document or claim digest.
 export const taskBody = data => data && Object.hasOwn(data, 'body') ? data.body : data?.contract;
 
-// taskFields maps repository and module to "body:<line label>" or "data:<field.path>". Crew has no default label.
+// taskFields maps the repository to a body line or a data field. Crew has no default label.
 export function validateTaskFields(config) {
   const fields = config.taskFields;
   if (fields === undefined) return;
   require(fields !== null && typeof fields === 'object' && !Array.isArray(fields) &&
-    Object.keys(fields).every(key => SCOPE.includes(key)) && Object.values(fields).every(spec => typeof spec === 'string' &&
+    Object.keys(fields).every(key => key === 'repository') && Object.values(fields).every(spec => typeof spec === 'string' &&
       /^(?:body:[^\s:][^\r\n:]*|data:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/.test(spec) && spec === spec.trimEnd()),
-  'taskFields maps repository and module to "body:<line label>" or "data:<field.path>"');
+  'taskFields maps repository to "body:<line label>" or "data:<field.path>"');
 }
 
 // The values that a Task declares for one scope field. taskFields is the only source, also for structured Tasks.
@@ -37,19 +36,6 @@ export function taskRepositoryChoice(config, data) {
   if (!known.length) return values.length || repositories.length !== 1 ? null : repositories[0];
   require(values.length === 1, 'Task repository declaration is ambiguous');
   return repositories.find(repo => repo.id === known[0]);
-}
-
-// The configured module of the chosen repository. Only a repository with one module needs no declaration.
-export function taskModuleChoice(config, repo, data) {
-  const values = declared(config, data, 'module');
-  require(values.length <= 1, 'Task declares more than one module');
-  if (!values.length) {
-    require(repo.modules.length === 1, 'Task module is ambiguous: declare one configured module');
-    return repo.modules[0];
-  }
-  const module = repo.modules.find(item => item.name === values[0]);
-  require(module, `Task module is not configured: declared ${values[0]}, configured ${repo.modules.map(item => item.name).join(', ')}`);
-  return module;
 }
 
 export function taskContract(data) {

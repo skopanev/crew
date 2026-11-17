@@ -8,73 +8,44 @@ import {save} from '../runtime.mjs';
 import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
 
-test('missing Module uses the only module or the whole repository, while explicit scope stays strict', async t => {
+test('repository paths apply regardless of missing or historical Module text', async t => {
   const f = await setup(t, {launchLanes: false}), object = f.joppa.objects.get('task:t1');
   const original = structuredClone(object.document.data);
-  for (const modules of [undefined, [f.config.repositories[0].modules[0]]]) {
-    const raw = structuredClone(f.config);
-    if (modules === undefined) delete raw.repositories[0].modules;
-    else raw.repositories[0].modules = modules;
-    save(f.configFile, raw);
-    const config = configFrom(f.configFile, f.env, {dryRun: true});
-    const expected = modules?.[0] ?? {name: 'app', path: '.'};
-    for (const structured of [false, true]) {
-      object.document.data = {...original, body: structured ? 'Goal: required change' : 'Goal: required change\nRepository: app',
-        ...(structured ? {repository: 'app', steps: ['Make the required change.']} : {})};
-      const before = structuredClone(object);
-      const {ticket} = taskInput(config, object);
-      assert.equal(ticket.moduleId, expected.name);
-      assert.equal(ticket.module, expected.path);
-      assert.deepEqual(ticket.modulePaths, expected.paths ?? [expected.path]);
-      assert.equal((await nextTask(config)).candidate.id, object.address);
-      assert.deepEqual(object, before);
-      object.document.data.body += '\nModule: unknown';
-      assert.throws(() => taskInput(config, object), /Task module is not configured/);
-      const refusal = (await nextTask(config)).selectionIssues.find(issue => issue.task === object.address);
-      assert.equal(refusal.revision, object.current_revision);
-      assert.match(refusal.message, /declared unknown, configured/);
-    }
+  for (const declaration of ['', '\nModule: unknown', '\nModule: first\nModule: second']) {
+    object.document.data = {...original, body: 'Goal: change\nRepository: app' + declaration};
+    const before = structuredClone(object);
+    const {ticket} = taskInput(f.config, object);
+    assert.deepEqual(ticket.paths, f.config.repositories[0].paths);
+    assert.equal(Object.hasOwn(ticket, 'module'), false);
+    assert.equal(Object.hasOwn(ticket, 'moduleId'), false);
+    const selection = await nextTask(f.config);
+    assert.equal(selection.candidate.id, object.address);
+    assert(!selection.selectionIssues?.some(issue => issue.task === object.address));
+    assert.deepEqual(object, before);
   }
-  object.document.data = {...original, body: 'Goal: required change\nRepository: app'};
-  assert.throws(() => taskInput(f.config, object), /module is ambiguous/);
-  object.document.data.body += '\nModule: m1\nModule: m2';
-  assert.throws(() => taskInput(f.config, object), /more than one module/);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
 
-test('taskFields selects project labels or data paths, and no mapping reads no body label', async t => {
+test('taskFields maps only repository labels or data paths', async t => {
   const f = await setup(t, {launchLanes: false}), object = f.joppa.objects.get('task:t1');
   const original = structuredClone(object.document.data), base = structuredClone(f.config);
   const load = raw => { save(f.configFile, raw); return configFrom(f.configFile, f.env, {dryRun: true}); };
   const input = (config, data) => { object.document.data = {...original, ...data}; return taskInput(config, object).ticket; };
-  // Without taskFields, line labels are plain text. The sole repository and module apply.
-  const whole = load({...base, taskFields: undefined, repositories: [{...base.repositories[0], modules: undefined}]});
-  assert.equal(input(whole, {body: 'Goal: change\nRepository: other\nModule: unknown'}).module, '.');
-  assert.equal(input(whole, {body: 'Goal: change', steps: ['Make the change.']}).moduleId, 'app');
-  // Unmapped structured scope fields are ignored, and the contract does not render them.
+  const whole = load({...base, taskFields: undefined});
+  assert.equal(input(whole, {body: 'Goal: change\nRepository: other'}).repository, 'app');
   const ignored = input(whole, {body: 'Goal: change', repository: 'other', module: 'unknown', steps: ['Make the change.']});
-  assert.deepEqual([ignored.repository, ignored.moduleId, ignored.body], ['app', 'app', 'Goal: change\n\nHow:\n1. Make the change.']);
-  const mapped = load({...base, taskFields: {repository: 'data:repository', module: 'data:module'},
-    repositories: [{...base.repositories[0], modules: undefined}]});
-  assert.throws(() => input(mapped, {body: 'Goal: change', repository: 'other', steps: ['Make the change.']}),
-    /not configured or not unique/);
-  assert.throws(() => input(mapped, {body: 'Goal: change', module: 'unknown', steps: ['Make the change.']}),
-    /module is not configured/);
-  const custom = load({...base, taskFields: {repository: 'body:Target repo', module: 'data:scope.module'}});
-  assert.equal(input(custom, {body: 'Goal: change\nTarget repo: app', scope: {module: 'm2'}}).moduleId, 'm2');
-  assert.equal(input(custom, {body: 'Goal: change', scope: {module: 'm1'}}).moduleId, 'm1');
-  assert.throws(() => input(custom, {body: 'Goal: change\nModule: m1'}), /module is ambiguous/);
-  assert.throws(() => input(custom, {body: 'Goal: change', scope: {module: 'm3'}}), /module is not configured/);
-  assert.throws(() => input(custom, {body: 'Goal: change', scope: {module: ['m1']}}), /scope.module must be one line/);
-  assert.throws(() => input(custom, {body: 'Target repo: app\nTarget repo: app', scope: {module: 'm1'}}), /ambiguous/);
-  // A second repository removes the sole choice: selection skips the Task without a read of its parent.
-  const two = {...custom, taskFields: {module: 'data:scope.module'},
-    repositories: [...custom.repositories, {...custom.repositories[0], id: 'other'}]};
-  object.document.data = {...original, body: 'Goal: change', scope: {module: 'm1'}};
+  assert.deepEqual([ignored.repository, ignored.body], ['app', 'Goal: change\n\nHow:\n1. Make the change.']);
+  const mapped = load({...base, taskFields: {repository: 'data:repository'}});
+  assert.throws(() => input(mapped, {body: 'Goal: change', repository: 'other'}), /not configured or not unique/);
+  const custom = load({...base, taskFields: {repository: 'body:Target repo'}});
+  assert.equal(input(custom, {body: 'Goal: change\nTarget repo: app'}).repository, 'app');
+  assert.throws(() => input(custom, {body: 'Target repo: app\nTarget repo: app'}), /ambiguous/);
+  const two = {...custom, taskFields: undefined, repositories: [...custom.repositories, {...custom.repositories[0], id: 'other'}]};
+  object.document.data = {...original, body: 'Goal: change'};
   assert.notEqual((await nextTask(two)).candidate?.id, object.address);
   assert.throws(() => taskInput(two, object), /not configured or not unique/);
-  for (const taskFields of [{repository: 'Repository'}, {repository: 'body:'}, {module: 'data:a..b'}, {other: 'body:X'}]) {
-    assert.throws(() => load({...base, taskFields}), /taskFields maps repository and module/);
+  for (const taskFields of [{repository: 'Repository'}, {repository: 'body:'}, {module: 'data:module'}, {other: 'body:X'}]) {
+    assert.throws(() => load({...base, taskFields}), /taskFields maps repository/);
   }
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
 });
@@ -137,7 +108,7 @@ test('held Tasks count only configured repositories regardless of project member
 
 test('unrelated structured contracts do not need executable steps or checks', async t => {
   const f = await packageFixture(t), task = f.objects.get('task:t1');
-  f.run.config.taskFields = {repository: 'data:repository', module: 'body:Module'};
+  f.run.config.taskFields = {repository: 'data:repository'};
   Object.assign(task.document.data, {body: 'External work', repository: 'unknown', steps: [], checks: []});
   task.document.parent = 'ac:unavailable';
   for (const assignee of [undefined, 'another-run']) {

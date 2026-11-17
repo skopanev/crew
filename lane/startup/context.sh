@@ -9,7 +9,6 @@ context_vars=(
   --var "LANE_MEMORY_CONFIG=/workspace/$(basename "$context_dir")/config.json"
   --var "LANE_MEMORY_PROJECT=$project"
   --var "LANE_MEMORY_TICKET=$ticket"
-  --var "LANE_MEMORY_MODULE=$module"
 )
 for role in scout coder reviewer gitfix; do
   [[ "$role" != scout || "${LANE_SCOUT:-true}" != false ]] || continue

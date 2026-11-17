@@ -9,7 +9,7 @@ sh ./lane-launcher/dolber-joppa.sh ./lane-launcher/my-project.json
 ```
 
 Copy `dolber-joppa.example.json` to your local config. Local JSON configs are ignored by Git.
-Set the workspace, repositories, modules, checks, mounts, image and lane limit there.
+Set the workspace, repositories, writable paths, checks, mounts, image and lane limit there.
 One authenticated worker can serve all lane slots. Set their number with `limit`.
 Keep credentials outside every mounted directory.
 
@@ -22,8 +22,8 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
-A Task without a module uses the repository's only configured module. Multiple modules need an explicit choice.
-An explicit module mismatch remains a refusal. The dashboard shows refused Tasks and their reason.
+The repository config supplies the writable paths. Task text cannot replace those paths.
+The dashboard shows refused Tasks and their reason.
 Set `selectionNotify` to send each refusal once through the existing Agntbus MCP endpoint:
 
 ```json
@@ -72,33 +72,19 @@ Computed status can change without a Task revision. This filter does not lock th
 Existing dependency and contract guards still apply. The filter grants no write access and does not change Task data.
 Local revision pins must be positive integers. Remote dependencies retain their access and revision checks.
 
-Set `taskFields` to tell Crew where a Task names its repository and module. Crew has no default label:
+Set `taskFields` to tell Crew where a Task names its repository. Crew has no default label:
 
 ```json
-{"taskFields": {"repository": "body:Repository", "module": "data:scope.module"}}
+{"taskFields": {"repository": "body:Repository"}}
 ```
 
-`body:<label>` reads each body line that starts with `<label>:`. `data:<field.path>` reads one text field of the Task data.
-Structured Tasks follow the same mapping. Unmapped `repository` or `module` fields are ignored and are not rendered.
-For Tasks from the bundled Joppa planner, use its stored data fields explicitly:
-
-```json
-{"taskFields": {"repository": "data:repository", "module": "data:module"}}
-```
-
-The planner still writes those fields. This change does not modify its scope parser.
-Existing configs that use body labels must now set their `body:` mappings before restarting Dolber.
-Without a mapping, a single-repository config treats every otherwise eligible Task as work for that repository.
-Each field has one source. Crew does not try another source when the selected field is missing.
-Use a consistent Task format, or separate configs and filters for different formats in the same workspace.
-Dispatchers that share a workspace must set `taskFields` or `joppa.filter` to select their own work.
-Without a value, Crew uses the sole configured repository, then the sole module of that repository.
-With several choices and no value, the queue skips the Task and the claim refuses it.
-An explicit value must name a configured repository or module. Two values for one field are refused.
+`body:<label>` reads a line that starts with `<label>:`. `data:<field.path>` reads a text field of the Task data.
+Structured Tasks follow the same mapping. Each field has one source.
+Without a value, Crew uses the sole configured repository. With several repositories, the queue skips the Task.
+An explicit value must name a configured repository. Two repository declarations are refused.
 A Task that names only an unknown repository belongs to another dispatcher and is skipped.
-Omit the repository's `modules` config to use the whole repository, with its repository ID as the module name.
+Set `repositories[].paths` to the writable roots inside that repository. The default is `["."]`.
 Selection, claim, Requirement delivery and the dependency guard use the same resolver.
-Module paths remain inside the selected repository.
 The lane reads a snapshot of the claimed Task. Joppa credentials stay on the host.
 The snapshot includes the direct parent as acceptance context. The Task contract defines the execution scope.
 Completion checks that both authored documents remain unchanged.
@@ -171,8 +157,8 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `limit` | Maximum concurrent lanes, independent of the number of authenticated workers |
 | `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
-| `repositories` | Map contract names to source paths, branches, CBM projects, modules and checks |
-| `taskFields` | Optional `repository` and `module` sources: `body:<line label>` or `data:<field.path>` |
+| `repositories` | Map contract names to source paths, branches, CBM projects, writable paths and checks |
+| `taskFields` | Optional `repository` source: `body:<line label>` or `data:<field.path>` |
 | `reviewCommands` | Checks before expert review. Required for branch and Requirement delivery. A repository value overrides the dispatcher value. Target delivery defaults to `gateCommands` |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |

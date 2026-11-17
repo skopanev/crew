@@ -111,7 +111,7 @@ test('Joppa package preserves a single Task ticket and execution identifier', as
   assert.equal(f.run.claim.id, executionId('task:t1'));
   assert.equal(f.run.claim.ticket.id, executionId('task:t1'));
   assert.equal(f.run.claim.ticket.body, f.objects.get('task:t1').document.data.body);
-  assert.deepEqual(f.run.claim.ticket.modulePaths, ['src/a', 'tests/a']);
+  assert.deepEqual(f.run.claim.ticket.paths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
   assert.equal(f.run.claim.digest, f.run.claim.tasks[0].digest);
 });
 

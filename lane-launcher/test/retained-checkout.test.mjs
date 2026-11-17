@@ -138,10 +138,10 @@ test('reuse fails closed on any mismatch', async t => {
   await refused(/head changed/);
   git(x.checkout, 'reset', '-q', '--hard', 'HEAD~1');
   for (const run of [x.run, x.prior]) {
-    run.claim.ticket.modulePaths = ['src'];
+    run.claim.ticket.paths = ['src'];
     x.savePrior();
-    await refused(/outside the Task modulePaths/);
-    run.claim.ticket.modulePaths = ['a.txt'];
+    await refused(/outside the Task paths/);
+    run.claim.ticket.paths = ['a.txt'];
     x.savePrior();
   }
   git(x.checkout, 'remote', 'set-url', 'origin', 'ssh://example.invalid/other.git');

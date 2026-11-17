@@ -27,9 +27,9 @@ test('Joppa package claims atomically and preserves each Task contract and scope
   assert.deepEqual(mutations[0].args.operations.map(({command}) => [command.op, `${command.kind}:${command.id}`, command.revision]),
     [['save_object', 'task:t1', 3], ['save_object', 'task:t2', 3]]);
   assert(mutations[0].args.operations.every(({command}) => command.data.assignee === f.run.claim.assignee));
-  assert.deepEqual(f.run.claim.ticket.modulePaths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
-  assert.deepEqual(f.run.claim.ticket.tasks[0].modulePaths, ['src/a', 'tests/a']);
-  assert.deepEqual(f.run.claim.ticket.tasks[1].modulePaths, ['src/b', 'tests/b']);
+  assert.deepEqual(f.run.claim.ticket.paths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
+  assert.deepEqual(f.run.claim.ticket.tasks[0].paths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
+  assert.deepEqual(f.run.claim.ticket.tasks[1].paths, ['src/a', 'tests/a', 'src/b', 'tests/b']);
   assert.match(f.run.claim.ticket.body, /Task 1: task:t1/);
   assert.equal(f.run.claim.ticket.tasks[0].parentContext.address, 'ac:a1');
   assert.equal(f.run.claim.ticket.tasks[1].parentContext.address, 'ac:a2');

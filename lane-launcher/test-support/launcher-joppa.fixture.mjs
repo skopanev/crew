@@ -186,9 +186,9 @@ async function packageFixture(t, mode = 'success') {
     stop: {kind: 'process', field: 'ends_when'},
     query: {kind: 'lesson', filter_env: {project: 'LANE_MEMORY_PROJECT'}, fields: ['title', 'body'], limit: 10, max_chars: 32768}};
   // The fixture Task bodies use explicit legacy line labels.
-  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, taskFields: {repository: 'body:Repository', module: 'body:Module'}, joppa: {url: baseUrl,
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, taskFields: {repository: 'body:Repository'}, joppa: {url: baseUrl,
     workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
-    modules: [{name: 'm1', path: 'src/a', paths: ['src/a', 'tests/a']}, {name: 'm2', path: 'src/b', paths: ['src/b', 'tests/b']}]}]};
+    paths: ['src/a', 'tests/a', 'src/b', 'tests/b']}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',
     task: 'task:t1', taskRevision: 3, tasks: [1, 2].map(index => ({address: `task:t${index}`, revision: 3})),
     executionId: executionId('req:r\napp'), runFolder: path.join(root, 'lane')};

@@ -8,7 +8,7 @@ RUNS_FOLDER="${LANE_RUNS_FOLDER:-$HOME/.medulla/lane-runs}"
 TOOLING_ROOT="$(cd "$WORKFLOW_DIR/.." && pwd)"
 source "$WORKFLOW_DIR/startup/usage.sh"
 
-ticket="" project="" source_root="" module="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
+ticket="" project="" source_root="" ssh_dir="${LANE_SSH_DIR:-}" cbm_command="" cbm_cache="" dispatcher_id=""
 image="${MEDULLA_IMAGE:-medulla-crew:latest}"
 after_land=""
 test_command='[]'
@@ -27,7 +27,7 @@ while (( $# )); do
     # Removed flags must not reach Medulla as passthrough mounts.
     --repo|--repo=*) say "run.sh: ${1%%=*} was removed; use --source-root"; exit 2 ;;
     --source-root) source_root="${2:-}"; shift 2 ;;
-    --module) module="${2:-}"; shift 2 ;;
+    --module|--module=*) say 'run.sh: --module was removed; configure repository paths'; exit 2 ;;
     --planning-result|--planning-result=*|--planning-task|--planning-task=*)
       say "run.sh: ${1%%=*} was removed with the legacy planner"; exit 2 ;;
     --runs-folder|--runs-folder=*) say "run.sh: use LANE_RUNS_FOLDER; dispatcher identity must remain in the run path"; exit 2 ;;
@@ -108,12 +108,6 @@ check_mountpoint() {
 # The host worker starts every lane from a Joppa Task claim.
 [[ "${LANE_SOURCE:-}" == joppa ]] || { say "run.sh: start through the Joppa lane worker"; exit 2; }
 ticket_json="$(jq -ec '.ticket | select(.source == "joppa")' "$claim_file")"
-# An explicit module asserts the ticket's module; it cannot replace it.
-stored="$(jq -r '.module // empty' <<<"$ticket_json" 2>/dev/null || true)"
-[[ -n "$stored" ]] || { say "run.sh: ticket $ticket declares no module; set it on the ticket"; exit 2; }
-[[ -z "$module" || "$module" == "$stored" ]] || {
-  say "run.sh: --module $module disagrees with ticket module $stored"; exit 2; }
-module="$stored"
 
 # The configured repository of the claimed Task; no fallback to another repository.
 source_root="$(cd "$source_root" && pwd -P)"
@@ -264,7 +258,7 @@ medulla \
   --var "ticket_title=$(jq -r '.title // empty' <<<"$ticket_json")" \
   --var "project_name=$project" \
   --var "project_dir=$project_dir" \
-  --var "module_name=$module" \
+  --var 'module_name=.' \
   --var "gate_commands=$gate_json" \
   --var "review_commands=$review_json" \
   --var "gate_timeout_seconds=$gate_timeout" \

@@ -72,7 +72,7 @@ try {
     run.repository = run.config.repositories.find(repo => repo.id === run.repositoryId);
     if (!run.repository) throw new Error('Finalization repository is not configured');
     finalizationTicket = {id: run.executionId, source: 'joppa', address: run.requirement,
-      repository: run.repository.id, module: '.', title: `Finalize ${run.requirement}`};
+      repository: run.repository.id, title: `Finalize ${run.requirement}`};
     announce(`[lane] FINALIZE ${run.requirement} · no Task claim`);
   } else {
     announce(`[lane] CLAIM ${run.ticket}`);
@@ -159,7 +159,7 @@ try {
   }
   if (!run.finalizeOnly) {
     const context = prepareContext(run.config.context, {ticket: run.ticket, project: run.workspace,
-      module: run.claim.ticket.module, worktree: `/workspace/${run.executionId}`});
+      worktree: `/workspace/${run.executionId}`});
     contextDir = context.dir;
     const hooks = prepareHooks(run.config.hooks);
     hooksDir = hooks.dir;
