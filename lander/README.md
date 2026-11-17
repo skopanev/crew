@@ -38,7 +38,9 @@ Use `batch.min_size: 3` and `batch.unit_field: "data.delivery.branch"` to wait f
 Set `batch.max_wait_seconds: 900` and `batch.age_field: "data.delivery.pushed_at"` to flush smaller batches after 15 minutes.
 Set `interval_seconds: 60` to check the queue every minute. All Tasks of each selected branch enter the same claim.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
-The configured gate timeout bounds each check and the push, including repository hooks. Medulla bounds each stage.
+The workflow has one deadline of 3600 seconds and sets no node timeouts.
+Native `on_timeout` runs `failed` once to release claims and clean the integration checkout.
+The configured gate timeout also bounds each command, including repository hooks.
 
 ## Failures
 

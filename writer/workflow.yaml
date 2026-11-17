@@ -1,9 +1,11 @@
 version: '2'
 start: prepare
-# Node timeouts and the finite rework count bound the run. A global deadline must not skip claim release.
-timeout: 0
+# The workflow deadline invokes failed once to release its claim.
+timeout: &workflow_timeout 3600
+on_timeout: failed
+# Override Medulla's shorter action fallback with the same global budget.
 defaults:
-  timeout: 60
+  timeout: *workflow_timeout
 vars:
   PLANNING_PYTHON: python3
   # launch.py supplies the shared flow stages, the selected item and the publication policy.
@@ -24,7 +26,6 @@ vars:
   critique: ''
 nodes:
   prepare:
-    timeout: 300
     shell: |
       set -eu
       for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
@@ -54,7 +55,6 @@ nodes:
       __failed__: failed
       __default__: failed
   author:
-    timeout: 1200
     max_attempts: 2
     # Agents get no tracker credentials, no MCP servers and no tools. The prompt holds everything they need.
     env: &agent_environment
@@ -142,7 +142,6 @@ nodes:
       __failed__: failed
       __default__: failed
   critics:
-    timeout: 1200
     max_attempts: 2
     env:
       LANE_MEMORY_CONFIG: ''
@@ -245,7 +244,6 @@ nodes:
       __default__: failed
   publish:
     # The shared stage adds the claim release and refuses operations outside config.publication.
-    timeout: 660
     shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish'
     on_signal:
       READY: __exit_ok__
@@ -255,7 +253,6 @@ nodes:
   failed:
     # A shared stage that already recorded result.json released or retained its claim. Do not repeat it.
     # A business rejection leaves failure.txt. Other stops record the last step message.
-    timeout: 660
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"

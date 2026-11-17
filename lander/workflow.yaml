@@ -1,9 +1,11 @@
 version: '2'
 start: prepare
-# Finite stages and one target rebuild. Node timeouts preserve the failure release path.
-timeout: 0
+# The workflow deadline invokes failed once to release its claim.
+timeout: &workflow_timeout 3600
+on_timeout: failed
+# Override Medulla's shorter action fallback with the same global budget.
 defaults:
-  timeout: 60
+  timeout: *workflow_timeout
 vars:
   PLANNING_PYTHON: python3
   CREW_FLOW_STAGES: ''
@@ -11,7 +13,6 @@ vars:
   FAILED_DATA: ''
 nodes:
   prepare:
-    timeout: 300
     shell: |
       set -eu
       [ -n "$WORKTREE_ROOT" ] && [ -n "$FAILED_DATA" ]
@@ -21,7 +22,6 @@ nodes:
       __failed__: failed
       __default__: failed
   build:
-    timeout: 18000
     shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" build'
     on_signal:
       BUILT: verify
@@ -29,21 +29,18 @@ nodes:
       __failed__: failed
       __default__: failed
   verify:
-    timeout: 660
     shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" verify'
     on_signal:
       VERIFIED: push
       __failed__: failed
       __default__: failed
   push:
-    timeout: 18000
     shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" push'
     on_signal:
       REPORT: publish
       __failed__: failed
       __default__: failed
   publish:
-    timeout: 660
     shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish'
     on_signal:
       READY: clean_success
@@ -51,7 +48,6 @@ nodes:
       __failed__: failed
       __default__: failed
   failed:
-    timeout: 660
     shell: |
       set -eu
       if [ -e "$MEDULLA_RUN_DIR/artifacts/result.json" ]; then
@@ -59,9 +55,10 @@ nodes:
       else
         "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
       fi
+      node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup
     on_signal:
-      __default__: clean_failure
-      __failed__: clean_failure
+      __default__: __exit_fail__
+      __failed__: __exit_fail__
   clean_success:
     shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
     on_signal:
