@@ -64,6 +64,43 @@ def acceptance_check(check, root=None):
     return check
 
 
+def existing(root):
+    """Select recorded Task tests only when their files and titles already exist at HEAD."""
+    artifacts = root.parent
+    ticket = json.loads((artifacts / "ticket.json").read_text())
+    paths = []
+    for task in ticket.get("tasks") or [ticket]:
+        tests = task.get("acceptanceTests")
+        if not isinstance(tests, list) or not tests:
+            raise ValueError("every Task needs recorded acceptanceTests for existing-code verification")
+        for test in tests:
+            if (not isinstance(test, dict) or not isinstance(test.get("command"), str)
+                    or not isinstance(test.get("title"), str) or not test["title"].strip()):
+                raise ValueError("existing-code verification needs a Test command and title")
+            reporters = re.findall(r"Reporter name:[ \t]*([^\r\n]+)", test.get("body", ""))
+            if len(reporters) > 1 or reporters and " > " not in reporters[0]:
+                raise ValueError("existing-code verification needs one unambiguous Reporter name")
+            argv = shlex.split(test["command"])
+            parts = reporters[0].split(" > ") if reporters else []
+            path = Path(parts[0].strip()) if len(parts) > 1 else Path(argv[-1]) if argv else Path()
+            title = parts[-1].strip() if len(parts) > 1 else test["title"]
+            if (path.is_absolute() or not path.is_file()
+                    or not path.resolve().is_relative_to(Path.cwd().resolve())):
+                raise ValueError("the Test command must end with a file inside this checkout")
+            name = path.as_posix()
+            if parts and not any(Path(arg).as_posix() == name for arg in argv):
+                raise ValueError("Reporter file differs from the Test command")
+            git("--literal-pathspecs", "ls-files", "--error-unmatch", "--", name)
+            if not title or title not in git("show", f"HEAD:{name}"):
+                raise ValueError(f"recorded Test name is absent at HEAD: {title}")
+            if name not in paths:
+                paths.append(name)
+    if not paths:
+        raise ValueError("existing-code verification needs Task test files")
+    test_bindings.write(artifacts / "ticket-checks.json", paths)
+    print(f"Verify existing code with {len(paths)} recorded Task test file(s).")
+
+
 def plan():
     commands = json.loads(os.environ.get("gate_commands", "[]"))
     if not isinstance(commands, list) or not commands or any(
@@ -267,12 +304,12 @@ def verify(root):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "verify", "bindings"):
-        raise ValueError("usage: gates.py run|verify|bindings")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "verify", "bindings", "existing"):
+        raise ValueError("usage: gates.py run|verify|bindings|existing")
     root = Path(os.environ["MEDULLA_RUN_DIR"]).resolve() / "artifacts/gates"
     root.mkdir(parents=True, exist_ok=True)
     # bindings reads the receipt that run wrote. It never runs a check again.
-    {"run": run, "verify": verify, "bindings": test_bindings.bind}[sys.argv[1]](root)
+    {"run": run, "verify": verify, "bindings": test_bindings.bind, "existing": existing}[sys.argv[1]](root)
 
 
 if __name__ == "__main__":

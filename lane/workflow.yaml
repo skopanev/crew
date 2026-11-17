@@ -516,8 +516,14 @@ nodes:
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then change_base="$(cat .git/lane-base)"; fi
       if [ "${VERIFY_ONLY}" != "true" ] && git diff --cached --quiet "$base" -- 2>/dev/null \
          && [ -z "$(git log --oneline "${change_base}..HEAD" 2>/dev/null)" ]; then
-        echo "<signal:NOTHING_DONE>кодер сказал OK, но дерево не изменилось</signal:NOTHING_DONE>"
-        exit 0
+        if ! verification="$(python3 "${TOOLING_ROOT}/lane/bin/gates.py" existing 2>&1)"; then
+          printf '%s\n' "$verification" >&2
+          echo '<signal:NOTHING_DONE>No source changes and no verified Task test files.</signal:NOTHING_DONE>'
+          exit 0
+        fi
+        printf '%s\n' "$verification"
+        export VERIFY_ONLY=true
+        echo '<signal:var key=VERIFY_ONLY>true</signal:var>'
       fi
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       export PATH="/home/medulla/.bun/bin:${PATH}"
