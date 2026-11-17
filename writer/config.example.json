@@ -10,7 +10,7 @@
   "selection": {
     "kind": "ac",
     "data": {
-      "stage": "tests_needed"
+      "stage": "to_implement"
     },
     "assignee": ""
   },
@@ -47,7 +47,6 @@
     "TASK_KIND": "task",
     "WAITING_STAGE": "waiting_for_tests",
     "READY_STAGE": "to_implement",
-    "APPROVAL_REVISION_FIELD": "approved_revision",
     "REWORK_LIMIT": 1
   },
   "context": {

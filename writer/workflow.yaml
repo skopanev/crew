@@ -17,7 +17,6 @@ vars:
   TASK_KIND: ''
   WAITING_STAGE: ''
   READY_STAGE: ''
-  APPROVAL_REVISION_FIELD: ''
   REWORK_LIMIT: '1'
   round: '1'
   draft: ''
@@ -28,7 +27,7 @@ nodes:
     timeout: 300
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE APPROVAL_REVISION_FIELD; do
+      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
@@ -38,10 +37,9 @@ nodes:
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
-      jq -e --arg field "$APPROVAL_REVISION_FIELD" '.selected as $item | ($item.current_revision | type == "number") and
-        $item.current_revision > 0 and $item.document.data[$field] == $item.current_revision' \
+      jq -e --arg ready "$READY_STAGE" '.selected.document.data.stage == $ready' \
         "$MEDULLA_RUN_DIR/artifacts/input.json" >/dev/null || {
-        echo 'The selected item needs approval of its current revision.' > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+        echo 'The selected item is not in the configured ready stage.' > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
         exit 2
       }
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
