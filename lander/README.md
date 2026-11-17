@@ -1,7 +1,7 @@
 # Lander
 
 Lander integrates checked Task branches through the existing configured dispatcher and Medulla.
-It uses no model and has no separate queue, claim store, or dashboard.
+It uses no model, separate queue, or claim store.
 
 ```sh
 sh lane-launcher/lander.sh /absolute/lander.json
@@ -90,3 +90,16 @@ Run `node lander/report.mjs /absolute/lander.json` from an existing timer.
 The command only reads the pending queue and local run evidence.
 It prints pending branch counts, batch sizes, outcome codes, and measured push-to-landing seconds for the last hour.
 A missing timestamp remains unmeasured. An unconfirmed native publication remains explicit in the report.
+
+## Monitor
+
+```sh
+sh lane-launcher/lander-status.sh /absolute/lander.json /absolute/run-stats.jsonl
+```
+
+The optional JSONL file is the existing run collector output.
+The monitor shares Dolber's table renderer and reads native run files every five seconds.
+It shows the claim time, distinct branch count, Task IDs, current stage, outcome, and elapsed time.
+An active build shows `full check` when its gate artifacts exist.
+Green requires confirmed target ancestry and native publication. The monitor writes no data and takes no dispatcher lock.
+Use `--once` to print one snapshot without an interactive screen.

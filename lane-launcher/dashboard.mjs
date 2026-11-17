@@ -80,11 +80,11 @@ function reasonFor(run) {
   return reasonCode(completionEvent(run, run.result, artifacts));
 }
 
-export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE', finished = false} = {}) {
+export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE', finished = false, statusWidth: statusLimit = 8} = {}) {
   const width = Math.max(1, process.stdout.columns || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
-  const statusWidth = Math.min(8, Math.max(6, ...recent.map(row => row.status.length)));
+  const statusWidth = Math.min(statusLimit, Math.max(6, ...recent.map(row => row.status.length)));
   const length = value => Array.from(plain(value || '')).length;
   const ticketWidth = identityWidth || Math.max(length(identityLabel), ...recent.map(row => length(row.ticket)));
   const localTime = value => {
@@ -95,6 +95,8 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     {key: 'started', label: 'STARTED', width: 19, value: row => localTime(row.start)},
     ...(finished ? [{key: 'finished', label: 'FINISHED', width: 19,
       value: row => row.active || !row.end ? '' : localTime(row.end)}] : []),
+    ...(recent.some(row => row.branches != null) ? [{key: 'branches', label: 'BRANCHES', width: 8,
+      value: row => row.branches ?? '—'}] : []),
     {key: 'ticket', label: identityLabel, width: ticketWidth, value: row => row.ticket},
     ...(recent.some(row => row.title) ? [{key: 'title', label: titleLabel,
       width: Math.min(60, Math.max(length(titleLabel), ...recent.map(row => length(row.title)))), value: row => row.title || ''}] : []),
@@ -126,7 +128,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     const codes = [row.status, row.stage].map(value => String(value || '').toUpperCase());
     const tone = codes.some(code => ['OWNER_STOPPED', 'HOLD', 'HELD'].includes(code)) ? 'gray' :
       codes.some(code => ['GATE_FAIL', 'OVER_TIME', 'TIMEOUT', 'LAND_FAILED', 'BASELINE_RED'].includes(code)) ? 'red' :
-      codes.some(code => ['QUEUED', 'PENDING_LANDING'].includes(code)) ? 'orange' :
+      codes.some(code => ['QUEUED', 'PENDING_LANDING', 'PARTIAL', 'PARTIAL_LANDING', 'PUSHED'].includes(code)) ? 'orange' :
       row.active ? 'blue' : ['BLOCKED', 'NOT_READY', 'NEEDS_HUMAN', 'DEFERRED'].includes(row.status) ? 'yellow' : 'red';
     const overtime = new Date(row.end || Date.now()) - new Date(row.start) > 3600000;
     const cells = columns.map(column => cell(column.value(row), column));
