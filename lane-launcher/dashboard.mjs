@@ -81,7 +81,7 @@ function reasonFor(run) {
 }
 
 export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE', finished = false, statusWidth: statusLimit = 8} = {}) {
-  const width = Math.max(1, process.stdout.columns || 80);
+  const width = Math.max(1, process.stdout.columns || Number(process.env.COLUMNS) || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
   const statusWidth = Math.min(statusLimit, Math.max(6, ...recent.map(row => row.status.length)));
@@ -106,7 +106,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     {key: 'time', label: 'ELAPSED', width: 8, value: row => duration(row.start, row.end || Date.now())},
   ];
   const tableWidth = () => columns.reduce((total, column) => total + column.width, 2 * (columns.length - 1));
-  for (const key of ['finished', 'title', 'started', 'run', 'stage']) {
+  for (const key of ['finished', 'title', 'run', 'started', 'stage']) {
     if (tableWidth() <= width) break;
     columns = columns.filter(column => column.key !== key);
   }
