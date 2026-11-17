@@ -2,7 +2,9 @@
 // Append completed native run evidence. Lock the output file with lockf or flock.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {completionEvent, reasonCode} from '../notify.mjs';
+import {scopeDirectory} from './scope.mjs';
 
 const json = file => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
 const dirs = root => fs.existsSync(root) ? fs.readdirSync(root, {withFileTypes: true})
@@ -118,7 +120,8 @@ try {
   let added = 0, errors = 0;
   try {
     for (const [source, root, collect] of [
-      ['dolber', path.join(dolber.stateDir, 'runs'), lane], ['lander', integration.runs_folder, lander],
+      ['dolber', path.join(scopeDirectory(dolber.stateDir || path.join(os.homedir(), '.medulla/lane-launcher'), dolber.id), 'runs'), lane],
+      ['lander', integration.runs_folder, lander],
     ]) {
       for (const folder of dirs(root)) {
         const key = source + ':' + path.basename(folder);
