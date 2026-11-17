@@ -33,7 +33,7 @@ function declared(config, data, name) {
 export function taskRepositoryChoice(config, data) {
   const repositories = config?.repositories || [], values = declared(config, data, 'repository');
   const known = values.filter(id => repositories.some(repo => repo.id === id));
-  if (!known.length) return values.length || repositories.length !== 1 ? null : repositories[0];
+  if (!known.length) return null;
   require(values.length === 1, 'Task repository declaration is ambiguous');
   return repositories.find(repo => repo.id === known[0]);
 }
