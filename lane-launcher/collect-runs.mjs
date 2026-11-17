@@ -105,11 +105,13 @@ function lander(folder) {
 }
 
 try {
-  const [dolberFile, landerFile, output] = process.argv.slice(2);
-  if (!dolberFile || !landerFile || !output || process.argv.length !== 5) {
-    throw new Error('Usage: node collect-runs.mjs DOLBER.json LANDER.json OUTPUT (lock OUTPUT to serialize collectors)');
+  const args = process.argv.slice(2);
+  const [dolberFile, landerFile, output] = args.length === 2 ? [args[0], null, args[1]] : args;
+  if (!dolberFile || !output || ![2, 3].includes(args.length)) {
+    throw new Error('Usage: node collect-runs.mjs DOLBER.json [LANDER.json] OUTPUT (lock OUTPUT to serialize collectors)');
   }
-  const dolber = json(dolberFile), integration = json(landerFile);
+  const dolber = json(dolberFile), integration = landerFile ? json(landerFile) : null;
+  if (!dolber || landerFile && !integration) throw new Error('Collector config is missing');
   const previous = fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '';
   if (previous && !previous.endsWith('\n')) throw new Error('The output has an incomplete final row. Preserve it before repair.');
   const seen = new Set(previous.split('\n').filter(Boolean).map(line => {
@@ -121,7 +123,7 @@ try {
   try {
     for (const [source, root, collect] of [
       ['dolber', path.join(scopeDirectory(dolber.stateDir || path.join(os.homedir(), '.medulla/lane-launcher'), dolber.id), 'runs'), lane],
-      ['lander', integration.runs_folder, lander],
+      ...(integration ? [['lander', integration.runs_folder, lander]] : []),
     ]) {
       for (const folder of dirs(root)) {
         const key = source + ':' + path.basename(folder);
