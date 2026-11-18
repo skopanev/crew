@@ -25,6 +25,25 @@ Invalid drafts and critic refusals use the same rework budget. The workflow has 
 The workflow sets no node timeouts. Its native `on_timeout` handler runs `failed` once after the deadline.
 The `failed` node records the reason in `failure.txt`, and the shared stage releases the claim with a note.
 
+To revise existing Tests, set `vars.TEST_OPERATION` to `update`, `publication.create_kinds` to `[]`,
+and `publication.update_kinds` to only the configured `TEST_KIND`. Include those direct children in `children`.
+Remove any `exclude_children` filter that excludes the existing Tests.
+The author uses their existing IDs. The same two critics review the revised text.
+Publication uses each child's frozen revision and sends only changed text fields. It preserves the parent, case, owner and relations.
+Earlier results remain as evidence for their earlier contract. Update mode changes no AC or Task stage.
+The host releases its existing selection claim. The normal revision checks refuse concurrent changes.
+The default operation remains `create`.
+Use `selection` to control which item stages can receive edits. Update mode adds no stage restriction of its own.
+An unchanged draft publishes no Test write and records `reason_code: NO_CHANGES`.
+
+For the kinds in the example config, the update overrides are:
+
+```json
+{"vars":{"TEST_OPERATION":"update"},"publication":{"file":"operations.json","allowed_operations":["save_object"],"create_kinds":[],"update_kinds":["test"]}}
+```
+
+Use your configured Test kind in place of `test` when its name differs.
+
 ## Configuration
 
 See `config.example.json`. The project supplies every native name:

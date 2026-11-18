@@ -19,6 +19,7 @@ vars:
   TASK_KIND: ''
   WAITING_STAGE: ''
   READY_STAGE: ''
+  TEST_OPERATION: create
   REWORK_LIMIT: '1'
   round: '1'
   draft: ''
@@ -34,6 +35,15 @@ nodes:
       done
       case "$REWORK_LIMIT" in
         ''|*[!0-9]*) echo 'writer: REWORK_LIMIT must be a nonnegative integer' >&2; exit 2 ;;
+      esac
+      case "$TEST_OPERATION" in
+        create) ;;
+        update)
+          printf '%s' "$FLOW_PUBLICATION" | jq -e --arg test "$TEST_KIND" \
+            '.create_kinds == [] and .update_kinds == [$test]' >/dev/null || {
+              echo 'writer: update requires no create kinds and only TEST_KIND in update_kinds' >&2; exit 2; }
+          ;;
+        *) echo 'writer: TEST_OPERATION must be create or update' >&2; exit 2 ;;
       esac
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
@@ -82,6 +92,7 @@ nodes:
       The critics score each Test with the questions of this contract:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
+      Test operation: {{var:TEST_OPERATION}}
       Assignment: {{var:writer_assignment}}
       Your previous draft (empty in the first round): {{var:draft}}
       Critic findings on your previous draft (empty in the first round): {{var:critique}}
@@ -97,38 +108,13 @@ nodes:
       a="$MEDULLA_RUN_DIR/artifacts"
       rm -f "$a"/critic-*.json
       if jq -e --arg test "$TEST_KIND" --arg task "$TASK_KIND" --arg waiting "$WAITING_STAGE" \
-        --slurpfile input "$a/input.json" '
-        $input[0] as $in | ($in.schema.types[$test] // {}) as $type | ($in.schema.test_results // {}) as $rules |
-        # required_fields is an object keyed by field or a list of field names.
-        ($type.fields // {}) as $fields |
-        ($type.required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end) as $required |
-        ([$in.children[]? | select(.kind == $test) | .document.data.title]) as $existing |
-        ([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
-          ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == ""))] | length) as $tasks |
-        def fits($limit): $limit == null or length <= $limit;
-        def name_ok: type == "string" and length > 0 and (explode | all(. >= 32)) and
-          fits($type.title_max_length) and fits($rules.name.max_length) and
-          ($rules.name.separator == null or $rules.name.min_parts == null or
-            (split($rules.name.separator) | length >= $rules.name.min_parts));
-        def field_ok: .key as $key | .value as $value | ($fields[$key] // null) as $field |
-          ($key != "title" and $key != "assignee") and $value != null and
-          ($field == null or (($field.from // "own") == "own" and
-            ($field.values == null or ($field.values | any(. == $value))))) and
-          (($value | type) != "string" or ($value | fits($type.field_max_length)));
-        def complete: . as $item | all($required[]; . as $key | $key == "title" or $item.data[$key] != null or
-          ($key == "owner" and $in.selected.document.data.owner != null));
-        (.tests | type == "array" and length > 0 and length + $tasks <= 98) and
-        ($rules.max_tests == null or (.tests | length) + ($existing | length) <= $rules.max_tests) and
-        all(.tests[]; type == "object" and (.id | type == "string" and test("^[A-Za-z0-9_-]+$")) and
-          (.title | name_ok) and ([.title] - $existing | length == 1) and
-          (.data | type == "object") and all(.data | to_entries[]; field_ok) and complete) and
-        ([.tests[].id] | length == (unique | length)) and ([.tests[].title] | length == (unique | length)) and
-        (.coverage | type == "string" and length > 0)' "$a/draft.json" >/dev/null; then
+        --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
+        -f "$MEDULLA_WORKFLOW_DIR/draft.jq" "$a/draft.json" >/dev/null; then
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
         printf '<signal:var key=draft_digest>%s</signal:var>\n' "${hash%% *}"
         echo '<signal:DRAFTED>The draft is ready for independent review.</signal:DRAFTED>'
       elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
-        echo '<signal:var key=critique>{"draft":"The draft does not match the output contract or the Test schema: unique ids and titles, no title of an existing Test, the name rules and limits, every required field, the listed values of each typed field, and a coverage statement."}</signal:var>'
+        echo '<signal:var key=critique>{"draft":"The draft must match the configured operation: unique ids and titles, no existing Test title in create mode, existing child IDs and preserved cases in update mode, name rules and limits, every required field, the listed values of each typed field, and complete coverage."}</signal:var>'
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The draft does not match the output contract or the Test schema.</signal:REVISE>'
       else
@@ -177,6 +163,7 @@ nodes:
       Mandatory role contract:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
+      Test operation: {{var:TEST_OPERATION}}
       Assignment: {{var:writer_assignment}}
       Draft digest: {{var:draft_digest}}
       Frozen draft: {{var:draft}}
@@ -195,34 +182,12 @@ nodes:
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" --arg task "$TASK_KIND" \
         --arg waiting "$WAITING_STAGE" --arg ready "$READY_STAGE" --slurpfile draft "$a/draft.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile claude "$a/critic-claude.json" \
-        --slurpfile input "$a/input.json" '
-        $draft[0] as $d | $input[0] as $in | ($d.tests | map(.id) | sort) as $ids |
-        {codex: $codex[0], claude: $claude[0]} as $reviews |
-        def valid: type == "object" and .draft_digest == $digest and (.tests | type == "array") and
-          ((.tests | map(.id) | sort) == $ids) and all(.tests[]; .score | type == "string" and test("^[01]{5}$")) and
-          (.coverage == "complete" or .coverage == "incomplete");
-        def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete" and
-          (.missing | type == "array" and length == 0);
-        ($in.schema.types[$test].required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end)
-          as $required |
-        (if $in.selected.document.data.owner
-         then {owner: $in.selected.document.data.owner} else {} end) as $owner |
-        if all($reviews[]; clean) then {approved: true, operations: (
-          [$d.tests[] | {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
-            parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
-            data: (.data + $owner + {title})}}] +
-          [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
-          ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == "")) |
-            {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
-              data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}] +
-          [{command: {op: "save_object", kind: $in.selected.kind,
-            id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
-            data: {stage: $ready}, reason: "Publish the reviewed Tests and prepare this item for implementation."}}])}
-        else {approved: false, critique: ($reviews | map_values(if valid then
-          {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else
-          {invalid: "The review does not match the critic output contract or reviewed another draft."} end))} end')"
+        --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
+        -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"
       if [ "$(printf '%s' "$verdict" | jq -r .approved)" = true ]; then
-        printf '%s' "$verdict" | jq '{operations}' > "$a/$file"
+        printf '%s' "$verdict" | jq 'if (.operations | length) == 0 then
+          {operations, outcome: {status: "published", reason: "No Test text changed.", reason_code: "NO_CHANGES"}}
+          else {operations} end' > "$a/$file"
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
       elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
