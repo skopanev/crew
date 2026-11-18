@@ -5,6 +5,9 @@ def valid: type == "object" and .draft_digest == $digest and (.tests | type == "
   (.coverage == "complete" or .coverage == "incomplete");
 def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete" and
   (.missing | type == "array" and length == 0);
+def coverage_only: valid and all(.tests[]; .score == "11111") and
+  (.missing | type == "array" and all(.[]; type == "string" and length > 0)) and
+  (if .coverage == "complete" then (.missing | length == 0) else (.missing | length > 0) end);
 (if $in.selected.document.data.owner
  then {owner: $in.selected.document.data.owner} else {} end) as $owner |
 if all($reviews[]; clean) then {approved: true, operations: (
@@ -23,6 +26,18 @@ if all($reviews[]; clean) then {approved: true, operations: (
   [{command: {op: "save_object", kind: $in.selected.kind,
     id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
     data: {stage: $ready}, reason: "Publish the reviewed Tests and prepare this item for implementation."}}] end))}
+elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) and
+  any($reviews[]; .coverage == "incomplete") then
+  ([$reviews[].missing[]] | unique) as $missing |
+  {approved: false, decision_required: true, operations: [
+    {command: {op: "save_object", kind: $in.selected.kind,
+      id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
+      data: {stage: $decision}, reason: "Return the item to its owner for missing acceptance coverage."}},
+    {command: {op: "note", target: $in.selected.address,
+      id: ("writer-missing-" + ($run | gsub("[^A-Za-z0-9_.-]"; "_") | .[-80:])),
+      text: ("Missing coverage:\n" + ($missing | join("\n") | .[0:750]) +
+        "\nRun: " + ($run | .[-100:]) + "\nFull findings: artifacts/critic-codex.json and artifacts/critic-claude.json")}}
+  ], outcome: {status: "blocked", reason_code: "COVERAGE_INCOMPLETE", reason: ($missing | join("; ") | .[0:1000])}}
 else {approved: false, critique: ($reviews | map_values(if valid then
   {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else
   {invalid: "The review does not match the critic output contract or reviewed another draft."} end))} end

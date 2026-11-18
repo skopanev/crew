@@ -19,6 +19,7 @@ vars:
   TASK_KIND: ''
   WAITING_STAGE: ''
   READY_STAGE: ''
+  DECISION_STAGE: ''
   TEST_OPERATION: create
   REWORK_LIMIT: '1'
   round: '1'
@@ -45,6 +46,10 @@ nodes:
           ;;
         *) echo 'writer: TEST_OPERATION must be create or update' >&2; exit 2 ;;
       esac
+      if [ "$TEST_OPERATION" = create ] && [ -n "$DECISION_STAGE" ]; then
+        printf '%s' "$FLOW_PUBLICATION" | jq -e '.allowed_operations | index("note") != null' >/dev/null || {
+          echo 'writer: DECISION_STAGE requires note publication permission' >&2; exit 2; }
+      fi
       # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
@@ -180,6 +185,7 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" --arg task "$TASK_KIND" \
+        --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
         --arg waiting "$WAITING_STAGE" --arg ready "$READY_STAGE" --slurpfile draft "$a/draft.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile claude "$a/critic-claude.json" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
@@ -189,6 +195,9 @@ nodes:
           {operations, outcome: {status: "published", reason: "No Test text changed.", reason_code: "NO_CHANGES"}}
           else {operations} end' > "$a/$file"
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
+      elif [ "$(printf '%s' "$verdict" | jq -r '.decision_required // false')" = true ]; then
+        printf '%s' "$verdict" | jq '{operations, outcome}' > "$a/$file"
+        echo '<signal:MISSING>The Tests passed, but acceptance coverage needs an owner decision.</signal:MISSING>'
       elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
         printf '<signal:var key=critique>%s</signal:var>\n' "$critique"
@@ -203,6 +212,7 @@ nodes:
       fi
     on_signal:
       APPROVED: publish
+      MISSING: publish
       REVISE: author
       REJECTED: failed
       __failed__: failed

@@ -20,6 +20,13 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
    The shared stage releases the claim in that transaction and refuses operations outside `config.publication`.
 
 A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
+Set `vars.DECISION_STAGE` to return coverage-only refusals to the item owner immediately in create mode.
+Both critics must review the same draft and score every Test `11111`.
+At least one critic must report incomplete coverage with a nonempty `missing` list. Other review failures keep the existing rework path.
+Writer publishes no Test or Task changes in this case. It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
+The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
+The configured publication policy must allow `note` and updates to the selected kind.
+An empty or omitted `DECISION_STAGE` keeps the existing rework path. Update mode keeps its existing stage behavior.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
 Invalid drafts and critic refusals use the same rework budget. The workflow has one deadline of 3600 seconds.
 The workflow sets no node timeouts. Its native `on_timeout` handler runs `failed` once after the deadline.
@@ -57,6 +64,7 @@ See `config.example.json`. The project supplies every native name:
 | `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit updates to the selected kind and Task kind |
 | `vars.TEST_KIND`, `vars.TASK_KIND` | Native kinds of new Tests and of the Tasks that wait for them |
 | `vars.WAITING_STAGE`, `vars.READY_STAGE` | Task stages before and after publication. The selected item also moves to `READY_STAGE` |
+| `vars.DECISION_STAGE` | Optional selected-item stage for coverage-only refusals, such as `to_decide` |
 | `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_CLAUDE_MODEL` | Optional model overrides |
 | `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |

@@ -76,7 +76,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         const failure = [...journal].reverse().find(row => ['failed', 'needs_human', '__exit_fail__'].includes(row.next)
           && !['failed', 'needs_human'].includes(row.node));
         stage = recovery ? 'RECOVERY_REQUIRED' : status === 'HUMAN' ? 'HUMAN' :
-          failure?.signal || (released?.status === 'confirmed' && !result ? 'INTERRUPTED' : status);
+          result?.reason_code || failure?.signal || (released?.status === 'confirmed' && !result ? 'INTERRUPTED' : status);
       }
       const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})-(.+)$/.exec(entry.name);
       const start = match ? new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}`).toISOString() : modified(folder);

@@ -1,8 +1,10 @@
 """Exercise configured publication against revision-checked native tracker operations."""
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -122,6 +124,34 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.assertTrue(result["needs_recovery"])
         self.assertFalse(result["claim_released"])
         self.assertEqual(len(self.api.batches), 1)
+
+    def test_writer_coverage_returns_the_item_and_note_in_one_claim_release(self):
+        self.config["publication"]["update_kinds"].append("criterion")
+        draft = {"tests": [{"id": "t1", "title": "A valid input is accepted", "data": {"body": "A test"}}]}
+        review = {"draft_digest": "frozen", "tests": [{"id": "t1", "score": "11111", "reasons": []}],
+                  "coverage": "incomplete", "missing": ["The required failure outcome is unspecified."], "summary": "Tests pass."}
+        values = {"draft": draft, "input": read(self.target / "input.json"), "codex": review, "claude": review}
+        args = ["jq", "-nc", "--arg", "digest", "frozen", "--arg", "test", "check", "--arg", "task", "work",
+                "--arg", "waiting", "waiting", "--arg", "ready", "ready", "--arg", "mode", "create",
+                "--arg", "decision", "needs_input", "--arg", "run", "writer-example"]
+        for name, value in values.items():
+            file = self.folder / (name + ".json")
+            write(file, value)
+            args.extend(["--slurpfile", name, str(file)])
+        value = json.loads(subprocess.check_output([*args, "-f", str(ROOT / "writer/publication.jq")], text=True))
+        self.assertTrue(value["decision_required"])
+        write(self.target / "operations.json", {key: value[key] for key in ("operations", "outcome")})
+        flow_publication.publish(self.api, self.config, self.target)
+        self.assertEqual(len(self.api.batches), 2)
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual([cmd["op"] for cmd in commands], ["save_object", "note"])
+        self.assertEqual(commands[0]["data"], {"stage": "needs_input", "assignee": None})
+        self.assertIn("Missing coverage", commands[1]["text"])
+        self.assertEqual(self.api.nodes["work:t"]["document"]["data"]["stage"], "waiting")
+        self.assertFalse(any(node["kind"] == "check" for node in self.api.nodes.values()))
+        result = read(self.target / "result.json")
+        self.assertEqual(result["reason_code"], "COVERAGE_INCOMPLETE")
+        self.assertTrue(result["claim_released"])
 
 
 if __name__ == "__main__":
