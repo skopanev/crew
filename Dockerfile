@@ -63,5 +63,10 @@ RUN set -eux; a="$(cat /tmp/arch)"; \
     unzip -q /tmp/tofu.zip -d /tmp/lane-tools; \
     install -m 755 /tmp/lane-tools/tofu /usr/local/bin/; \
     rm -rf /tmp/lane-tools /tmp/tofu.zip
+ARG CODEX_VERSION=0.170.0
+RUN npm_config_cache=/tmp/codex-install-cache \
+      npm install --global --prefix /usr/local "@openai/codex@${CODEX_VERSION}" \
+ && rm -rf /tmp/codex-install-cache
+
 USER ${USER_UID}:${USER_GID}
 ENTRYPOINT ["/usr/local/bin/lane-entrypoint.sh"]
