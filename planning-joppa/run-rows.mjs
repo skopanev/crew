@@ -18,6 +18,7 @@ const modified = file => {
 };
 
 export function plannerRows(root, current = null, limit = 30, scope = null) {
+  const tracked = new Map((Array.isArray(current) ? current : [current]).filter(Boolean).map(run => [run.folder, run]));
   let folders;
   try { folders = fs.readdirSync(root, {withFileTypes: true}); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
@@ -50,7 +51,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         try { return [JSON.parse(line)]; } catch { return []; }
       });
       const last = journal.at(-1);
-      const active = !result && (current?.folder === folder ? !current.ended : alive(pid));
+      const trackedRun = tracked.get(folder);
+      const active = !result && (trackedRun ? !trackedRun.ended : alive(pid));
       const released = json(path.join(artifacts, 'release.json'));
       const claim = json(path.join(artifacts, 'claim.json'));
       if (scope && (input?.workspace && input.workspace !== scope.workspace ||
@@ -78,7 +80,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       }
       const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})-(.+)$/.exec(entry.name);
       const start = match ? new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}`).toISOString() : modified(folder);
-      const end = active ? undefined : current?.folder === folder && current.finishedAt ||
+      const end = active ? undefined : trackedRun?.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
       return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac,

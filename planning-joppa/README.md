@@ -24,6 +24,16 @@ It does not require repositories or CBM for a flow that does not use them.
 The workflow controls its stages, model calls, review decisions and revision loop.
 Writer is the first bundled example in [writer](../writer/README.md).
 
+Set `concurrency: 3` to run up to three independent passes in one dashboard.
+The default is one. The dispatcher reserves each selected address before it starts a process.
+Each process keeps its own Medulla run folder, claim and output log.
+The existing native claim still checks ownership and revisions.
+One dispatcher lock protects the shared runs folder. Do not start three automatic dashboards on that folder.
+`--once` and an explicit item, AC or Requirement still run one pass.
+The dispatcher accepts config changes after all its active passes end.
+Stop before editing a config that an active workflow checks by digest.
+Ctrl+C stops every process group that this dashboard started.
+
 The workflow calls `flow_stages.py` through the supplied `CREW_FLOW_STAGES` variable.
 `prepare` emits `assignment` and each configured `<role>_contract`.
 The assignment contains the full `selected` object, `claim_revision`, configured references, children and schema.

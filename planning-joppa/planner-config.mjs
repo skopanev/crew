@@ -26,11 +26,13 @@ export function plannerConfig(configFile, {ac = null, automatic = false} = {}, b
   const root = real(path.resolve(path.dirname(configFile), expand(config.runs_folder)));
   const interval = config.interval_seconds ?? 60;
   if (!Number.isInteger(interval) || interval < 1 || interval > 3600) throw new Error('interval_seconds must be 1 to 3600');
+  const concurrency = config.concurrency ?? 1;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('concurrency must be a positive integer');
   const tokenFile = config.token_file ? path.resolve(path.dirname(configFile), expand(config.token_file)) : null;
   if (automatic && !tokenFile && !config.mcp_command) {
     throw new Error('Config needs mcp_command or token_file for automatic selection');
   }
-  return {config, root, interval, tokenFile, digest: createHash('sha256').update(bytes).digest('hex')};
+  return {config, root, interval, concurrency, tokenFile, digest: createHash('sha256').update(bytes).digest('hex')};
 }
 
 // The dispatch lock and run folders belong to these fields. A reload never changes them.

@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {lock as dispatcherLock} from './run-files.mjs';
 import {plannerRows, titleCell} from './run-rows.mjs';
 import {readyRequirements, nextConfiguredItem} from './queue.mjs';
 import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
 import {configReloader} from '../lane-launcher/config-reload.mjs';
+import {PlannerRuns} from './planner-runs.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -42,7 +44,7 @@ export async function main(argv) {
   const configFile = path.resolve(file);
   const automatic = !fixed && !monitor;
   const bytes = fs.readFileSync(configFile);
-  let {config, root, interval, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
+  let {config, root, interval, concurrency, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
   // launch.py compares the bytes it parses with this digest before it claims or starts Medulla.
   const handoff = () => ({...process.env, PLANNING_JOPPA_HANDOFF_DIGEST: digest});
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
@@ -54,17 +56,27 @@ export async function main(argv) {
   }
   const state = {message: fixed ? `Planning ${fixed}` :
     monitor ? 'Monitoring existing runs' : config.workflow ? 'Checking configured items' : 'Checking ready Requirements', error: null};
-  let current = null, screen, child, stopped = false, wake, termination, selection, nextCheck;
+  let screen, stopped = false, changed = false, wake, termination, selection, nextCheck;
+  const attempted = new Set(), cooldowns = new Map();
+  const pool = new PlannerRuns(root, run => {
+    // A refused handoff started nothing. Only this unstarted selection may be tried again.
+    if (run.code === HANDOFF_CHANGED && run.attemptKey && !run.current) attempted.delete(run.attemptKey);
+    if (run.code !== 0) state.error = run.error || `Planning exited ${run.code}`;
+    cooldowns.set(run.address, Date.now() + interval * 1000);
+    changed = true;
+    draw();
+    wake?.();
+  });
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
-    const rows = plannerRows(root, current);
+    const rows = plannerRows(root, pool.current);
     const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
       paint, 6, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT'});
     const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
     const footer = left == null ? 'Ctrl+C to stop' :
       `Next check in ${paint('blue', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`;
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
-      `workspace: ${config.workspace} · ${rows.filter(row => row.active).length} running · last 30 runs`,
+      `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
       '─'.repeat(width), ...table,
       String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
       closed ? (stopped ? 'Stopped' : 'Completed') : footer].join('\n');
@@ -73,21 +85,11 @@ export async function main(argv) {
     try { if (screen) screen.draw(); else process.stdout.write(render() + '\n'); }
     catch (error) { state.error = `Display error: ${error.message}`; }
   };
-  const groupSignal = signal => {
-    if (!child?.pid) return false;
-    try { process.kill(-child.pid, signal); return true; }
-    catch (error) { if (error.code !== 'ESRCH') throw error; return false; }
-  };
   const stop = signal => {
     stopped = true;
     selection?.abort();
     process.exitCode = signal === 'SIGTERM' ? 143 : 130;
-    termination ??= (async () => {
-      if (!groupSignal(signal)) return;
-      const deadline = Date.now() + 5000;
-      while (groupSignal(0) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
-      groupSignal('SIGKILL');
-    })();
+    termination ??= pool.stop(signal);
     wake?.();
   };
   const interrupt = () => stop('SIGINT');
@@ -95,11 +97,11 @@ export async function main(argv) {
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', terminate);
   let ticker, lock, reload;
-  const attempted = new Set();
   const pause = () => new Promise(resolve => {
+    if (changed) { changed = false; resolve(); return; }
     nextCheck = performance.now() + interval * 1000;
     draw();
-    const finish = () => { nextCheck = null; wake = null; resolve(); };
+    const finish = () => { nextCheck = null; wake = null; changed = false; resolve(); };
     const timer = setTimeout(finish, interval * 1000);
     wake = () => { clearTimeout(timer); finish(); };
     if (stopped) wake();
@@ -108,31 +110,42 @@ export async function main(argv) {
     if (automatic) {
       lock = dispatcherLock(root);
       const parse = raw => plannerConfig(configFile, {automatic}, raw);
-      reload = configReloader(configFile, parse, plannerIdentity, {config, root, interval, tokenFile, digest}, bytes);
+      reload = configReloader(configFile, parse, plannerIdentity, {config, root, interval, concurrency, tokenFile, digest}, bytes);
     }
     if (process.stdout.isTTY) screen = createScreen(state, paint, render);
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
       let selected = requirement, attemptKey = null, scope = '--req-id';
+      if (automatic && pool.size >= concurrency) { await pause(); continue; }
       if (automatic) {
-        current = null;
+        if (pool.size) {
+          try {
+            if (createHash('sha256').update(fs.readFileSync(configFile)).digest('hex') !== digest) {
+              state.error = 'Config changed; waiting for active passes to end';
+              await pause(); continue;
+            }
+          } catch (error) { state.error = `Config read failed: ${error.message}`; await pause(); continue; }
+        }
         state.error = null;
-        // Reload only here: no planner pass is active between passes.
-        const loaded = reload();
-        ({config, interval, tokenFile, digest} = loaded.config);
+        // Active passes keep their handoff. Accept new config only when the pool is empty.
+        const loaded = pool.size ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
+        ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
         try {
+          const rows = plannerRows(root, pool.current, Infinity, config);
+          const busy = address => pool.owns(address) || rows.some(row => row.active && row.ac === address);
           if (loaded.error) state.error = loaded.error;
-          else if (plannerRows(root, null, Infinity, config).some(row => row.status === 'HELD')) {
+          else if (rows.some(row => row.status === 'HELD')) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
           } else if (config.workflow) {
             // The configured flow selects one item. A run folder of the same item revision is not repeated.
             selection = new AbortController();
-            const started = new Set(plannerRows(root, null, Infinity, config)
+            const started = new Set(rows
               .flatMap(row => row.attemptKeys || [row.attemptKey]).filter(Boolean));
             const {count, next} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              row => !config.repeat && (attempted.has(row.attemptKey) || started.has(row.attemptKey)));
+              row => busy(row.address) || (config.repeat ? (cooldowns.get(row.address) || 0) > Date.now() :
+                attempted.has(row.attemptKey) || started.has(row.attemptKey)));
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);
@@ -144,7 +157,7 @@ export async function main(argv) {
             selection = new AbortController();
             const candidates = await readyRequirements(config, tokenFile, selection.signal);
             selection = null;
-            const next = candidates.find(row => !attempted.has(row.attemptKey));
+            const next = candidates.find(row => !busy(row.address) && !attempted.has(row.attemptKey));
             if (next) {
               selected = next.address;
               attemptKey = next.attemptKey;
@@ -159,46 +172,22 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
-        child = spawn('sh', runArgs, {stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: handoff()});
-        let pending = '', buffered = '';
-        const output = data => {
-          const text = data.toString();
-          if (current?.folder) fs.appendFileSync(path.join(current.folder, 'output.log'), text);
-          else {
-            buffered = (buffered + text).slice(-65536);
-            pending += text;
-            const lines = pending.split('\n');
-            pending = lines.pop();
-            for (const line of lines) {
-              const folder = line.trim();
-              const canonicalRoot = fs.existsSync(root) ? fs.realpathSync(root) : root;
-              if ((folder.startsWith(root + path.sep) || folder.startsWith(canonicalRoot + path.sep)) && fs.existsSync(folder)) {
-                current = {folder, ended: false};
-                fs.appendFileSync(path.join(folder, 'output.log'), buffered);
-                buffered = '';
-                state.message = '';
-                break;
-              }
-              if (line.startsWith('planning-joppa:')) state.error = line.trim();
-            }
-          }
-        };
-        child.stdout.on('data', output);
-        child.stderr.on('data', output);
-        const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-        await termination;
-        if (current) Object.assign(current, {ended: true, finishedAt: new Date().toISOString()});
-        // A refused handoff started nothing: only this unstarted selection may be tried again.
-        if (code === HANDOFF_CHANGED && attemptKey && !current) attempted.delete(attemptKey);
-        if (code !== 0 && !state.error) state.error = `Planning exited ${code ?? 'by signal'}`;
-        if (!stopped && (once || fixed)) process.exitCode = code ?? 2;
+        const run = pool.start(ac || item || selected, runArgs, handoff(), attemptKey);
+        if (once || fixed) {
+          const code = await run.completion;
+          await termination;
+          if (!stopped) process.exitCode = code;
+        }
         draw();
+        if (automatic && !once && !stopped) continue;
       }
       if (once || stopped || fixed || monitor) break;
       await pause();
     } while (!stopped);
     if (!once && !stopped && (fixed || monitor)) await new Promise(resolve => { wake = resolve; });
   } finally {
+    if (pool.size && !termination) termination = pool.stop('SIGTERM');
+    await termination;
     clearInterval(ticker);
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', terminate);
