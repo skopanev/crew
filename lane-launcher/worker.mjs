@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {save, read, herdr, laneArgs} from './runtime.mjs';
 import {laneRunFolder} from './scope.mjs';
 import {api, claimTask, guardTaskClaims, releaseTaskClaims} from './joppa.mjs';
+import {writeLaunchClaim, prepareClaimReader} from './joppa-claims.mjs';
 import {requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
@@ -61,8 +61,7 @@ process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
 let result, artifacts = null, claimRefused = false;
-let readerDir, contextDir, hooksDir;
-let finalizationTicket;
+let readerDir, contextDir, hooksDir, finalizationTicket;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
@@ -144,20 +143,8 @@ try {
     save(stateFile, run);
   }
   const ownedCheckout = prepareDiscardCheckout(run, () => save(stateFile, run));
-  const claimFile = path.join(fs.realpathSync(run.runFolder), 'launch-claim.json');
-  const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
-    input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,
-      task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})), taskFields: run.config.taskFields,
-        joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
-  const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
-    source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;
-  fs.writeFileSync(claimFile, JSON.stringify({...claim, joppa_url: run.config.joppa.url,
-    ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
-  if (run.config.joppa.readerTokenFile) {
-    readerDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-joppa-reader-')));
-    fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(readerDir, 'token'));
-    fs.chmodSync(path.join(readerDir, 'token'), 0o600);
-  }
+  const claimFile = writeLaunchClaim(run, dir, finalizationTicket);
+  readerDir = prepareClaimReader(run);
   if (!run.finalizeOnly) {
     const context = prepareContext(run.config.context, {ticket: run.ticket, project: run.workspace,
       worktree: `/workspace/${run.executionId}`});
@@ -181,6 +168,7 @@ try {
       LANE_MEMORY_DIR: contextDir || '',
       LANE_HOOKS_DIR: hooksDir || '',
       LANE_WORKFLOW_FILE: laneWorkflow,
+      LANE_RESUME_RUN: run.resume?.run || '', LANE_RESUME_NODE: run.resume?.node || '',
       LANE_CLAIM_FILE: claimFile, LANE_REUSE_HEAD: reuseHead, LANE_OWNED_CHECKOUT: ownedCheckout}, detached: true,
     stdio: ['ignore', 'pipe', 'pipe']});
   run.launchPgid = child.pid;

@@ -17,6 +17,7 @@ export function failureDetails(run, announce) {
     for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
       const folder = path.join(root, name), outcome = path.join(folder, 'outcome.json');
       if (!fs.existsSync(outcome) || read(outcome)?.error?.code !== 'E_DEADLINE') continue;
+      if (run.resume && fs.statSync(outcome).mtimeMs < Date.parse(run.worker.startedAt)) continue;
       const target = path.join(folder, 'artifacts');
       fs.mkdirSync(target, {recursive: true, mode: 0o700});
       const node = read(outcome).error.node || 'workflow';
@@ -115,7 +116,7 @@ export async function recordTaskOutcome({run, stateFile, result, artifacts, anno
     if (origin.signal === 'PUBLICATION_UNCERTAIN' ||
         origin.signal === 'OVER_TIME' && ['git_landing', 'cleanup', 'notify_success'].includes(origin.node)) {
       result.publicationUncertain = true;
-      run.retained = null;
+      if (origin.node !== 'git_landing') run.retained = null;
     }
   }
   try {

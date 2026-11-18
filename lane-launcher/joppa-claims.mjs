@@ -1,4 +1,6 @@
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeWaiting, nodeStageDone, nodePendingDelivery, saveNode} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
@@ -13,6 +15,28 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // A failure writes one release save with the hold code and one note for each Task in one batch.
 const FAILURE_OPERATIONS = 2;
+
+// A resumed Medulla run keeps its original claim file as evidence.
+export function writeLaunchClaim(run, dir, finalizationTicket) {
+  const file = path.join(fs.realpathSync(run.runFolder), run.resume ? `launch-claim-${path.basename(dir)}.json` : 'launch-claim.json');
+  const delivery = run.requirementDelivery && {plan: run.requirementDelivery,
+    input: {requirement: run.requirement, repository: run.repository.id, tasks: run.tasks, finalizeOnly: run.finalizeOnly === true,
+      task: run.task, config: {repositories: run.config.repositories.map(repo => ({id: repo.id})), taskFields: run.config.taskFields,
+        joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
+  const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
+    source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;
+  fs.writeFileSync(file, JSON.stringify({...claim, joppa_url: run.config.joppa.url,
+    ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
+  return file;
+}
+
+export function prepareClaimReader(run) {
+  if (!run.config.joppa.readerTokenFile) return '';
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-joppa-reader-')));
+  fs.copyFileSync(run.config.joppa.readerTokenFile, path.join(dir, 'token'));
+  fs.chmodSync(path.join(dir, 'token'), 0o600);
+  return dir;
+}
 
 export const laneAssignee = runId => {
   require(uuid.test(runId || ''), 'Task claim needs the launch UUID');

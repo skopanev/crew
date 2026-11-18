@@ -231,7 +231,7 @@ mounts+=(--mount-rw "$worktree")
 # Joppa service credentials belong to the host worker, not lane agents.
 unset JOPPA_TOKEN JOPPA_TOKEN_FILE
 # Keep Crew's workflow, hooks and verification scripts read-only.
-medulla \
+medulla_args=( \
   --docker \
   --cwd-ro \
   "${workflow_args[@]}" \
@@ -268,4 +268,11 @@ medulla \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   ${context_vars[@]+"${context_vars[@]}"} ${hooks_vars[@]+"${hooks_vars[@]}"} \
-  ${passthrough[@]+"${passthrough[@]}"}
+  ${passthrough[@]+"${passthrough[@]}"} )
+if [[ -n "${LANE_RESUME_RUN:-}" ]]; then
+  resume_args="$(node "$TOOLING_ROOT/lane-launcher/retained-landing.mjs" \
+    "$LANE_RESUME_RUN" "$LANE_RESUME_NODE" "${medulla_args[@]}")"
+  medulla_args=()
+  while IFS= read -r -d '' arg; do medulla_args+=("$arg"); done < <(jq -j '.[] | ., "\u0000"' <<<"$resume_args")
+fi
+medulla "${medulla_args[@]}"

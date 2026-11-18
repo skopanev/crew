@@ -8,6 +8,7 @@ import {api, claimTasks, contractDigest} from './joppa-common.mjs';
 import {heldBy} from './joppa-claims.mjs';
 import {runHoldsTasks} from './joppa-selection.mjs';
 import {workflowDigest, supportsRetainedCheckout} from './workflow-config.mjs';
+import {reviewedLanding, landingReuse, prepareLanding} from './retained-landing.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const sha = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const HIGH = /^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])/m;
@@ -91,7 +92,9 @@ export function recordRetained(run, artifacts) {
     const origin = JSON.parse(fs.readFileSync(path.join(artifacts, 'origin.json'), 'utf8'));
     // A retained checkout that changed after the host check is evidence only.
     if (origin.signal === 'RETAINED_CHANGED') return null;
-    return {...checkoutState(checkout, run.executionId), node: origin.node, signal: origin.signal, artifacts};
+    const state = checkoutState(checkout, run.executionId);
+    return {...state, node: origin.node, signal: origin.signal, artifacts,
+      ...(origin.node === 'git_landing' ? {landing: reviewedLanding(run, state, artifacts, laneGit(checkout))} : {})};
   } catch { return null; }
 }
 
@@ -139,6 +142,7 @@ function owner(run, dir, checkout) {
   // A soft reset and a new commit change HEAD for the same code. The budget is one retry per HEAD and per tree.
   const retried = prior.claim.ticket?.retained;
   require(!retried || retried.head !== retained.head && retried.tree !== retained.tree, 'this checkout was already retried once');
+  require(!retried?.landing || retried.landing.head !== retained.landing?.head, 'this reviewed candidate was already retried once');
   require(inside(retained.artifacts, prior.runFolder), 'failure artifacts are outside the failed run');
   return {dir: failed.dir, run: prior, retained};
 }
@@ -165,15 +169,17 @@ export async function retainedCheckout(run, dir) {
     require(writerGone(prior.run, checkout), 'the failed run has no stopped process group, or a container uses the checkout');
     const state = checkoutState(checkout, run.executionId);
     for (const key of ['branch', 'head', 'tree', 'base']) require(state[key] === retained[key], `checkout ${key} changed`);
-    const files = laneGit(checkout)('diff', '-z', '--no-renames', '--name-only', `${state.base}..${state.head}`).split('\0').filter(Boolean);
+    const landing = retained.node === 'git_landing'
+      ? await landingReuse(run, prior.run, state, retained.artifacts, laneGit(checkout)) : null;
+    const files = landing?.files ?? laneGit(checkout)('diff', '-z', '--no-renames', '--name-only', `${state.base}..${state.head}`).split('\0').filter(Boolean);
     require(files.length && files.every(file => within(file, prior.run.claim.ticket?.paths ?? prior.run.claim.ticket?.modulePaths) &&
       within(file, run.claim.ticket?.paths)), 'checkout changes files outside the Task paths');
     // Read the remote as a plain config file. The canonical repository is host configuration.
     const remote = command('git', ['config', '--file', path.join(checkout, '.git', 'config'), '--no-includes', '--get', 'remote.origin.url']);
     require(remote === command('git', ['-C', run.repository.path, 'remote', 'get-url', 'origin']),
       'checkout origin differs from the repository origin');
-    return {retained: {head: state.head, tree: state.tree, base: state.base, route: route(retained),
-      previousRun: path.basename(prior.dir)}, inputs: retained.artifacts};
+    return {retained: {head: state.head, tree: state.tree, base: state.base, route: landing?.route ?? route(retained),
+      previousRun: path.basename(prior.dir)}, inputs: retained.artifacts, ...(landing?.resume ? {resume: landing.resume} : {})};
   } catch (error) { return {reason: error.message}; }
 }
 
@@ -206,6 +212,12 @@ export async function prepareReuse(run, dir, announce, persist) {
   const reuse = await retainedCheckout(run, dir);
   if (reuse.reason) announce(`[lane] RETAINED checkout not reused: ${reuse.reason}`);
   if (!reuse.retained) return '';
+  if (reuse.resume) {
+    const head = prepareLanding(run, dir, reuse, laneGit(checkoutPath(run)));
+    persist();
+    announce(`[lane] RESUME ${head.slice(0, 12)} from ${reuse.retained.previousRun} · node ${run.resume.node}`);
+    return head;
+  }
   try { copyResumeInputs(reuse.inputs, fs.realpathSync(run.runFolder)); }
   catch (error) { announce(`[lane] RETAINED checkout not reused: prior reports not copied: ${error.message}`); return ''; }
   run.claim.ticket = {...run.claim.ticket, retained: reuse.retained};
