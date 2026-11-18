@@ -188,47 +188,18 @@ Dolber checks host support before reading or claiming a Task. The cap cannot ext
 It does not limit expert review or landing. A resumed run keeps its saved cap.
 Config changes apply only to new claims. Existing runs keep their captured arguments.
 
-### Reconcile a manually released startup failure
+### Reconcile a manually released failed run
 
-Use this command only for a finished branch-delivery run that failed before the native workflow started.
-Stop dispatch for this project first. Confirm the Task release in Joppa. Remove the unsupported timeout setting before another launch.
-Run this command from the Crew directory. Supply the old run's `launch.json` path.
-The handler checks the checkout, process group, containers, native run folder and current Task contracts.
-It preserves the failed result and existing requests. It does not start a lane.
+Dolber checks a finished held run against current Joppa reads from the same workspace and endpoint.
+It ignores the old reservation only when every Task has a newer revision, no assignee and no hold.
+The old worker, process group and containers must be gone. The old checkout path must be absent.
+The journal must prove that the run stayed before landing. Pending outcome and recovery operations prevent automatic reconciliation.
+Dolber keeps the original launch state, failed result and logs unchanged.
 
-```sh
-node --input-type=module --eval '
-import fs from "node:fs";
-import path from "node:path";
-import {readRun, save, alive} from "./lane-launcher/runtime.mjs";
-import {api, finishTask} from "./lane-launcher/joppa.mjs";
-const file = path.resolve(process.argv[1]), run = readRun(file);
-if (run.config.source !== "joppa" || run.config.delivery !== "branch" || run.finalizeOnly ||
-    run.result?.status !== "failed" || !run.result.finishedAt || alive(run.worker?.pid) ||
-    run.completionRequest || run.blockRequest || run.releaseRequest || run.recovery || run.recoveryNoteRequest) {
-  throw new Error("Inspect this run before recovery");
-}
-const lock = path.join(path.dirname(file), "worker.lock");
-fs.mkdirSync(lock);
-try {
-  for (const claim of run.claim.tasks || [run.claim]) {
-    const task = await api(run.config, run.joppaWorker, "joppa_objects", {workspace: run.workspace, address: claim.address});
-    if (task.address !== claim.address || task.process?.status !== "open" || task.process.assignee !== null) {
-      throw new Error("Task release is not confirmed");
-    }
-  }
-  const result = {...run.result};
-  await finishTask(run, file, result, null);
-  if (!run.releaseConfirmed) throw new Error("Startup release is not confirmed");
-  run.result = {...result, released: true, held: false, blocked: false,
-    tasks: run.releaseResults, recoveredAt: new Date().toISOString()};
-  save(file, run);
-  console.log("Release confirmed. Failed result preserved.");
-} finally {
-  fs.rmdirSync(lock);
-}
-' /absolute/old/run/launch.json
-```
+Landing-related, unreadable and uncertain claim records require operator inspection.
+Before confirming their local release, check target ancestry and preserve the candidate and the original launch file.
+Record the live Task revisions, operator instruction and publication check with the release confirmation.
+Do not replay a pending mutation blindly or clear a reservation only because its worker disappeared.
 
 Expert review uses the receipt for `reviewCommands`. Branch delivery reuses this receipt before its push.
 Target delivery replaces `artifacts/gates/current.json` with the full gate receipt before push.

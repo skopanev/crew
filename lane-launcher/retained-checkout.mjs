@@ -9,6 +9,8 @@ import {heldBy} from './joppa-claims.mjs';
 import {runHoldsTasks} from './joppa-selection.mjs';
 import {workflowDigest, supportsRetainedCheckout} from './workflow-config.mjs';
 import {reviewedLanding, landingReuse, prepareLanding} from './retained-landing.mjs';
+import {writerGone} from './container-cleanup.mjs';
+export {writerGone} from './container-cleanup.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const sha = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const HIGH = /^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])/m;
@@ -57,29 +59,6 @@ export function checkoutState(checkout, executionId) {
   git('merge-base', '--is-ancestor', base, head);
   require(!git('status', '--porcelain', '--untracked-files=all', '--ignore-submodules=all'), 'checkout has uncommitted changes');
   return {checkout, branch, head, tree, base};
-}
-
-// The old lane process group and every container of its run or with this checkout mounted are gone.
-export function writerGone(run, checkout) {
-  if (!Number.isSafeInteger(run.launchPgid) || run.launchPgid <= 1) return false;
-  try { process.kill(-run.launchPgid, 0); return false; }
-  catch (error) { if (error.code !== 'ESRCH') throw error; }
-  const folders = new Set([run.runFolder, exists(run.runFolder) ? fs.realpathSync(run.runFolder) : null].filter(Boolean));
-  const ids = command('docker', ['ps', '-q', '--no-trunc']).split('\n').filter(Boolean);
-  if (!ids.length) return true;
-  let rows;
-  try { rows = JSON.parse(command('docker', ['inspect', ...ids])); }
-  catch (error) {
-    // Docker can remove an unrelated container between ps and inspect. Keep the surviving rows.
-    const missing = String(error.stderr || '').trim().split('\n').map(line =>
-      /^Error: no such object: ([a-z0-9]+)$/i.exec(line.trim())?.[1]);
-    if (error.status !== 1 || !missing.length || missing.some(id => !id || !ids.includes(id))) throw error;
-    rows = JSON.parse(String(error.stdout));
-    require(Array.isArray(rows) && rows.length + missing.length === ids.length &&
-      rows.every(row => ids.includes(row.Id) && !missing.includes(row.Id)), 'Docker inspection is incomplete');
-  }
-  return !rows.some(row => folders.has(row.Config?.Labels?.['medulla.runs_under']) ||
-    (row.Mounts || []).some(mount => mount.Source === checkout));
 }
 
 // Record the retained checkout in the failed launch state. Null when it cannot be proven.

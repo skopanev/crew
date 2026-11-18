@@ -11,6 +11,7 @@ import {requirementBranch, requirementPlan, assertRequirementHead} from './requi
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
 import {nodeAssignee, nodeWaiting, nodeStageDone, nodePendingDelivery, taskPages, coversFields} from './joppa-nodes.mjs';
+import {reservationReleased} from './reservation-release.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -105,14 +106,19 @@ export async function nextTask(config) {
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   });
   const reservations = runs.filter(runHoldsTasks);
-  const reserved = new Set(reservations.flatMap(run =>
-    run.finalizeOnly ? [{address: run.task}] : run.claim ? claimTasks(run) : runTasks(run)).map(task => task.address));
   const finalizing = new Set(reservations.filter(run => run.finalizeOnly).map(run =>
     `${run.requirement}\n${run.repositoryId || run.repository?.id || run.claim?.ticket?.repository}`));
   const dependencyIssues = new Map(), selectionIssues = new Map();
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     const read = passReader(config, worker);
+    const pending = [];
+    for (const run of reservations) {
+      if (run.workspace !== config.workspace || run.config?.joppa?.url !== config.joppa.url ||
+          !await reservationReleased(run, read)) pending.push(run);
+    }
+    const reserved = new Set(pending.flatMap(run =>
+      run.finalizeOnly ? [{address: run.task}] : run.claim ? claimTasks(run) : runTasks(run)).map(task => task.address));
     const dependencies = dependencyCheck(read);
     const publications = publicationReader(config, read);
     const eligible = [], {object, group} = await occupancyReader(config, read);
