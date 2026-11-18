@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {recordRetained, retainedCheckout, retainedLine, prepareReuse} from '../retained-checkout.mjs';
 import {resumeArguments} from '../retained-landing.mjs';
 import {writeLaunchClaim} from '../joppa-claims.mjs';
@@ -102,6 +104,15 @@ test('a Task commit already on the remote re-enters cleanup without another push
   assert.equal(reuse.resume.head, x.head);
 });
 
+test('branch delivery keeps its existing review route instead of resuming a different publication branch', async t => {
+  const x = await landingFixture(t);
+  x.run.config.delivery = 'branch'; x.prior.config.delivery = 'branch';
+  x.run.deliveryBranch = 'new-branch'; x.prior.deliveryBranch = 'old-branch'; x.savePrior();
+  const reuse = await retainedCheckout(x.run, x.dir);
+  assert.equal(reuse.retained.route, 'review');
+  assert.equal(reuse.resume, undefined);
+});
+
 test('missing approval or changed gate evidence requires review again', async t => {
   const x = await landingFixture(t);
   fs.appendFileSync(x.log, 'changed');
@@ -137,4 +148,27 @@ test('resume strips fresh-only CLI vars and updates saved vars atomically withou
     assert.deepEqual(fs.readFileSync(file), before);
   }
   assert.throws(() => resumeArguments(x.folder, 'implement_code', args));
+});
+
+test('failed or partial jq decoding never starts Medulla', async t => {
+  const x = await landingFixture(t), root = fileURLToPath(new URL('../../', import.meta.url));
+  for (const mode of ['failed', 'partial']) {
+    const folder = path.join(x.f.root, 'jq-' + mode), marker = path.join(folder, 'started');
+    fs.mkdirSync(folder); fs.writeFileSync(path.join(folder, 'vars.yaml'), 'MARK: old\n');
+    const script = `set -eu
+say() { printf '%s\\n' "$*"; }
+source "$TOOLING_ROOT/lane/startup/workflow.sh"
+medulla() { touch "$MARKER"; }
+jq() {
+  if [[ "$MODE" == failed ]]; then return 23; fi
+  if [[ "$1" == -er ]]; then command jq "$@"; else printf '%s\\0' '-w'; return 23; fi
+}
+launch_medulla -w lane --runs-folder "$LANE_RESUME_RUN" --var MARK=new
+`;
+    const result = spawnSync('bash', ['-c', script], {encoding: 'utf8', env: {...process.env,
+      TOOLING_ROOT: root, WORKFLOW_DIR: path.join(root, 'lane'), LANE_RESUME_RUN: folder,
+      LANE_RESUME_NODE: 'git_landing', LANE_WORKFLOW_FILE: '', LANE_REVIEWERS_JSON: '', MARKER: marker, MODE: mode}});
+    assert.equal(result.status, mode === 'failed' ? 23 : 2, result.stderr);
+    assert.equal(fs.existsSync(marker), false);
+  }
 });

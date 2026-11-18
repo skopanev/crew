@@ -58,8 +58,10 @@ export function reviewedLanding(run, state, artifacts, git) {
 
 // A rebase can add incoming commits to lane-base..HEAD. Its single Task commit remains the scope.
 export async function landingReuse(run, prior, state, artifacts, git) {
+  if (run.config.delivery !== 'target') return {route: 'review',
+    files: git('diff', '-z', '--no-renames', '--name-only', state.base, state.head).split('\0').filter(Boolean)};
   const canonical = args => repositoryGit(run.config, run.repository, args);
-  const branch = run.config.delivery === 'branch' ? prior.deliveryBranch : run.repository.targetBranch;
+  const branch = run.repository.targetBranch;
   require(branch, 'landing reuse has no target branch');
   const remote = (await canonical(['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0];
   require(/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(remote), 'landing target is absent');

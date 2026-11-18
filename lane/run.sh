@@ -269,10 +269,4 @@ medulla_args=( \
   --var "GIT_SSH_COMMAND=$git_ssh" \
   ${context_vars[@]+"${context_vars[@]}"} ${hooks_vars[@]+"${hooks_vars[@]}"} \
   ${passthrough[@]+"${passthrough[@]}"} )
-if [[ -n "${LANE_RESUME_RUN:-}" ]]; then
-  resume_args="$(node "$TOOLING_ROOT/lane-launcher/retained-landing.mjs" \
-    "$LANE_RESUME_RUN" "$LANE_RESUME_NODE" "${medulla_args[@]}")"
-  medulla_args=()
-  while IFS= read -r -d '' arg; do medulla_args+=("$arg"); done < <(jq -j '.[] | ., "\u0000"' <<<"$resume_args")
-fi
-medulla "${medulla_args[@]}"
+launch_medulla "${medulla_args[@]}"

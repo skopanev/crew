@@ -17,3 +17,14 @@ fi
 if [[ -n "${LANE_REVIEWERS_JSON:-}" ]]; then
   workflow_args+=(--var "REVIEWERS_JSON=$LANE_REVIEWERS_JSON")
 fi
+
+launch_medulla() {
+  if [[ -z "${LANE_RESUME_RUN:-}" ]]; then medulla "$@"; return; fi
+  local json expected arg
+  local args=()
+  json="$(node "$TOOLING_ROOT/lane-launcher/retained-landing.mjs" "$LANE_RESUME_RUN" "$LANE_RESUME_NODE" "$@")" || return $?
+  expected="$(jq -er 'if type == "array" and length > 0 then length else error("invalid resume arguments") end' <<<"$json")" || return $?
+  while IFS= read -r -d '' arg; do args+=("$arg"); done < <(jq -j '.[] | ., "\u0000"' <<<"$json")
+  (( ${#args[@]} == expected )) || { say 'run.sh: resume argument decoding failed'; return 2; }
+  medulla "${args[@]}"
+}
