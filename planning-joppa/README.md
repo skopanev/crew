@@ -31,8 +31,12 @@ The existing native claim still checks ownership and revisions.
 One dispatcher lock protects the shared runs folder. Do not start three automatic dashboards on that folder.
 `--once` and an explicit item, AC or Requirement still run one pass.
 The dispatcher accepts config changes after all its active passes end.
-Stop before editing a config that an active workflow checks by digest.
-Ctrl+C stops every process group that this dashboard started.
+An edit still stops publication through the config digest check.
+Configured flows release their own claim with the private launch snapshot, even after the live config changes.
+Ctrl+C stops Medulla first, then runs the guarded failure release and records `release.json`.
+Shutdown allows 10 seconds for Medulla and 30 seconds for the release.
+Unconfirmed shutdown, changed ownership or uncertain mutations retain the claim for recovery.
+The legacy Requirement planner keeps its existing shutdown behavior.
 
 The workflow calls `flow_stages.py` through the supplied `CREW_FLOW_STAGES` variable.
 `prepare` emits `assignment` and each configured `<role>_contract`.

@@ -172,7 +172,7 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
-        const run = pool.start(ac || item || selected, runArgs, handoff(), attemptKey);
+        const run = pool.start(ac || item || selected, runArgs, handoff(), attemptKey, Boolean(config.workflow));
         if (once || fixed) {
           const code = await run.completion;
           await termination;

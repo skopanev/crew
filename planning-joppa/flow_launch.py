@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 
@@ -67,6 +66,10 @@ def launch(path, raw, item, dry_run):
     with tempfile.TemporaryDirectory(prefix="crew-planner-memory-") as memory, \
             tempfile.TemporaryDirectory(prefix="crew-planner-agy-") as agy:
         command.extend(["--var", "AGY_PROFILE_HOME=" + agy])
+        snapshot = Path(memory) / "config.json"
+        snapshot.write_bytes(raw.encode() if isinstance(raw, str) else raw)
+        snapshot.chmod(0o600)
+        command.extend(["--var", "PLANNING_JOPPA_CONFIG_SNAPSHOT=" + str(snapshot)])
         working = Path(memory) / "work"
         working.mkdir()
         env = dict(os.environ)
@@ -76,5 +79,6 @@ def launch(path, raw, item, dry_run):
             target.write_text(json.dumps(config["context"]))
             target.chmod(0o600)
             env["LANE_MEMORY_CONFIG"] = str(target)
-        code = subprocess.run(command, env=env, cwd=working, check=False).returncode
+        from flow_runtime import execute
+        code = execute(command, env, working, config)
         return 1 if code == 75 else code

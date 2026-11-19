@@ -137,9 +137,15 @@ class ConfiguredFlowTests(unittest.TestCase):
             self.assertTrue(profile.is_dir())
             self.assertEqual(profile.stat().st_mode & 0o777, 0o700)
             self.assertEqual(list(Path(kwargs["cwd"]).iterdir()), [])
+            snapshot = Path(next(value.split("=", 1)[1] for value in command
+                                 if value.startswith("PLANNING_JOPPA_CONFIG_SNAPSHOT=")))
+            self.assertEqual(read(snapshot), config)
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
             return subprocess.CompletedProcess(command, 0)
+        import flow_runtime
         with patch.object(flow_launch.shutil, "which", return_value="medulla"), \
-             patch.object(flow_launch.subprocess, "run", side_effect=execute):
+             patch.object(flow_runtime, "execute", side_effect=lambda command, env, cwd, config:
+                          execute(command, env=env, cwd=cwd).returncode):
             self.assertEqual(flow_launch.launch(self.folder / "config.json", json.dumps(config), "criterion:a", False), 0)
         self.assertEqual(len(profiles), 1)
         self.assertFalse(profiles[0].exists())

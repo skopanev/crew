@@ -165,3 +165,31 @@ setInterval(()=>{},1000);`);
     assert.throws(() => process.kill(child, 0), {code: 'ESRCH'});
   } finally { await pool.stop('SIGTERM'); }
 });
+
+test('configured shutdown signals its launcher and allows claim cleanup after five seconds', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-flow-stop-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const ready = path.join(root, 'ready'), released = path.join(root, 'released');
+  const worker = path.join(root, 'flow.cjs');
+  fs.writeFileSync(worker, `const fs=require('node:fs'),{spawn}=require('node:child_process');
+const child=spawn(process.execPath,['-e',"require('node:fs').writeFileSync(process.env.TEST_READY,'ready');setInterval(()=>{},1000)"],{stdio:'inherit'});
+process.once('SIGTERM',()=>setTimeout(()=>{
+  try {process.kill(child.pid,0);} catch {process.exit(3);}
+  child.once('exit',()=>{fs.writeFileSync(process.env.TEST_RELEASED,'confirmed');process.exit(0);});
+  child.kill('SIGTERM');
+},5500));
+setInterval(()=>{},1000);`);
+  const pool = new PlannerRuns(root, () => {});
+  const run = pool.start('ac:flow', ['-c', 'exec "$TEST_NODE" "$TEST_WORKER"'],
+    {...process.env, TEST_NODE: process.execPath, TEST_WORKER: worker, TEST_READY: ready, TEST_RELEASED: released},
+    null, true);
+  try {
+    const deadline = Date.now() + 3000;
+    while (!fs.existsSync(ready) && Date.now() < deadline) await pause(20);
+    assert.ok(fs.existsSync(ready));
+    await pool.stop('SIGTERM');
+    assert.equal(run.code, 0);
+    assert.equal(fs.readFileSync(released, 'utf8'), 'confirmed');
+    assert.equal(pool.size, 0);
+  } finally { await pool.stop('SIGTERM'); }
+});

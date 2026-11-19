@@ -40,6 +40,15 @@ def client(config):
     return Joppa(config["url"], config.get("token_file"), config.get("mcp_command"))
 
 
+def release_settings():
+    snapshot = os.environ.get("PLANNING_JOPPA_CONFIG_SNAPSHOT")
+    if not snapshot:
+        return settings()
+    config = read(snapshot)
+    require(digest(config) == os.environ["PLANNING_JOPPA_CONFIG_DIGEST"], "flow release config digest differs")
+    return config
+
+
 def prepare():
     target, config = artifacts(), settings()
     api = client(config)
@@ -83,7 +92,7 @@ def capture(name):
 
 
 def failure(reason=None):
-    target, config = artifacts(), settings()
+    target, config = artifacts(), release_settings()
     detail = target / "failure.txt"
     # An explicit exception takes priority. Otherwise use the workflow's business diagnosis.
     reason = reason or (detail.read_text()[:1000].strip() if detail.is_file() else "") or \

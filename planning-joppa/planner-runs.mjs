@@ -20,9 +20,9 @@ export class PlannerRuns {
   get current() { return [...this.completed, ...this.active.values()].map(run => run.current).filter(Boolean); }
   owns(address) { return this.active.has(address); }
 
-  start(address, args, env, attemptKey = null) {
+  start(address, args, env, attemptKey = null, configured = false) {
     if (this.stopping || this.owns(address)) throw new Error(`Planner already reserves ${address} or is stopping`);
-    const run = {address, attemptKey, current: null, child: null, error: null};
+    const run = {address, attemptKey, configured, current: null, child: null, error: null};
     // Reserve the address before spawn. The claim can change its revision while the child runs.
     this.active.set(address, run);
     let pending = '', buffered = '', ended = false, resolve;
@@ -71,8 +71,15 @@ export class PlannerRuns {
 
   stop(signal) {
     return this.stopping ??= Promise.all([...this.active.values()].map(async run => {
-      if (signalGroup(run, signal)) {
-        const deadline = Date.now() + 5000;
+      let sent = false;
+      if (run.configured && run.child?.pid) {
+        // The flow launcher stops Medulla before it releases its claim.
+        try { process.kill(run.child.pid, signal); sent = true; }
+        catch (error) { if (error.code !== 'ESRCH') throw error; }
+      } else sent = signalGroup(run, signal);
+      if (sent) {
+        // Allow 10 s for Medulla shutdown and 30 s for the guarded release.
+        const deadline = Date.now() + (run.configured ? 45000 : 5000);
         while (signalGroup(run, 0) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
         signalGroup(run, 'SIGKILL');
       }
