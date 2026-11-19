@@ -56,6 +56,9 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
     typeof value !== 'string' || value.includes('\0'))) {
     throw new Error('env must map runtime variable names to strings without host-owned overrides');
   }
+  for (const key of Object.keys(config.vars)) {
+    if (Object.hasOwn(config.env, key)) throw new Error(`vars.${key} duplicates env.${key}`);
+  }
   if (typeof config.dockerEngine !== 'boolean') throw new Error('dockerEngine must be true or false');
   if (typeof config.image !== 'string' || !config.image || /\s/.test(config.image) || config.image.startsWith('-')) {
     throw new Error('image must be a Docker image reference');

@@ -192,7 +192,8 @@ Git freshness checks remain mandatory. An unavailable optional connector is not 
 `cbmInitializeTimeoutSeconds` sets the connection budget and defaults to 90.
 `env` maps uppercase variable names to strings exported inside the workflow. Host-owned variable overrides are refused.
 `vars` sends literal `--var KEY=VALUE` arguments and replaces workflow defaults. Host-owned overrides fail before launch.
-For a custom name shared by `env` and `vars`, `env` keeps priority. Values can appear in run records; do not put secrets here.
+The same key cannot appear in both `env` and `vars`. Duplicate keys fail before launch.
+Values can appear in run records; do not put secrets here.
 For a shared Bun cache, append its absolute host path to `readWriteDirs` and set `env.BUN_INSTALL_CACHE_DIR`.
 The container path is `/workspace/<host directory basename>`. A host cache named `bun` therefore uses `/workspace/bun`.
 Cache mounts need write access. Keep them outside the canonical source repositories.

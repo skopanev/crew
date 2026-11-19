@@ -42,9 +42,11 @@ test('dispatcher vars refuse undeclared keys and declared host-owned keys before
     save(f.configFile, {...f.config, workflow, vars: {[key]: 'override'}});
     assert.throws(() => configFrom(f.configFile, f.env), /not declared in workflow.vars/);
   }
+  save(f.configFile, {...f.config, vars: {REJECT_ROUNDS: '1'}, env: {REJECT_ROUNDS: '2'}});
+  assert.throws(() => configFrom(f.configFile, f.env), /vars.REJECT_ROUNDS duplicates env.REJECT_ROUNDS/);
 });
 
-test('lane assembly keeps fixed host variables after dispatcher overrides', async t => {
+test('lane assembly passes custom values without evaluating shell text', async t => {
   const f = await setup(t, {launchLanes: false});
   const source = fs.readFileSync(fileURLToPath(new URL('../../lane/run.sh', import.meta.url)), 'utf8');
   const assembly = source.slice(source.indexOf('medulla_args=('), source.indexOf('launch_medulla "${medulla_args[@]}"'));
@@ -59,7 +61,7 @@ test_command='["test"]'; git_ssh=ssh
 `;
   const literal = 'literal = "quoted" $(touch must-not-exist)';
   const output = execFileSync('bash', ['-c', bindings + assembly + '\nprintf \'%s\\0\' "${medulla_args[@]}"',
-    'fixture', '--var', 'REJECT_ROUNDS=1', '--var', 'TARGET_BRANCH=wrong', '--var', 'TOOLING_ROOT=wrong',
+    'fixture', '--var', 'REJECT_ROUNDS=1',
     '--var', 'CUSTOM=' + literal], {cwd: f.root}).toString().split('\0').filter(Boolean);
   const values = Object.fromEntries(output.flatMap((value, index) => {
     if (value !== '--var') return [];

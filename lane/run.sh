@@ -234,7 +234,6 @@ unset JOPPA_TOKEN JOPPA_TOKEN_FILE
 medulla_args=( \
   --docker \
   --cwd-ro \
-  ${passthrough[@]+"${passthrough[@]}"} \
   "${workflow_args[@]}" \
   --runs-folder "$RUNS_FOLDER" \
   ${coder_args[@]+"${coder_args[@]}"} \
@@ -268,5 +267,6 @@ medulla_args=( \
   --var "LANE_SHARED_LOCK_DIR=${shared_lock_dir:+/workspace/$(basename "$shared_lock_dir")}" \
   --var "ticket_test_command=$test_command" \
   --var "GIT_SSH_COMMAND=$git_ssh" \
-  ${context_vars[@]+"${context_vars[@]}"} ${hooks_vars[@]+"${hooks_vars[@]}"} )
+  ${context_vars[@]+"${context_vars[@]}"} ${hooks_vars[@]+"${hooks_vars[@]}"} \
+  ${passthrough[@]+"${passthrough[@]}"} )
 launch_medulla "${medulla_args[@]}"
