@@ -48,7 +48,9 @@
     "TEST_KIND": "test",
     "DECISION_STAGE": "to_decide",
     "TEST_OPERATION": "create",
-    "REWORK_LIMIT": 1
+    "REWORK_LIMIT": 1,
+    "CRITIC_SECOND_HARNESS": "claude-code",
+    "CRITIC_SECOND_MODEL": "claude-sonnet-5-5"
   },
   "context": {
     "url": "https://joppa.example.com/api/data",

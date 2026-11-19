@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {plannerRows} from '../../planning-joppa/run-rows.mjs';
 
@@ -17,14 +18,14 @@ function fixture(t) {
       document: {data: {stage: 'waiting'}}}]};
   const review = {draft_digest: 'frozen', tests: [{id: 't1', score: '11111', reasons: []}],
     coverage: 'complete', missing: [], summary: 'The Test passes.'};
-  const run = ({codex = review, claude = review, decision = 'needs_input', mode = 'create'} = {}) => {
-    for (const [name, value] of Object.entries({draft, input, codex, claude})) {
+  const run = ({codex = review, second = review, decision = 'needs_input', mode = 'create'} = {}) => {
+    for (const [name, value] of Object.entries({draft, input, codex, second})) {
       fs.writeFileSync(path.join(root, name + '.json'), JSON.stringify(value));
     }
     const args = ['-nc', '--arg', 'digest', 'frozen', '--arg', 'test', 'check', '--arg', 'task', 'work',
       '--arg', 'waiting', 'waiting', '--arg', 'ready', 'ready', '--arg', 'mode', mode,
       '--arg', 'decision', decision, '--arg', 'run', '2026-11-18_12-00-00-12345678'];
-    for (const name of ['draft', 'input', 'codex', 'claude']) args.push('--slurpfile', name, path.join(root, name + '.json'));
+    for (const name of ['draft', 'input', 'codex', 'second']) args.push('--slurpfile', name, path.join(root, name + '.json'));
     return JSON.parse(execFileSync('jq', [...args, '-f', filter], {encoding: 'utf8'}));
   };
   return {root, review, input, run};
@@ -33,7 +34,7 @@ function fixture(t) {
 test('coverage alone returns only the selected item and a missing note without Test or Task changes', t => {
   const f = fixture(t);
   const gap = {...f.review, coverage: 'incomplete', missing: ['The required failure outcome is unspecified.']};
-  for (const reviews of [{codex: gap}, {claude: gap}, {codex: gap, claude: gap}]) {
+  for (const reviews of [{codex: gap}, {second: gap}, {codex: gap, second: gap}]) {
     const value = f.run(reviews);
     assert.equal(value.approved, false);
     assert.equal(value.decision_required, true);
@@ -54,7 +55,7 @@ test('other failures, stale reviews and malformed coverage retain the rework pat
     r => r.tests[0].id = 'other', r => r.missing = [], r => r.missing = 'not an array',
     r => r.coverage = 'complete', r => r.missing = ['']]) {
     const bad = structuredClone(gap); edit(bad);
-    for (const reviews of [{codex: bad, claude: gap}, {codex: gap, claude: bad}]) {
+    for (const reviews of [{codex: bad, second: gap}, {codex: gap, second: bad}]) {
       const value = f.run(reviews);
       assert.equal(value.approved, false);
       assert.equal(value.decision_required, undefined);
@@ -67,7 +68,7 @@ test('other failures, stale reviews and malformed coverage retain the rework pat
 test('disabled decision routing and update mode keep the existing behavior', t => {
   const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['A required behavior is not covered.']};
   for (const extra of [{decision: ''}, {mode: 'update'}]) {
-    const value = f.run({codex: gap, claude: gap, ...extra});
+    const value = f.run({codex: gap, second: gap, ...extra});
     assert.equal(value.decision_required, undefined);
     assert.ok(value.critique);
   }
@@ -80,10 +81,10 @@ test('disabled decision routing and update mode keep the existing behavior', t =
 
 test('the missing note stays bounded and points to the complete critic artifacts', t => {
   const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['A'.repeat(6000)]};
-  const value = f.run({codex: gap, claude: gap});
+  const value = f.run({codex: gap, second: gap});
   assert.ok(value.operations[1].command.text.length <= 1000);
   assert.ok(value.operations[1].command.id.length <= 120);
-  assert.match(value.operations[1].command.text, /critic-codex.json and artifacts\/critic-claude.json/);
+  assert.match(value.operations[1].command.text, /critic-codex.json and artifacts\/critic-second.json/);
   assert.ok(value.outcome.reason.length <= 1000);
 });
 
@@ -148,4 +149,66 @@ test('draft_check sends an empty source gap directly to decision publication', t
       assert.match(value.operations[1].command.text, /^GAP\. The source gives no refusal outcome/);
     }
   }
+});
+
+test('critic inputs keep Codex independent and use the selected second harness isolation', t => {
+  const workflow = fileURLToPath(new URL('../../writer/workflow.yaml', import.meta.url));
+  const shell = fs.readFileSync(workflow, 'utf8').match(/^    inputs:\n      shell: \|\n([\s\S]*?)^    agent:/m)[1]
+    .replace(/^        /gm, '');
+  for (const harness of ['claude-code', 'agy']) {
+    const seats = JSON.parse(execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
+      CRITIC_CODEX_MODEL: 'gpt-6.1-sol', CRITIC_SECOND_HARNESS: harness,
+      CRITIC_SECOND_MODEL: harness === 'agy' ? 'gemini-4-carbon-high' : 'claude-sonnet-5-5',
+      AGY_PROFILE_HOME: '/private/isolated-critic'}}));
+    assert.equal(seats.length, 2);
+    assert.deepEqual(seats[0], {slug: 'codex', harness: 'codex', model: 'gpt-6.1-sol',
+      a1: '--ignore-user-config', a2: '-c', a3: 'mcp_servers={}'});
+    const second = seats[1];
+    assert.equal(second.slug, 'second');
+    assert.equal(second.harness, harness);
+    if (harness === 'agy') {
+      assert.equal(second.model, 'gemini-4-carbon-high');
+      assert.deepEqual(second.env, {BROKER_AGY_HOME: '/private/isolated-critic', BROKER_ISOLATE_MCP: '1'});
+      assert.equal(second.a1, undefined);
+    } else {
+      assert.equal(second.a1, '--strict-mcp-config');
+      assert.equal(second.a4, '{"mcpServers":{}}');
+      assert.match(second.a6, /Bash,Read,Glob,Grep/);
+    }
+  }
+});
+
+test('invalid second seats stop before the shared prepare can claim an item', t => {
+  const f = fixture(t), workflow = fileURLToPath(new URL('../../writer/workflow.yaml', import.meta.url));
+  const shell = fs.readFileSync(workflow, 'utf8').match(/^  prepare:\n    shell: \|\n([\s\S]*?)^    on_signal:/m)[1]
+    .replace(/^      /gm, '');
+  for (const overrides of [{CRITIC_SECOND_HARNESS: 'codex'}, {CRITIC_SECOND_MODEL: 'author-model'},
+    {CRITIC_SECOND_MODEL: ''}, {CRITIC_SECOND_HARNESS: 'agy', AGY_PROFILE_HOME: path.join(f.root, 'absent')}]) {
+    assert.throws(() => execFileSync('bash', ['-c', shell], {stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env,
+      CREW_FLOW_STAGES: '/must-not-run', FLOW_PUBLICATION: '{"file":"operations.json"}', TEST_KIND: 'check',
+      TEST_OPERATION: 'create', DECISION_STAGE: '', REWORK_LIMIT: '1', AUTHOR_MODEL: 'author-model',
+      CRITIC_SECOND_HARNESS: 'claude-code', CRITIC_SECOND_MODEL: 'other-model', CRITIC_CLAUDE_MODEL: '',
+      ...overrides}}), error => error.status === 2 && !String(error.stderr).includes('must-not-run'));
+  }
+});
+
+test('review_join publishes only after both generic seat reports match the frozen draft', t => {
+  const f = fixture(t), artifacts = path.join(f.root, 'artifacts');
+  f.run();
+  fs.mkdirSync(artifacts);
+  for (const name of ['draft', 'input']) fs.copyFileSync(path.join(f.root, name + '.json'), path.join(artifacts, name + '.json'));
+  const digest = createHash('sha256').update(fs.readFileSync(path.join(artifacts, 'draft.json'))).digest('hex');
+  for (const name of ['codex', 'second']) fs.writeFileSync(path.join(artifacts, `critic-${name}.json`),
+    JSON.stringify({...f.review, draft_digest: digest}));
+  const workflow = fileURLToPath(new URL('../../writer/workflow.yaml', import.meta.url));
+  const shell = fs.readFileSync(workflow, 'utf8').match(/^  review_join:\n[\s\S]*?    shell: \|\n([\s\S]*?)^    on_signal:/m)[1]
+    .replace(/^      /gm, '');
+  const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
+    MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
+    TEST_OPERATION: 'create', DECISION_STAGE: '', REWORK_LIMIT: '1', round: '1',
+    FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
+  assert.match(output, /<signal:APPROVED>/);
+  const value = JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json'), 'utf8'));
+  assert.equal(value.operations.length, 1);
+  assert.equal(value.operations[0].command.kind, 'check');
 });

@@ -1,5 +1,5 @@
 $draft[0] as $d | $input[0] as $in | ($d.tests | map(.id) | sort) as $ids |
-{codex: $codex[0], claude: $claude[0]} as $reviews |
+{codex: $codex[0], second: $second[0]} as $reviews |
 def valid: type == "object" and .draft_digest == $digest and (.tests | type == "array") and
   ((.tests | map(.id) | sort) == $ids) and all(.tests[]; .score | type == "string" and test("^[01]{5}$")) and
   (.coverage == "complete" or .coverage == "incomplete");
@@ -29,7 +29,7 @@ elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) an
     {command: {op: "note", target: $in.selected.address,
       id: ("writer-missing-" + ($run | gsub("[^A-Za-z0-9_.-]"; "_") | .[-80:])),
       text: ("Missing coverage:\n" + ($missing | join("\n") | .[0:750]) +
-        "\nRun: " + ($run | .[-100:]) + "\nFull findings: artifacts/critic-codex.json and artifacts/critic-claude.json")}}
+        "\nRun: " + ($run | .[-100:]) + "\nFull findings: artifacts/critic-codex.json and artifacts/critic-second.json")}}
   ], outcome: {status: "blocked", reason_code: "COVERAGE_INCOMPLETE", reason: ($missing | join("; ") | .[0:1000])}}
 else {approved: false, critique: ($reviews | map_values(if valid then
   {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else

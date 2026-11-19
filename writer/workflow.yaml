@@ -13,7 +13,9 @@ vars:
   FLOW_PUBLICATION: ''
   AUTHOR_MODEL: claude-opus-5-5
   CRITIC_CODEX_MODEL: gpt-6.1-sol
-  CRITIC_CLAUDE_MODEL: claude-sonnet-5-5
+  CRITIC_SECOND_HARNESS: claude-code
+  CRITIC_SECOND_MODEL: claude-sonnet-5-5
+  AGY_PROFILE_HOME: ''
   # The project names its native Test kind in config.vars.
   TEST_KIND: ''
   DECISION_STAGE: ''
@@ -47,8 +49,14 @@ nodes:
         printf '%s' "$FLOW_PUBLICATION" | jq -e '.allowed_operations | index("note") != null' >/dev/null || {
           echo 'writer: DECISION_STAGE requires note publication permission' >&2; exit 2; }
       fi
-      # The Claude critic must review independently of the author. The same vendor is allowed, the same model is not.
-      [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
+      [ -z "${CRITIC_CLAUDE_MODEL:-}" ] || { echo 'writer: rename CRITIC_CLAUDE_MODEL to CRITIC_SECOND_MODEL' >&2; exit 2; }
+      case "$CRITIC_SECOND_HARNESS" in
+        claude-code) ;;
+        agy) [ -d "$AGY_PROFILE_HOME" ] || { echo 'writer: AGY_PROFILE_HOME is unavailable' >&2; exit 2; } ;;
+        *) echo 'writer: CRITIC_SECOND_HARNESS must be claude-code or agy' >&2; exit 2 ;;
+      esac
+      [ -n "$CRITIC_SECOND_MODEL" ] && [ "$AUTHOR_MODEL" != "$CRITIC_SECOND_MODEL" ] || {
+        echo 'writer: CRITIC_SECOND_MODEL must be nonempty and differ from AUTHOR_MODEL' >&2; exit 2; }
       prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
       # input.json stays complete for the shared publication fence.
@@ -137,6 +145,7 @@ nodes:
       __failed__: failed
       __default__: failed
   critics:
+    pre: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare_critic'
     max_attempts: 2
     env:
       LANE_MEMORY_CONFIG: ''
@@ -150,11 +159,14 @@ nodes:
     # Two independent seats from different vendors. Neither seat sees the other seat or the author.
     inputs:
       shell: |
-        jq -nc --arg codex '{{var:CRITIC_CODEX_MODEL}}' --arg claude '{{var:CRITIC_CLAUDE_MODEL}}' '[
+        jq -nc --arg codex "$CRITIC_CODEX_MODEL" --arg harness "$CRITIC_SECOND_HARNESS" \
+          --arg model "$CRITIC_SECOND_MODEL" --arg profile "$AGY_PROFILE_HOME" '[
           {slug: "codex", harness: "codex", model: $codex, a1: "--ignore-user-config", a2: "-c", a3: "mcp_servers={}"},
-          {slug: "claude", harness: "claude-code", model: $claude, a1: "--strict-mcp-config", a2: "--setting-sources=",
-           a3: "--mcp-config", a4: "{\"mcpServers\":{}}", a5: "--disallowedTools",
-           a6: "Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit"}]'
+          ({slug: "second", harness: $harness, model: $model} +
+           if $harness == "claude-code" then {a1: "--strict-mcp-config", a2: "--setting-sources=",
+             a3: "--mcp-config", a4: "{\"mcpServers\":{}}", a5: "--disallowedTools",
+             a6: "Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit"}
+           else {env: {BROKER_AGY_HOME: $profile, BROKER_ISOLATE_MCP: "1"}} end)]'
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -191,7 +203,7 @@ nodes:
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" \
         --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
         --slurpfile draft "$a/draft.json" \
-        --slurpfile codex "$a/critic-codex.json" --slurpfile claude "$a/critic-claude.json" \
+        --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
         -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"
       if [ "$(printf '%s' "$verdict" | jq -r .approved)" = true ]; then

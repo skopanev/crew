@@ -16,6 +16,7 @@ from joppa_reads import normalize_detail
 from provider_fixture import item, merged
 import flow_stages
 import flow_publication
+import flow_launch
 
 
 class Tracker:
@@ -125,12 +126,33 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.assertFalse(result["claim_released"])
         self.assertEqual(len(self.api.batches), 1)
 
+    def test_launch_gives_the_flow_a_private_temporary_agy_profile(self):
+        config = {**self.config, "workflow": str(ROOT / "writer/workflow.yaml"),
+                  "mcp_command": ["connector"], "vars": {"CRITIC_SECOND_HARNESS": "agy"}}
+        profiles = []
+        def execute(command, **kwargs):
+            variable = next(value for value in command if value.startswith("AGY_PROFILE_HOME="))
+            profile = Path(variable.split("=", 1)[1])
+            profiles.append(profile)
+            self.assertTrue(profile.is_dir())
+            self.assertEqual(profile.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(list(Path(kwargs["cwd"]).iterdir()), [])
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(flow_launch.shutil, "which", return_value="medulla"), \
+             patch.object(flow_launch.subprocess, "run", side_effect=execute):
+            self.assertEqual(flow_launch.launch(self.folder / "config.json", json.dumps(config), "criterion:a", False), 0)
+        self.assertEqual(len(profiles), 1)
+        self.assertFalse(profiles[0].exists())
+        config["vars"]["AGY_PROFILE_HOME"] = "/foreign/profile"
+        with self.assertRaisesRegex(ValueError, "reserved workflow variable"):
+            flow_launch.configuration(self.folder / "config.json", json.dumps(config))
+
     def test_writer_coverage_returns_the_item_and_note_in_one_claim_release(self):
         self.config["publication"]["update_kinds"].append("criterion")
         draft = {"tests": [{"id": "t1", "title": "A valid input is accepted", "data": {"body": "A test"}}]}
         review = {"draft_digest": "frozen", "tests": [{"id": "t1", "score": "11111", "reasons": []}],
                   "coverage": "incomplete", "missing": ["The required failure outcome is unspecified."], "summary": "Tests pass."}
-        values = {"draft": draft, "input": read(self.target / "input.json"), "codex": review, "claude": review}
+        values = {"draft": draft, "input": read(self.target / "input.json"), "codex": review, "second": review}
         args = ["jq", "-nc", "--arg", "digest", "frozen", "--arg", "test", "check", "--arg", "task", "work",
                 "--arg", "waiting", "waiting", "--arg", "ready", "ready", "--arg", "mode", "create",
                 "--arg", "decision", "needs_input", "--arg", "run", "writer-example"]

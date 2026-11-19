@@ -105,6 +105,9 @@ def main():
             result = read(artifacts() / "result.json")
             signal("READY" if result["status"] == "published" else "BLOCKED",
                    result.get("reason") or "Configured workflow output published")
+        elif command == "prepare_critic":
+            from tools import prepare_critic
+            prepare_critic()
         elif command == "verify":
             config = settings()
             flow_context.verify(client(config), config, read(artifacts() / "input.json"), read(artifacts() / "claim.json"))

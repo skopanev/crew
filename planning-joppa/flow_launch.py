@@ -25,7 +25,7 @@ def configuration(path, raw=None):
     require(isinstance(config.get("vars", {}), dict), "config.vars must be an object")
     for name in config.get("vars", {}):
         require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) and
-                not name.startswith(("PLANNING_", "CREW_FLOW_", "MEDULLA_")), "reserved workflow variable: " + name)
+                name != "AGY_PROFILE_HOME" and not name.startswith(("PLANNING_", "CREW_FLOW_", "MEDULLA_")), "reserved workflow variable: " + name)
     publication = config.get("publication")
     require(isinstance(publication, dict), "config.publication is required")
     filename = text(publication.get("file"), "publication.file")
@@ -64,7 +64,9 @@ def launch(path, raw, item, dry_run):
         print("Dry run: no MCP calls, claims, agents, or writes")
         return 0
     require(shutil.which(executable), "required executable missing: " + executable)
-    with tempfile.TemporaryDirectory(prefix="crew-planner-memory-") as memory:
+    with tempfile.TemporaryDirectory(prefix="crew-planner-memory-") as memory, \
+            tempfile.TemporaryDirectory(prefix="crew-planner-agy-") as agy:
+        command.extend(["--var", "AGY_PROFILE_HOME=" + agy])
         working = Path(memory) / "work"
         working.mkdir()
         env = dict(os.environ)
