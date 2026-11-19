@@ -196,7 +196,7 @@ nodes:
       - &simplicity_seat
         slug: simplicity
         harness: agy
-        model: gemini-4-argon-high
+        model: gemini-4-carbon-high
         read_instruction: Use native file tools for reads. Do not run shell commands.
         env:
           BROKER_AGY_HOME: '{{var:AGY_PROFILE_HOME}}'

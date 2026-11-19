@@ -23,7 +23,7 @@ prepare → research [code | knowledge | external, параллельно]
 | Три ветки разведки | Codex | `gpt-6.1-sol` |
 | Проектировщик | Claude Code | `claude-opus-5-5` |
 | Критик необходимости | Codex | `gpt-6.1-sol` |
-| Критик простоты | AGY | `gemini-4-argon-high` |
+| Критик простоты | AGY | `gemini-4-carbon-high` |
 | Критик корректности | OpenCode | `zai-coding-plan/glm-5.3` |
 
 Модели разведки, проектировщика и критиков задаются по местам в
