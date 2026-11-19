@@ -42,6 +42,24 @@ async function dolber(t, options, values = {}) {
   return {f, run: watch(t, launcher, ['--config', f.configFile], {...f.env, NO_COLOR: '1'})};
 }
 
+test('container memory budgets use host-only Medulla settings and reject invalid config before claim', async t => {
+  const f = await setup(t, {launchLanes: false});
+  save(f.configFile, {...f.config, dockerMemory: '8g', dockerMemorySwap: '8g'});
+  const config = configFrom(f.configFile, f.env), env = laneOptionsEnv(config);
+  assert.equal(env.MEDULLA_DOCKER_MEMORY, '8g');
+  assert.equal(env.MEDULLA_DOCKER_MEMORY_SWAP, '8g');
+  assert.equal(Object.hasOwn(config.vars, 'MEDULLA_DOCKER_MEMORY'), false);
+  for (const change of [{dockerMemory: ''}, {dockerMemory: 8}, {dockerMemory: '0g'},
+    {dockerMemory: '-1'}, {dockerMemory: '8g --privileged'}, {dockerMemory: '8g\n'},
+    {dockerMemorySwap: '8g'}, {dockerMemory: '8g', dockerMemorySwap: 0},
+    {dockerMemory: '8g', dockerMemorySwap: '4g'}]) {
+    save(f.configFile, {...f.config, ...change});
+    assert.throws(() => configFrom(f.configFile, f.env), /dockerMemory/);
+  }
+  assert.equal(laneOptionsEnv({dockerMemory: '8g', dockerMemorySwap: '-1'}).MEDULLA_DOCKER_MEMORY_SWAP, '-1');
+  assert.equal(laneOptionsEnv({dockerMemory: '1024m', dockerMemorySwap: '1G'}).MEDULLA_DOCKER_MEMORY_SWAP, '1G');
+});
+
 test('Dolber uses a changed config at the next selection and stays quiet while it is unchanged', async t => {
   const {f, run} = await dolber(t, {launchLanes: false});
   await run.until(output => count(output, /repositories=app\]/g) >= 2);

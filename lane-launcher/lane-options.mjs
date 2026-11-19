@@ -24,11 +24,29 @@ export function reviewerInputs(reviewers) {
 export function validateLaneOptions(config) {
   require(config.scout === undefined || typeof config.scout === 'boolean', 'scout must be true or false');
   reviewerInputs(config.reviewers);
+  for (const key of ['dockerMemory', 'dockerMemorySwap']) {
+    const value = config[key];
+    require(value === undefined || typeof value === 'string' &&
+      (/^[1-9][0-9]*[bkmg]?$/i.test(value) || key === 'dockerMemorySwap' && value === '-1'),
+    `${key} must be a positive Docker size string; swap also accepts -1`);
+  }
+  require(config.dockerMemorySwap === undefined || config.dockerMemory !== undefined,
+    'dockerMemorySwap requires dockerMemory');
+  if (config.dockerMemorySwap !== undefined && config.dockerMemorySwap !== '-1') {
+    const bytes = value => {
+      const [, digits, unit] = /^([0-9]+)([bkmg]?)$/i.exec(value);
+      return BigInt(digits) * 1024n ** BigInt(Math.max(0, 'bkmg'.indexOf(unit.toLowerCase())));
+    };
+    require(bytes(config.dockerMemorySwap) >= bytes(config.dockerMemory),
+      'dockerMemorySwap must be at least dockerMemory');
+  }
 }
 
 export function laneOptionsEnv(config) {
   validateLaneOptions(config);
   const reviewers = reviewerInputs(config.reviewers);
   return {LANE_SCOUT: String(config.scout ?? true),
-    LANE_REVIEWERS_JSON: reviewers ? JSON.stringify(reviewers) : ''};
+    LANE_REVIEWERS_JSON: reviewers ? JSON.stringify(reviewers) : '',
+    ...(config.dockerMemory !== undefined ? {MEDULLA_DOCKER_MEMORY: config.dockerMemory} : {}),
+    ...(config.dockerMemorySwap !== undefined ? {MEDULLA_DOCKER_MEMORY_SWAP: config.dockerMemorySwap} : {})};
 }

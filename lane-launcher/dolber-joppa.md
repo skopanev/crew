@@ -177,6 +177,8 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `reviewCommands` | Checks before expert review. Required for branch and Requirement delivery. A repository value overrides the dispatcher value. Target delivery defaults to `gateCommands` |
 | `gateTimeoutSeconds` | Maximum seconds per check, default 900. A repository value overrides the dispatcher value |
 | `coderTimeoutSeconds` | Optional cap per coder attempt. A repository value overrides the dispatcher value. Omit it to keep the workflow limit |
+| `dockerMemory` | Optional memory ceiling for the whole lane container, such as `8g`. Requires Medulla support for `MEDULLA_DOCKER_MEMORY` |
+| `dockerMemorySwap` | Optional total memory plus swap ceiling. Requires `dockerMemory`. Use the same value to disable swap |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
 | `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | `branch`, `target`, or `requirement` |
