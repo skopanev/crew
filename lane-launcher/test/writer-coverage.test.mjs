@@ -114,3 +114,38 @@ test('the dashboard shows the coverage reason code for the completed blocked run
   assert.equal(row.status, 'BLOCKED');
   assert.equal(row.stage, 'COVERAGE_INCOMPLETE');
 });
+
+test('draft_check sends an empty source gap directly to decision publication', t => {
+  const f = fixture(t), artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  const workflow = fileURLToPath(new URL('../../writer/workflow.yaml', import.meta.url));
+  const shell = fs.readFileSync(workflow, 'utf8').match(/^  draft_check:\n[\s\S]*?    shell: \|\n([\s\S]*?)^    on_signal:/m)[1]
+    .replace(/^      /gm, '');
+  fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify(f.input));
+  for (const [draft, mode, decision, signal] of [
+    [{tests: [], coverage: 'GAP. The source gives no refusal outcome.'}, 'create', 'needs_input', 'SOURCE_GAP'],
+    [{tests: [], coverage: 'GAP. Missing source.'}, 'update', 'needs_input', 'REVISE'],
+    [{tests: [], coverage: 'GAP. Missing source.'}, 'create', '', 'REVISE'],
+    [{tests: [], coverage: 'Complete.'}, 'create', 'needs_input', 'REVISE'],
+    [{tests: [], coverage: 'GAP. '}, 'create', 'needs_input', 'REVISE'],
+  ]) {
+    const file = path.join(artifacts, 'operations.json');
+    fs.rmSync(file, {force: true});
+    fs.writeFileSync(path.join(artifacts, 'draft.json'), JSON.stringify(draft));
+    const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
+      MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
+      TEST_OPERATION: mode, DECISION_STAGE: decision, REWORK_LIMIT: '1', round: '1',
+      FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
+    assert.ok(output.includes(`<signal:${signal}>`), output);
+    assert.equal(fs.existsSync(file), signal === 'SOURCE_GAP');
+    if (signal === 'SOURCE_GAP') {
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.equal(value.outcome.reason_code, 'SOURCE_GAP');
+      assert.equal(value.outcome.status, 'blocked');
+      assert.deepEqual(value.operations[0].command.data, {stage: decision});
+      assert.equal(value.operations[0].command.revision, f.input.claim_revision);
+      assert.equal(value.operations.length, 2);
+      assert.match(value.operations[1].command.text, /^GAP\. The source gives no refusal outcome/);
+    }
+  }
+});

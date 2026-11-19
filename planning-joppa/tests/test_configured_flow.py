@@ -153,6 +153,25 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.assertEqual(result["reason_code"], "COVERAGE_INCOMPLETE")
         self.assertTrue(result["claim_released"])
 
+    def test_writer_source_gap_releases_the_claim_with_a_stage_and_note(self):
+        self.config["publication"]["update_kinds"].append("criterion")
+        draft = self.folder / "draft.json"
+        write(draft, {"tests": [], "coverage": "GAP. The source gives no refusal outcome."})
+        value = subprocess.check_output(["jq", "-ce", "--arg", "decision", "needs_input",
+            "--arg", "run", "writer-source-gap", "--slurpfile", "input", str(self.target / "input.json"),
+            "-f", str(ROOT / "writer/source-gap.jq"), str(draft)], text=True)
+        write(self.target / "operations.json", json.loads(value))
+        flow_publication.publish(self.api, self.config, self.target)
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual([cmd["op"] for cmd in commands], ["save_object", "note"])
+        self.assertEqual(commands[0]["data"], {"stage": "needs_input", "assignee": None})
+        self.assertTrue(commands[1]["text"].startswith("GAP. The source gives no refusal outcome."))
+        self.assertFalse(any(node["kind"] == "check" for node in self.api.nodes.values()))
+        self.assertEqual(self.api.nodes["work:t"]["document"]["data"]["stage"], "waiting")
+        result = read(self.target / "result.json")
+        self.assertEqual(result["reason_code"], "SOURCE_GAP")
+        self.assertTrue(result["claim_released"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -109,7 +109,13 @@ nodes:
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       rm -f "$a"/critic-*.json
-      if jq -e --arg test "$TEST_KIND" \
+      if [ "$TEST_OPERATION" = create ] && [ -n "$DECISION_STAGE" ] && \
+        gap="$(jq -ce --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
+          --slurpfile input "$a/input.json" -f "$MEDULLA_WORKFLOW_DIR/source-gap.jq" "$a/draft.json")"; then
+        file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
+        printf '%s\n' "$gap" > "$a/$file"
+        echo '<signal:SOURCE_GAP>The source does not define a testable outcome. Return the item to its owner.</signal:SOURCE_GAP>'
+      elif jq -e --arg test "$TEST_KIND" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
         -f "$MEDULLA_WORKFLOW_DIR/draft.jq" "$a/draft.json" >/dev/null; then
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
@@ -124,6 +130,7 @@ nodes:
         echo '<signal:INVALID>The revised draft does not match the output contract or the Test schema.</signal:INVALID>'
       fi
     on_signal:
+      SOURCE_GAP: publish
       DRAFTED: critics
       REVISE: author
       INVALID: failed

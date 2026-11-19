@@ -10,6 +10,8 @@ Keep the title, Reporter name and command consistent. Unmentioned fields remain 
 An updated Test replaces its old text when you assess coverage. Do not count the old text as extra coverage.
 Each Test must get a yes to every review question that the critic contract gives.
 Write one Test for one behavior. Do not write Tests for behavior that the item does not require.
+If the supplied source defines no testable outcome, return an empty tests array and coverage "GAP. <missing source detail>".
+Do not invent an outcome to fill a source gap.
 
 The schema entry of the native Test kind defines the Test fields:
 1. For create, put every required field except title in data. Crew copies the selected owner. Updates preserve the existing owner.

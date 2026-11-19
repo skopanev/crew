@@ -26,6 +26,9 @@ At least one critic must report incomplete coverage with a nonempty `missing` li
 Writer publishes no Test or Task changes in this case. It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
 The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
 The configured publication policy must allow `note` and updates to the selected kind.
+In create mode, an empty `tests` array with `coverage: "GAP. <missing source detail>"` takes the same decision route.
+Writer saves `DECISION_STAGE`, adds the source gap note and releases its claim atomically.
+It records `reason_code: SOURCE_GAP` and starts no critics for this draft. The full text stays in `artifacts/draft.json`.
 Use `exclude_children` with the Test kind to exclude items that already have Tests from the create queue.
 An empty or omitted `DECISION_STAGE` keeps the existing rework path. Update mode keeps its existing stage behavior.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
