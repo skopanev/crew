@@ -79,7 +79,8 @@ Status: live publication and lane completion passed before native context reads 
 Native reads pass on four providers. Full native planning publication remains unverified.
 Whole-Requirement planning uses generic node operations: `save_object` and `archive_object`.
 Joppa removed `assess` and save `links`. Crew reserves a node with `data.assignee` and reads edges from `relations`.
-The legacy planner classifies failed Tasks with the configured `FAILED_TASK_STAGE`. It preserves that stage during contract edits.
+The legacy Task planner requires `FAILED_TASK_STAGE` and validates it against the native Task stage values.
+It classifies failed Tasks with this value. Configured flows that do not plan Tasks do not require this key. It preserves that stage during contract edits.
 Its provider checks pass. A live grouped run has not passed yet.
 Task completion does not confirm criterion acceptance.
 

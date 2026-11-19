@@ -102,7 +102,7 @@ test('Joppa planner reads all compact pages and uses native criterion tones', as
   f.objects.get('ac:extra1').status.tone = 'green';
   f.objects.get('ac:extra2').status.tone = 'orange';
   f.objects.get('ac:extra3').status.tone = 'red';
-  const rows = await readyCriteria({workspace: f.run.workspace, url: f.run.config.joppa.url}, f.run.joppaWorker.tokenFile);
+  const rows = await readyCriteria({workspace: f.run.workspace, FAILED_TASK_STAGE: 'review', url: f.run.config.joppa.url}, f.run.joppaWorker.tokenFile);
   assert.equal(rows.length, 27);
   assert(rows.some(row => row.address === 'ac:extra26'));
   assert(!rows.some(row => row.address === 'ac:extra27'));

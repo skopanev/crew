@@ -24,7 +24,7 @@ def unscoped(repositories):
 class RepositoryScopeTests(unittest.TestCase):
     def test_configuration_accepts_a_repository_without_a_project(self):
         folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        config = {"workspace": "product", "url": "https://joppa.example/mcp", "token_file": "token",
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "product", "url": "https://joppa.example/mcp", "token_file": "token",
                   "runs_folder": "runs", "cbm_store": "cbm", "cbm_root": "src", "context": {"token_file": "key", "session": {}, "query": {}, "roles": {"researcher": "r", "designer": "d", "critic": "c"}},
                   "repositories": [{"id": "app", "path": str(folder / "src" / "app"), "cbm_project": "app",
                                     "modules": [{"name": "core", "path": "src"}]},
@@ -37,7 +37,7 @@ class RepositoryScopeTests(unittest.TestCase):
 
     def test_context_needs_no_task_projects_reference_and_reads_no_project(self):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"},
-                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?"}, "check": CHECK_TYPE}
+                 "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"], "question": "What work?"}, "check": CHECK_TYPE}
         objects = {"criterion:a": item("criterion:a", "rule:r"), "rule:r": item("rule:r")}
         reads = []
         class Server:
@@ -52,7 +52,7 @@ class RepositoryScopeTests(unittest.TestCase):
                 if args.get("parent") == "rule:r":
                     return {"items": [{"address": "criterion:a", "kind": "criterion", "present": True}]}
                 return {"items": []}
-        config = {"workspace": "example", "repositories": unscoped(assignment()["repositories"])}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": unscoped(assignment()["repositories"])}
         data, _, requirement = context.load_requirement(Server(), config, "r")
         self.assertEqual(requirement["address"], "rule:r")
         self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a"])
@@ -110,7 +110,7 @@ class RepositoryScopeTests(unittest.TestCase):
                 if args.get("address"):
                     return deepcopy(details[args["address"]])
                 return {"items": deepcopy(rows), "total": len(rows)}
-        config = {"workspace": "example", "repositories": unscoped(data["repositories"])}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": unscoped(data["repositories"])}
         result = context.pending_work(Lists(), config, data)
         self.assertEqual([(entry["address"], entry["repository"]) for entry in result],
                          [("work:structured", "service"), ("work:free", "service"), ("work:both", "service"),

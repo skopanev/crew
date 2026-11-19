@@ -15,7 +15,7 @@ class ConfigHandoffTests(unittest.TestCase):
     def setUp(self):
         self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.config = self.folder / "config.json"
-        self.config.write_text(json.dumps({"workspace": "product", "url": "https://joppa.example/mcp",
+        self.config.write_text(json.dumps({"FAILED_TASK_STAGE": "review", "workspace": "product", "url": "https://joppa.example/mcp",
             "token_file": "token", "runs_folder": "runs", "cbm_store": "cbm", "cbm_root": "src",
             "context": {"token_file": "key", "session": {}, "query": {}, "roles": {"researcher": "r", "designer": "d", "critic": "c"}}, "repositories": [{"id": "app", "project": "project:app",
             "path": str(self.folder / "src" / "app"), "cbm_project": "app", "modules": [{"name": "core", "path": "src"}]}]}))

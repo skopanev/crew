@@ -1,7 +1,7 @@
 // Joppa planning queue reads: ready criteria and their Requirement groups.
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
-import {nodeAssignee, nodeFailed, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeFailed, validateFailedTaskStage, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -52,6 +52,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
   const dependencies = dependencyCheck(read);
   const schema = (await read('joppa_tree', {})).schema.types;
+  validateFailedTaskStage(config, schema);
   const kinds = role => Object.keys(schema).filter(kind => schema[kind].role === role);
   const covers = coversReference(config, schema, kinds('task'));
   const criteria = [];

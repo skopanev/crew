@@ -11,7 +11,15 @@ export function validateNodeFilter(filter, label = 'joppa.filter') {
   }
 }
 
-export const validateTaskFilter = config => validateNodeFilter(config.joppa?.filter);
+export function validateTaskFilter(config) {
+  validateNodeFilter(config.joppa?.filter);
+  const stage = config.joppa?.filter?.data?.stage;
+  const values = Array.isArray(stage) ? stage : [stage];
+  if (!values.length || values.some(value => typeof value !== 'string' || !value.trim()) ||
+      values.includes(config.FAILED_TASK_STAGE)) {
+    throw new Error('joppa.filter.data.stage must select working stages and exclude FAILED_TASK_STAGE');
+  }
+}
 
 // The revision from the filtered list must match the revision used by the claim save.
 export async function filteredTasks(config, read, wanted) {

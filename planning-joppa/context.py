@@ -11,11 +11,12 @@ from context_snapshot import (
     source, current_pin, remote_satisfied, snapshot_source, selected_criteria, unchanged, authored_meaning,
 )
 from context_reads import (
-    task_contract, pending_work, pending_work_page, object_read, read_remote_links, remote_key,
+    task_addresses, TONES, task_contract, pending_work, pending_work_page, object_read, read_remote_links, remote_key,
     remote_object, remote_snapshot, verify_remote, capture_object, refresh_reads, read_assignment,
 )
 from requirement_context import load_requirement
 from test_nodes import identities, read_nodes, test_type
+from joppa_reads import validate_failed_stage
 
 
 def requirement_meaning(api, workspace, req, types, get=None):
@@ -65,29 +66,11 @@ def load(api, config, ac_id):
                 raise
 
 
-# All six tones list present and archived objects. A done Task is archived with the purple tone.
-# Joppa renamed grey to blue. grey stays a read alias.
-TONES = ["red", "yellow", "orange", "blue", "grey", "green", "purple"]
-
-
-def task_addresses(api, workspace, parent, kind):
-    """List the current and archived Tasks of one criterion. Done Tasks keep their landed work in context."""
-    addresses, cursor, seen = [], None, set()
-    while True:
-        page = api.call("joppa_objects", {"workspace": workspace, "parent": parent, "kind": kind, "status": TONES,
-                                          "limit": 25, "fields": ["address"], **({"cursor": cursor} if cursor else {})})
-        addresses.extend(item["address"] for item in page["items"])
-        cursor = page.get("next_cursor")
-        if not cursor:
-            return addresses
-        require(cursor not in seen, "Task list pagination did not advance")
-        seen.add(cursor)
-
-
 def load_once(api, config, ac_id):
     workspace = config["workspace"]
     tree = api.call("joppa_tree", {"workspace": workspace})
     types = tree["schema"]["types"]
+    validate_failed_stage(config, types)
     ac_types = [kind for kind, value in types.items() if value.get("role") == "ac"]
     if ":" not in ac_id:
         require(len(ac_types) == 1, "use a full criterion address when the schema has multiple criterion types")
@@ -214,7 +197,7 @@ def configuration(path, raw=None):
     config = json.loads(raw) if raw is not None else read(path)
     for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root"):
         text(config.get(key), "config." + key)
-    if "FAILED_TASK_STAGE" in config: text(config["FAILED_TASK_STAGE"], "config.FAILED_TASK_STAGE")
+    validate_failed_stage(config)
     # Role contracts and lessons: the lane memory config, inline. launch writes it to a private file.
     memory = config.get("context")
     require(isinstance(memory, dict) and all(isinstance(memory.get(key), dict) for key in ("session", "query")),

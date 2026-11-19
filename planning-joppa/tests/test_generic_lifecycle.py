@@ -203,7 +203,7 @@ class GenericLifecycleTests(unittest.TestCase):
                 if start + 2 < len(rows):
                     page["next_cursor"] = str(start + 2)
                 return page
-        config = {"workspace": "example", "FAILED_TASK_STAGE": "review", "repositories": data["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example",  "repositories": data["repositories"]}
         result = context.pending_work(Lists(), config, data)
         self.assertEqual([(entry["address"], entry["status"]) for entry in result],
                          [("work:t0", "open"), ("work:t1", "active"), ("work:t2", "blocked")])

@@ -13,7 +13,7 @@ from test_nodes import NODE_FIELDS, node_results, read_nodes
 from provider_fixture import item, assignment, NodeServer, CHECK_TYPE
 
 TYPES = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
-         "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+         "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"], "question": "What work?",
                   "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
 
 
@@ -70,7 +70,7 @@ class TestNodeTests(unittest.TestCase):
 
     def test_snapshot_changes_when_a_node_changes_under_an_unchanged_criterion(self):
         api = Workspace()
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         value, snapshot, _ = context.load(api, config, "criterion:a")
         self.assertEqual(value["joppa"]["test_nodes"], [])
         self.assertEqual(value["joppa"]["test_type"], "check")
@@ -97,7 +97,7 @@ class TestNodeTests(unittest.TestCase):
 
     def test_orange_criterion_without_tests_remains_a_candidate(self):
         api = Workspace()
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         value, _, _ = context.load_requirement(api, config, "rule:r")
         self.assertEqual([entry["id"] for entry in value["joppa"]["criteria"]], ["criterion:a", "criterion:b"])
         self.assertEqual(value["joppa"]["criterion_schemas"]["criterion:b"]["test_nodes"], [])
@@ -138,7 +138,7 @@ class TestNodeTests(unittest.TestCase):
 
     def test_dependency_readiness_comes_from_target_completion(self):
         api = Workspace()
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         api.add("check:proof", "criterion:outside", "o.rs > proof", revision=1, ancestor="rule:outside")
         api.objects["rule:outside"] = item("rule:outside")
         api.objects["criterion:outside"] = item("criterion:outside", "rule:outside")

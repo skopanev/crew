@@ -138,7 +138,7 @@ class CoversTests(unittest.TestCase):
 
     def test_reference_validation_and_bare_id_normalization(self):
         types = {"criterion": {"role": "ac"}, "project": {"role": "document"},
-                 "work": {"role": "task", "references": {"covers": {"multiple": True, "target": "criterion"},
+                 "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "references": {"covers": {"multiple": True, "target": "criterion"},
                                                          "one": {"multiple": False, "target": "criterion"},
                                                          "projects": {"multiple": True, "target": "project"}}}}
         self.assertIsNone(coverage.reference({}, types, "work"))
@@ -166,7 +166,7 @@ class LifecycleTests(unittest.TestCase):
 class CoveredReadinessTests(unittest.TestCase):
     def server(self, task):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
-                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+                 "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"},
                                          "covers": {"multiple": True, "target": "criterion"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b")}
@@ -189,7 +189,7 @@ class CoveredReadinessTests(unittest.TestCase):
         return Server()
 
     def test_active_or_done_covering_task_owns_its_covered_criterion(self):
-        config = {"workspace": "example", "repositories": assignment()["repositories"], "covers_reference": "covers"}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"], "covers_reference": "covers"}
         task = item("work:shared", "criterion:a", {"title": "[01] Shared", "owner": "owner", "body": "Goal: x",
                                                    "covers": ["b"], "assignee": "crew-lane:host:run"})
         with self.assertRaisesRegex(ValueError, "no ready criteria"):

@@ -148,7 +148,8 @@ This applies to startup errors, timeouts and implementation failures.
 Admission rejection before lane startup only releases the revision-checked claim.
 Examples include active planning, a changed Requirement head and an unpublished dependency. No failure automatically returns a Task to a working stage.
 A person or an authorized role must change its stage before another implementation attempt.
-The native `joppa.filter` controls selection. Crew adds no `data.hold` filter.
+The native `joppa.filter` controls selection. Its `data.stage` must list working stages and exclude `FAILED_TASK_STAGE`.
+Crew refuses a missing or overlapping stage filter before claims. It adds no `data.hold` filter.
 An uncertain claim or outcome stays held until inspection confirms the result.
 The reservation holds only its Tasks. Other Tasks of the same Requirement and repository can run within the lane limit.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.

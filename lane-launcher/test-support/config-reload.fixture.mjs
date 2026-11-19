@@ -44,7 +44,7 @@ export async function plannerFixture(t, values = {}, passSeconds = 0, pass = rec
   fs.mkdirSync(bins);
   fs.writeFileSync(path.join(bins, 'sh'), pass, {mode: 0o755});
   const configFile = path.join(f.root, 'planner.json');
-  const config = {workspace: 'fixture', url: f.run.config.joppa.url, token_file: path.join(f.root, 'token'),
+  const config = {FAILED_TASK_STAGE: 'review', workspace: 'fixture', url: f.run.config.joppa.url, token_file: path.join(f.root, 'token'),
     runs_folder: path.join(f.root, 'planning-runs'), interval_seconds: 1, ...values};
   // Replace the file in one step: a reader never sees a partly written config.
   const write = value => {

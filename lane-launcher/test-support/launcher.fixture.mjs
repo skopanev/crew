@@ -12,7 +12,7 @@ const worker = fileURLToPath(new URL('../worker.mjs', import.meta.url));
 
 // One dispatcher pass reads the available Task queue once per free worker.
 const queueReads = f => f.calls.filter(call => call.name === 'joppa_objects' &&
-  [call.args.kind].flat().includes('task') && !call.args.cursor && !call.args.status).length;
+  [call.args.kind].flat().includes('task') && !call.args.cursor && !call.args.status && !call.args.data).length;
 
 function execute(script, args, env, {bin = process.execPath, cwd} = {}) {
   return new Promise((resolve, reject) => {
@@ -94,7 +94,7 @@ console.log(JSON.stringify({result}));
   const config = {id: 'test-project', workspace: 'fixture', FAILED_TASK_STAGE: 'review', launchLanes, sourceRoot: sources,
     pendingDeliveryData: {stage: 'to_review'},
     context: joppa.run.config.context, taskFields: joppa.run.config.taskFields,
-    joppa: {url: joppa.run.config.joppa.url, workers: [{actor: 'lane-1', tokenFile}]},
+    joppa: {url: joppa.run.config.joppa.url, filter: {data: {stage: 'ready'}}, workers: [{actor: 'lane-1', tokenFile}]},
     repositories: [{id: 'app', path: repo, targetBranch: 'main', cbmProject: 'app', preflight: null,
       paths: joppa.run.config.repositories[0].paths, gateCommands: ['true'], reviewCommands: ['true'], testCommand: ['true']}],
     worktreeRoot: path.join(sources, 'worktrees'),

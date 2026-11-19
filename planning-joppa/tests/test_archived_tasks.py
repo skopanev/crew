@@ -12,7 +12,7 @@ import context
 from provider_fixture import item, assignment, end, fail_task, CHECK_TYPE
 
 TYPES = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
-         "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+         "work": {"role": "task", "parents": ["criterion"], "question": "What work?", "fields": {"stage": {"values": ["ready", "review", "done"]}},
                   "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
 TONES = {"red", "yellow", "orange", "blue", "grey", "green", "purple"}
 

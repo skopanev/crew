@@ -70,7 +70,7 @@ test('covers reference must target several criteria and is ignored when not conf
   assert.throws(() => taskCovers({field: 'covers', target: 'ac'}, {document: {data: {covers: 'ac:a2'}}}), /list of criterion/);
   for (const field of [' ', 'acceptance', 'acceptance_checks', 'test_bindings']) {
     assert.throws(() => validateJoppa({joppa: {url: 'http://localhost', project: 'project:p', coversReference: field,
-      mcpCommand: ['node'], workers: [{actor: 'a'}]}, FAILED_TASK_STAGE: 'review', limit: 1}), /coversReference/);
+      mcpCommand: ['node'], filter: {data: {stage: 'ready'}}, workers: [{actor: 'a'}]}, FAILED_TASK_STAGE: 'review', limit: 1}), /coversReference/);
   }
 });
 

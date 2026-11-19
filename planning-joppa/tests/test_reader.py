@@ -30,7 +30,7 @@ class ProviderTests(unittest.TestCase):
     def test_current_api_keeps_all_requirement_children_decisions_and_tasks(self):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"},
                  "decision": {"role": "document", "inbox": True}, "project": {"role": "document"},
-                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+                 "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {"rule:r": item("rule:r"), "project:p": item("project:p")}
         for number in range(27):
@@ -65,7 +65,7 @@ class ProviderTests(unittest.TestCase):
                 return {"items": [{"address": obj["address"], **{key: obj.get(key, True if key == "present" else None)
                          for key in args["fields"]}} for obj in page],
                         **({"next_cursor": page[-1]["address"]} if len(rows) > 25 else {})}
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         value, snapshot, _ = context.load(Server(), config, "criterion:c00")
         self.assertEqual(len(value["joppa"]["tasks"]), 27)
         self.assertEqual(len(snapshot["requirement"]["acs"]), 27)

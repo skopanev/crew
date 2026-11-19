@@ -136,3 +136,15 @@ def complete_object(read_page, args, value):
     result["annotations"]["comments"] = comments
     result.pop("comments")
     return result
+
+
+def validate_failed_stage(config, types=None):
+    """Legacy Task planning needs the configured native failure stage."""
+    stage = config.get("FAILED_TASK_STAGE")
+    if not isinstance(stage, str) or not stage or stage.strip() != stage or stage == "done":
+        raise ValueError("FAILED_TASK_STAGE must name a nonterminal Task stage")
+    if types is not None:
+        tasks = [value for value in types.values() if value.get("role") == "task"]
+        if not tasks or any((value.get("fields", {}).get("stage", {}).get("from", "own") != "own" or
+                             stage not in value.get("fields", {}).get("stage", {}).get("values", [])) for value in tasks):
+            raise ValueError("FAILED_TASK_STAGE is absent from the native Task stage values")

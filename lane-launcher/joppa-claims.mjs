@@ -9,7 +9,7 @@ import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 import {criterionTests} from './test-nodes.mjs';
 import {criterionSources} from './source-context.mjs';
-import {filteredTasks} from './task-filter.mjs';
+import {filteredTasks, validateTaskFilter} from './task-filter.mjs';
 import {sendClaim} from './claim-retry.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,6 +78,7 @@ export async function claimTask(run, persist, runId, options = {}) {
     'Repository package exceeds the Joppa 100-operation atomic batch limit; no Tasks claimed');
   require(new Set(tasks.map(task => task.address)).size === tasks.length, 'Repository package contains duplicate Tasks');
   const assignee = laneAssignee(runId);
+  validateTaskFilter(run.config);
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   validateFailedTaskStage(run.config, types);
   if (!run.claimRequest) {

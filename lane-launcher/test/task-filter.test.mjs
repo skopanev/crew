@@ -8,13 +8,17 @@ import {setup} from '../test-support/launcher.fixture.mjs';
 
 test('config accepts native project fields and refuses routing or pagination overrides', async t => {
   const f = await setup(t, {launchLanes: false});
-  const filter = {data: {decision: {approved: true}, labels: ['selected']}};
+  const filter = {data: {stage: 'ready', decision: {approved: true}, labels: ['selected']}};
   save(f.configFile, {...f.config, joppa: {...f.config.joppa, filter}});
   assert.deepEqual(configFrom(f.configFile, f.env).joppa.filter, filter);
   for (const invalid of [null, [], 'stage', {data: []}, {workspace: 'other'}, {kind: 'source'},
     {fields: ['data']}, {cursor: 'skip'}, {limit: 1}, {address: 'task:t1'}, {ready: true}]) {
     save(f.configFile, {...f.config, joppa: {...f.config.joppa, filter: invalid}});
     assert.throws(() => configFrom(f.configFile, f.env), /joppa.filter must contain only native/);
+  }
+  for (const stage of [undefined, '', [], 'review', ['ready', 'review']]) {
+    save(f.configFile, {...f.config, joppa: {...f.config.joppa, filter: {data: {stage}}}});
+    assert.throws(() => configFrom(f.configFile, f.env), /exclude FAILED_TASK_STAGE/);
   }
 });
 

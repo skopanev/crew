@@ -30,7 +30,7 @@ from provider_fixture import item, assignment, plan, Fake, CHECK_TYPE
 class ProviderTests(unittest.TestCase):
     def test_requirement_selection_excludes_unmet_external_dependencies(self):
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
-                 "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
+                 "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"], "question": "What work?",
                           "references": {"projects": {"multiple": True, "target": "project"}}}, "check": CHECK_TYPE}
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
         # A criterion with a Crew hold is excluded.
@@ -59,7 +59,7 @@ class ProviderTests(unittest.TestCase):
                     return {"items": [{"address": address, "kind": "criterion",
                                        "present": objects[address]["document"]["present"]} for address in roster]}
                 return {"items": []}
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         data, snapshot, requirement = context.load_requirement(Server(), config, "r")
         self.assertEqual(requirement["address"], "rule:r")
         self.assertEqual([entry["id"] for entry in data["joppa"]["criteria"]], ["criterion:a"])
@@ -129,7 +129,7 @@ class ProviderTests(unittest.TestCase):
             obj["item_id"] = display_id
         objects = {obj["address"]: obj for obj in (ac, req, cap, dom, project, existing)}
         types = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "area": {"role": "group"},
-                 "project": {"role": "document"}, "work": {"role": "task", "parents": ["criterion"],
+                 "project": {"role": "document"}, "work": {"role": "task", "fields": {"stage": {"values": ["ready", "review", "done"]}}, "parents": ["criterion"],
                     "question": "What work?", "references": {"projects": {"multiple": True, "target": "project"}}},
                  "check": CHECK_TYPE}
         tree = {"position": 20, "schema": {"revision": 2, "types": types}}
@@ -151,7 +151,7 @@ class ProviderTests(unittest.TestCase):
                 if args.get("parent") == "rule:r":
                     return {"items": [{"address": "criterion:a", "kind": "criterion", "present": True}]}
                 return {"items": [{"address": "work:one"}]}
-        config = {"workspace": "example", "repositories": assignment()["repositories"]}
+        config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": assignment()["repositories"]}
         value, snapshot, criterion = context.load(Reader(), config, "a")
         self.assertEqual(criterion["address"], "criterion:a")
         self.assertEqual(value["knowledge_query"], ac["document"]["data"]["body"])

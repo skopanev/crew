@@ -68,7 +68,7 @@ test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
   assert.deepEqual(lines, ['Running lanes 0 of 1',
     'Joppa Tasks [workspace=fixture, repositories=app]: 2 available · 0 held Tasks',
-    'checking params:', '  repositories: app',
+    'checking params:', '  repositories: app', '  filter: {"data":{"stage":"ready"}}',
     'Starting new one with ticket: task:t1 (preview: запуск отключён)', '  [01] Task 1']);
   assert.equal(claims(f), 0);
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');

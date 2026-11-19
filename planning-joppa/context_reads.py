@@ -253,3 +253,22 @@ def pending_work_page(api, config, assignment):
             return result
         require(cursor not in seen, "Task list pagination did not advance")
         seen.add(cursor)
+
+
+# All six tones list present and archived objects. A done Task is archived with the purple tone.
+# Joppa renamed grey to blue. grey stays a read alias.
+TONES = ["red", "yellow", "orange", "blue", "grey", "green", "purple"]
+
+
+def task_addresses(api, workspace, parent, kind):
+    """List the current and archived Tasks of one criterion. Done Tasks keep their landed work in context."""
+    addresses, cursor, seen = [], None, set()
+    while True:
+        page = api.call("joppa_objects", {"workspace": workspace, "parent": parent, "kind": kind, "status": TONES,
+                                          "limit": 25, "fields": ["address"], **({"cursor": cursor} if cursor else {})})
+        addresses.extend(item["address"] for item in page["items"])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return addresses
+        require(cursor not in seen, "Task list pagination did not advance")
+        seen.add(cursor)

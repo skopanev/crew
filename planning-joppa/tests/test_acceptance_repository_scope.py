@@ -30,7 +30,7 @@ def configuration(repositories):
 def validated(root, repositories):
     for repo in repositories:
         (root / repo["path"]).mkdir(parents=True)
-    raw_config = {"workspace": "product", "url": "https://joppa.example.invalid/mcp",
+    raw_config = {"FAILED_TASK_STAGE": "review", "workspace": "product", "url": "https://joppa.example.invalid/mcp",
                   "mcp_command": ["node", "/opt/broker-joppa-host.cjs"], "runs_folder": str(root / "runs"),
                   "cbm_store": str(root / "cbm"), "cbm_root": str(root), "context": {"token_file": "key", "session": {}, "query": {}, "roles": {"researcher": "r", "designer": "d", "critic": "c"}},
                   "repositories": repositories}
@@ -82,7 +82,7 @@ def unfinished_work():
     data = assignment()
     data["repositories"] = [{"id": "service", "path": "/tmp/example-source", "cbm_project": "service",
                              "modules": [{"name": "core", "path": "src"}]}]
-    config = {"workspace": "example", "repositories": data["repositories"]}
+    config = {"FAILED_TASK_STAGE": "review", "workspace": "example", "repositories": data["repositories"]}
     return [entry["address"] for entry in context.pending_work(Joppa(), config, data)]
 
 

@@ -1,4 +1,5 @@
 {
+  "FAILED_TASK_STAGE": "to_review",
   "workspace": "product",
   "url": "https://joppa.example.com/mcp",
   "mcp_command": [

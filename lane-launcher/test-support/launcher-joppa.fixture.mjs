@@ -28,7 +28,7 @@ async function packageFixture(t, mode = 'success') {
   for (let index = 1; index <= 2; index++) {
     objects.set(`ac:a${index}`, make(`ac:a${index}`, 'ac', 'req:r', {title: `AC ${index}`}));
     objects.set(`task:t${index}`, make(`task:t${index}`, 'task', `ac:a${index}`, {
-      title: `[0${index}] Task ${index}`, projects: ['app'],
+      title: `[0${index}] Task ${index}`, stage: 'ready', projects: ['app'],
       body: `Goal: scoped change ${index}\nRepository: app\nModule: m${index}\nChecks: exact check ${index}`}));
   }
   // Tests can add Task references, a test type or test_results rules to this schema.
@@ -183,7 +183,7 @@ async function packageFixture(t, mode = 'success') {
     stop: {kind: 'process', field: 'ends_when'},
     query: {kind: 'lesson', filter_env: {project: 'LANE_MEMORY_PROJECT'}, fields: ['title', 'body'], limit: 10, max_chars: 32768}};
   // The fixture Task bodies use explicit legacy line labels.
-  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, FAILED_TASK_STAGE: 'review', taskFields: {repository: 'body:Repository'}, joppa: {url: baseUrl,
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, FAILED_TASK_STAGE: 'review', taskFields: {repository: 'body:Repository'}, joppa: {url: baseUrl, filter: {data: {stage: 'ready'}},
     workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
     paths: ['src/a', 'tests/a', 'src/b', 'tests/b']}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',
