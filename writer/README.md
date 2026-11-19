@@ -11,12 +11,12 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
 
 1. `prepare` checks the required vars. The shared flow stage reads the selected item, its references and its direct children, and claims the item.
 2. `author` drafts the new Tests. It sees the selected item, its references, its existing Tests, the author contract and the critic questions.
-   Task children stay out of the agent view. The host advances only unassigned Tasks without a hold or delivery.
+   Task children stay out of the agent view. Writer does not change Tasks.
    The shared prepare stage checks that the selected item matches `selection`, such as AC stage `to_prepare`.
 3. `draft_check` checks the draft against the native Test schema. It records the digest of the exact draft bytes.
 4. `critics` runs two independent seats from different vendors in parallel. Each seat scores every Test and the coverage.
 5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
-6. `publish` creates the Tests and moves the selected item to `vars.READY_STAGE` in one native transaction.
+6. `publish` creates the Tests in one native transaction. It preserves the selected item's stage.
    The shared stage releases the claim in that transaction and refuses operations outside `config.publication`.
 
 A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
@@ -26,6 +26,7 @@ At least one critic must report incomplete coverage with a nonempty `missing` li
 Writer publishes no Test or Task changes in this case. It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
 The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
 The configured publication policy must allow `note` and updates to the selected kind.
+Use `exclude_children` with the Test kind to exclude items that already have Tests from the create queue.
 An empty or omitted `DECISION_STAGE` keeps the existing rework path. Update mode keeps its existing stage behavior.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
 Invalid drafts and critic refusals use the same rework budget. The workflow has one deadline of 3600 seconds.
@@ -59,11 +60,10 @@ See `config.example.json`. The project supplies every native name:
 |---|---|
 | `workflow` | Absolute path to this `workflow.yaml` |
 | `selection`, `order`, `exclude_children` | Native Joppa filters that select one item for each pass |
-| `children` | Native filter for the direct children. Include the Test and Task kinds |
+| `children` | Native filter for the direct children. Include the Test kind |
 | `references` | Data fields of the selected item that name related objects |
-| `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit updates to the selected kind and Task kind |
-| `vars.TEST_KIND`, `vars.TASK_KIND` | Native kinds of new Tests and of the Tasks that wait for them |
-| `vars.WAITING_STAGE`, `vars.READY_STAGE` | Task stages before and after publication. The selected item also moves to `READY_STAGE` |
+| `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit selected-kind updates for the optional decision route |
+| `vars.TEST_KIND` | Native kind of the Tests |
 | `vars.DECISION_STAGE` | Optional selected-item stage for coverage-only refusals, such as `to_decide` |
 | `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_CLAUDE_MODEL` | Optional model overrides |
@@ -82,7 +82,7 @@ The schema entry of `TEST_KIND` supplies every rule. Writer has no own limit:
 - every required field, except `title`, in the Test data. Crew copies the selected item's owner as the new Test owner.
 - one listed value for each typed field, and no field that the schema computes.
 - `title_max_length`, `field_max_length`, `test_results.max_tests` and the `test_results.name` rules, when the schema gives them.
-- at most 98 operations for new Tests and Task updates. This is the host batch limit.
+- at most 98 Test writes. The host also releases the selected item's claim in the publication batch.
 
 ## Isolation
 

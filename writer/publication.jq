@@ -18,14 +18,7 @@ if all($reviews[]; clean) then {approved: true, operations: (
       data: ((.data + {title}) | with_entries(select(.value != $target.document.data[.key])))}}
   else {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
     parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
-    data: (.data + $owner + {title})}} end | select(.command.data | length > 0)] +
-  (if $mode == "update" then [] else [$in.children[] | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
-  ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == "")) |
-    {command: {op: "save_object", kind, id: (.address | sub("^[^:]*:"; "")), revision: .current_revision,
-      data: {stage: $ready}, reason: "The Tests of this item are published. The Task can start."}}] +
-  [{command: {op: "save_object", kind: $in.selected.kind,
-    id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
-    data: {stage: $ready}, reason: "Publish the reviewed Tests and prepare this item for implementation."}}] end))}
+    data: (.data + $owner + {title})}} end | select(.command.data | length > 0)])}
 elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) and
   any($reviews[]; .coverage == "incomplete") then
   ([$reviews[].missing[]] | unique) as $missing |

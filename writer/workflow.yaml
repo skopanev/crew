@@ -14,11 +14,8 @@ vars:
   AUTHOR_MODEL: claude-opus-5-5
   CRITIC_CODEX_MODEL: gpt-6.1-sol
   CRITIC_CLAUDE_MODEL: claude-sonnet-5-5
-  # The project names its native kinds and Task stages in config.vars. Crew has no default vocabulary.
+  # The project names its native Test kind in config.vars.
   TEST_KIND: ''
-  TASK_KIND: ''
-  WAITING_STAGE: ''
-  READY_STAGE: ''
   DECISION_STAGE: ''
   TEST_OPERATION: create
   REWORK_LIMIT: '1'
@@ -30,7 +27,7 @@ nodes:
   prepare:
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND TASK_KIND WAITING_STAGE READY_STAGE; do
+      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND; do
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
       done
@@ -54,7 +51,7 @@ nodes:
       [ "$AUTHOR_MODEL" != "$CRITIC_CLAUDE_MODEL" ] || { echo "writer: CRITIC_CLAUDE_MODEL must differ from AUTHOR_MODEL" >&2; exit 2; }
       prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
-      # input.json stays complete: review_join reads the waiting Tasks from it.
+      # input.json stays complete for the shared publication fence.
       view="$(jq -c --arg test "$TEST_KIND" '
         ([.selected.kind, $test] + [.references[]?[]?.kind]) as $kinds |
         del(.help, .claim_revision, .claim_revisions) | .children |= map(select(.kind == $test)) |
@@ -112,7 +109,7 @@ nodes:
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       rm -f "$a"/critic-*.json
-      if jq -e --arg test "$TEST_KIND" --arg task "$TASK_KIND" --arg waiting "$WAITING_STAGE" \
+      if jq -e --arg test "$TEST_KIND" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
         -f "$MEDULLA_WORKFLOW_DIR/draft.jq" "$a/draft.json" >/dev/null; then
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
@@ -184,9 +181,9 @@ nodes:
       a="$MEDULLA_RUN_DIR/artifacts"
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
-      verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" --arg task "$TASK_KIND" \
+      verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" \
         --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
-        --arg waiting "$WAITING_STAGE" --arg ready "$READY_STAGE" --slurpfile draft "$a/draft.json" \
+        --slurpfile draft "$a/draft.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile claude "$a/critic-claude.json" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
         -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"

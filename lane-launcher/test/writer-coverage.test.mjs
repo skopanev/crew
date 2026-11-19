@@ -73,10 +73,9 @@ test('disabled decision routing and update mode keep the existing behavior', t =
   }
   const approved = f.run();
   assert.equal(approved.approved, true);
-  assert.equal(approved.operations.length, 3);
+  assert.equal(approved.operations.length, 1);
   assert.equal(approved.operations[0].command.kind, 'check');
-  assert.equal(approved.operations[1].command.kind, 'work');
-  assert.deepEqual(approved.operations[2].command.data, {stage: 'ready'});
+  assert.ok(approved.operations.every(({command}) => command.kind === 'check'));
 });
 
 test('the missing note stays bounded and points to the complete critic artifacts', t => {
@@ -86,6 +85,22 @@ test('the missing note stays bounded and points to the complete critic artifacts
   assert.ok(value.operations[1].command.id.length <= 120);
   assert.match(value.operations[1].command.text, /critic-codex.json and artifacts\/critic-claude.json/);
   assert.ok(value.outcome.reason.length <= 1000);
+});
+
+test('approved create and update write only Test text and preserve item and Task stages', t => {
+  const f = fixture(t);
+  f.input.selected.document.data.stage = 'author_tests';
+  f.input.children.push({kind: 'check', address: 'check:t1', current_revision: 5,
+    document: {data: {title: 'A valid input is accepted', body: 'Earlier text.'}}});
+  for (const mode of ['create', 'update']) {
+    const value = f.run({mode});
+    assert.equal(value.approved, true);
+    assert.equal(value.operations.length, 1);
+    assert.equal(value.operations[0].command.kind, 'check');
+    assert.equal(value.operations[0].command.data.stage, undefined);
+    assert.equal(f.input.selected.document.data.stage, 'author_tests');
+    assert.equal(f.input.children[0].document.data.stage, 'waiting');
+  }
 });
 
 test('the dashboard shows the coverage reason code for the completed blocked run', t => {

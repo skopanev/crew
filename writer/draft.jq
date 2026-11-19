@@ -3,8 +3,6 @@ $input[0] as $in | ($in.schema.types[$test] // {}) as $type | ($in.schema.test_r
 ($type.fields // {}) as $fields |
 ($type.required_fields // [] | if type == "object" then keys elif type == "array" then . else [] end) as $required |
 ([$in.children[]? | select(.kind == $test)]) as $existing |
-([$in.children[]? | select(.kind == $task and .document.data.stage == $waiting and .document.data.delivery == null and
-  ((.document.data.assignee // "") == "") and ((.document.data.hold // "") == ""))] | length) as $tasks |
 def fits($limit): $limit == null or length <= $limit;
 def name_ok: type == "string" and length > 0 and (explode | all(. >= 32)) and
   fits($type.title_max_length) and fits($rules.name.max_length) and
@@ -22,7 +20,7 @@ def complete: . as $item |
   all($required[]; . as $key | $key == "title" or $data[$key] != null or
     ($mode == "create" and $key == "owner" and $in.selected.document.data.owner != null));
 ($mode == "create" or $mode == "update") and
-(.tests | type == "array" and length > 0 and length + (if $mode == "create" then $tasks else 0 end) <= 98) and
+(.tests | type == "array" and length > 0 and length <= 98) and
 ($rules.max_tests == null or ($existing | length) + (if $mode == "create" then (.tests | length) else 0 end) <= $rules.max_tests) and
 all(.tests[]; type == "object" and (.id | type == "string" and test("^[A-Za-z0-9_-]+$")) and
   (. as $item | .title | name_ok) and
