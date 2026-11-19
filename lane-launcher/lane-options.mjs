@@ -32,13 +32,17 @@ export function validateLaneOptions(config) {
   }
   require(config.dockerMemorySwap === undefined || config.dockerMemory !== undefined,
     'dockerMemorySwap requires dockerMemory');
-  if (config.dockerMemorySwap !== undefined && config.dockerMemorySwap !== '-1') {
+  if (config.dockerMemory !== undefined) {
     const bytes = value => {
       const [, digits, unit] = /^([0-9]+)([bkmg]?)$/i.exec(value);
       return BigInt(digits) * 1024n ** BigInt(Math.max(0, 'bkmg'.indexOf(unit.toLowerCase())));
     };
-    require(bytes(config.dockerMemorySwap) >= bytes(config.dockerMemory),
-      'dockerMemorySwap must be at least dockerMemory');
+    require(bytes(config.dockerMemory) >= 6n * 1024n * 1024n,
+      'dockerMemory must be at least Docker\'s 6 MiB minimum');
+    if (config.dockerMemorySwap !== undefined && config.dockerMemorySwap !== '-1') {
+      require(bytes(config.dockerMemorySwap) >= bytes(config.dockerMemory),
+        'dockerMemorySwap must be at least dockerMemory');
+    }
   }
 }
 

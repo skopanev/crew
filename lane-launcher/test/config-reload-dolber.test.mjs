@@ -52,7 +52,7 @@ test('container memory budgets use host-only Medulla settings and reject invalid
   for (const change of [{dockerMemory: ''}, {dockerMemory: 8}, {dockerMemory: '0g'},
     {dockerMemory: '-1'}, {dockerMemory: '8g --privileged'}, {dockerMemory: '8g\n'},
     {dockerMemorySwap: '8g'}, {dockerMemory: '8g', dockerMemorySwap: 0},
-    {dockerMemory: '8g', dockerMemorySwap: '4g'}]) {
+    {dockerMemory: '8g', dockerMemorySwap: '4g'}, {dockerMemory: '1b'}, {dockerMemory: '5m'}]) {
     save(f.configFile, {...f.config, ...change});
     assert.throws(() => configFrom(f.configFile, f.env), /dockerMemory/);
   }
