@@ -14,7 +14,7 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
    Task children stay out of the agent view. Writer does not change Tasks.
    The shared prepare stage checks that the selected item matches `selection`, such as AC stage `to_prepare`.
 3. `draft_check` checks the draft against the native Test schema. It records the digest of the exact draft bytes.
-4. `critics` runs two independent seats from different vendors in parallel. Codex is the first seat.
+4. `critics` runs two independent seats with different models in parallel. Codex is the first seat.
    The second seat uses Claude Code by default. Set its harness to `agy` to use Gemini. Each seat scores every Test and the coverage.
 5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
 6. `publish` creates the Tests in one native transaction. It preserves the selected item's stage.
@@ -74,7 +74,7 @@ See `config.example.json`. The project supplies every native name:
 | `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit selected-kind updates for the optional decision route |
 | `vars.TEST_KIND` | Native kind of the Tests |
 | `vars.DECISION_STAGE` | Optional selected-item stage for coverage-only refusals, such as `to_decide` |
-| `vars.CRITIC_SECOND_HARNESS` | `claude-code` (default) or `agy`. A second Codex seat is refused |
+| `vars.CRITIC_SECOND_HARNESS` | `claude-code` (default), `codex` or `agy`. The critic models must differ |
 | `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_SECOND_MODEL` | Optional model overrides |
 | `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |
@@ -86,9 +86,11 @@ A string keeps the previous behavior: it supplies the same role and process name
 The configured flow checks its live role contracts before it claims an item or starts an agent.
 
 For a Gemini second seat, set `CRITIC_SECOND_HARNESS=agy` and `CRITIC_SECOND_MODEL=gemini-4-carbon-high` in `vars`.
+For two Codex seats, set `CRITIC_CODEX_MODEL=gpt-6.2-sol`, `CRITIC_SECOND_HARNESS=codex` and `CRITIC_SECOND_MODEL=gpt-6.1-sol`.
+Both Codex seats use the read-only sandbox, ignore user configuration and have no MCP servers.
 Rename the previous `CRITIC_CLAUDE_MODEL` key to `CRITIC_SECOND_MODEL`.
 The launcher supplies `AGY_PROFILE_HOME`. Do not set it in `vars`.
-Reports use the stable seat names `critic-codex.json` and `critic-second.json` for either second harness.
+Reports use the stable seat names `critic-codex.json` and `critic-second.json` for any second harness.
 
 ## Test fields
 
