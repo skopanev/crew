@@ -144,6 +144,13 @@ The startup guard and completion require each saved acceptance context unchanged
 ## Failure
 
 Dolber writes the configured `FAILED_TASK_STAGE`, removes the assignee and adds a failure note in one atomic batch.
+If `artifacts/split.md` contains text, that batch adds a separate proposal note for each failed Task.
+The note ID is `crew-split-<run UUID>`. Its `CREW_SPLIT` prefix distinguishes it from the unchanged failure note.
+The proposal note holds at most 4000 Unicode characters, including that prefix.
+Truncated notes end with `…[truncated, full split.md in run artifacts]`. The full text stays in `split.md`.
+Missing, blank or linked proposal files add no note. Success ignores the proposal.
+Saved requests retain their original proposal text. Confirmation requires both notes in the tracker readback.
+The run artifacts remain `failure.txt`, optional `split.md` and workflow-owned `plan-outcome.json`.
 This applies to startup errors, timeouts and implementation failures.
 Admission rejection before lane startup only releases the revision-checked claim.
 Examples include active planning, a changed Requirement head and an unpublished dependency. No failure automatically returns a Task to a working stage.
@@ -162,6 +169,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 |---|---|
 | `FAILED_TASK_STAGE` | Required failure stage. It must exist in each native Task type and cannot be `done`. No default |
 | `limit` | Maximum concurrent lanes, independent of the number of authenticated workers |
+| `vars` | Optional workflow values declared in `workflow.vars`. Keys match `[A-Z_][A-Z0-9_]*`; values are strings without NUL. Host-owned keys are refused. Defaults to `{}` |
 | `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
 | `repositories` | Map contract names to source paths, branches, CBM projects, writable paths and checks |
@@ -183,6 +191,8 @@ Startup requires that name and the indexed root path to match the configured rep
 Git freshness checks remain mandatory. An unavailable optional connector is not attached to the agents.
 `cbmInitializeTimeoutSeconds` sets the connection budget and defaults to 90.
 `env` maps uppercase variable names to strings exported inside the workflow. Host-owned variable overrides are refused.
+`vars` sends literal `--var KEY=VALUE` arguments and replaces workflow defaults. Host-owned overrides fail before launch.
+For a custom name shared by `env` and `vars`, `env` keeps priority. Values can appear in run records; do not put secrets here.
 For a shared Bun cache, append its absolute host path to `readWriteDirs` and set `env.BUN_INSTALL_CACHE_DIR`.
 The container path is `/workspace/<host directory basename>`. A host cache named `bun` therefore uses `/workspace/bun`.
 Cache mounts need write access. Keep them outside the canonical source repositories.

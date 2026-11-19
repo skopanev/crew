@@ -9,6 +9,31 @@ import {completionEvent, reasonCode} from '../notify.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 const excerpt = value => Buffer.from(value, 'utf8').subarray(0, 1500).toString('utf8').replace(/\uFFFD$/, '');
+const SPLIT_NOTE_LIMIT = 4000;
+const SPLIT_TRUNCATED = '…[truncated, full split.md in run artifacts]';
+
+function splitText(run, artifacts) {
+  if (!artifacts) return '';
+  const file = path.join(artifacts, 'split.md');
+  let stat;
+  try { stat = fs.lstatSync(file); }
+  catch (error) { if (error.code === 'ENOENT') return ''; throw error; }
+  if (!stat.isFile() || stat.isSymbolicLink()) return '';
+  const root = fs.realpathSync(artifacts);
+  require(root.startsWith(fs.realpathSync(run.runFolder) + path.sep), 'Split artifacts escape the run folder');
+  require(fs.realpathSync(file).startsWith(root + path.sep), 'split.md escapes its artifacts folder');
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    if (!fs.fstatSync(fd).isFile()) return '';
+    const buffer = Buffer.alloc(SPLIT_NOTE_LIMIT * 4);
+    const body = buffer.subarray(0, fs.readSync(fd, buffer, 0, buffer.length, 0)).toString('utf8').replace(/\uFFFD$/, '').trim();
+    if (!body || body.includes('\0')) return '';
+    const note = Array.from('CREW_SPLIT\n' + body);
+    return note.length > SPLIT_NOTE_LIMIT || stat.size > buffer.length
+      ? note.slice(0, SPLIT_NOTE_LIMIT - Array.from(SPLIT_TRUNCATED).length).join('') + SPLIT_TRUNCATED
+      : note.join('');
+  } finally { fs.closeSync(fd); }
+}
 
 export async function failTask(run, stateFile, result, artifacts, {claims, objects, owned, persist}) {
   const output = fs.readFileSync(path.join(path.dirname(stateFile), 'output.log'), 'utf8');
@@ -46,11 +71,13 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   }
   const stage = run.config.FAILED_TASK_STAGE;
   require(text(stage) && stage === stage.trim(), 'FAILED_TASK_STAGE is required before a failed Task can be released');
+  const split = run.blockRequest ? '' : splitText(run, artifacts);
   // One batch per package: a revision-checked stage save releases the Task, then the note records the reason.
   run.blockRequest ||= batchRequest(run, objects.flatMap(object => [
     saveNode(object, {assignee: undefined, stage}, `Crew lane failed: ${code}.`),
     {op: 'note', target: object.address, id: randomUUID(), reply_to: null,
-      text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${run.retained ? retainedLine(run.retained) + '\n' : ''}${(failure || 'Lane failed').trim()}`}]));
+      text: `CREW_FAILURE\nTask: ${object.address}\nRun: ${runId}\nReason: ${code}\n${run.retained ? retainedLine(run.retained) + '\n' : ''}${(failure || 'Lane failed').trim()}`},
+    ...(split ? [{op: 'note', target: object.address, id: `crew-split-${runId}`, reply_to: null, text: split}] : [])]));
   require(claims.every(claim => {
     const commands = run.blockRequest.operations.map(row => row.command);
     const command = commands.find(cmd => cmd.op === 'save_object' && `${cmd.kind}:${cmd.id}` === claim.address);
@@ -63,12 +90,16 @@ export async function failTask(run, stateFile, result, artifacts, {claims, objec
   for (const claim of claims) {
     const requested = op => run.blockRequest.operations.find(({command}) => command.op === op &&
       (command.target ?? `${command.kind}:${command.id}`) === claim.address)?.command;
-    const expectedStage = requested('save_object')?.data?.stage, note = requested('note');
+    const expectedStage = requested('save_object')?.data?.stage;
+    const notes = run.blockRequest.operations.map(row => row.command)
+      .filter(command => command.op === 'note' && command.target === claim.address);
     const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
-    const comment = confirmed.annotations?.comments?.[note?.id];
     require(confirmed.address === claim.address && confirmed.historical === false && confirmed.document?.present === true &&
       !nodeAssignee(confirmed) && expectedStage === stage && nodeStage(confirmed) === stage &&
-      comment && comment.withdrawn !== true && comment.actor === run.joppaWorker.actor && comment.text === note.text,
+      notes.length > 0 && notes.every(note => {
+        const comment = confirmed.annotations?.comments?.[note.id];
+        return comment && comment.withdrawn !== true && comment.actor === run.joppaWorker.actor && comment.text === note.text;
+      }),
       'Joppa did not confirm every Task block; outcome requires inspection');
     result.tasks.push({address: claim.address, status: 'blocked', revision: confirmed.current_revision});
   }

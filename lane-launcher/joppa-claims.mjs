@@ -4,7 +4,7 @@ import path from 'node:path';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
-import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
+import {packageBudget, estimatedNodes, coveredBy, FAILURE_OPERATIONS} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {coversSpec, taskCovers, coveredProblem} from './joppa-covers.mjs';
 import {criterionTests} from './test-nodes.mjs';
@@ -13,8 +13,6 @@ import {filteredTasks, validateTaskFilter} from './task-filter.mjs';
 import {sendClaim} from './claim-retry.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// A failure writes one stage save and one note for each Task in one batch.
-const FAILURE_OPERATIONS = 2;
 
 // A resumed Medulla run keeps its original claim file as evidence.
 export function writeLaunchClaim(run, dir, finalizationTicket) {

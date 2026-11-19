@@ -27,6 +27,16 @@ export function workflowDigest(file = defaultWorkflow) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+export function validateWorkflowVars(file, values) {
+  if (!Object.keys(values).length) return;
+  const blocks = fs.readFileSync(validateWorkflow(file), 'utf8').split(/^vars:[ \t]*\r?$/m);
+  const block = blocks.length === 2 ? blocks[1].split(/^\S/m)[0] : '';
+  const declared = new Set([...block.matchAll(/^  ([A-Z_][A-Z0-9_]*):/gm)].map(match => match[1]));
+  for (const key of Object.keys(values)) {
+    if (!declared.has(key)) throw new Error(`vars.${key} is not declared in workflow.vars`);
+  }
+}
+
 // A custom author explicitly declares support for the retained checkout handoff.
 export function supportsRetainedCheckout(file = defaultWorkflow) {
   const blocks = fs.readFileSync(file, 'utf8').split(/^vars:[ \t]*\r?$/m);

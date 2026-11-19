@@ -7,13 +7,18 @@ import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
 import {validateContext} from './context-config.mjs';
 import {defaultHooks, validateHooks} from './hooks-config.mjs';
-import {defaultWorkflow, validateWorkflow} from './workflow-config.mjs';
+import {defaultWorkflow, validateWorkflow, validateWorkflowVars} from './workflow-config.mjs';
 import {validateLaneOptions} from './lane-options.mjs';
 import {validateSelectionNotify} from './selection-notify.mjs';
 
+const hostOwned = key => /^(MEDULLA_|LANE_|CBM_|REQUIREMENT_|DELIVERY(?:_|$))/.test(key) ||
+  ['TOOLING_ROOT', 'TARGET_BRANCH', 'IMAGE', 'TICKET_SOURCE', 'LAUNCH_CLAIM_FILE', 'SCOUT_ENABLED',
+    'FINALIZE_ONLY', 'JOPPA_READER_COMMAND_JSON', 'REPOSITORY_PREFLIGHT', 'GIT_SSH_COMMAND',
+    'REVIEWERS_JSON', 'REPAIR_BASELINE_ENABLED', 'RETAINED_CHECKOUT_PROTOCOL'].includes(key);
+
 export function configFrom(file, env = process.env, {dryRun = false, bytes = null} = {}) {
   const config = {limit: 1, intervalSeconds: 60, launchLanes: false, closeTabOnExit: false,
-    discardFailedWorktree: false, cbmRequired: true, cbmInitializeTimeoutSeconds: 90, env: {},
+    discardFailedWorktree: false, cbmRequired: true, cbmInitializeTimeoutSeconds: 90, env: {}, vars: {},
     readOnlyRepos: [], readWriteDirs: [], sharedLockDir: null, testCommand: [], gateTimeoutSeconds: 900, image: 'medulla-crew:latest', dockerEngine: false,
     stateDir: path.join(os.homedir(), '.medulla/lane-launcher'),
     herdr: env.HERDR_BIN_PATH || 'herdr', herdrWorkspace: env.HERDR_WORKSPACE_ID,
@@ -37,11 +42,17 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   if (typeof config.closeTabOnExit !== 'boolean') throw new Error('closeTabOnExit must be true or false');
   if (typeof config.discardFailedWorktree !== 'boolean') throw new Error('discardFailedWorktree must be true or false');
   if (typeof config.cbmRequired !== 'boolean') throw new Error('cbmRequired must be true or false');
+  if (!config.vars || typeof config.vars !== 'object' || Array.isArray(config.vars) ||
+      Object.entries(config.vars).some(([key, value]) => !/^[A-Z_][A-Z0-9_]*$/.test(key) ||
+        typeof value !== 'string' || value.includes('\0'))) {
+    throw new Error('vars must map uppercase variable names to strings without NUL');
+  }
+  for (const key of Object.keys(config.vars)) {
+    if (hostOwned(key)) throw new Error(`vars.${key} is host-owned`);
+  }
   if (!Number.isSafeInteger(config.cbmInitializeTimeoutSeconds) || config.cbmInitializeTimeoutSeconds < 1) throw new Error('cbmInitializeTimeoutSeconds must be positive');
   if (!config.env || typeof config.env !== 'object' || Array.isArray(config.env) || Object.entries(config.env).some(([key, value]) =>
-    !/^[A-Z_][A-Z0-9_]*$/.test(key) || /^(MEDULLA_|LANE_|CBM_|REQUIREMENT_|DELIVERY(?:_|$))/.test(key) ||
-    ['TOOLING_ROOT', 'TARGET_BRANCH', 'IMAGE', 'TICKET_SOURCE', 'LAUNCH_CLAIM_FILE', 'SCOUT_ENABLED',
-      'FINALIZE_ONLY', 'JOPPA_READER_COMMAND_JSON', 'REPOSITORY_PREFLIGHT', 'GIT_SSH_COMMAND', 'REVIEWERS_JSON'].includes(key) ||
+    !/^[A-Z_][A-Z0-9_]*$/.test(key) || hostOwned(key) ||
     typeof value !== 'string' || value.includes('\0'))) {
     throw new Error('env must map runtime variable names to strings without host-owned overrides');
   }
@@ -61,6 +72,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   config.stateDir = scopeDirectory(config.stateDir, config.id);
   if (config.hooks === undefined) config.hooks = defaultHooks;
   if (config.workflow === undefined) config.workflow = defaultWorkflow;
+  validateWorkflowVars(config.workflow, config.vars);
   if (!config.launchLanes) return config;
   validateHooks(config.hooks);
   validateWorkflow(config.workflow);
