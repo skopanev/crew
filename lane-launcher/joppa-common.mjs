@@ -10,8 +10,6 @@ export const contractDigest = object => {
   delete data.commit;
   // Completion writes the bound test names next to the commit. They are lifecycle evidence, not contract.
   delete data.test_bindings;
-  // A hold is Crew lifecycle state, not contract.
-  delete data.hold;
   return createHash('sha256').update(JSON.stringify({
     parent: object.document.parent, data, links: object.document.links,
     ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),

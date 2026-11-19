@@ -1,4 +1,4 @@
-"""Planning fences: exact ownership revision, saves before notes and exact hold codes. No network."""
+"""Planning fences: exact ownership revision, saves before notes and failure evidence. No network."""
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from provider_fixture import assignment, hold, hold, end, item
+from provider_fixture import assignment, fail_task, end, item
 from test_generic_lifecycle import Server, raw
 
 
@@ -47,67 +47,16 @@ class PlanningFenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "needs an earlier save"):
                 planning_claims.require_fenced(operations)
 
-    def test_startup_retry_clears_each_task_hold_and_matches_the_code_exactly(self):
-        import reader_context
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory)
-            (target / "src").mkdir()
-            data = assignment()
-            data["repositories"][0]["path"] = directory
-            task = data["joppa"]["tasks"][0]
-            task["document"]["data"].update(body="Goal\nRepository: service\nModule: core", projects=["p"])
-            hold(task, "WORKTREE_PREEXISTED")
-            ac = deepcopy(data["joppa"]["objects"]["criterion:a"])
-            ac["document"]["data"]["assignee"] = "crew-planning:h:run-1"
-            config = {"workspace": "example", "repositories": data["repositories"]}
-            sent = []
-            def mutate(api, path, name, arguments, **options):
-                sent.append(arguments["operations"])
-                return {"results": [{} for _ in arguments["operations"]]}
-            (target / "claim.json").write_text("{}")
-            # The AC and its Requirement have no unmet dependency.
-            objects = {"criterion:a": deepcopy(ac), "rule:r": item("rule:r")}
-            class Dependencies:
-                def call(self, name, args):
-                    if name == "joppa_tree":
-                        return {"schema": {"types": {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}}}}
-                    return deepcopy(objects[args["address"]])
-            api = Dependencies()
-            with patch.object(reader_context.claims, "owned"), patch.object(reader_context, "run", return_value=""), \
-                 patch.object(reader_context.publication, "mutate", side_effect=mutate), \
-                 patch.object(reader_context, "signal"):
-                hold(task, "WORKTREE_PREEXISTED: detail")
-                self.assertFalse(reader_context.retry_startup(api, config, target, data, ac, '"assess"'))
-                hold(task, "WORKTREE_PREEXISTED")
-                task["document"]["data"]["assignee"] = "lane-1"
-                with self.assertRaisesRegex(ValueError, "claimed Tasks"):
-                    reader_context.retry_startup(api, config, target, data, ac, '"assess"')
-                self.assertEqual(sent, [])
-                del task["document"]["data"]["assignee"]
-                objects["criterion:a"]["document"]["links"] = [
-                    {"target": "rule:r", "revision": 3, "relation": "depends_on", "blocking": True}]
-                with self.assertRaisesRegex(ValueError, "requires a ready AC"):
-                    reader_context.retry_startup(api, config, target, data, ac, '"assess"')
-                self.assertEqual(sent, [])
-                objects["criterion:a"]["document"]["links"] = []
-                self.assertTrue(reader_context.retry_startup(api, config, target, data, ac, '"assess"'))
-            operations = [entry["command"] for entry in sent[0]]
-            self.assertEqual([(entry["op"], entry.get("target") or entry["kind"] + ":" + entry["id"]) for entry in operations],
-                             [("save_object", "work:old"), ("save_object", "criterion:a")])
-            # Partial saves: the Task only clears its hold. The AC releases its assignee and clears its hold.
-            self.assertEqual((operations[0]["revision"], operations[0]["data"]), (3, {"hold": None}))
-            self.assertEqual(operations[1]["data"], {"assignee": None, "hold": None})
-
-    def test_detail_reads_keep_the_native_process_and_read_the_hold_from_data(self):
+    def test_detail_reads_keep_the_native_process_and_read_the_failure_stage_from_data(self):
         from joppa_reads import normalize_detail, task_state
         process = {"annotation_address": "work:t", "verification": {"state": "pass"}, "acceptance": {"by": "owner"}}
-        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "hold": "WORKTREE_PREEXISTED"},
+        value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "stage": "review"},
                                                            process=deepcopy(process)))
         self.assertEqual(value["process"], process)
-        self.assertEqual(task_state(value), "blocked")
+        self.assertEqual(task_state(value, "review"), "blocked")
         value = normalize_detail({"address": "work:t"}, raw("work:t", {"title": "t", "assignee": "lane-1"},
                                                            links=[{"target": "work:u", "relation": "depends_on", "revision": 2}]))
-        self.assertEqual(task_state(value), "active")
+        self.assertEqual(task_state(value, "review"), "active")
         self.assertEqual(value["document"]["links"],
                          [{"blocking": True, "relation": "depends_on", "revision": 2, "target": "work:u"}])
 

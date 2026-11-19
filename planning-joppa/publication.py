@@ -107,7 +107,7 @@ def operations(plan, assignment, completed=frozenset()):
     inventory = {item["address"]: item for item in assignment["joppa"]["tasks"]}
     targets = {task.get("target") for task in plan["tasks"] if task["action"] in ("update", "retire")}
     for existing in inventory.values():
-        if blocked(existing):
+        if blocked(existing, assignment["joppa"].get("failed_task_stage")):
             require(existing["address"] in targets,
                     f"blocked Task {existing['address']} needs a new contract or retirement")
     objects = assignment["joppa"]["objects"]
@@ -172,10 +172,7 @@ def operations(plan, assignment, completed=frozenset()):
             links = [link for link in links if not (link.get("relation") == "depends_on"
                                                    and link.get("target") in (canonical, target))]
             links.append(candidate)
-        reopen = bool(existing) and blocked(existing)
-        if reopen:
-            # The revised contract answers the block. The same save clears the hold.
-            data.pop("hold", None)
+        reopen = bool(existing) and blocked(existing, assignment["joppa"].get("failed_task_stage"))
         # Joppa computes the fields whose source is not own and refuses them in a save.
         data = authored(data, schema)
         stored = authored(existing["document"]["data"], schema) if existing else {}
@@ -222,7 +219,8 @@ def operations(plan, assignment, completed=frozenset()):
             changed.add(ac)
     for criterion in context.selected_criteria(assignment):
         ac = criterion["id"]
-        held = any(task["document"]["parent"] == ac and blocked(task) for task in inventory.values())
+        held = any(task["document"]["parent"] == ac and
+                   blocked(task, assignment["joppa"].get("failed_task_stage")) for task in inventory.values())
         result.extend(closing_operations(objects[ac], not grouped or ac in changed or held,
             "Publish the reviewed Requirement plan." if grouped
             else "Publish reviewed test bindings." if plan["disposition"] == "verify_existing"

@@ -9,7 +9,7 @@ import context_reads
 
 PREFIX = "crew-planning:"
 MAX_BATCH = 100
-# A failed release needs one save with the hold code and one critic note per criterion in a single batch.
+# A failed release needs one claim release and one critic note per criterion in a single batch.
 # The cap applies to new claims. An older claim of up to MAX_BATCH // 2 criteria still releases without notes.
 RELEASE_OPERATIONS = 2
 MAX_CLAIMED_CRITERIA = MAX_BATCH // RELEASE_OPERATIONS
@@ -38,15 +38,14 @@ def assignee_of(object):
     return ((object.get("document") or object).get("data") or {}).get("assignee")
 
 
-def save_command(object, assignee, reason, hold=KEEP):
+def save_command(object, assignee, reason, stage=KEEP):
     """A partial save at the read revision. Joppa merges data and keeps the parent and relations.
-    Change data.assignee unless KEEP. hold sets the Crew hold code, None clears it, KEEP leaves it.
-    A held node is not ready for Crew. The code is short. The detail stays in the save reason."""
+    Change data.assignee and stage only when the caller supplies them."""
     data = {}
     if assignee is not KEEP:
         data["assignee"] = assignee or None
-    if hold is not KEEP:
-        data["hold"] = hold
+    if stage is not KEEP:
+        data["stage"] = stage
     return {"op": "save_object", "kind": object["kind"], "id": object["address"].split(":", 1)[1],
             "revision": object["current_revision"], "data": data, "reason": reason}
 
@@ -169,7 +168,7 @@ def planning_idle(api, config, assignment, expected=None):
 
 def release(api, target, workspace, ac, reason, code=None, notes=None):
     """Save each AC that this run still holds without data.assignee. Keep every other field.
-    With a failure code, the same save holds each AC with that code. Leave an AC that changed after this run
+    The receipt preserves the failure code. Leave an AC that changed after this run
     wrote it untouched for recovery. Never split the batch.
     notes is {"id", "text"} of a final critic rejection, or {"dropped": reason}. With a failure code, each released
     AC also gets that note when the note is valid and the batch fits RELEASE_OPERATIONS per held AC. Otherwise the
@@ -184,7 +183,7 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
     publication = target / "publication.json"
     if publication.exists():
         result = read(publication)
-        # A rejected batch applied nothing. A failure release then holds the AC not ready, also after retain_claim.
+        # A rejected batch applied nothing. A confirmed failure can release its claim after retain_claim.
         if (result["status"] != "rejected" or (result.get("retain_claim") and not code)
                 or result.get("error") == "blocked Task needs a new contract or retirement"):
             return False
@@ -215,8 +214,7 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
             skipped.append({"ac": address, "unknown": True, "reason": f"criterion changed after this run claimed it: "
                             f"revision {object['current_revision']}, expected {expected.get(address)}"})
             continue
-        operations.append({"command": save_command(object, None, reason[:1024] or "Release the planning claim.",
-                                                   code if code else KEEP)})
+        operations.append({"command": save_command(object, None, reason[:1024] or "Release the planning claim.")})
         released.append(address)
         if with_notes:
             operations.append({"command": note(address, notes)})
@@ -243,8 +241,8 @@ def release(api, target, workspace, ac, reason, code=None, notes=None):
 
 
 def closing_operations(object, finished, reason):
-    """Clear this run's assignee. A finished plan also clears the hold of the AC."""
-    return [{"command": save_command(object, None, reason, None if finished else KEEP)}]
+    """Clear this run's assignee without changing the AC stage."""
+    return [{"command": save_command(object, None, reason)}]
 
 
 def is_closing(operation, criteria):

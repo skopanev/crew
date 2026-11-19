@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, NodeServer, hold, end
+from provider_fixture import item, assignment, plan, Fake, NodeServer, fail_task, end
 from test_nodes import bind_missing
 
 
@@ -63,7 +63,7 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(len(publication.operations(value, data)), 1)
             retire = deepcopy(plan()["tasks"][0])
             retire.update(action="retire", target="work:old", revision=3)
-            hold(data["joppa"]["tasks"][0], "Failed")
+            fail_task(data["joppa"]["tasks"][0], "Failed")
             value["tasks"] = [retire]
             nodes.pop()
             self.assertEqual([op["command"]["op"] for op in publication.operations(value, data)],

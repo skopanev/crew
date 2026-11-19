@@ -85,7 +85,7 @@ export async function requirementPlan(run, read) {
     const current = await object(address);
     require(present(current), `Current run Task is absent or archived: ${address}`);
     require(own.revision === undefined || current.current_revision >= own.revision, `Current run Task revision is invalid: ${address}`);
-    const status = taskStatus(current);
+    const status = taskStatus(current, run.config.FAILED_TASK_STAGE);
     require(status !== 'done' && status !== 'retired', `Current run Task is already ${status}: ${address}`);
     require(await requirementAncestor(current, true) === requirement, `Current run Task belongs to a different requirement: ${address}`);
     require(taskRepository(current, types, undefined, run.config) === repository, `Current run Task belongs to a different repository: ${address}`);
@@ -106,7 +106,7 @@ export async function requirementPlan(run, read) {
       require(current.current_revision === item.revision, `Task changed while reading delivery state: ${item.address}`);
       if (taskRepository(current, types, repository, run.config) !== repository) continue;
       if (await requirementAncestor(current, false) !== requirement) continue;
-      const status = taskStatus(current);
+      const status = taskStatus(current, run.config.FAILED_TASK_STAGE);
       requirementTasksByAddress.set(current.address, taskRecord(current, status, false));
       if (status === 'retired') continue;
       await remember(current);

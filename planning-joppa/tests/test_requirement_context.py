@@ -35,7 +35,7 @@ class ProviderTests(unittest.TestCase):
         objects = {address: item(address, "rule:r") for address in ("criterion:a", "criterion:b", "criterion:c")}
         # A criterion with a Crew hold is excluded.
         objects["criterion:waiting"] = item("criterion:waiting", "rule:r",
-                                            {"title": "criterion:waiting", "owner": "owner", "hold": "NEEDS_HUMAN"})
+                                            {"title": "criterion:waiting", "owner": "owner", "assignee": "owner-review"})
         objects.update({"rule:r": item("rule:r"), "project:p": item("project:p"),
                         "criterion:outside": item("criterion:outside", "rule:outside"),
                         "rule:outside": item("rule:outside")})

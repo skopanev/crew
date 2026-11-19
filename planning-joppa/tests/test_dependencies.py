@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end, ACCEPTANCE, links, merged
+from provider_fixture import item, assignment, plan, Fake, fail_task, end, ACCEPTANCE, links, merged
 
 
 class ProviderTests(unittest.TestCase):
@@ -153,7 +153,7 @@ class ProviderTests(unittest.TestCase):
         existing = data["joppa"]["tasks"][0]
         existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                              projects=["other", "p"])
-        hold(existing, "Failed")
+        fail_task(existing, "Failed")
         with self.assertRaisesRegex(ValueError, "blocked Task work:old needs a new contract or retirement"):
             publication.operations(value, data)
         task.update(action="create")

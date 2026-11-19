@@ -4,9 +4,16 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 export const NODE_TONES = ['red', 'yellow', 'orange', 'blue', 'grey', 'green', 'purple'];
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
-// Crew holds a node with its own data.hold reason code.
-export const nodeHold = node => node.document?.data?.hold ?? node.data?.hold ?? node['data.hold'] ?? null;
-export const nodeWaiting = node => Boolean(nodeHold(node));
+export const nodeStage = node => node.document?.data?.stage ?? node.data?.stage ?? node['data.stage'] ?? null;
+export const nodeFailed = (node, stage) => typeof stage === 'string' && stage.length > 0 && nodeStage(node) === stage;
+export function validateFailedTaskStage(config, types) {
+  const stage = config.FAILED_TASK_STAGE;
+  require(typeof stage === 'string' && stage.trim() === stage && stage.length > 0 && stage !== 'done',
+    'FAILED_TASK_STAGE must name a nonterminal Task stage');
+  const tasks = Object.values(types || {}).filter(type => type.role === 'task');
+  require(tasks.length > 0 && tasks.every(type => (type.fields?.stage?.from ?? 'own') === 'own' &&
+    type.fields?.stage?.values?.includes(stage)), 'FAILED_TASK_STAGE is absent from the native Task stage values');
+}
 export const nodeStageDone = node => (node.document?.data?.stage ?? node.data?.stage ?? node['data.stage']) === 'done';
 export const nodePendingDelivery = node =>
   (node.document?.data?.delivery ?? node.data?.delivery ?? node['data.delivery'])?.state === 'pending';
@@ -51,7 +58,7 @@ export async function* nodePages(read, filters) {
 export async function* taskPages(read, filters = {}, extraFields = []) {
   yield* nodePages(read, {kind: await roleKinds(read, 'task'),
     fields: ['title', 'revision', 'parent', 'present', 'data.assignee', 'data.commit', 'data.priority',
-      'data.hold', 'data.stage', 'data.delivery', ...extraFields],
+      'data.stage', 'data.delivery', ...extraFields],
     ...filters});
 }
 

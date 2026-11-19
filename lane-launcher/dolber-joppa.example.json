@@ -3,7 +3,7 @@
   "workspace": "my-workspace",
   "joppa": {
     "url": "https://joppa.example.com/mcp",
-    "filter": {},
+    "filter": {"data": {"stage": "to_implement"}},
     "claimRetryDelaysSeconds": [],
     "mcpCommand": [
       "node",
@@ -16,6 +16,7 @@
     ]
   },
   "limit": 1,
+  "FAILED_TASK_STAGE": "to_review",
   "gateTimeoutSeconds": 900,
   "intervalSeconds": 60,
   "launchLanes": false,

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import read
 from mcp import MCPError, Rejected
 import publication
-from provider_fixture import Fake, MARK, assignment, claim_receipt, hold, plan, raw_ac, links
+from provider_fixture import Fake, MARK, assignment, claim_receipt, fail_task, plan, raw_ac, links
 
 TYPES = {"work": {"role": "task"}, "criterion": {"role": "ac"}, "record": {"role": "note"}}
 COMMIT = "a" * 40
@@ -128,11 +128,11 @@ class PublicationFailureTests(unittest.TestCase):
         """Run finish with a held Task, as in the live defect. Run fail after an error, like main()."""
         stage = load_stages()
         data, value = scenario([PINNED])
-        hold(data["joppa"]["tasks"][0], "Lane failed")
+        fail_task(data["joppa"]["tasks"][0], "Lane failed")
         for name, body in {"input": data, "plan": value, "joppa-snapshot": {},
                            "claim": claim_receipt(["criterion:a"])}.items():
             (target / f"{name}.json").write_text(json.dumps(body))
-        with patch.object(stage, "settings", return_value={"workspace": "example"}), \
+        with patch.object(stage, "settings", return_value={"workspace": "example", "FAILED_TASK_STAGE": "review"}), \
              patch.object(stage.shared, "artifacts", return_value=target), \
              patch.object(stage.shared, "verify_context", return_value=({}, {}, {})), \
              patch.object(stage.context, "client", return_value=server), \
@@ -173,7 +173,7 @@ class PublicationFailureTests(unittest.TestCase):
                           links(publication_batch[0]["command"]))
             self.assertEqual([entry["command"]["op"] for entry in release_batch], ["save_object"])
             self.assertEqual(release_batch[0]["command"]["revision"], 4)
-            self.assertEqual(release_batch[0]["command"]["data"], {"assignee": None, "hold": "PLANNING_FAILED"})
+            self.assertEqual(release_batch[0]["command"]["data"], {"assignee": None})
             self.assertEqual((result["claim_released"], result["needs_recovery"]), (True, False))
             self.assertEqual(read(target / "publication.json"), receipt)
 

@@ -1,7 +1,7 @@
 // Read live requirement delivery state for one run and parse publication evidence.
 import {createHash} from 'node:crypto';
 import {taskRepositoryChoice} from './task-contract.mjs';
-import {nodeAssignee, nodeHold, nodeWaiting} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeFailed} from './joppa-nodes.mjs';
 
 export const require = (condition, message) => {
   if (!condition) throw Object.assign(new Error(message), {code: 'CANDIDATE_INVALID'});
@@ -123,7 +123,7 @@ export function taskRepository(value, types, expected, config) {
   require(repo, `Task needs an unambiguous repository: ${value.address}`);
   return repo.id;
 }
-export const taskStatus = value => {
+export const taskStatus = (value, failedStage) => {
   if (value.document.present === false) {
     const commit = value.document.data.commit;
     if (!commit) return 'retired';
@@ -131,15 +131,13 @@ export const taskStatus = value => {
       `Archived Task has an invalid commit: ${value.address}`);
     return 'done';
   }
-  if (nodeWaiting(value)) return 'blocked';
-  return nodeAssignee(value) ? 'in_progress' : 'open';
+  return nodeAssignee(value) ? 'in_progress' : nodeFailed(value, failedStage) ? 'blocked' : 'open';
 };
 export const taskRecord = (value, status, finishing) => ({
   address: value.address,
   revision: value.current_revision,
   status,
   assignee: nodeAssignee(value),
-  hold: nodeHold(value),
   commit: value.document.data.commit ?? null,
   finishing,
 });

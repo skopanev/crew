@@ -1,7 +1,7 @@
 // Joppa planning queue reads: ready criteria and their Requirement groups.
 import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
-import {nodeAssignee, nodeWaiting, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeFailed, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -56,7 +56,7 @@ export async function readyCriteria(config, tokenFile, signal) {
   const covers = coversReference(config, schema, kinds('task'));
   const criteria = [];
   for await (const page of nodePages(read, {kind: kinds('ac'),
-    fields: ['title', 'kind', 'parent', 'revision', 'status', 'data.assignee', 'data.hold']})) {
+    fields: ['title', 'kind', 'parent', 'revision', 'status', 'data.assignee']})) {
     criteria.push(...page.items);
   }
   const requirementOf = new Map(criteria.map(row => [row.address, row.parent]));
@@ -65,7 +65,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     .filter(address => address !== task.parent && requirementOf.has(address) &&
       requirementOf.get(address) === requirementOf.get(task.parent))];
   for await (const page of nodePages(read, {kind: kinds('task'), status: NODE_TONES,
-    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'data.hold', 'data.delivery',
+    fields: ['parent', 'revision', 'present', 'data.assignee', 'data.commit', 'data.stage', 'data.delivery',
       ...(covers ? [`data.${covers.field}`] : [])]})) {
     for (const task of page.items) {
       if (typeof task.parent !== 'string' || typeof task.address !== 'string' || !Number.isSafeInteger(task.revision)) {
@@ -77,8 +77,8 @@ export async function readyCriteria(config, tokenFile, signal) {
           if (task['data.commit']) completed.add(owner);
           continue;
         }
-        if (nodeAssignee(task) || nodePendingDelivery(task) || !nodeWaiting(task)) active.add(owner);
-        if (!nodeWaiting(task) || nodeAssignee(task)) continue;
+        if (nodeAssignee(task) || nodePendingDelivery(task) || !nodeFailed(task, config.FAILED_TASK_STAGE)) active.add(owner);
+        if (!nodeFailed(task, config.FAILED_TASK_STAGE) || nodeAssignee(task)) continue;
         const tasks = blocked.get(owner) || [];
         tasks.push(`${task.address}:${task.revision}`);
         blocked.set(owner, tasks);
@@ -86,7 +86,7 @@ export async function readyCriteria(config, tokenFile, signal) {
     }
   }
   for (const row of criteria) {
-    if (ids && !ids.includes(row.address) || nodeAssignee(row) || nodeWaiting(row) ||
+    if (ids && !ids.includes(row.address) || nodeAssignee(row) ||
         active.has(row.address)) continue;
     if (typeof row.status !== 'string' || !row.status) throw new Error(`Criterion status missing for ${row.address}`);
     const failures = (blocked.get(row.address) || []).sort();
@@ -135,7 +135,7 @@ export async function readyRequirements(config, tokenFile, signal) {
     {workspace: config.workspace, ...args}, {signal}));
 }
 
-// A configured flow selects with native Joppa filters only. Crew adds no stage, hold, assignee, Task or Requirement rule.
+// A configured flow selects with native Joppa filters only. Crew adds no stage, assignee, Task or Requirement rule.
 export function flowSettings(config) {
   if (config.workflow === undefined) return null;
   if (typeof config.workflow !== 'string' || !config.workflow.trim()) throw new Error('workflow must name a Medulla workflow.yaml file');

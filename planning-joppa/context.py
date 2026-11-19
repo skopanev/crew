@@ -165,7 +165,7 @@ def load_once(api, config, ac_id):
                   "decisions": [json.dumps(meaning, ensure_ascii=False)],
                   "repositories": config["repositories"],
                   "joppa": {"parents": [source(item) for item in parents], "tasks": [source(item) for item in tasks],
-                            "test_nodes": tests, "test_type": test_kind, "test_schema": types[test_kind],
+                            "failed_task_stage": config.get("FAILED_TASK_STAGE"), "test_nodes": tests, "test_type": test_kind, "test_schema": types[test_kind],
                             "test_rules": tree["schema"].get("test_results") or {},
                             "siblings": [item["address"] for item in siblings],
                             "objects": {key: source(item) for key, item in objects.items()}, "task_type": task_kind,
@@ -214,6 +214,7 @@ def configuration(path, raw=None):
     config = json.loads(raw) if raw is not None else read(path)
     for key in ("workspace", "url", "runs_folder", "cbm_store", "cbm_root"):
         text(config.get(key), "config." + key)
+    if "FAILED_TASK_STAGE" in config: text(config["FAILED_TASK_STAGE"], "config.FAILED_TASK_STAGE")
     # Role contracts and lessons: the lane memory config, inline. launch writes it to a private file.
     memory = config.get("context")
     require(isinstance(memory, dict) and all(isinstance(memory.get(key), dict) for key in ("session", "query")),

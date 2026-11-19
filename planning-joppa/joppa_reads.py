@@ -79,23 +79,21 @@ def done(object):
     return ended(object) and bool(object["document"]["data"].get("commit"))
 
 
-def block_reason(object):
-    """A live node with a Crew data.hold code is held. Return the code."""
-    hold = object["document"]["data"].get("hold")
-    if ended(object) or not hold:
-        return None
-    return hold
+def block_reason(object, failed_stage=None):
+    """Return the configured failure stage of a current failed Task."""
+    stage = object["document"]["data"].get("stage")
+    return stage if not ended(object) and failed_stage and stage == failed_stage else None
 
 
-def blocked(object):
-    return block_reason(object) is not None
+def blocked(object, failed_stage=None):
+    return block_reason(object, failed_stage) is not None
 
 
-def task_state(object):
+def task_state(object, failed_stage=None):
     """Classify one Task: done, retired, blocked, active or open."""
     if ended(object):
         return "done" if done(object) else "retired"
-    return "blocked" if blocked(object) else "active" if assignee(object) else "open"
+    return "active" if assignee(object) else "blocked" if blocked(object, failed_stage) else "open"
 
 
 def complete_object(read_page, args, value):

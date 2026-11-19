@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {alive} from './runtime.mjs';
 import {claimTasks, hasRecoveryCheckpoint} from './joppa-common.mjs';
-import {nodeAssignee, nodeWaiting} from './joppa-nodes.mjs';
+import {nodeAssignee} from './joppa-nodes.mjs';
 import {writerGone} from './container-cleanup.mjs';
 
 const landing = node => ['git_landing', 'cleanup', 'notify_success'].includes(node);
@@ -43,7 +43,7 @@ export async function reservationReleased(run, read, gone = writerGone) {
       const object = await read('joppa_objects', {address: task.address});
       if (object?.address !== task.address || object.historical !== false || object.document?.present !== true ||
           !Number.isSafeInteger(object.current_revision) || object.current_revision <= task.revision ||
-          nodeAssignee(object) || nodeWaiting(object)) return false;
+          nodeAssignee(object)) return false;
     }
     const checkout = path.join(run.config.worktreeRoot, run.executionId);
     try { fs.lstatSync(checkout); return false; }

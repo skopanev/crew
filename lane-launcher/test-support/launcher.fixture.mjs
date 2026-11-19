@@ -91,7 +91,7 @@ console.log(JSON.stringify({result}));
   for (const bin of ['medulla', 'jq']) fs.writeFileSync(path.join(bins, bin), '#!/bin/sh\nexit 0\n', {mode: 0o755});
   const docker = path.join(root, 'docker.jsonl');
   fs.writeFileSync(docker, '');
-  const config = {id: 'test-project', workspace: 'fixture', launchLanes, sourceRoot: sources,
+  const config = {id: 'test-project', workspace: 'fixture', FAILED_TASK_STAGE: 'review', launchLanes, sourceRoot: sources,
     pendingDeliveryData: {stage: 'to_review'},
     context: joppa.run.config.context, taskFields: joppa.run.config.taskFields,
     joppa: {url: joppa.run.config.joppa.url, workers: [{actor: 'lane-1', tokenFile}]},

@@ -44,7 +44,7 @@ def assignment():
     return {"workspace": "example", "ac": {"id": "criterion:a"},
             "repositories": [{"id": "service", "project": "project:p", "path": "/tmp/example-source",
                               "cbm_project": "service", "modules": [{"name": "core", "path": "src"}]}],
-            "joppa": {"task_type": "work", "task_schema": {"question": "What work?", "title_preview_length": 64},
+            "joppa": {"failed_task_stage": "review", "task_type": "work", "task_schema": {"question": "What work?", "title_preview_length": 64},
                       "tasks": [task], "objects": {"criterion:a": ac, "work:old": task, "work:dependency": dependency},
                       "test_nodes": [], "test_type": "check",
                       "test_schema": {"role": "test", "parents": ["criterion"], "title_max_length": 400},
@@ -164,9 +164,9 @@ def links(command):
             for edge in (command.get("relations") or {}).get("depends_on", {}).get("edges", [])]
 
 
-def hold(task, reason="Failed"):
-    """Crew holds a live node with a short reason code in data.hold."""
-    task["document"]["data"]["hold"] = reason
+def fail_task(task, reason="Failed"):
+    """The project marks a failed Task with its configured stage."""
+    task["document"]["data"]["stage"] = "review"
 
 
 def end(task, commit=None):

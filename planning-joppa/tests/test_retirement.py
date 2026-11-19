@@ -23,13 +23,13 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end, links
+from provider_fixture import item, assignment, plan, Fake, fail_task, end, links
 
 
 class ProviderTests(unittest.TestCase):
     def test_retirement_uses_the_existing_atomic_publication(self):
         data, value = assignment(), plan()
-        hold(data["joppa"]["tasks"][0], "Failed")
+        fail_task(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3,
                                  outcome="The approved outcome needs no further work.")
         original = deepcopy(data)
@@ -42,13 +42,13 @@ class ProviderTests(unittest.TestCase):
 
     def test_retirement_accepts_a_blocked_task_without_purpose(self):
         data, value = assignment(), plan()
-        hold(data["joppa"]["tasks"][0], "Failed")
+        fail_task(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         self.assertEqual(publication.operations(value, data)[0]["command"]["op"], "archive_object")
 
     def test_retirement_requires_existing_dependents_to_remove_the_link(self):
         data, value = assignment(), plan()
-        hold(data["joppa"]["tasks"][0], "Failed")
+        fail_task(data["joppa"]["tasks"][0], "Failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         consumer = deepcopy(data["joppa"]["tasks"][0])
         consumer["address"] = "work:consumer"
@@ -67,7 +67,7 @@ class ProviderTests(unittest.TestCase):
         # The blocked consumer gets a new contract, so the same save clears its hold.
         self.assertEqual([item["command"]["op"] for item in commands],
                          ["archive_object", "save_object", "save_object"])
-        self.assertIsNone(commands[1]["command"]["data"]["hold"])
+        self.assertNotIn("stage", commands[1]["command"]["data"])
         self.assertEqual(commands[2]["command"]["kind"] + ":" + commands[2]["command"]["id"], "criterion:a")
         saved = links(commands[1]["command"])
         self.assertFalse(any(link["target"] == "work:old" for link in saved))
@@ -79,7 +79,7 @@ class ProviderTests(unittest.TestCase):
         for field, setting in (("done", "a" * 40), ("retired", None)):
             with self.subTest(field=field):
                 data, value = assignment(), plan()
-                hold(data["joppa"]["tasks"][0], "Failed")
+                fail_task(data["joppa"]["tasks"][0], "Failed")
                 value["tasks"][0].update(action="retire", target="work:old", revision=3)
                 consumer = deepcopy(data["joppa"]["tasks"][0])
                 consumer["address"] = "work:consumer"
@@ -97,8 +97,8 @@ class ProviderTests(unittest.TestCase):
         task = value["tasks"][0]
         task.update(action="retire", target="work:old", revision=3)
         blocked = data["joppa"]["tasks"][0]
-        hold(blocked, "Failed")
-        def unblock(task): task["document"]["data"].pop("hold")
+        fail_task(blocked, "Failed")
+        def unblock(task): task["document"]["data"].pop("stage")
         def claim(task): task["document"]["data"]["assignee"] = "worker"
         for field, change in (("blocked", unblock), ("assignee", claim),
                               ("done", lambda task: end(task, "a" * 40)), ("retired", end)):

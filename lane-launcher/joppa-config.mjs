@@ -19,6 +19,8 @@ export function validateJoppa(config) {
   validateTaskFields(config);
   validateClaimRetries(config);
   validatePendingDelivery(config);
+  require(text(config.FAILED_TASK_STAGE) && config.FAILED_TASK_STAGE === config.FAILED_TASK_STAGE.trim() &&
+    config.FAILED_TASK_STAGE !== 'done', 'Config needs FAILED_TASK_STAGE: a nonterminal native Task stage');
   const url = new URL(joppa.url);
   require((url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
     !url.username && !url.password && !url.search && !url.hash, 'Joppa needs HTTPS or loopback HTTP without URL credentials');

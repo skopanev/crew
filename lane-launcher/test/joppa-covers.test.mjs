@@ -35,7 +35,6 @@ test('covering Task records each covered criterion as acceptance context', async
 
 for (const [name, change] of [
   ['held by a planner', ac => { ac.document.data.assignee = 'crew-planning:host:run'; }],
-  ['waiting', ac => { ac.document.data.hold = 'NEEDS_HUMAN'; }],
   ['waiting for a dependency', ac => { ac.document.links = [{relation: 'depends_on', blocking: true, target: 'ac:a1'}]; }],
   ['in another Requirement', ac => { ac.document.parent = 'req:other'; }],
 ]) test(`covering Task is not claimed when the covered criterion is ${name}`, async t => {
@@ -49,9 +48,9 @@ for (const [name, change] of [
 test('a covered criterion that changes during the claim releases the claimed Tasks', async t => {
   const f = await covering(t);
   const task = f.objects.get('task:t1'), ac = f.objects.get('ac:a2');
-  Object.defineProperty(ac.document.data, 'hold', {enumerable: true,
-    get: () => task.document.data.assignee ? 'WAITING' : undefined});
-  await assert.rejects(claimTask(f.run, f.persist, f.runId), /COVERED_CONTEXT_NOT_READY: ac:a2 is waiting; this run released/);
+  Object.defineProperty(ac.document.data, 'assignee', {enumerable: true,
+    get: () => task.document.data.assignee ? 'crew-planning:other:run' : undefined});
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /COVERED_CONTEXT_NOT_READY: ac:a2 .*; this run released/);
   assert.equal(batches(f).length, 2);
   assert.equal(f.run.releaseConfirmed, true);
   assert.equal(task.document.data.assignee, undefined);
@@ -71,7 +70,7 @@ test('covers reference must target several criteria and is ignored when not conf
   assert.throws(() => taskCovers({field: 'covers', target: 'ac'}, {document: {data: {covers: 'ac:a2'}}}), /list of criterion/);
   for (const field of [' ', 'acceptance', 'acceptance_checks', 'test_bindings']) {
     assert.throws(() => validateJoppa({joppa: {url: 'http://localhost', project: 'project:p', coversReference: field,
-      mcpCommand: ['node'], workers: [{actor: 'a'}]}, limit: 1}), /coversReference/);
+      mcpCommand: ['node'], workers: [{actor: 'a'}]}, FAILED_TASK_STAGE: 'review', limit: 1}), /coversReference/);
   }
 });
 

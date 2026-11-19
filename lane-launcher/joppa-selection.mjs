@@ -10,7 +10,7 @@ import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
-import {nodeAssignee, nodeWaiting, nodeStageDone, nodePendingDelivery, taskPages, coversFields} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage} from './joppa-nodes.mjs';
 import {reservationReleased} from './reservation-release.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -112,6 +112,7 @@ export async function nextTask(config) {
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     const read = passReader(config, worker);
+    validateFailedTaskStage(config, (await read('joppa_tree', {}))?.schema?.types);
     const pending = [];
     for (const run of reservations) {
       if (run.workspace !== config.workspace || run.config?.joppa?.url !== config.joppa.url ||
@@ -129,7 +130,7 @@ export async function nextTask(config) {
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
     const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) && !nodePendingDelivery(task) &&
-      !nodeAssignee(task) && !nodeWaiting(task) && !(priorities && !priorities.includes(task['data.priority'])) &&
+      !nodeAssignee(task) && !(priorities && !priorities.includes(task['data.priority'])) &&
       (!matches || matches.get(task.address) === task.revision);
     // Batch the Task details, then their immediate parents and local dependencies. Deeper reads stay single.
     const tasks = await read.prefetch([...assigned, ...inventory.filter(open)].map(task => task.address));

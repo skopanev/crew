@@ -21,9 +21,9 @@ def editable(task):
     unclaimed(task)
 
 
-def retirable(task):
+def retirable(task, failed_stage=None):
     unclaimed(task)
-    require(blocked(task),
+    require(blocked(task, failed_stage),
             "only blocked Tasks can be retired by Crew planning")
 
 def ordered_tasks(tasks):

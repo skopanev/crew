@@ -4,15 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import {spawn, spawnSync} from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
-import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
-import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
-import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
-import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
-import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
-import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
+
+import {save, read} from '../runtime.mjs';
+import {executionId} from '../joppa.mjs';
 
 async function packageFixture(t, mode = 'success') {
   // The run folder name is the launch UUID, as in launcher state.
@@ -37,7 +33,8 @@ async function packageFixture(t, mode = 'success') {
   }
   // Tests can add Task references, a test type or test_results rules to this schema.
   const types = {req: {role: 'requirement'}, ac: {role: 'ac'},
-    task: {role: 'task', ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}};
+    task: {role: 'task', fields: {stage: {values: ['ready', 'review', 'done']}},
+      ...(mode === 'no-question' ? {} : {question: 'Which change does this Task make?'})}};
   const schema = {types};
   // Tests can lower the batch size cap, alias an address, give an object more comment pages
   // or make batch reads unavailable.
@@ -96,7 +93,7 @@ async function packageFixture(t, mode = 'success') {
           title: object.document.data.title,
           'data.assignee': object.document.data.assignee ?? null, 'data.commit': object.document.data.commit ?? null,
           'data.projects': object.document.data.projects ?? null, 'data.priority': object.document.data.priority ?? null,
-          'data.hold': object.document.data.hold ?? null,
+          'data.stage': object.document.data.stage ?? null,
           ...Object.fromEntries((args.fields || []).filter(field => field.startsWith('data.') &&
             !['data.assignee', 'data.commit', 'data.projects', 'data.priority'].includes(field))
             .map(field => [field, object.document.data[field.slice(5)] ?? null]))}))
@@ -150,7 +147,7 @@ async function packageFixture(t, mode = 'success') {
           if (command.op === 'save_object') {
             const data = mode === 'wrong-commit' && command.data.commit ? {...command.data, commit: '0'.repeat(40)} : command.data;
             applyData(object.document.data, mergedData(object.document.data, {...command, data}));
-            if (mode === 'wrong-hold' && data.hold) object.document.data.hold = 'OTHER_CODE';
+            if (mode === 'wrong-stage' && data.stage) object.document.data.stage = 'other';
             if (command.parent !== undefined) object.document.parent = command.parent;
             for (const [relation, group] of Object.entries(command.relations || {})) {
               object.document.links = object.document.links.filter(link => link.relation !== relation);
@@ -186,7 +183,7 @@ async function packageFixture(t, mode = 'success') {
     stop: {kind: 'process', field: 'ends_when'},
     query: {kind: 'lesson', filter_env: {project: 'LANE_MEMORY_PROJECT'}, fields: ['title', 'body'], limit: 10, max_chars: 32768}};
   // The fixture Task bodies use explicit legacy line labels.
-  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, taskFields: {repository: 'body:Repository'}, joppa: {url: baseUrl,
+  const config = {id: 'fixture', source: 'joppa', workspace: 'fixture', stateDir: root, context, FAILED_TASK_STAGE: 'review', taskFields: {repository: 'body:Repository'}, joppa: {url: baseUrl,
     workers: [{actor: 'lane-1', tokenFile}]}, repositories: [{id: 'app', path: root,
     paths: ['src/a', 'tests/a', 'src/b', 'tests/b']}]};
   const run = {config, workspace: 'fixture', joppaWorker: config.joppa.workers[0], requirement: 'req:r',
@@ -253,12 +250,12 @@ function blockedPackage(f) {
     const text = `CREW_FAILURE\nTask: ${address}\nRun: ${runId}\nReason: GATE_FAIL\nGate failed.`;
     run.blockRequest.operations.push({command: {op: 'note', target: address, id, text}});
     return {address, kind: 'task', current_revision: 3, historical: false,
-      document: {present: true, data: {title: address, hold: 'GATE_FAIL'}, links: [], parent: 'ac:a1'},
+      document: {present: true, data: {title: address, stage: 'review'}, links: [], parent: 'ac:a1'},
       annotations: {comments: {[id]: {actor: run.joppaWorker.actor, text}}}};
   });
   save(path.join(runs, runId, 'launch.json'), run);
   const operations = tasks.map(task => ({command: {op: 'archive_object', target: task.address, revision: 3, reason: 'Retire'}}));
-  return {root, runs, run, folder, runId, input: {tasks, operations, config: {workspace: 'fixture',
+  return {root, runs, run, folder, runId, input: {tasks, operations, config: {workspace: 'fixture', FAILED_TASK_STAGE: 'review',
     url: f.run.config.joppa.url, worktree_root: root, lane_runs_folder: runs, repositories: [{path: f.root}]}}};
 }
 
@@ -287,6 +284,5 @@ function packageLanding(f, delivery = 'target') {
   fs.writeFileSync(path.join(artifacts, 'landing.txt'), `Landed SHA: ${sha}\nTarget: checked-package\n`);
   return artifacts;
 }
-
 
 export {packageFixture, blockedPackage, packageLanding};

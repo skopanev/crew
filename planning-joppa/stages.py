@@ -18,7 +18,7 @@ from mcp import Rejected
 from joppa_reads import blocked
 
 _failure_message = None
-from reader_context import retry_startup, settings, reader_servers, prepare_reader, prepare_critic, prompt_assignment
+from reader_context import settings, reader_servers, prepare_reader, prepare_critic, prompt_assignment
 
 
 def report_failure():
@@ -65,8 +65,6 @@ def prepare():
                                   if requirement else context.load(api, config, ac["address"]))
     context.unchanged(snapshot, current)
     claims.planning_idle(api, config, fresh, holders)
-    if not requirement and retry_startup(api, config, target, fresh, current_ac, advertised):
-        return
     assignment["joppa"]["unfinished_work"] = context.pending_work(api, config, assignment)
     write(target / "input.json", assignment)
     shared.prepare_context(prompt_assignment(assignment), mcp_servers=prepare_reader())
@@ -123,7 +121,10 @@ def finish():
         if task["action"] in ("update", "retire"):
             actual = current_tasks.get(task["target"])
             require(actual and actual["current_revision"] == task["revision"], "target Task revision changed during planning")
-            (publication.retirable if task["action"] == "retire" else publication.editable)(actual)
+            if task["action"] == "retire":
+                publication.retirable(actual, config.get("FAILED_TASK_STAGE"))
+            else:
+                publication.editable(actual)
     claim = read(target / "claim.json")
     require(claim["status"] == "confirmed", "planning claim was not confirmed")
     claims.planning_idle(api, config, fresh, claims.owned(api, config["workspace"], claim))
@@ -132,7 +133,7 @@ def finish():
     completed = publication.completed_dependencies(api, config["workspace"], plan,
                                                    current.get("schema", {}).get("types", {}))
     operations = publication.operations(plan, fresh, completed)
-    held = any(blocked(task) for task in fresh["joppa"]["tasks"])
+    held = any(blocked(task, config.get("FAILED_TASK_STAGE")) for task in fresh["joppa"]["tasks"])
     criteria = {item["id"] for item in context.selected_criteria(fresh)}
     if not grouped and all(claims.is_closing(op, criteria) for op in operations) and not held:
         released = publication.release(api, target, config["workspace"], assignment["ac"]["id"],
@@ -164,7 +165,7 @@ def finish():
 
 
 def failure_code(reason):
-    """A short data.hold code: a leading UPPER_CODE: prefix, or PLANNING_FAILED."""
+    """Return the leading reason code, or PLANNING_FAILED. Receipts preserve this diagnosis."""
     match = re.match(r"([A-Z][A-Z0-9_]{2,63}):", reason)
     return match.group(1) if match else "PLANNING_FAILED"
 

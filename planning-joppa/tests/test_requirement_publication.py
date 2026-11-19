@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, hold, end, links
+from provider_fixture import item, assignment, plan, Fake, fail_task, end, links
 
 
 class ProviderTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class ProviderTests(unittest.TestCase):
         retained["document"]["data"]["title"] = "Legacy approved work"
         self.assertTrue(publication.operations(value, data)[0]["command"]["data"]["title"].startswith("[01] "))
         old = data["joppa"]["objects"]["work:old"]
-        hold(old, "Failed")
+        fail_task(old, "Failed")
         old["document"]["data"].update(title="[03] Existing work", body="Repository: service\nModule: core")
         retained["document"]["data"]["title"] = "[07] Approved work"
         data["joppa"]["tasks"] = [old]
@@ -61,7 +61,7 @@ class ProviderTests(unittest.TestCase):
         value["tasks"].append(new)
         commands = publication.operations(value, data)
         # The revised blocked Task clears its hold in the same save.
-        self.assertIsNone(commands[0]["command"]["data"]["hold"])
+        self.assertNotIn("stage", commands[0]["command"]["data"])
         self.assertTrue(commands[1]["command"]["data"]["title"].startswith("[08] "))
 
     def test_cross_criterion_retirement_cannot_become_a_dependency(self):
@@ -70,7 +70,7 @@ class ProviderTests(unittest.TestCase):
             criterion_schemas={address: {key: deepcopy(data["joppa"][key])
                 for key in ("task_type", "task_schema", "test_nodes")} for address in ("criterion:a", "criterion:b")})
         data["joppa"]["objects"]["criterion:b"] = context.source(item("criterion:b", "rule:r"))
-        hold(data["joppa"]["tasks"][0], "Failed")
+        fail_task(data["joppa"]["tasks"][0], "Failed")
         consumer = deepcopy(data["joppa"]["tasks"][0])
         consumer.update(address="work:consumer")
         consumer["document"]["parent"] = "criterion:b"
@@ -119,7 +119,7 @@ class ProviderTests(unittest.TestCase):
         # Each changed AC loses this run's assignee and its hold in the same batch.
         self.assertEqual([(operation["command"]["op"], operation["command"]["id"], operation["command"]["data"])
                           for operation in commands[-3:]],
-                         [("save_object", address.split(":")[1], {"assignee": None, "hold": None})
+                         [("save_object", address.split(":")[1], {"assignee": None})
                           for address in ("criterion:a", "criterion:b", "criterion:c")])
         value["tasks"][0]["ac"] = "criterion:outside"
         with self.assertRaisesRegex(ValueError, "selected Requirement criterion"):
@@ -168,7 +168,7 @@ class ProviderTests(unittest.TestCase):
         value["criteria"] = [{"ac": "criterion:a", "disposition": "implement"}]
         value["acceptance_checks"][0]["ac"] = "criterion:a"
         old = data["joppa"]["tasks"][0]
-        hold(old, "Failed")
+        fail_task(old, "Failed")
         with self.assertRaisesRegex(ValueError, "explicitly update or retire unfinished Task work:old"):
             publication.operations(value, data)
         provider = deepcopy(old)
@@ -227,7 +227,7 @@ class ProviderTests(unittest.TestCase):
                               for command in bindings], [("check", "criterion:b", 0, "checks.rs > required_behavior")])
             # The unchanged AC only loses the assignee. The bound AC also clears its hold.
             self.assertEqual([(op["command"]["op"], op["command"]["id"], op["command"]["data"]) for op in ops[-2:]],
-                             [("save_object", "a", {"assignee": None}), ("save_object", "b", {"assignee": None, "hold": None})])
+                             [("save_object", "a", {"assignee": None}), ("save_object", "b", {"assignee": None})])
 
     def test_requirement_mixes_implementation_and_existing_test_bindings(self):
         with tempfile.TemporaryDirectory() as directory:

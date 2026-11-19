@@ -1,5 +1,5 @@
 // Criteria that a Task covers besides its parent, through the configured Task reference joppa.coversReference.
-import {nodeAssignee, nodeWaiting} from './joppa-nodes.mjs';
+import {nodeAssignee} from './joppa-nodes.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 
 // Return {field, target} for the Task type, or null when the feature is off.
@@ -30,7 +30,6 @@ export function coveredProblem(object, address, dependency, requirement) {
   if (requirement !== undefined && object.document.parent !== requirement) {
     return `${address} belongs to another Requirement`;
   }
-  if (nodeWaiting(object)) return `${address} is waiting`;
   if (nodeAssignee(object)) return `${address} is held by ${nodeAssignee(object)}`;
   if (!dependency?.ready) return `${address} waits for ${dependency?.blocker}`;
   return null;

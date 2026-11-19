@@ -7,7 +7,7 @@ ac:cj3sulbw  A revision read stays historical
 from copy import deepcopy
 import unittest
 
-from provider_fixture import assignment, plan, hold  # noqa: F401  (sets sys.path for planning modules)
+from provider_fixture import assignment, plan, fail_task  # noqa: F401  (sets sys.path for planning modules)
 import publication
 from task_contracts import contract_fields
 from context_reads import object_read
@@ -19,7 +19,7 @@ def held_update(previous):
     value, work = assignment(), plan()
     task = value["joppa"]["objects"]["work:old"]
     task["document"]["data"].update(previous)
-    hold(task, "GATE_FAIL")
+    fail_task(task, "GATE_FAIL")
     work["tasks"][0].update(action="update", target="work:old", revision=3)
     return work, value
 
@@ -42,8 +42,8 @@ class RevisedContractClearsHold(unittest.TestCase):
         self.assertEqual(len(saves), 1)
         self.assertEqual(saves[0]["revision"], 3)
         self.assertEqual(saves[0]["data"]["body"], "Goal: Observable output")
-        self.assertIn("hold", saves[0]["data"])
-        self.assertIsNone(saves[0]["data"]["hold"])
+        self.assertNotIn("stage", saves[0]["data"])
+        self.assertNotIn("hold", saves[0]["data"])
         self.assertNotIn("steps", saves[0]["data"], "only the body changed")
 
     def test_changed_steps_sends_hold_null_in_the_same_save(self):
@@ -55,8 +55,8 @@ class RevisedContractClearsHold(unittest.TestCase):
         self.assertEqual(len(saves), 1)
         self.assertEqual(saves[0]["data"]["steps"], ["Use the existing mechanism and reject invalid input."])
         self.assertNotIn("body", saves[0]["data"], "only the steps changed")
-        self.assertIn("hold", saves[0]["data"])
-        self.assertIsNone(saves[0]["data"]["hold"])
+        self.assertNotIn("stage", saves[0]["data"])
+        self.assertNotIn("hold", saves[0]["data"])
 
     def test_unchanged_body_and_steps_do_not_clear_the_hold(self):
         work, _ = held_update({})

@@ -4,19 +4,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import {spawn, spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import {activeCount, dockerLanes, configFrom} from '../launcher.mjs';
-import {scopeDirectory, laneRunFolder, validateId} from '../scope.mjs';
-import {save, read, laneArgs, runDirectories} from '../runtime.mjs';
-import {claimTask, finishTask, nextTask, executionId, runHoldsTasks, contractDigest, guardTaskClaims} from '../joppa.mjs';
-import {cleanupBlockedTasks} from '../../planning-joppa/cleanup.mjs';
-import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.mjs';
+
+import {configFrom} from '../launcher.mjs';
+import {laneRunFolder} from '../scope.mjs';
+import {save, read} from '../runtime.mjs';
+import {nextTask, executionId, runHoldsTasks} from '../joppa.mjs';
+
 import {defaultHooks} from '../hooks-config.mjs';
 import {defaultWorkflow} from '../workflow-config.mjs';
 
-import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
-import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
+import {launcher, worker, execute, setup, workerFixture} from './launcher.fixture.mjs';
+import {packageFixture} from './launcher-joppa.fixture.mjs';
 
 test('live launcher accepts flat memory and refuses an invalid explicit context root', async t => {
   const f = await setup(t);
@@ -198,7 +196,7 @@ test('Joppa package unconfirmed worker outcome remains held', async t => {
 });
 
 for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container-cli-rejected', 'released-startup', 'released-native-run', 'unlabelled-container', 'checkout-present', 'broken-symlink', 'native-run', 'medulla-started', 'docker-present', 'contract-changed', 'unknown-exit', 'surviving-child']) {
-  test(`Joppa pre-Medulla startup handling (${scenario}) releases only when unused and confirmed`, async t => {
+  test(`Joppa pre-Medulla startup handling (${scenario}) records failure without an automatic retry`, async t => {
     const f = await packageFixture(t);
     const worktreeRoot = path.join(f.root, 'worktrees'), bins = path.join(f.root, 'bins'), marker = path.join(f.root, 'ran');
     fs.mkdirSync(worktreeRoot);
@@ -247,17 +245,20 @@ for (const scenario of ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container
     const result = await execute(worker, [f.stateFile], {...process.env, PATH: `${bins}:${process.env.PATH}`});
     assert.equal(result.code, 2, result.stderr);
     assert.equal(fs.existsSync(marker), true, scenario);
-    const saved = read(f.stateFile), released = ['cbm-sync', 'mcp-bridge', 'removed-worktree', 'container-cli-rejected', 'released-startup'].includes(scenario);
-    assert.equal(saved.releaseConfirmed === true, released, scenario);
-    assert.equal(saved.result.released === true, released, scenario);
-    assert.equal(saved.result.held === true, !released, scenario);
-    assert.equal(Boolean(saved.result.blocked), false, scenario);
-    assert.equal(runHoldsTasks(saved), !released, scenario);
+    const saved = read(f.stateFile);
+    const uncertain = manuallyReleased || ['docker-present', 'surviving-child'].includes(scenario);
+    assert.equal(saved.releaseConfirmed, undefined, scenario);
+    assert.equal(saved.result.released, undefined, scenario);
+    assert.equal(saved.result.held === true, uncertain, scenario);
+    assert.equal(saved.result.blockConfirmed === true, !uncertain, scenario);
+    assert.equal(runHoldsTasks(saved), uncertain, scenario);
     if (manuallyReleased) assert.equal(f.calls.filter(call => call.name === 'joppa_batch' &&
       call.args.operations.some(item => item.command.op === 'save_object' && !item.command.data.assignee)).length, 0, scenario);
     assert.match(saved.claim.assignee, new RegExp(`^crew-lane:[^:]+:${f.runId}$`), scenario);
     for (const address of ['task:t1', 'task:t2']) {
-      assert.equal(f.objects.get(address).document.data.assignee, released || manuallyReleased ? undefined : saved.claim.assignee, scenario);
+      const data = f.objects.get(address).document.data;
+      assert.equal(data.assignee, !uncertain || manuallyReleased ? undefined : saved.claim.assignee, scenario);
+      if (!uncertain) assert.equal(data.stage, f.run.config.FAILED_TASK_STAGE, scenario);
     }
   });
 }

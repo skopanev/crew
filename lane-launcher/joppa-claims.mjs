@@ -2,7 +2,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies} from './joppa-common.mjs';
-import {nodeAssignee, nodeWaiting, nodeStageDone, nodePendingDelivery, saveNode} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -13,7 +13,7 @@ import {filteredTasks} from './task-filter.mjs';
 import {sendClaim} from './claim-retry.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// A failure writes one release save with the hold code and one note for each Task in one batch.
+// A failure writes one stage save and one note for each Task in one batch.
 const FAILURE_OPERATIONS = 2;
 
 // A resumed Medulla run keeps its original claim file as evidence.
@@ -44,12 +44,12 @@ export const laneAssignee = runId => {
 };
 const current = object => object?.historical === false && object.document?.present === true &&
   Number.isSafeInteger(object.current_revision) && object.current_revision > 0;
-// The run holds a Task only through its own run-specific assignee. A waiting Task is not held.
+// The run holds a Task only through its own run-specific assignee.
 export const heldBy = (run, object) => current(object) && typeof run.claim?.assignee === 'string' &&
-  nodeAssignee(object) === run.claim.assignee && !nodeWaiting(object);
-export const released = object => current(object) && !nodeAssignee(object) && !nodeWaiting(object);
-// Acceptance context is live when it is current, not waiting and not held by a planner.
-export const contextLive = object => current(object) && !nodeWaiting(object) && !nodeAssignee(object);
+  nodeAssignee(object) === run.claim.assignee;
+export const released = object => current(object) && !nodeAssignee(object);
+// Acceptance context is live when it is current and not held by a planner.
+export const contextLive = object => current(object) && !nodeAssignee(object);
 const kindOf = object => object.address.slice(0, object.address.indexOf(':'));
 const read = (run, address) => api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address});
 
@@ -78,6 +78,8 @@ export async function claimTask(run, persist, runId, options = {}) {
     'Repository package exceeds the Joppa 100-operation atomic batch limit; no Tasks claimed');
   require(new Set(tasks.map(task => task.address)).size === tasks.length, 'Repository package contains duplicate Tasks');
   const assignee = laneAssignee(runId);
+  const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
+  validateFailedTaskStage(run.config, types);
   if (!run.claimRequest) {
     const selected = [];
     for (const task of tasks) {
@@ -85,7 +87,6 @@ export async function claimTask(run, persist, runId, options = {}) {
       require(object?.address === task.address && current(object) &&
         (task.revision === undefined || object.current_revision === task.revision), 'Task changed after selection; no Tasks claimed');
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
-      require(!nodeWaiting(object), `TASK_WAITING: ${task.address} is waiting; no Tasks claimed`);
       require(!nodeStageDone(object), `TASK_COMPLETED: ${task.address} is done; no Tasks claimed`);
       require(!nodePendingDelivery(object), `TASK_PENDING_DELIVERY: ${task.address} awaits target integration; no Tasks claimed`);
       selected.push(object);
@@ -96,7 +97,6 @@ export async function claimTask(run, persist, runId, options = {}) {
       require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
     }
     // A covering Task also needs each covered criterion live, unheld and ready before any claim.
-    const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
     for (const object of selected) {
       const covered = taskCovers(coversSpec(run.config, types, kindOf(object)), object);
       const requirement = covered.length ? (await read(run, object.document.parent))?.document?.parent : undefined;

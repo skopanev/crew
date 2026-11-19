@@ -49,9 +49,9 @@ class CoversTests(unittest.TestCase):
         self.assertEqual(save["data"]["acceptance_checks"], [
             {"ac": "criterion:a", "check": "Reject invalid input => No mutation"},
             {"ac": "criterion:b", "check": "Show the saved value => The value is visible"}])
-        # The covered criterion is released and its hold cleared in the same batch. It has no Task of its own.
+        # The covered criterion is released in the same batch. Its stage stays unchanged.
         cleared = [operation["command"]["kind"] + ":" + operation["command"]["id"] for operation in operations
-                   if operation["command"]["op"] == "save_object" and operation["command"]["data"].get("hold", 0) is None]
+                   if operation["command"]["op"] == "save_object" and operation["command"]["data"].get("assignee", 0) is None]
         self.assertEqual(cleared, ["criterion:a", "criterion:b"])
         self.assertEqual(sum(operation["command"].get("kind") == "work" for operation in operations), 1)
 

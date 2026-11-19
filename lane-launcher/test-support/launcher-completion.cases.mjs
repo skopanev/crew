@@ -163,8 +163,8 @@ test('worker records the outcome before notifying; Telegram failure preserves it
   assert.equal(result.code, 2, result.stderr);
   const saved = read(f.stateFile).result;
   assert.equal(saved.code, 2);
-  assert.equal(saved.held, true);
-  assert.equal(read(sent).text, '🔴 FAILED\nTicket: task:t1\nReason: EXIT_2');
+  assert.equal(saved.blockConfirmed, true);
+  assert.equal(read(sent).text, '🔴 BLOCKED\nTicket: task:t1\nReason: EXIT_2');
   assert.match(read(path.join(f.root, 'notification-error.json')).error, /fixture delivery failure/);
 });
 for (const closeTabOnExit of [false, true]) {

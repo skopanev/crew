@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {executionId, runHoldsTasks} from '../lane-launcher/joppa.mjs';
 import {readRun} from '../lane-launcher/runtime.mjs';
-import {nodeAssignee, nodeHold, nodeWaiting} from '../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, nodeFailed, nodeStage} from '../lane-launcher/joppa-nodes.mjs';
 import {isDeepStrictEqual} from 'node:util';
 
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -27,7 +27,7 @@ export function laneRunsFolders(config) {
 }
 
 export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false} = {}) {
-  const blocked = tasks.filter(task => task.document?.present === true && nodeWaiting(task));
+  const blocked = tasks.filter(task => task.document?.present === true && nodeFailed(task, config.FAILED_TASK_STAGE));
   if (!blocked.length) return [];
   const configured = laneRunsFolders(config);
   require(config.worktree_root && configured.length, 'Blocked retries need config.worktree_root and lane runs folders');
@@ -71,23 +71,23 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     require(operation, 'Every blocked Task needs an unblock, contract update or retirement before cleanup');
     const cmd = operation.command;
     require(cmd.revision === task.current_revision, 'Cleanup operation uses a different Task revision');
-    // A partial save that only clears the hold retries the unchanged contract.
-    const retry = cmd.op === 'save_object' && isDeepStrictEqual(cmd.data, {hold: null}) &&
+    // A stage-only retry requires a separate owner or role decision.
+    const retry = cmd.op === 'save_object' && isDeepStrictEqual(cmd.data, {stage: cmd.data?.stage}) &&
       cmd.relations === undefined && cmd.parent === undefined;
     if (cmd.op === 'save_object') {
       require(!cmd.data.assignee, 'Cleanup cannot assign a Task');
-      require(cmd.data.hold === null, 'Task contract save must clear its hold');
+      require(cmd.data.stage === undefined || cmd.data.stage === nodeStage(task),
+        'Planning cannot return a failed Task to a working stage');
     }
-    require(!retry || nodeHold(task) === 'WORKTREE_PREEXISTED',
-      'Only worktree startup failures can use unchanged contract cleanup');
-    return {operation, retry};
+    require(!retry, 'Stage-only Task retries require an owner or role decision');
+    return operation;
   };
   const failureReceipt = task => {
     const comments = Object.entries(task.annotations?.comments || {});
     for (const [id, note] of comments.reverse()) {
       if (note.withdrawn || !note.text?.startsWith('CREW_FAILURE\n')) continue;
       const field = name => new RegExp(`^${name}: ([^\\r\\n]+)$`, 'm').exec(note.text)?.[1];
-      if (field('Task') !== task.address || field('Reason') !== nodeHold(task)) continue;
+      if (field('Task') !== task.address || !field('Reason')) continue;
       const runId = field('Run'), receipt = receipts.get(runId);
       if (!uuid.test(runId || '') || !receipt) continue;
       const requested = receipt.blockRequest?.operations?.find(({command}) =>
@@ -99,10 +99,10 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
     return {};
   };
   for (const task of blocked) {
-    const {retry} = validateTask(task);
+    validateTask(task);
     const {runId, receipt} = failureReceipt(task);
     const related = [...receipts.values()].filter(run => members(run).includes(task.address));
-    if (!receipt && !related.length && !stat(path.join(root, executionId(task.address))) && !retry) continue;
+    if (!receipt && !related.length && !stat(path.join(root, executionId(task.address)))) continue;
     require(runId && uuid.test(runId) && receipt, 'Blocked worktree has no terminal lane Run ID or receipt');
     require(members(receipt).includes(task.address), 'Block receipt does not include this Task');
     const execution = receipt.executionId;
@@ -112,7 +112,7 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
       'Cleanup cannot contain lane receipts');
     require(!entry || entry.isDirectory() && !entry.isSymbolicLink() && fs.realpathSync(folder) === folder,
       'Blocked worktree must be a real directory without symlinks');
-    if (!entry && !retry) continue;
+    if (!entry) continue;
     const group = members(receipt);
     for (const address of group) {
       const current = blocked.find(item => item.address === address);
@@ -140,7 +140,6 @@ export function cleanupBlockedTasks({config, tasks, operations}, {dryRun = false
         continue;
       }
       matches.push(name);
-      if (name === runId && retry) require(run.result.code === 73, 'Startup retry requires the worktree failure exit code');
     }
     require(matches.includes(runId), 'Block receipt does not confirm a finished lane for this Task');
     if (entry) prepared.set(folder, {task: group.join(', '), folder});

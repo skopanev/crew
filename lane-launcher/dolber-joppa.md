@@ -135,7 +135,7 @@ Joppa `done` records execution. It does not accept the AC or Requirement.
 ### Covered criteria
 
 With `joppa.coversReference`, a claimed Task can cover other criteria of its Requirement.
-Before the claim, each covered criterion must be present, without a `data.hold` code, without assignee and without unmet dependencies.
+Before the claim, each covered criterion must be present, without assignee and without unmet dependencies.
 Otherwise Dolber claims nothing and reports `COVERED_CONTEXT_NOT_READY`.
 After the claim, Dolber reads each covered criterion again and stores its revision and digest as acceptance context.
 A change in this window releases the claimed Tasks before startup with the same code.
@@ -143,7 +143,12 @@ The startup guard and completion require each saved acceptance context unchanged
 
 ## Failure
 
-Dolber blocks confirmed failures with evidence and releases their claims.
+Dolber writes the configured `FAILED_TASK_STAGE`, removes the assignee and adds a failure note in one atomic batch.
+This applies to startup errors, timeouts and implementation failures.
+Admission rejection before lane startup only releases the revision-checked claim.
+Examples include active planning, a changed Requirement head and an unpublished dependency. No failure automatically returns a Task to a working stage.
+A person or an authorized role must change its stage before another implementation attempt.
+The native `joppa.filter` controls selection. Crew adds no `data.hold` filter.
 An uncertain claim or outcome stays held until inspection confirms the result.
 The reservation holds only its Tasks. Other Tasks of the same Requirement and repository can run within the lane limit.
 Unused and unchanged worktrees are removed. Failed worktrees with changes remain for recovery.
@@ -154,6 +159,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 
 | Field | Purpose |
 |---|---|
+| `FAILED_TASK_STAGE` | Required failure stage. It must exist in each native Task type and cannot be `done`. No default |
 | `limit` | Maximum concurrent lanes, independent of the number of authenticated workers |
 | `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |
 | `joppa.readerTokenFile` | Private read-only token for final Requirement context checks |
@@ -191,7 +197,7 @@ Config changes apply only to new claims. Existing runs keep their captured argum
 ### Reconcile a manually released failed run
 
 Dolber checks a finished held run against current Joppa reads from the same workspace and endpoint.
-It ignores the old reservation only when every Task has a newer revision, no assignee and no hold.
+It ignores the old reservation only when every Task has a newer revision and no assignee.
 The old worker, process group and containers must be gone. The old checkout path must be absent.
 The journal must prove that the run stayed before landing. Pending outcome and recovery operations prevent automatic reconciliation.
 Dolber keeps the original launch state, failed result and logs unchanged.

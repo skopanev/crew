@@ -18,11 +18,12 @@ test('claim refuses an assigned Task before any write', async t => {
   assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
 });
 
-test('claim refuses a waiting Task and a run without a launch UUID', async t => {
+test('claim refuses a Task outside the native stage filter and a run without a launch UUID', async t => {
   const f = await packageFixture(t);
   await assert.rejects(claimTask(f.run, f.persist, 'not-a-run'), /launch UUID/);
-  f.objects.get('task:t1').document.data.hold = 'GATE_FAIL';
-  await assert.rejects(claimTask(f.run, f.persist, f.runId), /TASK_WAITING: task:t1/);
+  f.run.config.joppa.filter = {data: {stage: 'ready'}};
+  f.objects.get('task:t1').document.data.stage = 'review';
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /TASK_FILTER_MISMATCH/);
   assert.deepEqual(batches(f), []);
 });
 
@@ -101,7 +102,7 @@ test('release clears only the assignee with a revision-checked partial save', as
   assert.deepEqual(f.run.releaseResults.map(task => [task.address, task.revision]), [['task:t1', 5], ['task:t2', 5]]);
 });
 
-test('failure releases, holds and notes every Task in one batch', async t => {
+test('failure releases, sets the configured stage and notes every Task in one batch', async t => {
   const f = await packageFixture(t);
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = path.join(f.root, 'artifacts');
@@ -109,14 +110,14 @@ test('failure releases, holds and notes every Task in one batch', async t => {
   fs.writeFileSync(path.join(artifacts, 'failure.txt'), 'Required check failed\n');
   const result = {code: 1, status: 'failed'};
   await finishTask(f.run, f.stateFile, result, artifacts);
-  const block = batches(f).at(-1), reason = block[0].data.hold;
+  const block = batches(f).at(-1), reason = /^Reason: ([A-Z0-9_]+)$/m.exec(block[1].text)[1];
   assert.equal(batches(f).length, 2);
-  assert.match(reason, /^[A-Z0-9_]+$/);
+  assert.equal(block[0].data.stage, f.run.config.FAILED_TASK_STAGE);
   for (const [index, address] of ['task:t1', 'task:t2'].entries()) {
     const [save, note] = block.slice(index * 2, index * 2 + 2);
     assert.deepEqual([save.op, `${save.kind}:${save.id}`, save.revision, save.data],
-      ['save_object', address, 4, {assignee: null, hold: reason}]);
-    assert.equal(f.objects.get(address).document.data.hold, reason);
+      ['save_object', address, 4, {assignee: null, stage: f.run.config.FAILED_TASK_STAGE}]);
+    assert.equal(f.objects.get(address).document.data.stage, f.run.config.FAILED_TASK_STAGE);
     assert.equal(note.op, 'note');
     assert.equal(note.target, address);
     assert.equal(note.text, `CREW_FAILURE\nTask: ${address}\nRun: ${f.runId}\nReason: ${reason}\nRequired check failed`);
@@ -195,8 +196,8 @@ for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-p
   });
 }
 
-test('failure is not confirmed when the read hold differs from the written code', async t => {
-  const f = await packageFixture(t, 'wrong-hold');
+test('failure is not confirmed when the read stage differs from the written stage', async t => {
+  const f = await packageFixture(t, 'wrong-stage');
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = path.join(f.root, 'artifacts');
   fs.mkdirSync(artifacts);
@@ -221,4 +222,24 @@ test('a package whose failure batch exceeds 100 operations is refused before API
   f.run.tasks = Array.from({length: 51}, (_, index) => ({address: `task:t${index}`, revision: 3}));
   await assert.rejects(claimTask(f.run, f.persist, f.runId), /100-operation/);
   assert.equal(f.calls.length, 0);
+});
+
+for (const stage of [undefined, '', 'unknown', 'done']) {
+  test(`an invalid failure stage refuses the claim before writes: ${stage}`, async t => {
+    const f = await packageFixture(t);
+    f.run.config.FAILED_TASK_STAGE = stage;
+    await assert.rejects(claimTask(f.run, f.persist, f.runId), /FAILED_TASK_STAGE/);
+    assert.equal(batches(f).length, 0);
+    assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
+  });
+}
+
+test('an old saved failure request cannot replay a hold write', async t => {
+  const f = await packageFixture(t);
+  await claimTask(f.run, f.persist, f.runId);
+  f.run.blockRequest = {operations: [{command: {op: 'save_object', kind: 'task', id: 't1',
+    revision: 4, data: {assignee: null, hold: 'GATE_FAIL'}}}]};
+  const sent = batches(f).length;
+  await assert.rejects(finishTask(f.run, f.stateFile, {code: 2}, null), /Saved failure request/);
+  assert.equal(batches(f).length, sent);
 });

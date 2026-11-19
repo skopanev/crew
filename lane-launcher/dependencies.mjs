@@ -1,5 +1,4 @@
 // Read live dependency state for one queue check. Store no persistent state.
-import {nodeWaiting} from './joppa-nodes.mjs';
 const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
 
 const validWorkspaceId = value => typeof value === 'string' && Boolean(value.trim()) &&
@@ -61,7 +60,6 @@ export function dependencyCheck(read) {
     const types = (await schema)?.schema?.types;
     if (!types || typeof types !== 'object') throw invalid('Dependency schema types are missing');
     const start = await object(address);
-    if (nodeWaiting(start)) return {ready: false, blocker: start.address};
     const seen = new Set();
     let node = start;
     while (node) {

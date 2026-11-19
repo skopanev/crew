@@ -23,7 +23,7 @@ for (const forceColor of ['0', '1']) {
     const sent = path.join(f.root, 'sent.json'), log = path.join(f.root, 'output.log');
     await execute(worker, [f.stateFile], {...notificationEnv(f, f.stateFile, sent), FORCE_COLOR: forceColor, NO_COLOR: undefined});
     assert.match(read(f.stateFile).result.error, /Lane exited 2/);
-    assert.equal(read(sent).text, '🔴 FAILED\nTicket: task:t1\nReason: EXIT_2');
+    assert.equal(read(sent).text, '🔴 BLOCKED\nTicket: task:t1\nReason: EXIT_2');
     assert.ok(fs.readFileSync(log, 'utf8').includes(reason + '\n\n'));
     assert.ok(!fs.readFileSync(log, 'utf8').includes('\x1b['));
     assert.equal(f.calls.filter(call => call.name === 'joppa_batch' &&

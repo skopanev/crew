@@ -9,7 +9,7 @@ A plan removes a depends_on edge only by retiring the target Task in the same pl
 from copy import deepcopy
 import unittest
 
-from provider_fixture import assignment, plan, hold  # noqa: F401  (sets sys.path for planning modules)
+from provider_fixture import assignment, plan, fail_task  # noqa: F401  (sets sys.path for planning modules)
 import publication
 
 
@@ -33,7 +33,7 @@ def existing_task(dependencies):
 
 def retire(work, value, address):
     """The plan retires the held Task at `address` (Crew planning retires only held Tasks)."""
-    hold(value["joppa"]["objects"][address], "Failed")
+    fail_task(value["joppa"]["objects"][address], "Failed")
     task = deepcopy(work["tasks"][0])
     task.update(id="retire-" + address.split(":")[1], action="retire", target=address, revision=3,
                 outcome="The approved outcome needs no further work.", depends_on=[])

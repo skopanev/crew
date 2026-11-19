@@ -5,7 +5,7 @@ import path from 'node:path';
 import {readJoppa} from '../../lane-launcher/joppa-api.mjs';
 import {contractDigest} from '../../lane-launcher/joppa.mjs';
 import {contextDigest} from '../../lane-launcher/joppa-common.mjs';
-import {nodeAssignee, nodeWaiting} from '../../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee} from '../../lane-launcher/joppa-nodes.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../../lane-launcher/dependencies.mjs';
 import {assertRequirementHead, requirementPlan} from '../../lane-launcher/requirement-delivery.mjs';
 
@@ -13,8 +13,8 @@ const require = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 const text = value => typeof value === 'string' && Boolean(value.trim());
-// Live context has no waiting assessment and no planner assignee.
-const live = object => !nodeWaiting(object) && !nodeAssignee(object);
+// Live context has no planner assignee. Contract digests detect stage changes after the claim.
+const live = object => !nodeAssignee(object);
 
 try {
   const args = process.argv.slice(2);
@@ -66,7 +66,7 @@ try {
       require(current && current.address === task.address && current.historical === false &&
         current.document?.present === true,
         `Claimed Task is absent or historical: ${task.address}`);
-      require(nodeAssignee(current) === assignee && !nodeWaiting(current), `Task holder changed: ${task.address}`);
+      require(nodeAssignee(current) === assignee, `Task holder changed: ${task.address}`);
       const dependency = await dependencies(task.address);
       require(dependency.ready, `Task dependency changed: ${dependency.blocker}`);
       require(contractDigest(current) === task.digest, `Task contract changed after claim: ${task.address}`);

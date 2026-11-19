@@ -62,12 +62,11 @@ def load_requirement(api, config, req_id, selected=None):
         # A covering Task owns its covered criteria for readiness. Its parent alone owns update and retirement.
         own = [item for item in tasks if item["document"]["parent"] == address or address in covers(item)]
         work = [item for item in own if not ended(item)]
-        failures = [item for item in work if blocked(item) and not assignee(item)]
+        failures = [item for item in work if blocked(item, config.get("FAILED_TASK_STAGE")) and not assignee(item)]
         # Landed work without a live failure waits for acceptance. Planning again would repeat it.
         completed = any(done(item) for item in own) and not failures
         if ((not config.get("ac_ids") or address in config["ac_ids"])
                 and not completed
-                and not ac["document"]["data"].get("hold")
                 and (selected is not None or not ac["document"]["data"].get("assignee")) and statuses[address] != "green"
                 and len(failures) == len(work)):
             candidates.append(address)

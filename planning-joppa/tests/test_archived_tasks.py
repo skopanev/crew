@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 import context
 
-from provider_fixture import item, assignment, end, hold, CHECK_TYPE
+from provider_fixture import item, assignment, end, fail_task, CHECK_TYPE
 
 TYPES = {"criterion": {"role": "ac"}, "rule": {"role": "requirement"}, "project": {"role": "document"},
          "work": {"role": "task", "parents": ["criterion"], "question": "What work?",
@@ -45,7 +45,7 @@ class Workspace:
                           and ("status" in args or object["document"]["present"])]}
 
 
-CONFIG = {"workspace": "example", "repositories": assignment()["repositories"]}
+CONFIG = {"workspace": "example", "FAILED_TASK_STAGE": "review", "repositories": assignment()["repositories"]}
 criteria = lambda value: [entry["id"] for entry in value["joppa"]["criteria"]]
 tasks = lambda value: sorted(task["address"] for task in value["joppa"]["tasks"])
 
@@ -54,7 +54,7 @@ class ArchivedTaskTests(unittest.TestCase):
     def test_selected_criterion_keeps_done_and_failed_tasks(self):
         api = Workspace(["criterion:a"])
         end(api.task("work:done", "criterion:a"), "a" * 40)
-        hold(api.task("work:failed", "criterion:a"))
+        fail_task(api.task("work:failed", "criterion:a"))
         value, snapshot, _ = context.load(api, CONFIG, "criterion:a")
         self.assertEqual(tasks(value), ["work:done", "work:failed"])
         self.assertIs(value["joppa"]["objects"]["work:done"]["document"]["present"], False)
@@ -79,7 +79,7 @@ class ArchivedTaskTests(unittest.TestCase):
         self.assertEqual(criteria(context.load_requirement(api, CONFIG, "rule:r")[0]), ["criterion:a", "criterion:b"])
         # A live unassigned failure next to landed work admits the criterion again.
         api.objects["work:b1"]["document"]["data"]["commit"] = "b" * 40
-        hold(api.task("work:b3", "criterion:b"))
+        fail_task(api.task("work:b3", "criterion:b"))
         value, _, _ = context.load_requirement(api, CONFIG, "rule:r")
         self.assertEqual(criteria(value), ["criterion:a", "criterion:b"])
         self.assertEqual(tasks(value), ["work:b1", "work:b2", "work:b3"])

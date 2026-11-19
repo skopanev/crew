@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {saveNode, nodeAssignee, nodeWaiting, nodePages, roleKinds} from '../joppa-nodes.mjs';
+import {saveNode, nodeAssignee, nodeStage, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
 import {contractDigest, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
@@ -18,7 +18,7 @@ test('assignment saves send only the changed fields and require a current revisi
     data: {assignee: 'crew-lane:host:run'}, reason: 'Claim'});
   assert.deepEqual(node, before);
   node.document.data.assignee = 'crew-lane:host:run';
-  assert.deepEqual(saveNode(node, {assignee: undefined, hold: 'GATE_FAIL'}, 'Release').data, {assignee: null, hold: 'GATE_FAIL'});
+  assert.deepEqual(saveNode(node, {assignee: undefined, stage: 'review'}, 'Release').data, {assignee: null, stage: 'review'});
   node.document.present = false;
   assert.throws(() => saveNode(node, {}, 'Claim'), /current, present/);
 });
@@ -28,7 +28,6 @@ test('execution metadata does not alter authored content checks', () => {
   node.current_revision++;
   node.document.data.assignee = 'crew-lane:host:run';
   node.document.data.commit = 'a'.repeat(40);
-  node.document.data.hold = 'GATE_FAIL';
   assert.equal(contractDigest(node), original);
   node.document.data.body = 'Changed scope';
   assert.notEqual(contractDigest(node), original);
@@ -36,9 +35,10 @@ test('execution metadata does not alter authored content checks', () => {
 
 test('native fields work in detail reads and named list fields', async () => {
   assert.equal(nodeAssignee({'data.assignee': 'worker'}), 'worker');
-  assert.equal(nodeWaiting({'data.hold': 'GATE_FAIL'}), true);
-  assert.equal(nodeWaiting({document: {data: {hold: 'NEEDS_HUMAN'}}}), true);
-  assert.equal(nodeWaiting({'data.hold': null}), false);
+  assert.equal(nodeStage({'data.stage': 'review'}), 'review');
+  assert.equal(nodeFailed({document: {data: {stage: 'review'}}}, 'review'), true);
+  assert.equal(nodeFailed({'data.stage': 'ready'}, 'review'), false);
+  assert.equal(nodeFailed({'data.stage': 'review'}, undefined), false);
   const calls = [];
   const read = async (tool, args) => {
     calls.push([tool, args]);
@@ -52,6 +52,16 @@ test('native fields work in detail reads and named list fields', async () => {
   await assert.rejects(async () => {
     for await (const _ of nodePages(async () => ({items: [], next_cursor: 'same'}), {})) {}
   }, /pagination did not advance/);
+});
+
+test('the failure stage must be an editable nonterminal stage of the native Task type', () => {
+  const types = {work: {role: 'task', fields: {stage: {values: ['ready', 'review', 'done']}}}};
+  assert.doesNotThrow(() => validateFailedTaskStage({FAILED_TASK_STAGE: 'review'}, types));
+  for (const stage of [undefined, '', ' review', 'unknown', 'done']) {
+    assert.throws(() => validateFailedTaskStage({FAILED_TASK_STAGE: stage}, types), /FAILED_TASK_STAGE/);
+  }
+  types.work.fields.stage.from = 'children';
+  assert.throws(() => validateFailedTaskStage({FAILED_TASK_STAGE: 'review'}, types), /FAILED_TASK_STAGE/);
 });
 
 test('mixed mutation receipts validate saves and non-save commands without invented objects', async t => {

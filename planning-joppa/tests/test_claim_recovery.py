@@ -23,7 +23,7 @@ from mcp import MCPError, Rejected, Reader
 import publication
 
 
-from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac, hold, end, ACCEPTANCE
+from provider_fixture import item, assignment, plan, Fake, MARK, claim_receipt, raw_ac, fail_task, end, ACCEPTANCE
 
 class ProviderTests(unittest.TestCase):
     def test_partial_release_recovery_stays_bound_to_the_unreadable_criterion(self):
@@ -183,13 +183,13 @@ class ProviderTests(unittest.TestCase):
                 existing["document"]["data"].update(title=task["title"], body=publication.contract(task, value),
                                                      projects=["other", "p"], acceptance_checks=deepcopy(ACCEPTANCE))
                 if blocked:
-                    hold(existing, "Failed")
+                    fail_task(existing, "Failed")
                 if terminal:
                     finished = deepcopy(existing)
                     finished["address"] = "work:finished"
                     end(finished, "a" * 40 if terminal == "done" else None)
                     data["joppa"]["tasks"].append(finished)
-                    existing["document"]["data"].pop("hold")
+                    existing["document"]["data"].pop("stage")
                 active_blocked = blocked and terminal is None
                 if active_blocked:
                     task["steps"].append("Record the exact remaining failure.")
@@ -207,7 +207,7 @@ class ProviderTests(unittest.TestCase):
                             raise Rejected(refusal)
                         return {"results": [{"position": 23}]}
                 api = Server()
-                with patch.object(stage, "settings", return_value={"workspace": "example"}), \
+                with patch.object(stage, "settings", return_value={"workspace": "example", "FAILED_TASK_STAGE": "review"}), \
                      patch.object(stage.shared, "artifacts", return_value=target), \
                      patch.object(stage.shared, "verify_context", return_value=({}, {}, {})), \
                      patch.object(stage.context, "client", return_value=api), \
@@ -233,7 +233,7 @@ class ProviderTests(unittest.TestCase):
                     self.assertTrue(read(target / "publication.json")["retain_claim"])
                     released = read(target / "release.json")["arguments"]["operations"]
                     self.assertEqual([op["command"]["op"] for op in released], ["save_object"])
-                    self.assertEqual(released[0]["command"]["data"], {"assignee": None, "hold": "PLANNING_FAILED"})
+                    self.assertEqual(released[0]["command"]["data"], {"assignee": None})
                 if kept:
                     self.assertTrue(result["needs_recovery"])
                     self.assertTrue(read(target / "publication.json")["retain_claim"])

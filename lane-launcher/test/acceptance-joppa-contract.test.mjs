@@ -146,10 +146,10 @@ async function failedLane(t, {origin, journal, failure, output = ''}) {
 }
 
 const writes = f => f.calls.filter(call => ['joppa_batch', 'joppa_command'].includes(call.name));
-const holdSaves = f => writes(f).flatMap(call => (call.args.operations || [{command: call.args.command}]))
-  .map(({command}) => command).filter(command => command.op === 'save_object' && command.data && Object.hasOwn(command.data, 'hold') && command.data.hold);
+const stageSaves = f => writes(f).flatMap(call => (call.args.operations || [{command: call.args.command}]))
+  .map(({command}) => command).filter(command => command.op === 'save_object' && command.data && Object.hasOwn(command.data, 'stage') && command.data.stage);
 
-test('ac:b3w8lkpw nominal: a lane that fails review with code GATE_FAIL and a failure report saves task:t1 at read revision 3 with assignee null and hold GATE_FAIL plus one note in one batch', async t => {
+test('ac:b3w8lkpw nominal: a lane that fails review with code GATE_FAIL and a failure report saves task:t1 at read revision 3 with assignee null and configured failure stage plus one note in one batch', async t => {
   const report = 'Gate failed: 2 of 7 checks red.';
   const f = await failedLane(t, {origin: {node: 'review', signal: 'GATE_FAIL', message: report},
     journal: [{node: 'implement_code', signal: '__default__'}, {node: 'review', signal: 'GATE_FAIL'}], failure: report});
@@ -164,53 +164,52 @@ test('ac:b3w8lkpw nominal: a lane that fails review with code GATE_FAIL and a fa
   assert.equal(save.op, 'save_object');
   assert.equal(`${save.kind}:${save.id}`, 'task:t1');
   assert.equal(save.revision, 3);
-  assert.deepEqual(save.data, {assignee: null, hold: 'GATE_FAIL'});
+  assert.deepEqual(save.data, {assignee: null, stage: f.run.config.FAILED_TASK_STAGE});
   assert.equal(note.op, 'note');
   assert.equal(note.target, 'task:t1');
   assert.ok(note.text.includes(report), 'the note carries the failure report');
-  assert.equal(f.task.document.data.hold, 'GATE_FAIL');
+  assert.equal(f.task.document.data.stage, f.run.config.FAILED_TASK_STAGE);
   assert.equal(f.task.document.data.assignee, undefined);
   assert.equal(Object.keys(f.task.annotations.comments).length, 1);
   assert.equal(result.blocked, true);
 });
 
-test('ac:b3w8lkpw boundary: a different failure code TESTS_FAILED becomes the hold code itself', async t => {
+test('ac:b3w8lkpw boundary: a different failure code TESTS_FAILED stays in the note', async t => {
   const report = 'TESTS_FAILED: 1 of 12 tests failed';
   const f = await failedLane(t, {origin: {node: 'run_tests', signal: 'TESTS_FAILED', message: report},
     journal: [{node: 'run_tests', signal: 'TESTS_FAILED'}], failure: report});
   await finishTask(f.run, f.stateFile, {status: 'failed', code: 1}, f.artifacts);
-  const saves = holdSaves(f);
+  const saves = stageSaves(f);
   assert.equal(saves.length, 1);
-  assert.equal(saves[0].data.hold, 'TESTS_FAILED');
+  assert.equal(saves[0].data.stage, f.run.config.FAILED_TASK_STAGE);
   assert.equal(saves[0].data.assignee, null);
-  assert.equal(f.task.document.data.hold, 'TESTS_FAILED');
+  assert.equal(f.task.document.data.stage, f.run.config.FAILED_TASK_STAGE);
 });
 
-test('ac:b3w8lkpw off_nominal: an implement timeout does not hold task:t1 and writes no hold code', async t => {
+test('ac:b3w8lkpw off_nominal: an implement timeout saves the configured failure stage', async t => {
   const f = await failedLane(t, {origin: {node: 'implement_code', signal: '__timeout__'},
     journal: [{node: 'prepare', signal: '__default__'},
       {node: 'implement_code', signal: '__timeout__', timed_out: true, next: 'notify_failure'}],
     failure: 'implement_code timed out after 3600 s'});
   const result = {status: 'failed', code: 1};
-  // Timeout recovery needs a retained session and checkout that this black-box fixture does not have; it may refuse.
-  await finishTask(f.run, f.stateFile, result, f.artifacts).catch(() => {});
-  assert.equal(holdSaves(f).length, 0, 'no save sends a hold code');
-  assert.equal(f.task.document.data.hold, undefined);
-  assert.equal(result.held, true, 'the run went to timeout recovery');
-  assert.equal(result.blocked, false);
+  await finishTask(f.run, f.stateFile, result, f.artifacts);
+  assert.equal(stageSaves(f).length, 1, 'one save records the configured failure stage');
+  assert.equal(f.task.document.data.stage, f.run.config.FAILED_TASK_STAGE);
+  assert.equal(result.blockConfirmed, true);
+  assert.equal(result.blocked, true);
 });
 
-test('ac:b3w8lkpw off_nominal: a lane failure that leaves no failure report does not hold task:t1', async t => {
+test('ac:b3w8lkpw off_nominal: a lane failure without a report saves its failure stage and note', async t => {
   const f = await failedLane(t, {origin: {node: 'review', signal: 'GATE_FAIL'},
     journal: [{node: 'review', signal: 'GATE_FAIL'}]});
   const result = {status: 'failed', code: 1};
   await finishTask(f.run, f.stateFile, result, f.artifacts);
-  assert.equal(holdSaves(f).length, 0, 'no save sends a hold code');
-  assert.equal(f.task.document.data.hold, undefined);
-  assert.notEqual(result.blocked, true);
+  assert.equal(stageSaves(f).length, 1, 'one save records the configured failure stage');
+  assert.equal(f.task.document.data.stage, f.run.config.FAILED_TASK_STAGE);
+  assert.equal(result.blocked, true);
 });
 
-test('ac:b3w8lkpw off_nominal: a preparation failure with a failure report releases task:t1 without a hold', async t => {
+test('ac:b3w8lkpw off_nominal: a preparation failure saves its failure stage and releases the claim', async t => {
   const f = await failedLane(t, {origin: {node: 'prepare', signal: '__failed__'},
     journal: [{node: 'prepare', signal: '__failed__'}], failure: 'prepare failed: dependency install exited 1'});
   // A worktree root names the unused checkout; the checkout itself is absent.
@@ -222,8 +221,8 @@ test('ac:b3w8lkpw off_nominal: a preparation failure with a failure report relea
   f.persist();
   const result = {status: 'failed', code: 1};
   await finishTask(f.run, f.stateFile, result, f.artifacts);
-  assert.equal(holdSaves(f).length, 0, 'no save sends a hold code');
-  assert.equal(f.task.document.data.hold, undefined);
+  assert.equal(stageSaves(f).length, 1, 'one save records the configured failure stage');
+  assert.equal(f.task.document.data.stage, f.run.config.FAILED_TASK_STAGE);
   assert.equal(f.task.document.data.assignee, undefined, 'the Task is released');
-  assert.equal(result.released, true);
+  assert.equal(result.blockConfirmed, true);
 });

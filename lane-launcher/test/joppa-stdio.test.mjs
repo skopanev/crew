@@ -259,7 +259,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   // Native state: another assignee, a waiting Task, or a planner on the criterion refuses the push.
   for (const [change, restore, pattern] of [
     [() => { task.document.data.assignee = 'crew-lane:host:other'; }, () => { task.document.data.assignee = assignee; }, /Task holder changed/],
-    [() => { task.document.data.hold = 'GATE_FAIL'; }, () => { delete task.document.data.hold; }, /Task holder changed/],
+    [() => { task.document.data.stage = 'review'; }, () => { delete task.document.data.stage; }, /Task contract changed/],
     [() => { parent.document.data.assignee = 'crew-planning:host:run'; }, () => { delete parent.document.data.assignee; }, /active planning/]]) {
     change();
     assert.match(check().stderr, pattern);

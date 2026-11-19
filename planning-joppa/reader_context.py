@@ -1,15 +1,12 @@
 """Runtime context for the Joppa planning stages."""
-import re
 import json
 import os
 from pathlib import Path
-from common import read, run, signal, digest, require, write
+from common import digest, require, write
 import stages as shared
 import context
 import publication
-import planning_claims as claims
-from context_reads import dependency_ready
-from joppa_reads import block_reason, ended, task_state
+from joppa_reads import ended, task_state
 
 
 def settings():
@@ -88,13 +85,13 @@ def prompt_assignment(assignment):
         "tasks": [{"address": task["address"], "item_id": task.get("item_id"), "revision": task["current_revision"],
                    **({"remote_links": task["remote_links"]} if task.get("remote_links") else {}),
                    "data": prompt_data(task), "links": task["document"]["links"],
-                   "state": task_state(task), "hold": task["document"]["data"].get("hold")}
+                   "state": task_state(task, assignment["joppa"].get("failed_task_stage"))}
                   for task in tasks],
         "objects": {address: {"item_id": item.get("item_id"), "revision": item["current_revision"], "data": prompt_data(item),
                               **({"remote_links": item["remote_links"]} if item.get("remote_links") else {}),
                               "parent": item["document"]["parent"], "links": item["document"]["links"], "annotations": item["annotations"],
-                              "hold": item["document"]["data"].get("hold"),
-                              **({"state": task_state(item)} if item.get("kind") == assignment["joppa"]["task_type"] else {})}
+                              **({"state": task_state(item, assignment["joppa"].get("failed_task_stage"))}
+                                 if item.get("kind") == assignment["joppa"]["task_type"] else {})}
                     for address, item in assignment["joppa"]["objects"].items() if address not in visible | task_ids}}
     if assignment["joppa"].get("remote"):
         remote = assignment["joppa"]["remote"]
@@ -128,49 +125,3 @@ def prompt_assignment(assignment):
     result["details_file"] = str(shared.artifacts() / "input.json")
     result["details_note"] = "Read relevant omitted Task contracts in details_file before proposing new work or declaring reuse or duplication."
     return result
-
-
-def retry_startup(api, config, target, assignment, ac, advertised):
-    tasks = [task for task in assignment["joppa"]["tasks"] if not ended(task)]
-    if not tasks or not all(block_reason(task) == "WORKTREE_PREEXISTED" for task in tasks):
-        return False
-    require(len(tasks) <= 49, "Startup retry supports at most 49 Tasks in one atomic batch")
-    # The hold code holds the Tasks. The AC itself must be ready for work.
-    types = api.call("joppa_tree", {"workspace": config["workspace"]})["schema"]["types"]
-    require(dependency_ready(api, config["workspace"], types, ac["address"], {}), "Startup retry requires a ready AC")
-    for item in [ac, *tasks]:
-        require(item["document"].get("present") is True,
-                "Startup retry requires live objects")
-    operations = []
-    for task in tasks:
-        publication.editable(task)
-        data = task["document"]["data"]
-        contract = context.task_contract(data)
-        require(isinstance(contract, str) and contract.strip(), "Startup retry requires an implementation contract")
-        def field(name):
-            values = re.findall(r"^" + name + r":[ \t]*(\S[^\r\n]*)$", contract, re.M)
-            require(len(values) == 1, f"Task contract needs exactly one {name}: line")
-            return values[0].strip()
-        repo = next((repo for repo in config["repositories"] if repo["id"] == field("Repository")), None)
-        require(repo is not None, "Task repository is not configured")
-        module = next((module for module in repo["modules"] if module["name"] == field("Module")), None)
-        require(module is not None, "Task module is not configured")
-        require((Path(repo["path"]) / module["path"]).is_dir(), "Task module directory is absent")
-        # A save at the read revision of the same Task only clears its hold.
-        reason = "Retry startup after removing the retained worktree."
-        operations.append({"command": claims.save_command(task, claims.KEEP, reason, None)})
-    claim = read(target / "claim.json")
-    claims.owned(api, config["workspace"], claim)
-    operations.extend(claims.closing_operations(ac, True, "Retry startup with the same owner-reviewed Task contracts."))
-    claims.require_fenced(operations)
-    print(run(["node", str(Path(__file__).with_name("cleanup.mjs"))], input=json.dumps({
-        "config": config, "tasks": tasks, "operations": operations}), timeout=120), end="")
-    result = publication.mutate(api, target / "publication.json", "joppa_batch", {
-        "workspace": config["workspace"], "operations": operations}, retain_claim=True)
-    results = result.get("results")
-    require(isinstance(results, list) and len(results) == len(operations),
-            "startup publication response is incomplete; inspect publication.json")
-    write(target / "result.json", {"status": "published", "scope": "startup_retry", "ac": ac["address"],
-        "acceptance_verified": False, "task_count": len(tasks), "publication": result})
-    signal("READY", "Retained worktrees removed. Existing Task contracts reopened without research.")
-    return True

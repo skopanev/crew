@@ -226,7 +226,7 @@ def pending_work_page(api, config, assignment):
             declared = [value for value in repository_declarations(data) if value in repositories]
             if not declared:
                 continue
-            status = task_state(document)
+            status = task_state(document, config.get("FAILED_TASK_STAGE"))
             if status in ("done", "retired"):
                 continue
             entry = {"address": address, "revision": document["current_revision"], "title": data.get("title"),

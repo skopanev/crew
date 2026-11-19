@@ -30,7 +30,7 @@ test('a fresh operator release supersedes only the dead pre-landing reservation 
   assert.deepEqual(f.run, original);
   for (const edit of [o => o.current_revision = 3, o => o.historical = true,
     o => o.document.present = false, o => o.document.data.assignee = 'another-worker',
-    o => o.document.data.hold = 'GATE_FAIL', o => o.address = 'task:other']) {
+    o => o.address = 'task:other']) {
     const object = structuredClone(f.object); edit(object);
     assert.equal(await reservationReleased(f.run, async () => object, () => true), false);
   }

@@ -84,7 +84,10 @@ def validate_one(plan, assignment, elsewhere=(), covering=(), carriers=()):
             address = text(task.get("target"), "Task target")
             require(address in inventory and address not in targets, "update must target one existing Task under this AC")
             existing = inventory[address]
-            (retirable if task["action"] == "retire" else editable)(existing)
+            if task["action"] == "retire":
+                retirable(existing, assignment["joppa"].get("failed_task_stage"))
+            else:
+                editable(existing)
             require(task.get("revision") == existing["current_revision"], "Task source revision differs from the input")
             targets.add(address)
         else:

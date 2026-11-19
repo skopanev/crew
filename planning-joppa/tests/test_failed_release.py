@@ -50,14 +50,14 @@ def paired(commands):
     """Every save in a failure batch releases the AC and holds it with one code. No assess is sent."""
     saves = [entry for entry in commands if entry["op"] == "save_object"]
     return (bool(saves) and all(entry["op"] in ("save_object", "note") for entry in commands)
-            and all(entry["data"].get("assignee", "") is None and isinstance(entry["data"].get("hold"), str)
+            and all(entry["data"].get("assignee", "") is None and "stage" not in entry["data"]
                     for entry in saves))
 
 
 def held(commands, code):
     """Every save in a failure batch releases the AC and holds it with the code. No hold is omitted."""
     saves = [entry for entry in commands if entry["op"] == "save_object"]
-    return bool(saves) and all(entry["data"] == {"assignee": None, "hold": code} for entry in saves)
+    return bool(saves) and all(entry["data"] == {"assignee": None} for entry in saves)
 
 
 class FailedReleaseTests(unittest.TestCase):
@@ -80,7 +80,7 @@ class FailedReleaseTests(unittest.TestCase):
             [batch] = api.batches()
             self.assertEqual(shape(batch), [("save_object", "criterion:a"), ("save_object", "criterion:b")])
             for save in batch:
-                self.assertEqual(save["data"], {"assignee": None, "hold": "PLANNING_FAILED"})
+                self.assertEqual(save["data"], {"assignee": None})
                 self.assertEqual(save["revision"], 4)
                 self.assertNotIn("question_checked", save)
                 self.assertIn("context reader stopped", save["reason"])
@@ -116,7 +116,7 @@ class FailedReleaseTests(unittest.TestCase):
             result = self.run_fail(target, api, "WORKTREE_PREEXISTED: src exists")
             [batch] = api.batches()
             self.assertEqual(shape(batch), [("save_object", "criterion:c")])
-            self.assertEqual(batch[0]["data"]["hold"], "WORKTREE_PREEXISTED")
+            self.assertEqual(batch[0]["data"], {"assignee": None})
             self.assertEqual(result["skipped_claims"], [
                 {"ac": "criterion:a", "reason": "planning claim is missing or replaced"},
                 {"ac": "criterion:b", "unknown": True,

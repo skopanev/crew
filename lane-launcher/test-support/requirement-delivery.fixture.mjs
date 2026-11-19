@@ -19,7 +19,7 @@ function fixture() {
         ...(status ? {body: 'Repository: repo\nImplement the selected behavior.'} : {})}},
       process: {}};
     if (status === 'in_progress') value.document.data.assignee = 'crew-lane:host:run';
-    if (status === 'blocked') value.document.data.hold = 'GATE_FAIL';
+    if (status === 'blocked') value.document.data.stage = 'review';
     if (status === 'done' || status === 'retired') value.document.present = false;
     if (status === 'done') value.document.data.commit = 'a'.repeat(40);
     objects.set(address, value);
@@ -50,7 +50,7 @@ function fixture() {
           status: x.document.present ? x.status?.tone || 'grey' : 'purple',
           'data.assignee': x.document.data.assignee ?? null, 'data.commit': x.document.data.commit ?? null,
           'data.stage': x.document.data.stage ?? null,
-          'data.hold': x.document.data.hold ?? null}))
+        }))
         .filter(x => tones ? tones.includes(x.status) : x.present)
         .sort((a, b) => a.address.localeCompare(b.address));
       const after = rows.filter(row => !args.cursor || row.address > args.cursor), page = after.slice(0, args.limit || 25);
@@ -61,7 +61,7 @@ function fixture() {
     throw new Error(`Unexpected read ${tool}`);
   };
   const run = {requirement: 'spec:r', repository: 'repo', tasks: [{address: 'work:one', revision: 1}],
-    config: {repositories: [{id: 'repo'}], taskFields: {repository: 'body:Repository', module: 'body:Module'}}};
+    config: {FAILED_TASK_STAGE: 'review', repositories: [{id: 'repo'}], taskFields: {repository: 'body:Repository', module: 'body:Module'}}};
   return {objects, add, read, run, branch};
 }
 

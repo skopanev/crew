@@ -68,12 +68,12 @@ else { console.log(process.env.DOCKER_ROWS);
   fs.writeFileSync(path.join(path.dirname(f.stateFile), 'output.log'), '[sync] shared CBM timed out during initialize\n');
   const result = {status: 'failed', code: 75};
   await finishTask(f.run, f.stateFile, result, null);
-  assert.equal(result.released, true);
-  assert.equal(result.held, false);
+  assert.equal(result.blockConfirmed, true);
+  assert.notEqual(result.held, true);
   assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
 });
 
-for (const harness of [null, 'codex']) test('checkout setup failure releases only without agent work: ' + harness, async t => {
+for (const harness of [null, 'codex']) test('checkout setup failure records the configured failure stage: ' + harness, async t => {
   const f = await fixture(t);
   fs.rmdirSync(f.checkout); f.run.discardCheckout.removed = true;
   const native = path.join(f.run.runFolder, 'native'); fs.mkdirSync(path.join(native, 'artifacts'), {recursive: true});
@@ -85,8 +85,9 @@ for (const harness of [null, 'codex']) test('checkout setup failure releases onl
     '[medulla] step 2 | create_worktree\nrun.sh: removed unchanged worktree: ' + f.checkout + '\n');
   const result = {status: 'failed', code: 2};
   await finishTask(f.run, f.stateFile, result, null);
-  if (harness) { assert.equal(result.held, true); assert.ok(f.objects.get('task:t1').document.data.assignee); }
-  else { assert.equal(result.released, true); assert.equal(f.objects.get('task:t1').document.data.assignee, undefined); }
+  assert.equal(result.blockConfirmed, true);
+  assert.equal(f.objects.get('task:t1').document.data.assignee, undefined);
+  assert.equal(f.objects.get('task:t1').document.data.stage, f.run.config.FAILED_TASK_STAGE);
 });
 
 test('uncertain, active, pre-existing and replaced checkouts are preserved', async t => {
@@ -184,7 +185,7 @@ test('a workflow deadline blocks with OVER_TIME and preserves work despite an oc
   const artifacts = failureDetails(f.run, f.announce), result = {status: 'failed', code: 1};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.blockConfirmed, true);
-  assert.equal(f.objects.get('task:t1').document.data.hold, 'OVER_TIME');
+  assert.equal(f.objects.get('task:t1').document.data.stage, f.run.config.FAILED_TASK_STAGE);
   f.run.result = result;
   discardFailedCheckout(f.run, f.stateFile, f.announce, artifacts);
   assert.equal(fs.existsSync(f.checkout), false);

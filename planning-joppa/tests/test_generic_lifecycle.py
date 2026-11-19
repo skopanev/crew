@@ -1,4 +1,4 @@
-"""Planning on generic Joppa nodes: data.assignee claims, data.hold and archive. No network."""
+"""Planning on generic Joppa nodes: data.assignee claims, failure stages and archive. No network."""
 from copy import deepcopy
 import importlib.util
 import json
@@ -18,7 +18,7 @@ from joppa_reads import normalize_detail, task_state
 from mcp import Rejected
 import publication
 
-from provider_fixture import item, assignment, plan, hold, end
+from provider_fixture import item, assignment, plan, fail_task, end
 
 REMOVED = ("joppa_tasks", "claim_task", "claim_next_task", "release_task", "block_task", "unblock_task",
            "complete_task", "review_task", "retire_task", "claim_planning", "finish_planning", "release_planning",
@@ -76,7 +76,8 @@ class GenericLifecycleTests(unittest.TestCase):
              patch.object(stage, "reader_servers"), patch.object(stage.context, "client", return_value=server), \
              patch.object(stage.context, "load", return_value=(data, {}, data["joppa"]["objects"]["criterion:a"])), \
              patch.object(stage.claims, "planning_idle"), patch.object(stage.publication, "ensure_recovered"), \
-             patch.object(stage, "retry_startup", return_value=True), \
+             patch.object(stage.shared, "prepare_context"), patch.object(stage, "prepare_reader", return_value={}), \
+             patch.object(stage, "prompt_assignment", return_value={}), patch.object(stage.context, "pending_work", return_value=[]), \
              patch.object(stage.shared, "artifacts", return_value=target):
             stage.prepare()
         return stage, target
@@ -124,7 +125,7 @@ class GenericLifecycleTests(unittest.TestCase):
             for name, body in {"input": data, "plan": value, "joppa-snapshot": {}, "claim": receipt}.items():
                 (target / f"{name}.json").write_text(json.dumps(body))
             server = Server({"criterion:a": raw("criterion:a", {"title": "a", "assignee": "crew-planning:h:run-2"})})
-            with patch.object(stage, "settings", return_value={"workspace": "example"}), \
+            with patch.object(stage, "settings", return_value={"workspace": "example", "FAILED_TASK_STAGE": "review"}), \
                  patch.object(stage.shared, "artifacts", return_value=target), \
                  patch.object(stage.shared, "verify_context", return_value=({}, {}, {})), \
                  patch.object(stage.context, "client", return_value=server), \
@@ -135,26 +136,26 @@ class GenericLifecycleTests(unittest.TestCase):
                     stage.finish()
             self.assertNotIn("joppa_batch", [name for name, _ in server.calls])
 
-    def test_finish_batch_clears_assignee_and_hold_and_unblocks_revised_tasks(self):
+    def test_finish_batch_clears_assignee_and_preserves_revised_task_stage(self):
         data, value = assignment(), plan()
         data["joppa"]["objects"]["criterion:a"]["document"]["data"]["assignee"] = "crew-planning:h:run-1"
         task = value["tasks"][0]
         task.update(action="update", target="work:old", revision=3)
-        hold(data["joppa"]["tasks"][0], "Lane failed")
+        fail_task(data["joppa"]["tasks"][0], "Lane failed")
         operations = publication.operations(value, data)
         self.assertEqual([entry["command"]["op"] for entry in operations], ["save_object", "save_object"])
-        # The revised contract save clears the Task hold. An update sends only changed fields, null removes one.
+        # The revised contract save keeps the failed Task stage. An update sends only changed fields, null removes one.
         task_save = operations[0]["command"]
         self.assertEqual((task_save["id"], task_save.get("clean")), ("old", None))
-        self.assertIsNone(task_save["data"]["hold"])
+        self.assertNotIn("stage", task_save["data"])
         release = operations[1]["command"]
         self.assertEqual((release["kind"], release["id"], release["revision"]), ("criterion", "a", 3))
-        self.assertEqual(release["data"], {"assignee": None, "hold": None})
+        self.assertEqual(release["data"], {"assignee": None})
         self.assertFalse(any(name in json.dumps(operations) for name in REMOVED))
 
     def test_retire_archives_without_commit(self):
         data, value = assignment(), plan()
-        hold(data["joppa"]["tasks"][0], "Lane failed")
+        fail_task(data["joppa"]["tasks"][0], "Lane failed")
         value["tasks"][0].update(action="retire", target="work:old", revision=3)
         command = publication.operations(value, data)[0]["command"]
         self.assertEqual(command, {"op": "archive_object", "target": "work:old", "revision": 3,
@@ -163,11 +164,11 @@ class GenericLifecycleTests(unittest.TestCase):
     def test_task_detail_classifies_blocked_active_done_and_retired(self):
         def state(**extra):
             data = {"title": "t", **extra.pop("data", {})}
-            return task_state(normalize_detail({"address": "work:t"}, raw("work:t", data, **extra)))
+            return task_state(normalize_detail({"address": "work:t"}, raw("work:t", data, **extra)), "review")
         self.assertEqual(state(), "open")
         self.assertEqual(state(data={"assignee": "lane-1"}), "active")
-        self.assertEqual(state(data={"hold": "WORKTREE_PREEXISTED"}), "blocked")
-        self.assertEqual(state(data={"hold": None}), "open")
+        self.assertEqual(state(data={"stage": "review"}), "blocked")
+        self.assertEqual(state(data={"stage": "ready"}), "open")
         self.assertEqual(state(data={"commit": "a" * 40}, present=False), "done")
         self.assertEqual(state(present=False), "retired")
         self.assertEqual(state(data={"archived": True}), "open")
@@ -189,7 +190,7 @@ class GenericLifecycleTests(unittest.TestCase):
                  "repository": "service" if index != 3 else "elsewhere"} for index in range(5)]
         details = {"work:t0": raw("work:t0", {"title": "Open", **fields}),
                    "work:t1": raw("work:t1", {"title": "Mine", "assignee": "lane-1", **fields}),
-                   "work:t2": raw("work:t2", {"title": "Held", "hold": "LANE_FAILED", **fields}),
+                   "work:t2": raw("work:t2", {"title": "Held", "stage": "review", **fields}),
                    "work:t4": raw("work:t4", {"title": "Landed", "commit": "b" * 40, **fields}, present=False)}
         calls = []
         class Lists:
@@ -202,7 +203,7 @@ class GenericLifecycleTests(unittest.TestCase):
                 if start + 2 < len(rows):
                     page["next_cursor"] = str(start + 2)
                 return page
-        config = {"workspace": "example", "repositories": data["repositories"]}
+        config = {"workspace": "example", "FAILED_TASK_STAGE": "review", "repositories": data["repositories"]}
         result = context.pending_work(Lists(), config, data)
         self.assertEqual([(entry["address"], entry["status"]) for entry in result],
                          [("work:t0", "open"), ("work:t1", "active"), ("work:t2", "blocked")])
