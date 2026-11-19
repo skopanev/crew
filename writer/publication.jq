@@ -20,7 +20,7 @@ if all($reviews[]; clean) then {approved: true, operations: (
     parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
     data: (.data + $owner + {title})}} end | select(.command.data | length > 0)])}
 elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) and
-  any($reviews[]; .coverage == "incomplete") then
+  any($reviews[]; .coverage == "incomplete" and .coverage_gap_kind == "ac") then
   ([$reviews[].missing[]] | unique) as $missing |
   {approved: false, decision_required: true, operations: [
     {command: {op: "save_object", kind: $in.selected.kind,
@@ -32,5 +32,5 @@ elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) an
         "\nRun: " + ($run | .[-100:]) + "\nFull findings: artifacts/critic-codex.json and artifacts/critic-second.json")}}
   ], outcome: {status: "blocked", reason_code: "COVERAGE_INCOMPLETE", reason: ($missing | join("; ") | .[0:1000])}}
 else {approved: false, critique: ($reviews | map_values(if valid then
-  {failing: [.tests[] | select(.score != "11111")], coverage, missing, summary} else
+  {failing: [.tests[] | select(.score != "11111")], coverage, coverage_gap_kind, missing, summary} else
   {invalid: "The review does not match the critic output contract or reviewed another draft."} end))} end

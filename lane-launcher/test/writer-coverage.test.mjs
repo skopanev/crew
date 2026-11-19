@@ -31,9 +31,10 @@ function fixture(t) {
   return {root, review, input, run};
 }
 
-test('coverage alone returns only the selected item and a missing note without Test or Task changes', t => {
+test('an AC coverage gap returns only the selected item and a missing note without Test or Task changes', t => {
   const f = fixture(t);
-  const gap = {...f.review, coverage: 'incomplete', missing: ['The required failure outcome is unspecified.']};
+  const gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac',
+    missing: ['The required failure outcome is unspecified.']};
   for (const reviews of [{codex: gap}, {second: gap}, {codex: gap, second: gap}]) {
     const value = f.run(reviews);
     assert.equal(value.approved, false);
@@ -50,7 +51,7 @@ test('coverage alone returns only the selected item and a missing note without T
 });
 
 test('other failures, stale reviews and malformed coverage retain the rework path', t => {
-  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['A required behavior is not covered.']};
+  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['A required behavior is not covered.']};
   for (const edit of [r => r.tests[0].score = '11011', r => r.draft_digest = 'other',
     r => r.tests[0].id = 'other', r => r.missing = [], r => r.missing = 'not an array',
     r => r.coverage = 'complete', r => r.missing = ['']]) {
@@ -66,7 +67,7 @@ test('other failures, stale reviews and malformed coverage retain the rework pat
 });
 
 test('disabled decision routing and update mode keep the existing behavior', t => {
-  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['A required behavior is not covered.']};
+  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['A required behavior is not covered.']};
   for (const extra of [{decision: ''}, {mode: 'update'}]) {
     const value = f.run({codex: gap, second: gap, ...extra});
     assert.equal(value.decision_required, undefined);
@@ -80,7 +81,7 @@ test('disabled decision routing and update mode keep the existing behavior', t =
 });
 
 test('the missing note stays bounded and points to the complete critic artifacts', t => {
-  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['A'.repeat(6000)]};
+  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['A'.repeat(6000)]};
   const value = f.run({codex: gap, second: gap});
   assert.ok(value.operations[1].command.text.length <= 1000);
   assert.ok(value.operations[1].command.id.length <= 120);
@@ -105,7 +106,7 @@ test('approved create and update write only Test text and preserve item and Task
 });
 
 test('the dashboard shows the coverage reason code for the completed blocked run', t => {
-  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', missing: ['An outcome is unspecified.']};
+  const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['An outcome is unspecified.']};
   const value = f.run({codex: gap});
   const folder = path.join(f.root, '2026-11-18_12-00-00-example'), artifacts = path.join(folder, 'artifacts');
   fs.mkdirSync(artifacts, {recursive: true});
@@ -192,23 +193,37 @@ test('invalid second seats stop before the shared prepare can claim an item', t 
   }
 });
 
-test('review_join publishes only after both generic seat reports match the frozen draft', t => {
+test('review_join returns missing Tests to the author and sends only AC gaps to the owner', t => {
   const f = fixture(t), artifacts = path.join(f.root, 'artifacts');
   f.run();
   fs.mkdirSync(artifacts);
   for (const name of ['draft', 'input']) fs.copyFileSync(path.join(f.root, name + '.json'), path.join(artifacts, name + '.json'));
   const digest = createHash('sha256').update(fs.readFileSync(path.join(artifacts, 'draft.json'))).digest('hex');
-  for (const name of ['codex', 'second']) fs.writeFileSync(path.join(artifacts, `critic-${name}.json`),
-    JSON.stringify({...f.review, draft_digest: digest}));
   const workflow = fileURLToPath(new URL('../../writer/workflow.yaml', import.meta.url));
   const shell = fs.readFileSync(workflow, 'utf8').match(/^  review_join:\n[\s\S]*?    shell: \|\n([\s\S]*?)^    on_signal:/m)[1]
     .replace(/^      /gm, '');
-  const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
-    MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
-    TEST_OPERATION: 'create', DECISION_STAGE: '', REWORK_LIMIT: '1', round: '1',
-    FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
-  assert.match(output, /<signal:APPROVED>/);
-  const value = JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json'), 'utf8'));
-  assert.equal(value.operations.length, 1);
-  assert.equal(value.operations[0].command.kind, 'check');
+  for (const [kind, signal] of [[null, 'APPROVED'], [undefined, 'REVISE'], ['author', 'REVISE'], ['tests', 'REVISE'],
+    ['unknown', 'REVISE'], ['ac', 'MISSING']]) {
+    const report = {...f.review, draft_digest: digest};
+    fs.writeFileSync(path.join(artifacts, 'critic-codex.json'), JSON.stringify(report));
+    if (kind !== null) Object.assign(report, {coverage: 'incomplete', coverage_gap_kind: kind,
+      missing: ['Decision preservation needs two Tests. Title: Preserve the decision.']});
+    fs.writeFileSync(path.join(artifacts, 'critic-second.json'), JSON.stringify(report));
+    const file = path.join(artifacts, 'operations.json');
+    fs.rmSync(file, {force: true});
+    const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
+      MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
+      TEST_OPERATION: 'create', DECISION_STAGE: 'needs_input', REWORK_LIMIT: '1', round: '1',
+      FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
+    assert.ok(output.includes(`<signal:${signal}>`), output);
+    assert.equal(fs.existsSync(file), signal !== 'REVISE');
+    if (signal === 'REVISE') {
+      assert.match(output, /Decision preservation needs two Tests/);
+      assert.match(output, /<signal:var key=round>2<\/signal:var>/);
+    } else {
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (signal === 'MISSING') assert.equal(value.outcome.reason_code, 'COVERAGE_INCOMPLETE');
+      else assert.equal(value.operations[0].command.kind, 'check');
+    }
+  }
 });

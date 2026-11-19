@@ -13,6 +13,10 @@ Write 1 for yes and 0 for no. The score is the five digits, for example "11011".
 Then decide coverage. Use "complete" with an empty missing list only when the draft and the existing Tests together cover every
 requirement of the selected item. Otherwise use "incomplete" and list each missing behavior.
 Do not demand Tests for behavior that the item does not require.
+Set coverage_gap_kind to "ac" only when the contract needs an owner decision before you can write the missing Test.
+Use "author" when the author can cover the missing behavior from the supplied source.
+Use "author" when you can give the missing Test text.
+Omit coverage_gap_kind when coverage is complete.
 An acceptable draft can have no findings. Do not invent criticism.
 
 Return ONLY one JSON object as your final response; no signal tags:

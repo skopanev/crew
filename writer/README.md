@@ -24,7 +24,12 @@ A refused draft returns to the author with the findings, up to `vars.REWORK_LIMI
 Set `vars.DECISION_STAGE` to return coverage-only refusals to the item owner immediately in create mode.
 Both critics must review the same draft and score every Test `11111`.
 At least one critic must report incomplete coverage with a nonempty `missing` list. Other review failures keep the existing rework path.
-Writer publishes no Test or Task changes in this case. It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
+The immediate return also requires `coverage_gap_kind: "ac"` from a critic with incomplete coverage.
+Use this marker only when the selected item's contract needs an owner decision.
+Missing Tests that the author can write use `coverage_gap_kind: "author"` and return to the author with the findings.
+An absent or unrecognized marker also keeps the rework path.
+For an AC gap, Writer publishes no Test or Task changes.
+It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
 The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
 The configured publication policy must allow `note` and updates to the selected kind.
 In create mode, an empty `tests` array with `coverage: "GAP. <missing source detail>"` takes the same decision route.

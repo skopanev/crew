@@ -157,7 +157,8 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.config["publication"]["update_kinds"].append("criterion")
         draft = {"tests": [{"id": "t1", "title": "A valid input is accepted", "data": {"body": "A test"}}]}
         review = {"draft_digest": "frozen", "tests": [{"id": "t1", "score": "11111", "reasons": []}],
-                  "coverage": "incomplete", "missing": ["The required failure outcome is unspecified."], "summary": "Tests pass."}
+                  "coverage": "incomplete", "coverage_gap_kind": "ac",
+                  "missing": ["The required failure outcome is unspecified."], "summary": "Tests pass."}
         values = {"draft": draft, "input": read(self.target / "input.json"), "codex": review, "second": review}
         args = ["jq", "-nc", "--arg", "digest", "frozen", "--arg", "test", "check", "--arg", "task", "work",
                 "--arg", "waiting", "waiting", "--arg", "ready", "ready", "--arg", "mode", "create",
