@@ -154,7 +154,8 @@ def prepare_agy(mcp_servers=None):
     root = Path(os.environ["AGY_PROFILE_HOME"])
     require(root.is_dir(), "AGY runtime profile directory is unavailable")
     config = root / ".gemini/config/mcp_config.json"
-    installed = read(config).get("mcpServers", {}) if config.is_file() else {}
+    raw = config.read_text().strip() if config.is_file() else ""
+    installed = json.loads(raw).get("mcpServers", {}) if raw else {}
     require(not installed or installed == (mcp_servers or {}),
             "AGY isolation failed: unexpected MCP remains")
     environment = {**os.environ, "BROKER_AGY_HOME": str(root), "BROKER_ISOLATE_MCP": "1"}
