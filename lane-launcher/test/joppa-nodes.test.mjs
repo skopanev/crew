@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {saveNode, nodeAssignee, nodeStage, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
-import {contractDigest, sameContract, mutateTasks} from '../joppa-common.mjs';
+import {contractDigest, sameContract, sameContext, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
 const object = () => ({address: 'work:one', historical: false, current_revision: 7,
@@ -28,6 +29,7 @@ test('execution metadata does not alter authored content checks', () => {
   node.current_revision++;
   node.document.data.assignee = 'crew-lane:host:run';
   node.document.data.commit = 'a'.repeat(40);
+  node.document.data.tags = ['owner-question'];
   assert.equal(contractDigest(node), original);
   for (const stage of ['to_implement', 'in_progress', 'done']) {
     node.document.data.stage = stage;
@@ -47,11 +49,41 @@ test('execution metadata does not alter authored content checks', () => {
   legacy.document.data.stage = 'in_progress';
   assert.equal(sameContract(legacy, snapshot), false);
   assert.equal(sameContract(legacy, snapshot, claim), true);
+  legacy.document.data.tags = ['owner-question'];
+  assert.equal(sameContract(legacy, snapshot, claim), true);
   legacy.document.data.body = 'Changed scope';
   assert.equal(sameContract(legacy, snapshot, claim), false);
   legacy.document.data.body = 'Keep the approved scope.';
   legacy.remote_links_revision = 1;
   assert.equal(sameContract(legacy, snapshot, claim), false);
+});
+
+test('claims from before tag exclusion require unchanged frozen contract data', () => {
+  const node = object();
+  node.document.data.stage = 'to_implement';
+  node.document.data.tags = ['original'];
+  const {stage, ...data} = node.document.data;
+  const snapshot = {digest: createHash('sha256').update(JSON.stringify({
+    parent: node.document.parent, data, links: node.document.links,
+  })).digest('hex')};
+  const claim = {tasks: [{ticket: {parentContext: {address: node.address, data: structuredClone(node.document.data)}}}]};
+  assert.equal(sameContract(node, snapshot), true);
+  node.files = [{id: 'file', hash: 'original'}];
+  const source = {source: true, digest: createHash('sha256').update(JSON.stringify({
+    revision: node.current_revision, contract: snapshot.digest, files: node.files,
+  })).digest('hex')};
+  assert.equal(sameContext(node, source), true);
+  node.files[0].hash = 'changed';
+  assert.equal(sameContext(node, source), false);
+  node.files[0].hash = 'original';
+  node.current_revision++;
+  assert.equal(sameContext(node, source), false);
+  node.document.data.tags = ['owner-question'];
+  node.document.data.stage = 'done';
+  assert.equal(sameContract(node, snapshot), false);
+  assert.equal(sameContract(node, snapshot, claim), true);
+  node.document.data.body = 'A different contract';
+  assert.equal(sameContract(node, snapshot, claim), false);
 });
 
 test('native fields work in detail reads and named list fields', async () => {

@@ -9,11 +9,12 @@ const digestOf = (object, data) => createHash('sha256').update(JSON.stringify({
   ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
   ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
 })).digest('hex');
-const legacyDigest = object => {
+const legacyDigest = (object, includeStage = true) => {
   const data = {...object.document.data};
   delete data.assignee;
   delete data.commit;
   delete data.test_bindings;
+  if (!includeStage) delete data.stage;
   return digestOf(object, data);
 };
 export const contractDigest = object => {
@@ -24,19 +25,23 @@ export const contractDigest = object => {
   delete data.test_bindings;
   // Stage tracks execution or rolls up from status. It does not change the authored contract.
   delete data.stage;
+  // Tags classify the node. They do not change the authored contract.
+  delete data.tags;
   return digestOf(object, data);
 };
 
-// Old claims include stage in the digest. Use their frozen data, never revision equality, to prove a match.
+const matchesLegacy = (object, digest) => [true, false].some(stage => legacyDigest(object, stage) === digest);
+
+// Old claims include tags or stage. Use frozen data, never revision equality, to prove a match.
 export function sameContract(object, snapshot, claim = {}) {
   if (!snapshot?.digest) return false;
-  if (contractDigest(object) === snapshot.digest || legacyDigest(object) === snapshot.digest) return true;
+  if (contractDigest(object) === snapshot.digest || matchesLegacy(object, snapshot.digest)) return true;
   const tickets = [claim.ticket, ...(claim.tasks || []).map(task => task.ticket)].filter(Boolean);
   const frozen = tickets.flatMap(ticket => [ticket.parentContext, ticket.requirementContext,
     ...(ticket.coveredContexts || [])]).find(context => context?.address === object.address && context.data);
   if (!frozen) return false;
   const original = {...object, document: {...object.document, data: frozen.data}};
-  return contractDigest(original) === contractDigest(object) && legacyDigest(original) === snapshot.digest;
+  return contractDigest(original) === contractDigest(object) && matchesLegacy(original, snapshot.digest);
 }
 
 // Never expose download credentials. These fields also identify attachment changes independently of document revisions.
@@ -50,7 +55,10 @@ export const contextDigest = (object, context) => context.source
   : contractDigest(object);
 
 export const sameContext = (object, context, claim) => context.source
-  ? contextDigest(object, context) === context.digest : sameContract(object, context, claim);
+  ? contextDigest(object, context) === context.digest || [true, false].some(stage =>
+    createHash('sha256').update(JSON.stringify({revision: object.current_revision,
+      contract: legacyDigest(object, stage), files: sourceFiles(object)})).digest('hex') === context.digest)
+  : sameContract(object, context, claim);
 
 export function verifyRemoteDependencies(object) {
   const link = remoteDependencyBlocker(object);
