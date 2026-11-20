@@ -224,8 +224,8 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   fs.mkdirSync(artifacts, {recursive: true});
   fs.writeFileSync(path.join(artifacts, 'claim.json'), JSON.stringify({source: 'joppa', workspace: 'sample',
     joppa_url: 'https://service.invalid/mcp', actor: 'worker', assignee,
-    tasks: [{address: task.address, digest: contractDigest(task)}],
-    contexts: [{address: parent.address, digest: contractDigest(parent)}]}));
+    tasks: [{address: task.address, revision: task.current_revision, digest: contractDigest(task)}],
+    contexts: [{address: parent.address, revision: parent.current_revision, digest: contractDigest(parent)}]}));
   const env = {...process.env, MEDULLA_RUN_DIR: path.dirname(artifacts),
     JOPPA_READER_COMMAND_JSON: JSON.stringify(command), REQUIREMENT_READER_FILE: '', DELIVERY: 'target'};
   const checker = fileURLToPath(new URL('../../lane/bin/requirement-current.mjs', import.meta.url));
@@ -234,6 +234,20 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
     return spawnSync(process.execPath, [checker, '--tasks'], {env, encoding: 'utf8', timeout: 10_000});
   };
   assert.equal(check().status, 0);
+  const claimFile = path.join(artifacts, 'claim.json'), modernClaim = fs.readFileSync(claimFile, 'utf8');
+  task.document.data.stage = parent.document.data.stage = 'to_implement';
+  const legacyParent = {address: parent.address, revision: 1,
+    digest: 'a13a0490462ce5025dac6f2572de23cf2c095695489b1440c1d51f7e88f32a47'};
+  fs.writeFileSync(claimFile, JSON.stringify({...JSON.parse(modernClaim),
+    tasks: [{address: task.address, revision: 1,
+      digest: 'e1046b37bf30892fca33fbdf0ae4e086b22a33795f39ee7a90ed3640f18a2415', parent: legacyParent}],
+    contexts: [legacyParent], ticket: {parentContext: {address: parent.address, data: {...parent.document.data}}}}));
+  parent.document.data.stage = 'in_progress';
+  const legacyCheck = check();
+  assert.equal(legacyCheck.status, 0, legacyCheck.stdout + legacyCheck.stderr);
+  fs.writeFileSync(claimFile, modernClaim);
+  delete task.document.data.stage;
+  delete parent.document.data.stage;
   state.transportFailures = 2;
   assert.equal(check().status, 0, 'A read retries two lost replies before confirming the unchanged contract');
   state.transportFailures = 3;
@@ -259,7 +273,7 @@ test('normal landing rechecks native MCP dependencies before pushing', t => {
   // Native state: another assignee, a waiting Task, or a planner on the criterion refuses the push.
   for (const [change, restore, pattern] of [
     [() => { task.document.data.assignee = 'crew-lane:host:other'; }, () => { task.document.data.assignee = assignee; }, /Task holder changed/],
-    [() => { task.document.data.stage = 'review'; }, () => { delete task.document.data.stage; }, /Task contract changed/],
+    [() => { task.document.data.body = 'Changed scope'; }, () => { delete task.document.data.body; }, /Task contract changed/],
     [() => { parent.document.data.assignee = 'crew-planning:host:run'; }, () => { delete parent.document.data.assignee; }, /active planning/]]) {
     change();
     assert.match(check().stderr, pattern);

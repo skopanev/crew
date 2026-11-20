@@ -3,8 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {readJoppa} from '../../lane-launcher/joppa-api.mjs';
-import {contractDigest} from '../../lane-launcher/joppa.mjs';
-import {contextDigest} from '../../lane-launcher/joppa-common.mjs';
+import {sameContract, sameContext} from '../../lane-launcher/joppa-common.mjs';
 import {nodeAssignee} from '../../lane-launcher/joppa-nodes.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../../lane-launcher/dependencies.mjs';
 import {assertRequirementHead, requirementPlan} from '../../lane-launcher/requirement-delivery.mjs';
@@ -13,7 +12,7 @@ const require = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 const text = value => typeof value === 'string' && Boolean(value.trim());
-// Live context has no planner assignee. Contract digests detect stage changes after the claim.
+// Live context has no planner assignee. Contract digests detect authored changes after the claim.
 const live = object => !nodeAssignee(object);
 
 try {
@@ -69,7 +68,7 @@ try {
       require(nodeAssignee(current) === assignee, `Task holder changed: ${task.address}`);
       const dependency = await dependencies(task.address);
       require(dependency.ready, `Task dependency changed: ${dependency.blocker}`);
-      require(contractDigest(current) === task.digest, `Task contract changed after claim: ${task.address}`);
+      require(sameContract(current, task, claim), `Task contract changed after claim: ${task.address}`);
       if (task.parent) {
         require(text(task.parent.address) && text(task.parent.digest), `Captured Task parent context is invalid: ${task.address}`);
         const parent = await read('joppa_objects', {address: task.parent.address});
@@ -79,7 +78,7 @@ try {
           Number.isSafeInteger(parent.current_revision) && parent.current_revision > 0 &&
           live(parent),
           `Task parent context needs review or has active planning: ${task.parent.address}`);
-        require(contractDigest(parent) === task.parent.digest, `Task parent context changed after claim: ${task.parent.address}`);
+        require(sameContract(parent, task.parent, claim), `Task parent context changed after claim: ${task.parent.address}`);
       }
     }
     require(Array.isArray(claim.contexts) && claim.contexts.length > 0, 'Captured Task claim is missing contexts');
@@ -91,7 +90,7 @@ try {
         parent.document?.present === true &&
         live(parent),
         `Acceptance context is invalid, needs review, or has active planning: ${context.address}`);
-      require(contextDigest(parent, context) === context.digest, `Acceptance context changed after claim: ${context.address}`);
+      require(sameContext(parent, context, claim), `Acceptance context changed after claim: ${context.address}`);
       const dependency = await dependencies(context.address);
       require(dependency.ready, `Acceptance dependency changed: ${dependency.blocker}`);
     }

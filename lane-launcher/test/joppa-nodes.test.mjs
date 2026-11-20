@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {saveNode, nodeAssignee, nodeStage, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
-import {contractDigest, mutateTasks} from '../joppa-common.mjs';
+import {contractDigest, sameContract, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
 const object = () => ({address: 'work:one', historical: false, current_revision: 7,
@@ -37,6 +37,21 @@ test('execution metadata does not alter authored content checks', () => {
   assert.equal(contractDigest(node), original);
   node.document.data.body = 'Changed scope';
   assert.notEqual(contractDigest(node), original);
+
+  const legacy = object();
+  legacy.document.data.stage = 'to_implement';
+  const snapshot = {revision: legacy.current_revision,
+    digest: '1eae184d0d6c16a08d5eb17541cafc8a2e80d533fe0f027dbbd5fe0bc3306ae0'};
+  const claim = {ticket: {parentContext: {address: legacy.address, data: structuredClone(legacy.document.data)}}};
+  assert.equal(sameContract(legacy, snapshot), true);
+  legacy.document.data.stage = 'in_progress';
+  assert.equal(sameContract(legacy, snapshot), false);
+  assert.equal(sameContract(legacy, snapshot, claim), true);
+  legacy.document.data.body = 'Changed scope';
+  assert.equal(sameContract(legacy, snapshot, claim), false);
+  legacy.document.data.body = 'Keep the approved scope.';
+  legacy.remote_links_revision = 1;
+  assert.equal(sameContract(legacy, snapshot, claim), false);
 });
 
 test('native fields work in detail reads and named list fields', async () => {

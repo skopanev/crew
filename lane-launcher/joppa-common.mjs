@@ -4,6 +4,18 @@ import {callJoppa, readJoppa} from './joppa-api.mjs';
 import {remoteDependencyBlocker} from './dependencies.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 export const executionId = address => 'joppa-' + createHash('sha256').update(address).digest('hex').slice(0, 32);
+const digestOf = (object, data) => createHash('sha256').update(JSON.stringify({
+  parent: object.document.parent, data, links: object.document.links,
+  ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
+  ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
+})).digest('hex');
+const legacyDigest = object => {
+  const data = {...object.document.data};
+  delete data.assignee;
+  delete data.commit;
+  delete data.test_bindings;
+  return digestOf(object, data);
+};
 export const contractDigest = object => {
   const data = {...object.document.data};
   delete data.assignee;
@@ -12,12 +24,20 @@ export const contractDigest = object => {
   delete data.test_bindings;
   // Stage tracks execution or rolls up from status. It does not change the authored contract.
   delete data.stage;
-  return createHash('sha256').update(JSON.stringify({
-    parent: object.document.parent, data, links: object.document.links,
-    ...(object.remote_links?.length ? {remote_links: object.remote_links.map(({status, ...link}) => link)} : {}),
-    ...(object.remote_links_revision > 0 ? {remote_links_revision: object.remote_links_revision} : {}),
-  })).digest('hex');
+  return digestOf(object, data);
 };
+
+// Old claims include stage in the digest. Use their frozen data, never revision equality, to prove a match.
+export function sameContract(object, snapshot, claim = {}) {
+  if (!snapshot?.digest) return false;
+  if (contractDigest(object) === snapshot.digest || legacyDigest(object) === snapshot.digest) return true;
+  const tickets = [claim.ticket, ...(claim.tasks || []).map(task => task.ticket)].filter(Boolean);
+  const frozen = tickets.flatMap(ticket => [ticket.parentContext, ticket.requirementContext,
+    ...(ticket.coveredContexts || [])]).find(context => context?.address === object.address && context.data);
+  if (!frozen) return false;
+  const original = {...object, document: {...object.document, data: frozen.data}};
+  return contractDigest(original) === contractDigest(object) && legacyDigest(original) === snapshot.digest;
+}
 
 // Never expose download credentials. These fields also identify attachment changes independently of document revisions.
 export const sourceFiles = object => (object.files || []).map(file => Object.fromEntries(
@@ -28,6 +48,9 @@ export const contextDigest = (object, context) => context.source
   ? createHash('sha256').update(JSON.stringify({revision: object.current_revision,
     contract: contractDigest(object), files: sourceFiles(object)})).digest('hex')
   : contractDigest(object);
+
+export const sameContext = (object, context, claim) => context.source
+  ? contextDigest(object, context) === context.digest : sameContract(object, context, claim);
 
 export function verifyRemoteDependencies(object) {
   const link = remoteDependencyBlocker(object);

@@ -1,7 +1,7 @@
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies} from './joppa-common.mjs';
+import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, sameContract, sameContext, verifyRemoteDependencies} from './joppa-common.mjs';
 import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy, FAILURE_OPERATIONS} from './test-bindings.mjs';
@@ -231,7 +231,7 @@ export async function guardTaskClaims(run, persist) {
     verifyRemoteDependencies(object);
     const dependency = await dependencies(claim.address);
     require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);
-    require(contractDigest(object) === claim.digest, 'Task contract changed before lane startup');
+    require(sameContract(object, claim, run.claim), 'Task contract changed before lane startup');
   }
   for (const context of run.claim.contexts || []) {
     const object = await read(run, context.address);
@@ -239,7 +239,7 @@ export async function guardTaskClaims(run, persist) {
     const dependency = await dependencies(context.address);
     require(object?.address === context.address && contextLive(object) &&
       dependency.ready &&
-      contextDigest(object, context) === context.digest,
+      sameContext(object, context, run.claim),
       `Acceptance context changed before lane startup: ${context.address}`);
   }
 }
@@ -248,7 +248,7 @@ export async function releaseTaskClaims(run, persist, reason) {
   const objects = [];
   for (const claim of claimTasks(run)) {
     const object = await read(run, claim.address);
-    require(object.address === claim.address && heldBy(run, object) && contractDigest(object) === claim.digest,
+    require(object.address === claim.address && heldBy(run, object) && sameContract(object, claim, run.claim),
       'PACKAGE_RELEASE_UNCONFIRMED: Task holder or contract changed');
     objects.push(object);
   }

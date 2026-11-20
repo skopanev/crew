@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {command, readRun, runDirectories} from './runtime.mjs';
-import {api, claimTasks, contractDigest} from './joppa-common.mjs';
+import {api, claimTasks, sameContract} from './joppa-common.mjs';
 import {heldBy} from './joppa-claims.mjs';
 import {runHoldsTasks} from './joppa-selection.mjs';
 import {workflowDigest, supportsRetainedCheckout} from './workflow-config.mjs';
@@ -139,7 +139,7 @@ export async function retainedCheckout(run, dir) {
       .find(command => command.op === 'note' && command.target === run.task);
     const comment = note && object.annotations?.comments?.[note.id];
     // The live Task is current, held by this run's claim and unchanged since that claim.
-    require(object.address === run.task && heldBy(run, object) && contractDigest(object) === claimTasks(run)[0].digest,
+    require(object.address === run.task && heldBy(run, object) && sameContract(object, claimTasks(run)[0], run.claim),
       'the live Task is not held by this claim or changed after it');
     require(comment && comment.withdrawn !== true &&
       comment.actor === prior.run.joppaWorker?.actor && comment.text === note.text &&

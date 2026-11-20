@@ -3,7 +3,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {isDeepStrictEqual} from 'node:util';
 import {quote, save} from './runtime.mjs';
-import {api, batchRequest, claimTasks, contractDigest, contextDigest, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
+import {api, batchRequest, claimTasks, sameContract, sameContext, verifyRemoteDependencies, hasRecoveryCheckpoint} from './joppa-common.mjs';
 import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive} from './joppa-claims.mjs';
@@ -37,7 +37,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
         verifyRemoteDependencies(object);
         const dependency = await dependencies(claim.address);
         require(dependency.ready, `TASK_REVIEW_REQUIRED: Unmet dependency ${dependency.blocker}; landed package remains held`);
-        require(contractDigest(object) === claim.digest, 'Task contract changed during execution; package completion refused');
+        require(sameContract(object, claim, run.claim), 'Task contract changed during execution; package completion refused');
       }
       objects.push(object);
     }
@@ -52,14 +52,14 @@ export async function finishTask(run, stateFile, result, artifacts) {
       verifyRemoteDependencies(parent);
       require(parent.address === context.address && contextLive(parent) && (await dependencies(context.address)).ready,
         'Task parent context needs review; completion refused');
-      require(contractDigest(parent) === context.digest, 'Task parent context changed during execution; package completion refused');
+      require(sameContract(parent, context, run.claim), 'Task parent context changed during execution; package completion refused');
     }
     for (const context of run.claim.contexts || []) {
       const parent = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: context.address});
       verifyRemoteDependencies(parent);
       require(parent.address === context.address && contextLive(parent) &&
         (await dependencies(context.address)).ready &&
-        contextDigest(parent, context) === context.digest,
+        sameContext(parent, context, run.claim),
         `Package acceptance context changed during execution: ${context.address}; completion refused`);
     }
   };
