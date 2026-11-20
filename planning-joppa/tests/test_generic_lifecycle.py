@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "planning"))
 sys.path.insert(0, str(ROOT / "planning-joppa"))
 import context
+from context_reads import target_completed
 from joppa_reads import normalize_detail, task_state
 from mcp import Rejected
 import publication
@@ -172,6 +173,16 @@ class GenericLifecycleTests(unittest.TestCase):
         self.assertEqual(state(data={"commit": "a" * 40}, present=False), "done")
         self.assertEqual(state(present=False), "retired")
         self.assertEqual(state(data={"archived": True}), "open")
+        value = raw("work:t", {"title": "t"}, computed={"stage": "review"})
+        detail = normalize_detail({"address": "work:t"}, value)
+        self.assertEqual(task_state(detail, "review"), "blocked")
+        self.assertNotIn("stage", detail["document"]["data"])
+        self.assertEqual(context.source(detail)["computed"], {"stage": "review"})
+        types = {"work": {"role": "task"}}
+        before = context.snapshot_source(detail, types)
+        detail["computed"]["stage"] = "done"
+        self.assertTrue(target_completed(detail, types))
+        self.assertEqual(context.snapshot_source(detail, types), before)
 
     def test_flow_relations_stay_out_of_semantic_links(self):
         value = raw("work:t", {"title": "t"}, links=[{"target": "work:d", "relation": "depends_on"},

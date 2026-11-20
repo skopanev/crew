@@ -30,6 +30,11 @@ test('local ordering reads dependency targets and accepts only completed state',
   assert.equal((await dependencyCheck(read)('work:one')).ready, false);
   target.document.data.stage = 'done';
   assert.equal((await dependencyCheck(read)('work:one')).ready, true);
+  target.computed = {stage: 'review'};
+  assert.equal((await dependencyCheck(read)('work:one')).ready, false);
+  delete target.document.data.stage;
+  target.computed.stage = 'done';
+  assert.equal((await dependencyCheck(read)('work:one')).ready, true);
   f.objects.get('work:one').document.links.push({...f.objects.get('work:one').document.links[0]});
   calls.length = 0;
   const check = dependencyCheck(read);

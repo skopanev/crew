@@ -7,6 +7,8 @@ def source(object):
     process = dict(object.get("process", {}))
     value = {key: object.get(key) for key in ("address", "item_id", "kind", "current_revision", "document", "annotations",
                                             "files", "references")} | {"process": process}
+    if object.get("computed"):
+        value["computed"] = object["computed"]
     if object.get("remote_links") or object.get("remote_links_revision", 0) > 0:
         value["remote_links"] = object.get("remote_links", [])
         value["remote_links_revision"] = object.get("remote_links_revision", 0)
@@ -38,6 +40,7 @@ def remote_satisfied(link):
 
 def snapshot_source(object, types, selected_ac=None):
     current = source(object)
+    current.pop("computed", None)
     current.pop("item_id", None)
     current.pop("remote_review_required", None)
     if current.get("remote_links"):

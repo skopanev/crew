@@ -5,6 +5,7 @@ import {taskContract, taskRepositoryChoice} from './task-contract.mjs';
 import {execFile} from 'node:child_process';
 import path from 'node:path';
 import {quote} from './runtime.mjs';
+import {nodeStageDone} from './joppa-nodes.mjs';
 
 export function repositoryGit(config, repo, args) {
   const ssh = config.sshDir;
@@ -81,7 +82,7 @@ export async function guardPublications(run, read, ancestor) {
       if (link.relation !== 'depends_on' || link.blocking !== true) continue;
       const target = await object(link.target, true);
       if (schema[target.kind]?.role === 'task') {
-        if (target.document.present === true && target.document.data?.stage !== 'done') pending(`${target.address} is not completed`);
+        if (target.document.present === true && !nodeStageDone(target)) pending(`${target.address} is not completed`);
         const commit = target.document.data.commit;
         if (!commit) continue;
         const parsed = typeof commit === 'string' && /^(?:(\S+)[ \t]+)?([0-9a-f]{40}(?:[0-9a-f]{24})?)$/.exec(commit);

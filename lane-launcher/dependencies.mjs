@@ -1,4 +1,5 @@
 // Read live dependency state for one queue check. Store no persistent state.
+import {nodeStageDone} from './joppa-nodes.mjs';
 const invalid = message => Object.assign(new Error(message), {code: 'DEPENDENCY_INVALID'});
 
 const validWorkspaceId = value => typeof value === 'string' && Boolean(value.trim()) &&
@@ -73,7 +74,7 @@ export function dependencyCheck(read) {
           throw invalid(`Invalid linked revision on ${node.address}: ${link.target}`);
         }
         if (!(target.document.present === false || (types[target.kind]?.role === 'task'
-          ? target.document.data?.stage === 'done' : target.status?.tone === 'green'))) {
+          ? nodeStageDone(target) : target.status?.tone === 'green'))) {
           return {ready: false, blocker: target.address};
         }
       }

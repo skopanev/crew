@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {saveNode, nodeAssignee, nodeStage, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
+import {saveNode, nodeAssignee, nodeStage, nodeStageDone, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
 import {contractDigest, sameContract, sameContext, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
@@ -89,6 +89,9 @@ test('claims from before tag exclusion require unchanged frozen contract data', 
 test('native fields work in detail reads and named list fields', async () => {
   assert.equal(nodeAssignee({'data.assignee': 'worker'}), 'worker');
   assert.equal(nodeStage({'data.stage': 'review'}), 'review');
+  assert.equal(nodeStage({stage: 'review'}), 'review');
+  assert.equal(nodeStage({computed: {stage: 'done'}, data: {stage: 'review'}}), 'done');
+  assert.equal(nodeStageDone({computed: {stage: 'done'}}), true);
   assert.equal(nodeFailed({document: {data: {stage: 'review'}}}, 'review'), true);
   assert.equal(nodeFailed({'data.stage': 'ready'}, 'review'), false);
   assert.equal(nodeFailed({'data.stage': 'review'}, undefined), false);

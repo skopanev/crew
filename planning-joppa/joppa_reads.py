@@ -23,10 +23,10 @@ def relation_links(relations):
 
 # With fields, status is a tone string, status.label is separate and an absent optional key is null.
 # current_revision is not a detail key. present keeps an archived node archived.
-DETAIL_FIELDS = ("revision", "parent", "data", "present", "status", "status.label", "process",
+DETAIL_FIELDS = ("revision", "parent", "data", "computed", "present", "status", "status.label", "process",
                  "relations", "references", "comments", "files", "remote_links", "remote_review_required",
                  "remote_links_revision", "result")
-OPTIONAL_KEYS = ("process", "result", "remote_links", "remote_review_required", "current_revision",
+OPTIONAL_KEYS = ("computed", "process", "result", "remote_links", "remote_review_required", "current_revision",
                  "present", "files", "references", "remote_links_revision")
 
 
@@ -79,9 +79,14 @@ def done(object):
     return ended(object) and bool(object["document"]["data"].get("commit"))
 
 
+def node_stage(object):
+    stage = (object.get("computed") or {}).get("stage")
+    return stage if stage is not None else object["document"]["data"].get("stage")
+
+
 def block_reason(object, failed_stage=None):
     """Return the configured failure stage of a current failed Task."""
-    stage = object["document"]["data"].get("stage")
+    stage = node_stage(object)
     return stage if not ended(object) and failed_stage and stage == failed_stage else None
 
 

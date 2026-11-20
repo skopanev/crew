@@ -4,7 +4,7 @@ const require = (condition, message) => { if (!condition) throw new Error(messag
 export const NODE_TONES = ['red', 'yellow', 'orange', 'blue', 'grey', 'green', 'purple'];
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
-export const nodeStage = node => node.document?.data?.stage ?? node.data?.stage ?? node['data.stage'] ?? null;
+export const nodeStage = node => node.computed?.stage ?? node.stage ?? node.document?.data?.stage ?? node.data?.stage ?? node['data.stage'] ?? null;
 export const nodeFailed = (node, stage) => typeof stage === 'string' && stage.length > 0 && nodeStage(node) === stage;
 export function validateFailedTaskStage(config, types) {
   const stage = config.FAILED_TASK_STAGE;
@@ -14,7 +14,7 @@ export function validateFailedTaskStage(config, types) {
   require(tasks.length > 0 && tasks.every(type => (type.fields?.stage?.from ?? 'own') === 'own' &&
     type.fields?.stage?.values?.includes(stage)), 'FAILED_TASK_STAGE is absent from the native Task stage values');
 }
-export const nodeStageDone = node => (node.document?.data?.stage ?? node.data?.stage ?? node['data.stage']) === 'done';
+export const nodeStageDone = node => nodeStage(node) === 'done';
 export const nodePendingDelivery = node =>
   (node.document?.data?.delivery ?? node.data?.delivery ?? node['data.delivery'])?.state === 'pending';
 

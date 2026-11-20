@@ -7,6 +7,7 @@ from pathlib import Path
 from common import strings, read, require, text
 from mcp import Rejected, complete_object
 from context_snapshot import source, snapshot_source, selected_criteria, unchanged, current_pin, remote_satisfied
+from joppa_reads import node_stage
 
 
 def object_read(api, workspace, address, allow_archived=False):
@@ -18,11 +19,11 @@ def object_read(api, workspace, address, allow_archived=False):
     return result
 
 def target_completed(target, types):
-    """An archived target meets a blocking depends_on. A live Task needs data.stage done, any other target green."""
+    """An archived target meets a blocking depends_on. A live Task needs stage done, any other target green."""
     if target["document"].get("present") is False:
         return True
     if types.get(target["kind"], {}).get("role") == "task":
-        return target["document"]["data"].get("stage") == "done"
+        return node_stage(target) == "done"
     status = target.get("status")
     return (status.get("tone") if isinstance(status, dict) else status) == "green"
 
