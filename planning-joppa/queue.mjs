@@ -148,6 +148,10 @@ export function flowSettings(config) {
     throw new Error('selection needs a native kind and optional native filters');
   }
   validateNodeFilter(selection, 'selection');
+  if (config.exclude_tags !== undefined && (!Array.isArray(config.exclude_tags) ||
+      config.exclude_tags.some(tag => typeof tag !== 'string' || !tag.trim()))) {
+    throw new Error('exclude_tags must be a list of nonempty tags');
+  }
   const exclude = config.exclude_children;
   if (exclude !== undefined) {
     const {kind: childKind, ...filters} = object(exclude) ? exclude : {};
@@ -184,7 +188,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
   const batch = config.batch;
-  const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...flow.order.map(item => item.field),
+  const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...(config.exclude_tags?.length ? ['data.tags'] : []), ...flow.order.map(item => item.field),
     ...[batch?.by, batch?.age_field, batch?.unit_field].filter(Boolean).map(batchProjection)])];
   const rows = [], seen = new Set();
   for await (const page of nodePages(read, {...flow.selection, fields})) {
@@ -200,7 +204,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   rows.sort(compare(flow.order));
   const eligible = [];
   for (const row of rows) {
-    if (skip(row)) continue;
+    if (skip(row) || config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) continue;
     let excluded = false;
     if (flow.exclude) {
       for await (const page of nodePages(read, {...flow.exclude, parent: row.address, depth: 1, fields: ['parent']})) {

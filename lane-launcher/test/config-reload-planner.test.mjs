@@ -173,10 +173,15 @@ test('a configured flow selects one ordered native item, skips excluded and star
     const config = {...f.config, ...flow, exclude_children: undefined, order: [{field: 'title', direction}]};
     assert.equal((await nextConfiguredItem(config, f.config.token_file)).next.address, first);
   }
+  const filtered = {...f.config, ...flow, exclude_children: undefined, exclude_tags: ['source-gap-owner']};
+  f.objects.get('ac:a2').document.data.tags = ['keep', 'source-gap-owner'];
+  assert.equal((await nextConfiguredItem(filtered, f.config.token_file)).next.address, 'ac:a1');
+  f.objects.get('ac:a1').document.data.tags = ['source-gap-owner'];
+  assert.equal((await nextConfiguredItem(filtered, f.config.token_file)).next, null);
   for (const bad of [{workflow: 'workflow.yaml'}, {selection: {data: {}}}, {selection: {kind: 'ac', fields: ['data']}},
-    {exclude_children: {parent: 'ac:a1'}}, {order: [{field: 'title', direction: 'up'}]}, {ac_ids: ['ac:a1']}]) {
+    {exclude_children: {parent: 'ac:a1'}}, {exclude_tags: 'not-a-list'}, {order: [{field: 'title', direction: 'up'}]}, {ac_ids: ['ac:a1']}]) {
     assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, ...flow, ...bad}))),
-      /workflow|selection|exclude_children|order|ac_ids/);
+      /workflow|selection|exclude_children|exclude_tags|order|ac_ids/);
   }
 });
 

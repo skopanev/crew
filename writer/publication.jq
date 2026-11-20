@@ -23,10 +23,11 @@ elif $mode == "create" and $gap_tag != "" and all($reviews[]; coverage_review) a
   any($reviews[]; .coverage == "incomplete" and .coverage_gap_kind == "ac") then
   ([$reviews[].missing[]] | unique) as $missing |
   {approved: false, decision_required: true, operations: [
-    {command: {op: "save_object", kind: $in.selected.kind,
+    (if (($in.selected.document.data.tags // []) | index($gap_tag)) == null then
+     {command: {op: "save_object", kind: $in.selected.kind,
       id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
       data: {tags: (($in.selected.document.data.tags // []) + [$gap_tag] | unique)},
-      reason: "Return the item to its owner for missing acceptance coverage."}},
+      reason: "Return the item to its owner for missing acceptance coverage."}} else empty end),
     {command: {op: "note", target: $in.selected.address,
       id: ("writer-missing-" + ($run | gsub("[^A-Za-z0-9_.-]"; "_") | .[-80:])),
       text: ("Missing coverage:\n" + ($missing | join("\n") | .[0:750]) +

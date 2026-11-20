@@ -40,6 +40,8 @@ In create mode, an empty `tests` array with `coverage: "GAP. <missing source det
 Writer adds `SOURCE_GAP_TAG`, adds the source gap note and releases its claim atomically.
 It records `reason_code: SOURCE_GAP` and starts no critics for this draft. The full text stays in `artifacts/draft.json`.
 Use `exclude_children` with the Test kind to exclude items that already have Tests from the create queue.
+Set `exclude_tags` to a list that contains `SOURCE_GAP_TAG`. The dispatcher and manual runs then refuse marked items.
+The owner removes the tag after the source gap is resolved. An existing tag is not written again.
 An empty or omitted `SOURCE_GAP_TAG` keeps the existing rework path. Update mode keeps its existing stage behavior.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
 Invalid drafts and critic refusals use the same rework budget. The workflow has one deadline of 3600 seconds.
@@ -73,6 +75,7 @@ See `config.example.json`. The project supplies every native name:
 |---|---|
 | `workflow` | Absolute path to this `workflow.yaml` |
 | `selection`, `order`, `exclude_children` | Native Joppa filters that select one item for each pass |
+| `exclude_tags` | Items with any of these tags stay out of the queue, including after a restart |
 | `children` | Native filter for the direct children. Include the Test kind |
 | `references` | Data fields of the selected item that name related objects |
 | `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit selected-kind updates for the optional decision route |

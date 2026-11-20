@@ -50,6 +50,8 @@ test('an AC coverage gap returns only the selected item and a missing note witho
     assert.equal(value.outcome.reason_code, 'COVERAGE_INCOMPLETE');
     assert.equal(value.outcome.status, 'blocked');
   }
+  f.input.selected.document.data.tags.push('source-gap-owner');
+  assert.deepEqual(f.run({codex: gap}).operations.map(row => row.command.op), ['note']);
 });
 
 test('other failures, stale reviews and malformed coverage retain the rework path', t => {

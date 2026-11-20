@@ -39,10 +39,13 @@ def load(api, config, address):
     schema = api.call("joppa_tree", {"workspace": workspace})["schema"]
     help = api.call("joppa_help", {"workspace": workspace, "op": "save_object"})
     selected = object_read(api, workspace, address)
+    require(not any(tag in (selected["document"]["data"].get("tags") or []) for tag in config.get("exclude_tags", [])),
+            "selected object has an excluded tag")
     batch = flow_batch.settings(config)
-    fields = ["revision", *([flow_batch.projection(batch[key]) for key in ("by", "unit_field", "age_field") if batch.get(key)] if batch else []),
+    fields = ["revision", *(["data.tags"] if config.get("exclude_tags") else []), *([flow_batch.projection(batch[key]) for key in ("by", "unit_field", "age_field") if batch.get(key)] if batch else []),
               *[item["field"] for item in config.get("order", [])]]
     rows = pages(api, workspace, {**config["selection"], "fields": list(dict.fromkeys(fields)) if batch else ["revision"]})
+    rows = (item for item in rows if not any(tag in (flow_batch.field(item, "data.tags") or []) for tag in config.get("exclude_tags", [])))
     candidates = list(rows) if batch else None
     row = next((item for item in candidates if item.get("address") == address), None) if batch else \
           next((item for item in rows if item.get("address") == address), None)

@@ -23,6 +23,7 @@
   "exclude_children": {
     "kind": "test"
   },
+  "exclude_tags": ["source-gap-owner"],
   "children": {
     "kind": [
       "test"

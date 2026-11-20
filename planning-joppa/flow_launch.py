@@ -22,6 +22,9 @@ def configuration(path, raw=None):
             "config.selection needs a native kind filter")
     require(config.get("mcp_command") or config.get("token_file"), "configure Joppa authentication")
     require(isinstance(config.get("vars", {}), dict), "config.vars must be an object")
+    require(isinstance(config.get("exclude_tags", []), list) and
+            all(isinstance(tag, str) and tag.strip() for tag in config.get("exclude_tags", [])),
+            "exclude_tags must be a list of nonempty tags")
     for name in config.get("vars", {}):
         require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) and
                 name != "AGY_PROFILE_HOME" and not name.startswith(("PLANNING_", "CREW_FLOW_", "MEDULLA_")), "reserved workflow variable: " + name)

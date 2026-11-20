@@ -200,6 +200,10 @@ class ConfiguredFlowTests(unittest.TestCase):
         result = read(self.target / "result.json")
         self.assertEqual(result["reason_code"], "SOURCE_GAP")
         self.assertTrue(result["claim_released"])
+        self.config["exclude_tags"] = ["source-gap-owner"]
+        with self.assertRaisesRegex(ValueError, "excluded tag"):
+            flow_stages.prepare()
+        self.assertEqual(len(self.api.batches), 2)
 
 
 if __name__ == "__main__":
