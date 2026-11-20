@@ -162,7 +162,7 @@ class ConfiguredFlowTests(unittest.TestCase):
         values = {"draft": draft, "input": read(self.target / "input.json"), "codex": review, "second": review}
         args = ["jq", "-nc", "--arg", "digest", "frozen", "--arg", "test", "check", "--arg", "task", "work",
                 "--arg", "waiting", "waiting", "--arg", "ready", "ready", "--arg", "mode", "create",
-                "--arg", "decision", "needs_input", "--arg", "run", "writer-example"]
+                "--arg", "gap_tag", "source-gap-owner", "--arg", "run", "writer-example"]
         for name, value in values.items():
             file = self.folder / (name + ".json")
             write(file, value)
@@ -174,7 +174,7 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.assertEqual(len(self.api.batches), 2)
         commands = [row["command"] for row in self.api.batches[-1]["operations"]]
         self.assertEqual([cmd["op"] for cmd in commands], ["save_object", "note"])
-        self.assertEqual(commands[0]["data"], {"stage": "needs_input", "assignee": None})
+        self.assertEqual(commands[0]["data"], {"tags": ["source-gap-owner"], "assignee": None})
         self.assertIn("Missing coverage", commands[1]["text"])
         self.assertEqual(self.api.nodes["work:t"]["document"]["data"]["stage"], "waiting")
         self.assertFalse(any(node["kind"] == "check" for node in self.api.nodes.values()))
@@ -182,18 +182,18 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.assertEqual(result["reason_code"], "COVERAGE_INCOMPLETE")
         self.assertTrue(result["claim_released"])
 
-    def test_writer_source_gap_releases_the_claim_with_a_stage_and_note(self):
+    def test_writer_source_gap_releases_the_claim_with_a_tag_and_note(self):
         self.config["publication"]["update_kinds"].append("criterion")
         draft = self.folder / "draft.json"
         write(draft, {"tests": [], "coverage": "GAP. The source gives no refusal outcome."})
-        value = subprocess.check_output(["jq", "-ce", "--arg", "decision", "needs_input",
+        value = subprocess.check_output(["jq", "-ce", "--arg", "gap_tag", "source-gap-owner",
             "--arg", "run", "writer-source-gap", "--slurpfile", "input", str(self.target / "input.json"),
             "-f", str(ROOT / "writer/source-gap.jq"), str(draft)], text=True)
         write(self.target / "operations.json", json.loads(value))
         flow_publication.publish(self.api, self.config, self.target)
         commands = [row["command"] for row in self.api.batches[-1]["operations"]]
         self.assertEqual([cmd["op"] for cmd in commands], ["save_object", "note"])
-        self.assertEqual(commands[0]["data"], {"stage": "needs_input", "assignee": None})
+        self.assertEqual(commands[0]["data"], {"tags": ["source-gap-owner"], "assignee": None})
         self.assertTrue(commands[1]["text"].startswith("GAP. The source gives no refusal outcome."))
         self.assertFalse(any(node["kind"] == "check" for node in self.api.nodes.values()))
         self.assertEqual(self.api.nodes["work:t"]["document"]["data"]["stage"], "waiting")

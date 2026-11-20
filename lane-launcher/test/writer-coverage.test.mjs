@@ -18,13 +18,13 @@ function fixture(t) {
       document: {data: {stage: 'waiting'}}}]};
   const review = {draft_digest: 'frozen', tests: [{id: 't1', score: '11111', reasons: []}],
     coverage: 'complete', missing: [], summary: 'The Test passes.'};
-  const run = ({codex = review, second = review, decision = 'needs_input', mode = 'create'} = {}) => {
+  const run = ({codex = review, second = review, gapTag = 'source-gap-owner', mode = 'create'} = {}) => {
     for (const [name, value] of Object.entries({draft, input, codex, second})) {
       fs.writeFileSync(path.join(root, name + '.json'), JSON.stringify(value));
     }
     const args = ['-nc', '--arg', 'digest', 'frozen', '--arg', 'test', 'check', '--arg', 'task', 'work',
       '--arg', 'waiting', 'waiting', '--arg', 'ready', 'ready', '--arg', 'mode', mode,
-      '--arg', 'decision', decision, '--arg', 'run', '2026-11-18_12-00-00-12345678'];
+      '--arg', 'gap_tag', gapTag, '--arg', 'run', '2026-11-18_12-00-00-12345678'];
     for (const name of ['draft', 'input', 'codex', 'second']) args.push('--slurpfile', name, path.join(root, name + '.json'));
     return JSON.parse(execFileSync('jq', [...args, '-f', filter], {encoding: 'utf8'}));
   };
@@ -35,12 +35,14 @@ test('an AC coverage gap returns only the selected item and a missing note witho
   const f = fixture(t);
   const gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac',
     missing: ['The required failure outcome is unspecified.']};
-  for (const reviews of [{codex: gap}, {second: gap}, {codex: gap, second: gap}]) {
+  f.input.selected.document.data.tags = ['keep'];
+  const failedDraft = {...gap, tests: [{id: 't1', score: '11011', reasons: ['The Source gives no outcome.']}]};
+  for (const reviews of [{codex: gap}, {second: gap}, {codex: gap, second: gap}, {codex: failedDraft}]) {
     const value = f.run(reviews);
     assert.equal(value.approved, false);
     assert.equal(value.decision_required, true);
     assert.deepEqual(value.operations[0].command, {op: 'save_object', kind: 'criterion', id: 'a', revision: 7,
-      data: {stage: 'needs_input'}, reason: 'Return the item to its owner for missing acceptance coverage.'});
+      data: {tags: ['keep', 'source-gap-owner']}, reason: 'Return the item to its owner for missing acceptance coverage.'});
     assert.equal(value.operations.length, 2);
     assert.equal(value.operations[1].command.op, 'note');
     assert.equal(value.operations[1].command.target, 'criterion:a');
@@ -52,7 +54,7 @@ test('an AC coverage gap returns only the selected item and a missing note witho
 
 test('other failures, stale reviews and malformed coverage retain the rework path', t => {
   const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['A required behavior is not covered.']};
-  for (const edit of [r => r.tests[0].score = '11011', r => r.draft_digest = 'other',
+  for (const edit of [r => r.draft_digest = 'other',
     r => r.tests[0].id = 'other', r => r.missing = [], r => r.missing = 'not an array',
     r => r.coverage = 'complete', r => r.missing = ['']]) {
     const bad = structuredClone(gap); edit(bad);
@@ -68,7 +70,7 @@ test('other failures, stale reviews and malformed coverage retain the rework pat
 
 test('disabled decision routing and update mode keep the existing behavior', t => {
   const f = fixture(t), gap = {...f.review, coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['A required behavior is not covered.']};
-  for (const extra of [{decision: ''}, {mode: 'update'}]) {
+  for (const extra of [{gapTag: ''}, {mode: 'update'}]) {
     const value = f.run({codex: gap, second: gap, ...extra});
     assert.equal(value.decision_required, undefined);
     assert.ok(value.critique);
@@ -124,7 +126,7 @@ test('draft_check sends an empty source gap directly to decision publication', t
   const shell = fs.readFileSync(workflow, 'utf8').match(/^  draft_check:\n[\s\S]*?    shell: \|\n([\s\S]*?)^    on_signal:/m)[1]
     .replace(/^      /gm, '');
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify(f.input));
-  for (const [draft, mode, decision, signal] of [
+  for (const [draft, mode, gapTag, signal] of [
     [{tests: [], coverage: 'GAP. The source gives no refusal outcome.'}, 'create', 'needs_input', 'SOURCE_GAP'],
     [{tests: [], coverage: 'GAP. Missing source.'}, 'update', 'needs_input', 'REVISE'],
     [{tests: [], coverage: 'GAP. Missing source.'}, 'create', '', 'REVISE'],
@@ -136,7 +138,7 @@ test('draft_check sends an empty source gap directly to decision publication', t
     fs.writeFileSync(path.join(artifacts, 'draft.json'), JSON.stringify(draft));
     const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
       MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
-      TEST_OPERATION: mode, DECISION_STAGE: decision, REWORK_LIMIT: '1', round: '1',
+      TEST_OPERATION: mode, SOURCE_GAP_TAG: gapTag, REWORK_LIMIT: '1', round: '1',
       FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
     assert.ok(output.includes(`<signal:${signal}>`), output);
     assert.equal(fs.existsSync(file), signal === 'SOURCE_GAP');
@@ -144,7 +146,7 @@ test('draft_check sends an empty source gap directly to decision publication', t
       const value = JSON.parse(fs.readFileSync(file, 'utf8'));
       assert.equal(value.outcome.reason_code, 'SOURCE_GAP');
       assert.equal(value.outcome.status, 'blocked');
-      assert.deepEqual(value.operations[0].command.data, {stage: decision});
+      assert.deepEqual(value.operations[0].command.data, {tags: [gapTag]});
       assert.equal(value.operations[0].command.revision, f.input.claim_revision);
       assert.equal(value.operations.length, 2);
       assert.match(value.operations[1].command.text, /^GAP\. The source gives no refusal outcome/);
@@ -191,7 +193,7 @@ test('prepare accepts distinct Codex critics and rejects invalid seats before cl
     {CRITIC_SECOND_MODEL: ''}, {CRITIC_SECOND_HARNESS: 'agy', AGY_PROFILE_HOME: path.join(f.root, 'absent')}]) {
     assert.throws(() => execFileSync('bash', ['-c', shell], {stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env,
       CREW_FLOW_STAGES: '/must-not-run', FLOW_PUBLICATION: '{"file":"operations.json"}', TEST_KIND: 'check',
-      TEST_OPERATION: 'create', DECISION_STAGE: '', REWORK_LIMIT: '1', AUTHOR_MODEL: 'author-model',
+      TEST_OPERATION: 'create', SOURCE_GAP_TAG: '', REWORK_LIMIT: '1', AUTHOR_MODEL: 'author-model',
       CRITIC_CODEX_MODEL: 'gpt-6.2-sol',
       CRITIC_SECOND_HARNESS: 'claude-code', CRITIC_SECOND_MODEL: 'other-model', CRITIC_CLAUDE_MODEL: '',
       ...overrides}}), error => error.status === 2 && !String(error.stderr).includes('must-not-run'));
@@ -203,7 +205,7 @@ test('prepare accepts distinct Codex critics and rejects invalid seats before cl
   const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
     CREW_FLOW_STAGES: stages, PLANNING_PYTHON: 'sh', MEDULLA_RUN_DIR: f.root,
     FLOW_PUBLICATION: '{"file":"operations.json"}', TEST_KIND: 'check', TEST_OPERATION: 'create',
-    DECISION_STAGE: '', REWORK_LIMIT: '1', AUTHOR_MODEL: 'author-model', CRITIC_CLAUDE_MODEL: '',
+    SOURCE_GAP_TAG: '', REWORK_LIMIT: '1', AUTHOR_MODEL: 'author-model', CRITIC_CLAUDE_MODEL: '',
     CRITIC_CODEX_MODEL: 'gpt-6.2-sol', CRITIC_SECOND_HARNESS: 'codex', CRITIC_SECOND_MODEL: 'gpt-6.1-sol'}});
   assert.match(output, /<signal:PREPARED>/);
 });
@@ -228,7 +230,7 @@ test('review_join returns missing Tests to the author and sends only AC gaps to 
     fs.rmSync(file, {force: true});
     const output = execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...process.env,
       MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: path.dirname(workflow), TEST_KIND: 'check',
-      TEST_OPERATION: 'create', DECISION_STAGE: 'needs_input', REWORK_LIMIT: '1', round: '1',
+      TEST_OPERATION: 'create', SOURCE_GAP_TAG: 'source-gap-owner', REWORK_LIMIT: '1', round: '1',
       FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
     assert.ok(output.includes(`<signal:${signal}>`), output);
     assert.equal(fs.existsSync(file), signal !== 'REVISE');

@@ -5,7 +5,7 @@ def valid: type == "object" and .draft_digest == $digest and (.tests | type == "
   (.coverage == "complete" or .coverage == "incomplete");
 def clean: valid and all(.tests[]; .score == "11111") and .coverage == "complete" and
   (.missing | type == "array" and length == 0);
-def coverage_only: valid and all(.tests[]; .score == "11111") and
+def coverage_review: valid and
   (.missing | type == "array" and all(.[]; type == "string" and length > 0)) and
   (if .coverage == "complete" then (.missing | length == 0) else (.missing | length > 0) end);
 (if $in.selected.document.data.owner
@@ -19,13 +19,14 @@ if all($reviews[]; clean) then {approved: true, operations: (
   else {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
     parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
     data: (.data + $owner + {title})}} end | select(.command.data | length > 0)])}
-elif $mode == "create" and $decision != "" and all($reviews[]; coverage_only) and
+elif $mode == "create" and $gap_tag != "" and all($reviews[]; coverage_review) and
   any($reviews[]; .coverage == "incomplete" and .coverage_gap_kind == "ac") then
   ([$reviews[].missing[]] | unique) as $missing |
   {approved: false, decision_required: true, operations: [
     {command: {op: "save_object", kind: $in.selected.kind,
       id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
-      data: {stage: $decision}, reason: "Return the item to its owner for missing acceptance coverage."}},
+      data: {tags: (($in.selected.document.data.tags // []) + [$gap_tag] | unique)},
+      reason: "Return the item to its owner for missing acceptance coverage."}},
     {command: {op: "note", target: $in.selected.address,
       id: ("writer-missing-" + ($run | gsub("[^A-Za-z0-9_.-]"; "_") | .[-80:])),
       text: ("Missing coverage:\n" + ($missing | join("\n") | .[0:750]) +

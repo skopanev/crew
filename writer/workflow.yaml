@@ -18,7 +18,7 @@ vars:
   AGY_PROFILE_HOME: ''
   # The project names its native Test kind in config.vars.
   TEST_KIND: ''
-  DECISION_STAGE: ''
+  SOURCE_GAP_TAG: ''
   TEST_OPERATION: create
   REWORK_LIMIT: '1'
   round: '1'
@@ -45,9 +45,9 @@ nodes:
           ;;
         *) echo 'writer: TEST_OPERATION must be create or update' >&2; exit 2 ;;
       esac
-      if [ "$TEST_OPERATION" = create ] && [ -n "$DECISION_STAGE" ]; then
+      if [ "$TEST_OPERATION" = create ] && [ -n "$SOURCE_GAP_TAG" ]; then
         printf '%s' "$FLOW_PUBLICATION" | jq -e '.allowed_operations | index("note") != null' >/dev/null || {
-          echo 'writer: DECISION_STAGE requires note publication permission' >&2; exit 2; }
+          echo 'writer: SOURCE_GAP_TAG requires note publication permission' >&2; exit 2; }
       fi
       [ -z "${CRITIC_CLAUDE_MODEL:-}" ] || { echo 'writer: rename CRITIC_CLAUDE_MODEL to CRITIC_SECOND_MODEL' >&2; exit 2; }
       case "$CRITIC_SECOND_HARNESS" in
@@ -119,8 +119,8 @@ nodes:
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       rm -f "$a"/critic-*.json
-      if [ "$TEST_OPERATION" = create ] && [ -n "$DECISION_STAGE" ] && \
-        gap="$(jq -ce --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
+      if [ "$TEST_OPERATION" = create ] && [ -n "$SOURCE_GAP_TAG" ] && \
+        gap="$(jq -ce --arg gap_tag "$SOURCE_GAP_TAG" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
           --slurpfile input "$a/input.json" -f "$MEDULLA_WORKFLOW_DIR/source-gap.jq" "$a/draft.json")"; then
         file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
         printf '%s\n' "$gap" > "$a/$file"
@@ -204,7 +204,7 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" \
-        --arg decision "$DECISION_STAGE" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
+        --arg gap_tag "$SOURCE_GAP_TAG" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
         --slurpfile draft "$a/draft.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
         --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
@@ -216,7 +216,7 @@ nodes:
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
       elif [ "$(printf '%s' "$verdict" | jq -r '.decision_required // false')" = true ]; then
         printf '%s' "$verdict" | jq '{operations, outcome}' > "$a/$file"
-        echo '<signal:MISSING>The Tests passed, but acceptance coverage needs an owner decision.</signal:MISSING>'
+        echo '<signal:MISSING>The acceptance contract needs an owner decision. No Tests are published.</signal:MISSING>'
       elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
         printf '<signal:var key=critique>%s</signal:var>\n' "$critique"

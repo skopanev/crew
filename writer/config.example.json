@@ -46,7 +46,7 @@
   },
   "vars": {
     "TEST_KIND": "test",
-    "DECISION_STAGE": "to_decide",
+    "SOURCE_GAP_TAG": "source-gap-owner",
     "TEST_OPERATION": "create",
     "REWORK_LIMIT": 1,
     "CRITIC_SECOND_HARNESS": "claude-code",

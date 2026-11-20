@@ -21,22 +21,26 @@ sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
    The shared stage releases the claim in that transaction and refuses operations outside `config.publication`.
 
 A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
-Set `vars.DECISION_STAGE` to return coverage-only refusals to the item owner immediately in create mode.
-Both critics must review the same draft and score every Test `11111`.
-At least one critic must report incomplete coverage with a nonempty `missing` list. Other review failures keep the existing rework path.
+Set `vars.SOURCE_GAP_TAG` to tag source gaps and return them to the item owner immediately in create mode.
+Both critics must return valid reviews of the same draft.
+At least one critic must report incomplete coverage with a nonempty `missing` list.
+Without an identified AC gap, other refusals keep the existing rework path.
 The immediate return also requires `coverage_gap_kind: "ac"` from a critic with incomplete coverage.
 Use this marker only when the selected item's contract needs an owner decision.
 Missing Tests that the author can write use `coverage_gap_kind: "author"` and return to the author with the findings.
 An absent or unrecognized marker also keeps the rework path.
 For an AC gap, Writer publishes no Test or Task changes.
-It saves the selected item's stage, adds a `missing` note and releases its claim atomically.
+It preserves the existing tags, adds the configured gap tag and a `missing` note, and releases its claim atomically.
+It never writes a stage. A source gap can require an owner decision even when a draft also has failed scores.
+This route publishes no Tests. Normal Test publication still requires both critics to score every Test `11111`.
 The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
 The configured publication policy must allow `note` and updates to the selected kind.
+Replace the previous `DECISION_STAGE` option with `SOURCE_GAP_TAG` when upgrading.
 In create mode, an empty `tests` array with `coverage: "GAP. <missing source detail>"` takes the same decision route.
-Writer saves `DECISION_STAGE`, adds the source gap note and releases its claim atomically.
+Writer adds `SOURCE_GAP_TAG`, adds the source gap note and releases its claim atomically.
 It records `reason_code: SOURCE_GAP` and starts no critics for this draft. The full text stays in `artifacts/draft.json`.
 Use `exclude_children` with the Test kind to exclude items that already have Tests from the create queue.
-An empty or omitted `DECISION_STAGE` keeps the existing rework path. Update mode keeps its existing stage behavior.
+An empty or omitted `SOURCE_GAP_TAG` keeps the existing rework path. Update mode keeps its existing stage behavior.
 The default permits one rework. Set `2` to permit two reworks after the initial draft.
 Invalid drafts and critic refusals use the same rework budget. The workflow has one deadline of 3600 seconds.
 The workflow sets no node timeouts. Its native `on_timeout` handler runs `failed` once after the deadline.
@@ -73,7 +77,7 @@ See `config.example.json`. The project supplies every native name:
 | `references` | Data fields of the selected item that name related objects |
 | `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit selected-kind updates for the optional decision route |
 | `vars.TEST_KIND` | Native kind of the Tests |
-| `vars.DECISION_STAGE` | Optional selected-item stage for coverage-only refusals, such as `to_decide` |
+| `vars.SOURCE_GAP_TAG` | Optional tag for source gaps, such as `source-gap-owner` |
 | `vars.CRITIC_SECOND_HARNESS` | `claude-code` (default), `codex` or `agy`. The critic models must differ |
 | `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
 | `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_SECOND_MODEL` | Optional model overrides |
