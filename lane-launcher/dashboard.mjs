@@ -186,9 +186,7 @@ export function createDashboard(config, paint) {
     const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
       clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
       counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
-        (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tickets: —',
-      clip(`Source: Joppa · delivery: ${config.delivery}` +
-        (config.joppa.filter ? ` · filter: ${JSON.stringify(config.joppa.filter)}` : ''), width),
+        (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tasks: not checked',
       '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)
@@ -204,7 +202,7 @@ export function createDashboard(config, paint) {
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
-    output.push(...renderRunTable(rows, paint, 7 + footer.length, {finished: true}));
+    output.push(...renderRunTable(rows, paint, 6 + footer.length, {finished: true}));
     output.push(...footer);
     output.push(stopped ? 'Stopped' : config.monitorOnly ? 'Dispatch paused · Ctrl+C to close' : left == null ? 'Checking tickets · Ctrl+C to stop' :
       `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);
