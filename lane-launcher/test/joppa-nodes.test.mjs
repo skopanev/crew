@@ -29,6 +29,12 @@ test('execution metadata does not alter authored content checks', () => {
   node.document.data.assignee = 'crew-lane:host:run';
   node.document.data.commit = 'a'.repeat(40);
   assert.equal(contractDigest(node), original);
+  for (const stage of ['to_implement', 'in_progress', 'done']) {
+    node.document.data.stage = stage;
+    assert.equal(contractDigest(node), original);
+  }
+  delete node.document.data.stage;
+  assert.equal(contractDigest(node), original);
   node.document.data.body = 'Changed scope';
   assert.notEqual(contractDigest(node), original);
 });

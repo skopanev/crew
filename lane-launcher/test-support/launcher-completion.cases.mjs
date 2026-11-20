@@ -65,6 +65,8 @@ test('Joppa completion keeps a Task current after a test child changes', async t
   await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f);
   child.document.data.title = 'checks.test.js > replacement';
+  parent.document.data.stage = 'in_progress';
+  f.objects.get('req:r').document.data.stage = 'done';
   const result = {code: 0, status: 'exited'};
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.completed, true);
