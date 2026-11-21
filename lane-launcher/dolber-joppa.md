@@ -119,7 +119,8 @@ Other failures retry after 60 seconds. Existing run results supply the retry tim
 A repeated finalization checks target ancestry under the lock and skips checks and push if the code already landed.
 This mode requires `sharedLockDir` and a server-enforced read-only `joppa.readerTokenFile`.
 Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
-The host confirms the remote SHA before it saves `data.commit` and archives the Task in one batch.
+The host confirms the remote SHA before it saves `data.commit`, removes the assignee and sets the completion stage.
+The same batch archives the Task at the saved revision. `DONE_TASK_STAGE` defaults to `done` and must exist in its schema.
 The command sends that SHA in `commit`. The host then checks the returned Task commit.
 An existing-code check sends the verified remote SHA. It does not create a commit.
 A completed Task records delivered work. Criterion test results decide acceptance separately.
@@ -168,6 +169,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | Field | Purpose |
 |---|---|
 | `FAILED_TASK_STAGE` | Required failure stage. It must exist in each native Task type and cannot be `done`. No default |
+| `DONE_TASK_STAGE` | Completion stage before archive. Defaults to `done`. It must be editable in the Task schema and differ from the failure stage |
 | `limit` | Maximum concurrent lanes, independent of the number of authenticated workers |
 | `vars` | Optional workflow values declared in `workflow.vars`. Keys match `[A-Z_][A-Z0-9_]*`; values are strings without NUL. Host-owned keys are refused. Defaults to `{}` |
 | `joppa.workers` | Authenticated actors and host token files. One entry can serve all lane slots |

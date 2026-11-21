@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {saveNode, nodeAssignee, nodeStage, nodeStageDone, nodeFailed, validateFailedTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
+import {saveNode, nodeAssignee, nodeStage, nodeStageDone, nodeFailed, validateFailedTaskStage, doneTaskStage, nodePages, roleKinds} from '../joppa-nodes.mjs';
 import {contractDigest, sameContract, sameContext, mutateTasks} from '../joppa-common.mjs';
 import {fixture} from './fixtures/joppa-stdio.mjs';
 
@@ -118,6 +118,19 @@ test('the failure stage must be an editable nonterminal stage of the native Task
   }
   types.work.fields.stage.from = 'children';
   assert.throws(() => validateFailedTaskStage({FAILED_TASK_STAGE: 'review'}, types), /FAILED_TASK_STAGE/);
+});
+
+test('the completion stage is configurable and must exist as an editable Task field', () => {
+  const schema = {types: {work: {role: 'task', fields: {stage: {values: ['ready', 'done', 'closed']}}}}};
+  const node = {kind: 'work'};
+  assert.equal(doneTaskStage({}, schema, node), 'done');
+  assert.equal(doneTaskStage({DONE_TASK_STAGE: 'closed'}, schema, node), 'closed');
+  for (const value of ['', ' done', 'absent']) {
+    assert.throws(() => doneTaskStage({DONE_TASK_STAGE: value}, schema, node), /DONE_TASK_STAGE/);
+  }
+  assert.throws(() => doneTaskStage({FAILED_TASK_STAGE: 'done'}, schema, node), /must differ/);
+  schema.types.work.fields.stage.from = 'status';
+  assert.throws(() => doneTaskStage({}, schema, node), /editable/);
 });
 
 test('mixed mutation receipts validate saves and non-save commands without invented objects', async t => {

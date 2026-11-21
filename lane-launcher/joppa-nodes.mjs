@@ -15,6 +15,15 @@ export function validateFailedTaskStage(config, types) {
     type.fields?.stage?.values?.includes(stage)), 'FAILED_TASK_STAGE is absent from the native Task stage values');
 }
 export const nodeStageDone = node => nodeStage(node) === 'done';
+export function doneTaskStage(config, schema, object) {
+  const stage = config.DONE_TASK_STAGE ?? 'done';
+  const type = schema.types?.[object.kind], field = type?.fields?.stage;
+  require(typeof stage === 'string' && stage.trim() === stage && stage.length > 0 &&
+    type?.role === 'task' && (field?.from ?? 'own') === 'own' && field?.values?.includes(stage),
+  'DONE_TASK_STAGE must name an editable stage in the native Task type');
+  require(stage !== config.FAILED_TASK_STAGE, 'DONE_TASK_STAGE must differ from FAILED_TASK_STAGE');
+  return stage;
+}
 export const nodePendingDelivery = node =>
   (node.document?.data?.delivery ?? node.data?.delivery ?? node['data.delivery'])?.state === 'pending';
 

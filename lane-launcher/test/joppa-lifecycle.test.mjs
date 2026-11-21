@@ -135,7 +135,7 @@ const complete = async (t, mode) => {
   return {f, artifacts, result, sha, finish: () => finishTask(f.run, f.stateFile, result, artifacts)};
 };
 
-test('success saves the commit and archives at the saved revision in one batch', async t => {
+test('success saves the commit and done stage and archives at the saved revision in one batch', async t => {
   const {f, result, sha, finish} = await complete(t);
   await finish();
   assert.equal(result.completed, true);
@@ -143,12 +143,37 @@ test('success saves the commit and archives at the saved revision in one batch',
   assert.deepEqual(done.map(({ref, command}) => [ref, command.op]),
     [['done0', 'save_object'], [undefined, 'archive_object'], ['done1', 'save_object'], [undefined, 'archive_object']]);
   assert.deepEqual(done[1].command.revision, {$ref: 'done0/saved_revision'});
+  assert.deepEqual(done[0].command.data, {assignee: null, commit: sha, stage: 'done'});
   assert(done.every(({command}) => command.op !== 'save_object' || !Object.hasOwn(command, 'question_checked')));
   assert.deepEqual(result.tasks.map(task => [task.address, task.revision]), [['task:t1', 6], ['task:t2', 6]]);
   for (const address of ['task:t1', 'task:t2']) {
     assert.equal(f.objects.get(address).document.present, false);
     assert.equal(f.objects.get(address).document.data.commit, sha);
+    assert.equal(f.objects.get(address).document.data.stage, 'done');
   }
+});
+
+test('completion uses the configured stage and replays legacy requests without changing them', async t => {
+  const {f, result, finish} = await complete(t);
+  f.run.config.DONE_TASK_STAGE = 'closed';
+  f.schema.types.task.fields.stage.values.push('closed');
+  await finish();
+  assert.equal(result.completed, true);
+  assert(f.run.completionRequest.operations.filter(({command}) => command.op === 'save_object')
+    .every(({command}) => command.data.stage === 'closed'));
+  const legacy = await complete(t);
+  legacy.f.run.completionRequest = {workspace: 'fixture', request_id: 'legacy', operations: ['t1', 't2'].flatMap((id, index) => [
+    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4,
+      data: {assignee: null, commit: legacy.sha}, reason: 'Done'}},
+    {command: {op: 'archive_object', target: `task:${id}`, revision: {$ref: `done${index}/saved_revision`}, reason: 'Done'}}])};
+  const saved = structuredClone(legacy.f.run.completionRequest);
+  await legacy.finish();
+  assert.equal(legacy.result.completed, true);
+  assert.deepEqual(legacy.f.run.completionRequest, saved);
+  const invalid = await packageFixture(t);
+  invalid.schema.types.task.fields.stage.values = ['ready', 'review'];
+  await assert.rejects(claimTask(invalid.run, invalid.persist, invalid.runId), /DONE_TASK_STAGE/);
+  assert.equal(batches(invalid).length, 0);
 });
 
 test('branch publication releases Tasks for Lander without archiving or selecting them again', async t => {
@@ -188,7 +213,7 @@ test('a Task type without a schema question can be claimed and completed', async
 
 for (const [mode, label] of [['wrong-commit', 'a different commit'], ['archive-present', 'a present document'],
   ['archive-historical', 'a historical document'], ['archive-assigned', 'an assigned document'],
-  ['archive-missing-commit', 'a missing commit']]) {
+  ['archive-missing-commit', 'a missing commit'], ['wrong-stage', 'a different completion stage']]) {
   test(`completion is refused when the archived read shows ${label}`, async t => {
     const {result, finish} = await complete(t, mode);
     await assert.rejects(finish(), /did not confirm every Task completion at the checked SHA/);

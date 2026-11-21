@@ -8,7 +8,7 @@ import {parsePublication} from './requirement-delivery.mjs';
 import {failTask} from './joppa-failure.mjs';
 import {heldBy, released, contextLive} from './joppa-claims.mjs';
 import {dependencyCheck} from './dependencies.mjs';
-import {saveNode} from './joppa-nodes.mjs';
+import {saveNode, doneTaskStage} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
 import {missingTestNodes, nodeResult} from './test-nodes.mjs';
 import {recordPendingDelivery} from './pending-delivery.mjs';
@@ -94,16 +94,17 @@ export async function finishTask(run, stateFile, result, artifacts) {
     // Recompute the frozen test bindings and the missing (AC, test) nodes, also for a saved request.
     const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
     const schema = (await read('joppa_tree', {})).schema;
+    const stages = current.map(object => doneTaskStage(run.config, schema, object));
     const bindings = frozenBindings(run, artifacts, current, coveredBy(run.config, schema.types));
     const nodes = bindings.rows.length ? await missingTestNodes(read, schema, bindings.rows) : [];
     packageBudget(current.length, nodes.length);
     run.testBindings = {status: bindings.status, gaps: bindings.gaps, nodes: nodes.length};
     const bound = object => bindings.rows.filter(row => row.task === object.address)
       .map(({ac, check, test}) => ({ac, check, test}));
-    // One save records the commit and removes the assignee. The archive uses the revision that save returns.
+    // One save records the commit and done stage, then removes the assignee. Archive uses its saved revision.
     if (!run.completionRequest) {
       run.completionRequest = batchRequest(run, [...current.flatMap((object, index) => [
-        saveNode(object, {assignee: undefined, commit: sha, ...(bound(object).length ? {test_bindings: bound(object)} : {})},
+        saveNode(object, {assignee: undefined, commit: sha, stage: stages[index], ...(bound(object).length ? {test_bindings: bound(object)} : {})},
           `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`),
         {op: 'archive_object', target: object.address, revision: {$ref: `done${index}/saved_revision`}, reason: `Crew lane landed ${sha}.`}]),
         ...nodes]);
@@ -115,6 +116,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
       isDeepStrictEqual(created.map(({command}) => command), nodes) && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
+        // Replay old durable requests unchanged. New requests always contain the stage.
+        (!Object.hasOwn(save.data, 'stage') || save.data.stage === stages[index]) &&
         isDeepStrictEqual(save.data.test_bindings, bound(current[index]).length ? bound(current[index]) : undefined) &&
         !save.data.assignee && typeof ref === 'string' && archive.op === 'archive_object' &&
         archive.target === claim.address && isDeepStrictEqual(archive.revision, {$ref: `${ref}/saved_revision`});
@@ -140,13 +143,15 @@ export async function finishTask(run, stateFile, result, artifacts) {
         Number.isSafeInteger(saved.object.revision), 'Joppa batch response does not confirm each test node; inspect the saved request');
       await nodeResult(read, saved.object.address, parent, data.title);
     }
-    // An archived node reads as present:false and keeps data.commit.
+    // An archived node keeps the commit and the stage sent in its saved request.
     result.tasks = [];
     for (const [index, claim] of claims.entries()) {
+      const sent = operations[index * 2].command.data;
       const confirmed = await api(run.config, run.joppaWorker, 'joppa_objects', {workspace: run.workspace, address: claim.address});
       require(confirmed?.address === claim.address && confirmed.historical === false &&
         Number.isSafeInteger(confirmed.current_revision) && confirmed.current_revision > savedRevisions[index] &&
-        confirmed.document?.present === false && confirmed.document.data?.commit === sha && !confirmed.document.data.assignee,
+        confirmed.document?.present === false && confirmed.document.data?.commit === sha && !confirmed.document.data.assignee &&
+        (!Object.hasOwn(sent, 'stage') || confirmed.document.data.stage === sent.stage),
         'Joppa did not confirm every Task completion at the checked SHA');
       result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }

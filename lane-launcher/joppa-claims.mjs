@@ -2,7 +2,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, sameContract, sameContext, verifyRemoteDependencies} from './joppa-common.mjs';
-import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage, doneTaskStage} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy, FAILURE_OPERATIONS} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -85,6 +85,7 @@ export async function claimTask(run, persist, runId, options = {}) {
       const object = await read(run, task.address);
       require(object?.address === task.address && current(object) &&
         (task.revision === undefined || object.current_revision === task.revision), 'Task changed after selection; no Tasks claimed');
+      doneTaskStage(run.config, {types}, object);
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
       require(!nodeStageDone(object), `TASK_COMPLETED: ${task.address} is done; no Tasks claimed`);
       require(!nodePendingDelivery(object), `TASK_PENDING_DELIVERY: ${task.address} awaits target integration; no Tasks claimed`);
