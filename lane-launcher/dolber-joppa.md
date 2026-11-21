@@ -18,7 +18,14 @@ Keep credentials outside every mounted directory.
 Dolber and the planner queue use the same Node.js MCP client. Their queue calls do not start a Python process.
 Dolber selects available Tasks whose repository resolves to a configured repository ID. See `taskFields` below.
 Joppa project membership does not filter Tasks. Dolber skips unknown or ambiguous repositories without changing the Task.
-It opens a Herdr tab in the current workspace. Its worker claims that exact Task before preflight or Docker.
+By default, it opens a Herdr tab in the current workspace.
+Set `"launchLanes": true, "lanes": "headless"` to start the same worker without a tab or Herdr connection.
+`lanes` accepts `"herdr"` (default) or `"headless"`. `launchLanes: false` still means preview.
+Both modes keep the dispatcher dashboard. The worker claims the exact Task before preflight or Docker.
+Headless workers write their output to the existing run folder's `output.log`, without a separate log file.
+`closeTabOnExit` applies only when the run has a pane.
+Change `lanes` while the dispatcher runs to apply the mode to new workers at the next config reload.
+Existing workers keep their saved config, claims and slots. Stopping the dispatcher does not stop these workers.
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 

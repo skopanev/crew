@@ -21,6 +21,7 @@
   "gateTimeoutSeconds": 900,
   "intervalSeconds": 60,
   "launchLanes": false,
+  "lanes": "herdr",
   "closeTabOnExit": true,
   "discardFailedWorktree": false,
   "delivery": "branch",

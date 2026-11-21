@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {save, readRun, alive, quote, command, herdr, runDirectories} from './runtime.mjs';
+import {save, readRun, alive, command, herdr, runDirectories} from './runtime.mjs';
 import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
@@ -13,6 +13,7 @@ import {configReloader} from './config-reload.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
 import {reportSelectionIssues} from './selection-notify.mjs';
 import {selectionProgress} from './selection-progress.mjs';
+import {dispatchLane} from './lane-dispatch.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,7 @@ function snapshots(config) {
   // containing commas. JSON quoting also preserves spaces and escapes.
   const format = '{"workflow":{{json (.Label "medulla.workflow")}},"runFolder":{{json (.Label "medulla.runs_under")}}}';
   const containers = dockerLanes(command('docker', ['ps', '--format', format]), config);
+  if (config.lanes === 'headless') return {containers, panes: null};
   const result = herdr(config, ['pane', 'list', '--workspace', config.herdrWorkspace]);
   if (!Array.isArray(result?.panes)) throw new Error('Herdr returned no pane list; refusing to assume free capacity');
   return {containers, panes: new Set(result.panes.map(pane => pane.pane_id))};
@@ -118,26 +120,9 @@ export async function tick(config, display = null) {
     joppaWorker: selected.worker};
   const stateFile = path.join(dir, 'launch.json');
   save(stateFile, run);
-  // Reserve capacity before opening the tab; its worker claims before startup.
-  let result;
-  try {
-    result = herdr(config, ['tab', 'create', '--workspace', config.herdrWorkspace,
-      '--cwd', path.dirname(here), '--label', `lane:${candidate.id}`, '--no-focus']);
-  } catch (error) {
-    // No worker was dispatched, even if the tab response was lost.
-    save(stateFile, {...run, result: {status: 'failed', error: error.message,
-      finishedAt: new Date().toISOString()}});
-    throw new Error(`Herdr could not open a tab: ${error.message}; no ticket was claimed`);
-  }
-  run.pane = result?.root_pane?.pane_id;
-  if (!run.pane) {
-    save(stateFile, {...run, result: {status: 'failed', finishedAt: new Date().toISOString()}});
-    throw new Error(`Herdr returned no pane; no ticket was claimed`);
-  }
-  save(stateFile, run);
-  herdr(config, ['pane', 'run', run.pane,
-    `${quote(process.execPath)} ${quote(path.join(here, 'worker.mjs'))} ${quote(stateFile)}`]);
-  print(display ? '' : `started ${candidate.id} in ${run.pane}; logs: ${dir}`);
+  // Reserve capacity before dispatch; the worker claims before startup.
+  await dispatchLane(config, run, stateFile);
+  print(display ? '' : `started ${candidate.id} in ${run.pane || 'headless mode'}; logs: ${dir}`);
   await report();
 }
 

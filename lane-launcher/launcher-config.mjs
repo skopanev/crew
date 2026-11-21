@@ -32,10 +32,12 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   config.gateCommands = config.repositories[0].gateCommands;
   config.testCommand = config.repositories[0].testCommand;
   if (dryRun) config.launchLanes = false;
+  config.lanes ??= 'herdr';
+  if (!['herdr', 'headless'].includes(config.lanes)) throw new Error('lanes must be herdr or headless');
   config.id = validateId(config.id);
   // The terminal running dolber owns the destination workspace.
   config.herdrWorkspace = env.HERDR_WORKSPACE_ID || config.herdrWorkspace;
-  for (const field of config.launchLanes ? ['workspace', 'herdrWorkspace'] : ['workspace']) {
+  for (const field of config.launchLanes && config.lanes === 'herdr' ? ['workspace', 'herdrWorkspace'] : ['workspace']) {
     if (typeof config[field] !== 'string' || !config[field].trim()) throw new Error(`Config needs ${field}`);
   }
   if (typeof config.launchLanes !== 'boolean') throw new Error('launchLanes must be true or false');

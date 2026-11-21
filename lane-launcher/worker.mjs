@@ -39,6 +39,7 @@ if (run.worker || run.claimRequest || run.result) {
   process.exit(2);
 }
 const log = fs.openSync(path.join(dir, 'output.log'), 'a', 0o600);
+const headless = run.config.lanes === 'headless';
 const color = process.env.NO_COLOR === undefined && process.env.FORCE_COLOR !== '0' &&
   (process.stdout.isTTY || process.env.FORCE_COLOR === '1');
 function announce(message) {
@@ -63,7 +64,7 @@ process.on('SIGHUP', () => stop('SIGTERM'));
 let result, artifacts = null, claimRefused = false;
 let readerDir, contextDir, hooksDir, finalizationTicket;
 try {
-  announce(`[lane] START ${run.ticket || '(ticket)'} · pane ${run.pane}`);
+  announce(`[lane] START ${run.ticket || '(ticket)'} · ${run.pane ? `pane ${run.pane}` : 'headless'}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   const laneWorkflow = workflowFile(run.config.workflow);
@@ -176,6 +177,7 @@ try {
   for (const [stream, target] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
     // Keep original bytes on disk; presentation colors apply only to the tab.
     stream.on('data', data => fs.writeSync(log, data));
+    if (headless) continue;
     if (color || stream === child.stderr) {
       createInterface({input: stream, crlfDelay: Infinity}).on('line', line => {
         if (color) target.write(formatLaneLine(line, true) + '\n');
@@ -250,10 +252,10 @@ try {
     announce(`[lane] Notification failed: ${error.message}`);
   }
   fs.closeSync(log);
-  if (run.config.closeTabOnExit === true) {
+  if (run.pane && run.config.closeTabOnExit === true) {
     try { herdr(run.config, ['pane', 'close', run.pane]); }
     catch (error) { console.error(`Lane ended; cannot close ${run.pane}: ${error.message}`); }
   } else {
-    console.log(`[lane] Finished. Tab kept open; logs: ${path.join(dir, 'output.log')}`);
+    console.log(`[lane] Finished.${run.pane ? ' Tab kept open;' : ''} logs: ${path.join(dir, 'output.log')}`);
   }
 }
