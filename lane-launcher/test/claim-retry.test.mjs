@@ -5,6 +5,21 @@ import {configFrom} from '../launcher-config.mjs';
 import {claimTask, runHoldsTasks} from '../joppa.mjs';
 import {retryFixture} from '../test-support/claim-retry.fixture.mjs';
 import {setup} from '../test-support/launcher.fixture.mjs';
+import {packageFixture} from '../test-support/launcher-joppa.fixture.mjs';
+
+test('independent dispatchers with the same id cannot both claim one Task revision', async t => {
+  const f = await packageFixture(t);
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+  f.run.tasks = [f.run.tasks[0]];
+  const runs = ids.map(() => structuredClone(f.run));
+  const outcomes = await Promise.allSettled(runs.map((run, index) =>
+    claimTask(run, () => save(`${f.root}/${ids[index]}.json`, run), ids[index])));
+  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
+  const winner = runs.find(run => run.claim?.claimed), loser = runs.find(run => !run.claim?.claimed);
+  assert.equal(f.objects.get('task:t1').document.data.assignee, winner.claim.assignee);
+  assert.equal(f.objects.get('task:t1').current_revision, 4);
+  assert.equal(loser.claim, undefined);
+});
 
 test('claim retry delays come only from a validated config', async t => {
   const f = await setup(t, {launchLanes: false});

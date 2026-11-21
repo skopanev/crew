@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Land a clean, reviewed candidate using native hooks and a normal push.
-# Refuse a diverged target; verify its final SHA.
+# Refuse a diverged target; confirm that the remote contains the candidate.
 set -euo pipefail
 usage() { echo 'land.sh <target-branch>'; }
 [[ $# -eq 1 && "$1" != -h && "$1" != --help ]] || { usage; exit 2; }
@@ -49,10 +49,35 @@ if [[ "${DELIVERY:-}" != requirement && -n "${JOPPA_READER_COMMAND_JSON:-}${REQU
   case "$rc" in 0) ;; 75|124) exit 75 ;; *) exit 1 ;; esac
 fi
 budget_check
-timeout --kill-after=5s 60s git push origin "$sha:refs/heads/$target" || {
-  echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2; exit 4; }
+rc=0
+push_output="$(LC_ALL=C timeout --kill-after=5s 60s git push --porcelain origin "$sha:refs/heads/$target" 2>&1)" || rc=$?
+printf '%s\n' "$push_output"
+if [ "$rc" -ne 0 ]; then
+  # Only an explicit rejection proves this push did not update the target. A transport error does not.
+  if printf '%s\n' "$push_output" | awk -F '\t' -v ref="$sha:refs/heads/$target" '
+    $1 == "!" && $2 == ref && $3 ~ /^\[rejected\] \((fetch first|non-fast-forward)\)$/ { found=1 }
+    END { exit !found }'; then
+    echo 'lane-push: TARGET_MOVED; refresh the candidate and rerun its checks' >&2
+    exit 3
+  fi
+  if printf '%s\n' "$push_output" | awk -F '\t' -v ref="$sha:refs/heads/$target" '
+    $1 == "!" && $2 == ref && $3 ~ /^\[remote rejected\] \((incorrect old value provided|failed to update ref)\)$/ { found=1 }
+    END { exit !found }'; then
+    moved="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || moved="$before"
+    if [[ "$moved" != "$before" ]]; then
+      echo 'lane-push: TARGET_MOVED; the server rejected a stale target update' >&2
+      exit 3
+    fi
+  fi
+  echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2
+  exit 4
+fi
 after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || {
   echo 'lane-push: target read failed after publication; inspect target ancestry' >&2; exit 4; }
 echo "lane-push: after=$after"
-[[ "$after" == "$sha" ]] || { echo 'lane-push: вершина не совпала с кандидатом — проверь вручную' >&2; exit 4; }
+if [[ "$after" != "$sha" ]]; then
+  [[ -n "$after" ]] && timeout 60 git fetch --no-write-fetch-head origin "$after" &&
+    git merge-base --is-ancestor "$sha" "$after" || {
+      echo 'lane-push: remote target does not confirm candidate ancestry; inspect publication' >&2; exit 4; }
+fi
 echo "lane-push: OK $target -> $sha"

@@ -22,6 +22,14 @@ It opens a Herdr tab in the current workspace. Its worker claims that exact Task
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
+Each host keeps its own state directory, worktrees and `sharedLockDir`. Separate hosts can use the same dispatcher ID.
+Two dispatchers can select one Task, but only one revision-checked claim succeeds. The other worker stops before Docker.
+The lane limit applies to each host, not to the workspace total.
+
+`sharedLockDir` serializes target landing on one host. Git rejects stale target updates between hosts without a distributed lock.
+An explicit target rejection uses the existing refresh and gate retry. A later remote descendant still confirms the landed candidate.
+A lost push response remains uncertain and does not trigger automatic republication.
+
 The repository config supplies the writable paths. Task text cannot replace those paths.
 When Dolber selects a Task, the dashboard shows criterion progress and successful runs in the last 60 minutes and 24 hours.
 One grouped count uses criterion types and the filter's parent and depth. It does not apply the Task stage filter.
