@@ -8,6 +8,19 @@ import {parsePublication, requirementPlan, assertRequirementHead} from './requir
 import {repositoryGit} from './publication-guard.mjs';
 import {removeEmptyDiscardCheckout} from './failed-checkout.mjs';
 
+// A host hook refusal precedes a new claim, so it is not a claim transport failure.
+export function startupFailure(run, error, signal, claimRefused) {
+  const message = run.claim || signal || run.finalizeOnly || String(error.code || '').startsWith('PRE_LAUNCH_') ? error.message :
+    claimRefused || error.rejected ? `CLAIM_REFUSED: ${error.message}` :
+      `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in Joppa before retrying`;
+  return {status: 'failed', code: 2, error: message};
+}
+
+export function postLandWarning(dir) {
+  return fs.readFileSync(path.join(dir, 'output.log'), 'utf8')
+    .match(/^run\.sh: POST_LAND_FAILED: ([^\r\n]+)/m)?.[1];
+}
+
 // Announce the latest failure report and its failed checks. Returns its artifacts folder.
 export function failureDetails(run, announce) {
   let artifacts = null;

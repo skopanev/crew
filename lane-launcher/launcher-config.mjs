@@ -10,6 +10,7 @@ import {defaultHooks, validateHooks} from './hooks-config.mjs';
 import {defaultWorkflow, validateWorkflow, validateWorkflowVars} from './workflow-config.mjs';
 import {validateLaneOptions} from './lane-options.mjs';
 import {validateSelectionNotify} from './selection-notify.mjs';
+import {validatePreLaunch} from './pre-launch.mjs';
 
 const hostOwned = key => /^(MEDULLA_|LANE_|CBM_|REQUIREMENT_|DELIVERY(?:_|$))/.test(key) ||
   ['TOOLING_ROOT', 'TARGET_BRANCH', 'IMAGE', 'TICKET_SOURCE', 'LAUNCH_CLAIM_FILE', 'SCOUT_ENABLED',
@@ -26,6 +27,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   // Saved run state records the source; operator recovery checks it.
   config.source = 'joppa';
   validateSelectionNotify(config.selectionNotify);
+  validatePreLaunch(config);
   config.delivery ??= 'branch';
   validateJoppa(config);
   validateLaneOptions(config);

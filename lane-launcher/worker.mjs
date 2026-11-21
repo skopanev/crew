@@ -12,7 +12,7 @@ import {requirementPlan, assertRequirementHead} from './requirement-delivery.mjs
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
-import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead} from './worker-outcome.mjs';
+import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead, startupFailure, postLandWarning} from './worker-outcome.mjs';
 import {publishLandedResults} from './test-results-publish.mjs';
 import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
@@ -21,6 +21,7 @@ import {prepareReuse} from './retained-checkout.mjs';
 import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
 import {laneOptionsEnv} from './lane-options.mjs';
 import {stopRunContainers} from './container-cleanup.mjs';
+import {runPreLaunch} from './pre-launch.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -68,6 +69,7 @@ try {
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   const laneWorkflow = workflowFile(run.config.workflow);
+  await runPreLaunch(run, dir, {signal: claimAbort.signal, announce});
   if (run.finalizeOnly) {
     if (run.config.delivery !== 'requirement') throw new Error('Finalization requires requirement delivery');
     run.repository = run.config.repositories.find(repo => repo.id === run.repositoryId);
@@ -190,16 +192,10 @@ try {
     child.once('close', (code, receivedSignal) => resolve({code, signal: receivedSignal || signal}));
   });
   result = {...outcome, status: outcome.code === 0 ? 'exited' : 'failed'};
-  const postLand = fs.readFileSync(path.join(dir, 'output.log'), 'utf8')
-    .match(/^run\.sh: POST_LAND_FAILED: ([^\r\n]+)/m);
-  if (postLand) result.postLandWarning = postLand[1];
+  result.postLandWarning = postLandWarning(dir);
   if (result.status === 'failed') result.error = `Lane exited ${result.code ?? result.signal}; full output: ${path.join(dir, 'output.log')}`;
 } catch (error) {
-  const message = run.claim || signal || run.finalizeOnly ? error.message :
-    claimRefused || error.rejected ? `CLAIM_REFUSED: ${error.message}` :
-      `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in Joppa before retrying`;
-  result = {status: 'failed', code: 2,
-    error: message};
+  result = startupFailure(run, error, signal, claimRefused);
   process.exitCode = 2;
 } finally {
   if (child) {

@@ -29,6 +29,20 @@ Existing workers keep their saved config, claims and slots. Stopping the dispatc
 A claim refusal stops that worker. An uncertain claim remains reserved until you inspect it.
 The continuous dispatcher still checks for other work.
 
+Set `preLaunch` to run a host command before each worker claims its Task or starts the lane:
+
+```json
+{"preLaunch":["/absolute/bin/prepare-host","--cleanup"],"preLaunchTimeoutSeconds":60}
+```
+
+Crew executes this argument array directly, without a shell. Omit it or set it to `null` to disable it.
+The command runs in the launch directory. `CREW_DISPATCHER_ID` gives the dispatcher ID. `CREW_RUN_DIR` gives that directory.
+The host environment remains available. Both output streams go to `pre-launch.log` there.
+`preLaunchTimeoutSeconds` defaults to 60. A timeout or worker interruption kills the command's process group.
+The dashboard shows `PRE_LAUNCH_FAILED`, `PRE_LAUNCH_TIMEOUT` or `PRE_LAUNCH_ABORTED` if the command does not succeed.
+For a new unclaimed run, failure starts no lane and makes no Task mutation.
+The hook applies to Herdr and headless workers. Preview and dry-run do not execute it.
+
 Each host keeps its own state directory, worktrees and `sharedLockDir`. Separate hosts can use the same dispatcher ID.
 Two dispatchers can select one Task, but only one revision-checked claim succeeds. The other worker stops before Docker.
 The lane limit applies to each host, not to the workspace total.
