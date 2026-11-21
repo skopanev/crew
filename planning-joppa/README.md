@@ -30,13 +30,35 @@ Each process keeps its own Medulla run folder, claim and output log.
 The existing native claim still checks ownership and revisions.
 One dispatcher lock protects the shared runs folder. Do not start three automatic dashboards on that folder.
 `--once` and an explicit item, AC or Requirement still run one pass.
-The dispatcher accepts config changes after all its active passes end.
-An edit still stops publication through the config digest check.
+In inline mode, the dispatcher accepts config changes after all its active passes end.
+Each pass checks its own config digest before publication.
 Configured flows release their own claim with the private launch snapshot, even after the live config changes.
 Ctrl+C stops Medulla first, then runs the guarded failure release and records `release.json`.
 Shutdown allows 10 seconds for Medulla and 30 seconds for the release.
 Unconfirmed shutdown, changed ownership or uncertain mutations retain the claim for recovery.
 The legacy Requirement planner keeps its existing shutdown behavior.
+
+Set `"execution": "detached"` for independent configured flow passes.
+The default `"inline"` keeps the shutdown behavior above. Changing this option requires a dispatcher restart.
+Detached passes use the same process launcher as headless Dolber lanes. They need no Herdr tab or additional container.
+Each pass keeps its PID, config snapshot, launch record and `output.log` in its own run folder.
+The Medulla run keeps its existing artifacts. The dashboard shows one row for the pass.
+The dispatcher identity follows the endpoint, workspace and canonical runs folder.
+After a restart, live passes still occupy concurrency slots. The dashboard reads their current stages from their journals.
+Ctrl+C stops only the detached dashboard. Live passes keep their claims and continue.
+New passes use reloaded configuration, even when older passes remain active.
+Each active pass uses its captured config. Its digest, claim, revision and publication guards remain in force.
+An uncertain receipt still holds further work. The dispatcher creates no separate history database.
+`--once` starts one independent pass and waits for its exit status.
+To stop one pass, use the full Run ID or full run folder name:
+
+```sh
+sh ./lane-launcher/planner-joppa.sh /absolute/path/to/flow.json --stop-run RUN_ID
+```
+
+The command checks the worker PID and signals that process only.
+The configured launcher stops Medulla and performs the normal guarded claim release.
+Wait for the row to finish. An unconfirmed release shows `HELD` and requires recovery.
 
 The workflow calls `flow_stages.py` through the supplied `CREW_FLOW_STAGES` variable.
 `prepare` emits `assignment` and each configured `<role>_contract`.
@@ -132,9 +154,11 @@ Use `--once` to select at most one Requirement and exit after it finishes.
 Use `--monitor --once` for one display snapshot.
 The table reads existing Medulla journals and results. It creates no history database.
 New runs save their output in `output.log` inside the Medulla run folder.
-Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
+In inline mode, Ctrl+C stops this display and interrupts its own run. It does not stop other runs.
+In detached mode, Ctrl+C stops only this display.
 The automatic loop checks the queue every 60 seconds. Set `interval_seconds` in the config to change this interval.
-The automatic loop reloads the config before each queue selection, never during a planning pass.
+The automatic loop reloads the config before each queue selection.
+Inline passes wait until all active passes end. Detached passes keep their own config snapshots.
 Each pass reads the config file when it starts. Attempt history stays after a reload.
 The dispatcher gives each pass the digest of the config bytes it validated (`PLANNING_JOPPA_HANDOFF_DIGEST`).
 `launch.py` refuses a file with other bytes before any claim or Medulla start, with exit status 75 (handoff changed, nothing started).

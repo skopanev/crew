@@ -11,6 +11,7 @@ import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.
 import {configReloader} from '../lane-launcher/config-reload.mjs';
 import {PlannerRuns} from './planner-runs.mjs';
 import {retryFilter} from './retry.mjs';
+import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-runs.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -33,19 +34,27 @@ export async function main(argv) {
   const ac = option('--ac-id');
   const requirement = option('--req-id');
   const item = option('--item-id');
+  const stopRun = option('--stop-run');
   const fixed = ac || requirement || item;
   const once = argv.includes('--once');
   const monitor = argv.includes('--monitor');
   const dryRun = argv.includes('--dry-run');
   if (!file || argv.some(value => !['--once', '--dry-run', '--monitor'].includes(value)) ||
       Number(Boolean(ac)) + Number(Boolean(requirement)) + Number(Boolean(item)) + Number(monitor) > 1) {
-    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--req-id REQ | --ac-id AC | --item-id ITEM | --monitor] [--once] [--dry-run]');
+    throw new Error('Usage: sh lane-launcher/planner-joppa.sh CONFIG [--req-id REQ | --ac-id AC | --item-id ITEM | --monitor | --stop-run RUN_ID] [--once] [--dry-run]');
   }
   if (dryRun && !fixed) throw new Error('--dry-run needs --req-id, --ac-id or --item-id');
   const configFile = path.resolve(file);
   const automatic = !fixed && !monitor;
   const bytes = fs.readFileSync(configFile);
   let {config, root, interval, concurrency, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
+  const detached = config.execution === 'detached';
+  const owner = dispatcherId(plannerIdentity({config, root}));
+  if (stopRun) {
+    if (!detached || fixed || monitor || dryRun) throw new Error('--stop-run requires a detached configured flow');
+    console.log(`Stopping ${stopDetachedRun(root, owner, stopRun)}`);
+    return;
+  }
   // launch.py compares the bytes it parses with this digest before it claims or starts Medulla.
   const handoff = () => ({...process.env, PLANNING_JOPPA_HANDOFF_DIGEST: digest});
   const args = [path.join(here, 'run.sh'), '--config', configFile, ...(ac ? ['--ac-id', ac] : []),
@@ -58,8 +67,11 @@ export async function main(argv) {
   const state = {message: fixed ? `Planning ${fixed}` :
     monitor ? 'Monitoring existing runs' : config.workflow ? 'Checking configured items' : 'Checking ready Requirements', error: null};
   let screen, stopped = false, changed = false, wake, termination, selection, nextCheck;
+  let resolveStop;
+  const dashboardStopped = new Promise(resolve => { resolveStop = resolve; });
   const attempted = new Set(), cooldowns = new Map();
-  const pool = new PlannerRuns(root, run => {
+  const Runs = detached ? DetachedPlannerRuns : PlannerRuns;
+  const finished = run => {
     // A refused handoff started nothing. Only this unstarted selection may be tried again.
     if (run.code === HANDOFF_CHANGED && run.attemptKey && !run.current) attempted.delete(run.attemptKey);
     if (run.code !== 0) state.error = run.error || `Planning exited ${run.code}`;
@@ -67,10 +79,11 @@ export async function main(argv) {
     changed = true;
     draw();
     wake?.();
-  });
+  };
+  const pool = detached ? new Runs(root, owner, finished, config) : new Runs(root, finished);
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
-    const rows = plannerRows(root, pool.current);
+    const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
     const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
       paint, 6, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT'});
     const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
@@ -90,6 +103,7 @@ export async function main(argv) {
     stopped = true;
     selection?.abort();
     process.exitCode = signal === 'SIGTERM' ? 143 : 130;
+    resolveStop(process.exitCode);
     termination ??= pool.stop(signal);
     wake?.();
   };
@@ -118,9 +132,9 @@ export async function main(argv) {
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
       let selected = requirement, attemptKey = null, scope = '--req-id';
-      if (automatic && pool.size >= concurrency) { await pause(); continue; }
+      if (automatic && !detached && pool.size >= concurrency) { await pause(); continue; }
       if (automatic) {
-        if (pool.size) {
+        if (pool.size && !detached) {
           try {
             if (createHash('sha256').update(fs.readFileSync(configFile)).digest('hex') !== digest) {
               state.error = 'Config changed; waiting for active passes to end';
@@ -129,13 +143,18 @@ export async function main(argv) {
           } catch (error) { state.error = `Config read failed: ${error.message}`; await pause(); continue; }
         }
         state.error = null;
-        // Active passes keep their handoff. Accept new config only when the pool is empty.
-        const loaded = pool.size ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
+        // Detached passes keep their snapshots. Inline passes finish before config reload.
+        const loaded = pool.size && !detached ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
         ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
+        if (detached && pool.size >= concurrency) {
+          state.error = loaded.error || null;
+          if (once) { draw(); break; }
+          await pause(); continue;
+        }
         try {
-          const rows = plannerRows(root, pool.current, Infinity, config);
-          const busy = address => pool.owns(address) || rows.some(row => row.active && row.ac === address);
+          const rows = plannerRows(root, pool.current, Infinity, {...config, dispatcherId: owner});
+          const busy = address => !detached && pool.owns(address) || rows.some(row => row.active && row.ac === address);
           if (loaded.error) state.error = loaded.error;
           else if (rows.some(row => row.status === 'HELD')) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
@@ -171,9 +190,9 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
-        const run = pool.start(ac || item || selected, runArgs, handoff(), attemptKey, Boolean(config.workflow));
+        const run = await pool.start(ac || item || selected, runArgs, handoff(), attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow));
         if (once || fixed) {
-          const code = await run.completion;
+          const code = await (detached ? Promise.race([run.completion, dashboardStopped]) : run.completion);
           await termination;
           if (!stopped) process.exitCode = code;
         }

@@ -60,6 +60,17 @@ class FlowShutdownTests(unittest.TestCase):
         self.assertFalse((self.target / "release.json").exists())
         self.assertEqual(len(self.api.batches), 1)
 
+    def test_detached_snapshot_survives_live_config_change_and_keeps_its_digest_guard(self):
+        with patch.dict(os.environ, {"PLANNING_JOPPA_CONFIG": str(self.snapshot)}):
+            write(self.live, {**self.config, "workspace": "different"})
+            self.assertEqual(flow_stages.settings()["workspace"], "example")
+            with patch.object(sys, "argv", ["flow_stages.py", "verify"]):
+                self.assertEqual(flow_stages.main(), 0)
+            self.assertEqual(len(self.api.batches), 1)
+            write(self.snapshot, {**self.config, "workspace": "different"})
+            with self.assertRaisesRegex(ValueError, "flow config changed"):
+                flow_stages.settings()
+
     def test_ctrl_c_waits_for_medulla_exit_then_releases_once(self):
         script = """import os, signal, sys, time
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(130))

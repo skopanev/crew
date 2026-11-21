@@ -15,6 +15,9 @@ export const HANDOFF_CHANGED = 75;
 export function plannerConfig(configFile, {ac = null, automatic = false} = {}, bytes = fs.readFileSync(configFile)) {
   const config = JSON.parse(bytes.toString('utf8'));
   const ids = criterionIds(config);
+  if (config.execution !== undefined && (!config.workflow || !['inline', 'detached'].includes(config.execution))) {
+    throw new Error('execution must be inline or detached for a configured workflow');
+  }
   if (ac && ids && !ids.includes(ac)) throw new Error('Selected AC is outside config.ac_ids');
   if (typeof config.workspace !== 'string' || typeof config.runs_folder !== 'string') throw new Error('Config needs workspace and runs_folder');
   // A configured flow names its Medulla workflow explicitly. Without workflow the bundled planner flow applies.
@@ -37,4 +40,5 @@ export function plannerConfig(configFile, {ac = null, automatic = false} = {}, b
 
 // The dispatch lock and run folders belong to these fields. A reload never changes them.
 export const plannerIdentity = loaded => ({workspace: loaded.config.workspace, url: loaded.config.url ?? null,
-  mcpCommand: loaded.config.mcp_command ?? null, root: real(loaded.root)});
+  mcpCommand: loaded.config.mcp_command ?? null, root: real(loaded.root),
+  detached: loaded.config.execution === 'detached'});
