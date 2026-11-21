@@ -4,6 +4,7 @@ import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeFailed, validateFailedTaskStage, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
+import {retryPolicy} from './retry.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -167,7 +168,7 @@ export function flowSettings(config) {
     throw new Error('order must list {field, direction} with direction asc or desc');
   }
   batchSettings(config.batch);
-  if (config.repeat !== undefined && typeof config.repeat !== 'boolean') throw new Error('repeat must be boolean');
+  retryPolicy(config);
   return {selection: config.selection, exclude: exclude ?? null, order};
 }
 

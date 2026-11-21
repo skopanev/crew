@@ -57,7 +57,7 @@ Native data merges preserve unspecified fields. The host refuses moves, whole-do
 It rechecks the schema, references, child membership, revisions and claim before publication.
 Reference reads precede the batch. A reference edit inside this interval is not part of the batch revision guard.
 An uncertain write retains its receipt and requires recovery. A workflow result never proves acceptance.
-A finished run records the revision it left, so its own claim release does not cause another automatic attempt.
+A finished run records the revision it left. The retry policy uses that final revision, including the claim release.
 Set `batch` to `{ "size": 5, "by": "data.repository" }` to claim up to five matching items of one configured group.
 Set `min_size` to wait for a minimum batch. Polling still uses `interval_seconds`.
 Set `max_wait_seconds` and `age_field` together to release a smaller batch after its oldest timestamp reaches that age.
@@ -70,14 +70,22 @@ The native selection filter controls every member, including stage fields. Crew 
 The assignment adds `items` and `claim_revisions`. The entire batch is claimed in one transaction.
 Publication can update or archive those claimed items. It clears every claim in the same transaction.
 An archive uses the saved revision of its preceding claim release. New objects can belong to any claimed item.
-The run records every final item revision. With `repeat: false`, revision deduplication excludes previously attempted batch anchors.
+Set `retry` to control automatic retries of configured flow items:
+
+- `"on_revision"` (default): retry only above the highest recorded final revision.
+- `"always"`: retry matching items after `interval_seconds`, including after a confirmed failure.
+- `"never"`: do not retry an address that has a recorded attempt, even after a revision change.
+
+The dispatcher reads existing run folders. It writes no separate attempt history.
+These policies apply to batch anchors. The run records every final item revision.
 Another eligible anchor can still include those items as batch members when they match the native selection filter.
-Set `repeat: true` for a scheduled deterministic flow that must revisit pending work after each configured interval.
-The default is false. Unknown mutation outcomes always hold the dispatcher, including when repeat is true.
+The previous `repeat: true` setting means `retry: "always"`. `repeat: false` means `retry: "on_revision"`.
+An explicit `retry` takes precedence. Unknown mutation outcomes always hold the dispatcher, for every retry policy.
+Active addresses remain reserved. Claims, ownership and revision checks stay unchanged.
 The publication envelope can add `outcome: { "status": "blocked", "reason_code": "BASELINE_RED", "reason": "..." }`.
 This records a stopped business outcome after a confirmed note or claim release. It does not claim acceptance passed.
 The generic `verify` stage checks the claimed inputs before an external side effect, such as a Git push.
-Edit the selected node or remove that run after receipt recovery to permit another attempt at unchanged work.
+After receipt recovery, use `retry: "always"` to permit another attempt at unchanged work.
 
 Status: live publication and lane completion passed before native context reads were added.
 Native reads pass on four providers. Full native planning publication remains unverified.

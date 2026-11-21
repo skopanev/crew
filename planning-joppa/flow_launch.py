@@ -44,6 +44,8 @@ def configuration(path, raw=None):
             all(isinstance(item, str) and item for item in config.get("references", [])), "references must be field names")
     batch_settings(config)
     require(type(config.get("repeat", False)) is bool, "config.repeat must be boolean")
+    require(config.get("retry", "on_revision") in ("always", "on_revision", "never"),
+            "config.retry must be always, on_revision or never")
     return config
 
 

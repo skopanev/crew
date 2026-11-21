@@ -10,6 +10,7 @@ import {readyRequirements, nextConfiguredItem} from './queue.mjs';
 import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
 import {configReloader} from '../lane-launcher/config-reload.mjs';
 import {PlannerRuns} from './planner-runs.mjs';
+import {retryFilter} from './retry.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -139,13 +140,11 @@ export async function main(argv) {
           else if (rows.some(row => row.status === 'HELD')) {
             state.error = 'RECOVERY_REQUIRED: resolve the held planning run before another claim';
           } else if (config.workflow) {
-            // The configured flow selects one item. A run folder of the same item revision is not repeated.
+            // Retry policy affects selection only. Busy and held runs remain excluded.
             selection = new AbortController();
-            const started = new Set(rows
-              .flatMap(row => row.attemptKeys || [row.attemptKey]).filter(Boolean));
+            const skipRetry = retryFilter(config, rows, attempted, cooldowns);
             const {count, next} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              row => busy(row.address) || (config.repeat ? (cooldowns.get(row.address) || 0) > Date.now() :
-                attempted.has(row.attemptKey) || started.has(row.attemptKey)));
+              row => busy(row.address) || skipRetry(row));
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);
