@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {read, validateWritableDirs} from './runtime.mjs';
+import {read, validateWritableDirs, command} from './runtime.mjs';
 import {scopeDirectory, validateId} from './scope.mjs';
 import {validateJoppa} from './joppa.mjs';
 import {validateContext} from './context-config.mjs';
@@ -117,3 +117,28 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
 export const dolberIdentity = config => ({workspace: config.workspace, url: config.joppa.url,
   mcpCommand: config.joppa.mcpCommand ?? null, id: config.id,
   stateDir: fs.existsSync(config.stateDir) ? fs.realpathSync(config.stateDir) : config.stateDir});
+
+export function preflight(config) {
+  if (config.launchLanes && config.delivery !== 'branch' && !config.sharedLockDir) {
+    throw new Error('Target delivery requires sharedLockDir; no ticket was claimed');
+  }
+  for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
+    command('bash', ['-c', 'command -v "$1"', '_', bin]);
+  }
+  if (config.launchLanes) {
+    try { command('medulla', ['-w', config.workflow, '--validate']); }
+    catch (error) {
+      throw new Error(`Workflow failed Medulla validation; no ticket was claimed: ${String(error.stderr || error.stdout || error.message).trim()}`);
+    }
+  }
+  const coderTimeout = config.coderTimeoutSeconds != null || config.repositories?.some(repo => repo.coderTimeoutSeconds != null);
+  if (config.launchLanes && (config.dockerEngine || coderTimeout)) {
+    const help = command('medulla', ['--help']);
+    if (config.dockerEngine && !help.includes('--docker-engine')) {
+      throw new Error('dockerEngine requires Medulla with --docker-engine support; no ticket was claimed');
+    }
+    if (coderTimeout && !help.includes('--node-timeout')) {
+      throw new Error('coderTimeoutSeconds requires Medulla with --node-timeout support; no ticket was claimed');
+    }
+  }
+}

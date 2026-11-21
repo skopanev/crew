@@ -8,10 +8,11 @@ import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
 import {formatDependencyIssue} from './dependencies.mjs';
-import {configFrom, dolberIdentity} from './launcher-config.mjs';
+import {configFrom, dolberIdentity, preflight} from './launcher-config.mjs';
 import {configReloader} from './config-reload.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
 import {reportSelectionIssues} from './selection-notify.mjs';
+import {selectionProgress} from './selection-progress.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -60,31 +61,6 @@ function snapshots(config) {
   return {containers, panes: new Set(result.panes.map(pane => pane.pane_id))};
 }
 
-function preflight(config) {
-  if (config.launchLanes && config.delivery !== 'branch' && !config.sharedLockDir) {
-    throw new Error('Target delivery requires sharedLockDir; no ticket was claimed');
-  }
-  for (const bin of config.launchLanes ? ['medulla', 'jq'] : []) {
-    command('bash', ['-c', 'command -v "$1"', '_', bin]);
-  }
-  if (config.launchLanes) {
-    try { command('medulla', ['-w', config.workflow, '--validate']); }
-    catch (error) {
-      throw new Error(`Workflow failed Medulla validation; no ticket was claimed: ${String(error.stderr || error.stdout || error.message).trim()}`);
-    }
-  }
-  const coderTimeout = config.coderTimeoutSeconds != null || config.repositories?.some(repo => repo.coderTimeoutSeconds != null);
-  if (config.launchLanes && (config.dockerEngine || coderTimeout)) {
-    const help = command('medulla', ['--help']);
-    if (config.dockerEngine && !help.includes('--docker-engine')) {
-      throw new Error('dockerEngine requires Medulla with --docker-engine support; no ticket was claimed');
-    }
-    if (coderTimeout && !help.includes('--node-timeout')) {
-      throw new Error('coderTimeoutSeconds requires Medulla with --node-timeout support; no ticket was claimed');
-    }
-  }
-}
-
 export async function tick(config, display = null) {
   const print = display ? message => { display.message = message; } : console.log;
   if (display) { display.message = 'Checking tickets'; display.error = null; }
@@ -118,6 +94,12 @@ export async function tick(config, display = null) {
   };
   if (!candidate) { if (display) display.message = 'No ready tickets'; await report(); return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');
+  try {
+    const progress = await selectionProgress(config, selected);
+    if (display) display.progress = progress.line;
+    else print(progress.line);
+    if (progress.error) { if (display) display.error = progress.error; else console.error(progress.error); }
+  } catch (error) { if (display) display.error = error.message; else console.error(error.message); }
   print(`Starting new one with ticket: ${paint('accent', candidate.id)}${config.launchLanes ? '' : ' (preview: запуск отключён)'}`);
   if (!display && candidate.title) print(`  ${paint('description', candidate.title.replace(/[\r\n\x1b]/g, ' '))}`);
   if (!config.launchLanes) { await report(); return; }

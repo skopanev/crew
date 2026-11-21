@@ -23,6 +23,10 @@ A claim refusal stops that worker. An uncertain claim remains reserved until you
 The continuous dispatcher still checks for other work.
 
 The repository config supplies the writable paths. Task text cannot replace those paths.
+When Dolber selects a Task, the dashboard shows criterion progress and successful runs in the last 60 minutes and 24 hours.
+One grouped count uses criterion types and the filter's parent and depth. It does not apply the Task stage filter.
+The run counts include only confirmed completions with exit code zero. Queued branches do not count as completed runs.
+Redraws and checks at full capacity keep the last progress line. They make no progress query.
 The dashboard shows refused Tasks and their reason.
 Set `selectionNotify` to send each refusal once through the existing Agntbus MCP endpoint:
 

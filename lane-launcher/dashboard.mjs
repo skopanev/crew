@@ -187,7 +187,7 @@ export function createDashboard(config, paint) {
       clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
       counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tasks: not checked',
-      '─'.repeat(width)];
+      ...(state.progress ? [clip(state.progress, width)] : []), '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
     footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)
       .map(line => paint('yellow', line))));
@@ -202,7 +202,7 @@ export function createDashboard(config, paint) {
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
-    output.push(...renderRunTable(rows, paint, 6 + footer.length, {finished: true}));
+    output.push(...renderRunTable(rows, paint, 6 + footer.length + Number(Boolean(state.progress)), {finished: true}));
     output.push(...footer);
     output.push(stopped ? 'Stopped' : config.monitorOnly ? 'Dispatch paused · Ctrl+C to close' : left == null ? 'Checking tickets · Ctrl+C to stop' :
       `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);

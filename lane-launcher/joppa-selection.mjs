@@ -112,7 +112,9 @@ export async function nextTask(config) {
   let available = 0, held = 0;
   for (const worker of config.joppa.workers) {
     const read = passReader(config, worker);
-    validateFailedTaskStage(config, (await read('joppa_tree', {}))?.schema?.types);
+    const types = (await read('joppa_tree', {}))?.schema?.types;
+    validateFailedTaskStage(config, types);
+    const criterionKinds = Object.keys(types).filter(kind => types[kind].role === 'ac');
     const pending = [];
     for (const run of reservations) {
       if (run.workspace !== config.workspace || run.config?.joppa?.url !== config.joppa.url ||
@@ -189,7 +191,7 @@ export async function nextTask(config) {
       const candidate = await finalizationCandidate({config, worker,
         read: (tool, args) => api(config, worker, tool, {workspace: config.workspace, ...args}),
         object, group, rows: inventory, occupied: finalizing, runs});
-      if (candidate) return {candidate, worker, available: available + 1, held,
+      if (candidate) return {candidate, worker, criterionKinds, available: available + 1, held,
         dependencyIssues: [...dependencyIssues.values()], selectionIssues: [...selectionIssues.values()]};
     }
     while (eligible.length) {
@@ -219,7 +221,7 @@ export async function nextTask(config) {
         }
       }
       return {candidate: {id: task.address, title: task.title, revision: task.revision,
-        tasks, requirement: task.requirement, repository: task.repository}, worker, available, held,
+        tasks, requirement: task.requirement, repository: task.repository}, worker, criterionKinds, available, held,
         dependencyIssues: [...dependencyIssues.values()], selectionIssues: [...selectionIssues.values()]};
     }
   }
