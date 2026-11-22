@@ -621,12 +621,18 @@ nodes:
     post: |
       [ "$MEDULLA_BODY_RC" = 0 ] || exit 1
       case "$MEDULLA_BODY_SIGNAL" in
-        CLEAR|REJECT) exit 0 ;;
-        *) echo 'Return CLEAR or REJECT as a signal. A report with NONE does not supply a verdict.' >&2
+        CLEAR|REJECT|SCOPE_MISMATCH) exit 0 ;;
+        *) echo 'Return CLEAR, REJECT or SCOPE_MISMATCH as a signal. A report with NONE does not supply a verdict.' >&2
            exit 1 ;;
       esac
     prompt: |
       Read {{var:RUN_ARTIFACTS}}/reviewer-contract.txt and execute its steps.
+      Return SCOPE_MISMATCH only when a blocking remedy changes an explicit Task/AC restriction or needs a missing prerequisite.
+      A missing plan detail or missing test within the Task/AC remains REJECT. Keep optional improvements as advice.
+      For SCOPE_MISMATCH, include an open HIGH finding and exactly one JSON line in the report:
+      SCOPE_MISMATCH: {"restriction":"Task/AC address and exact quoted restriction","evidence":"Code location and observed behavior","required_change":"Required contract or prerequisite change"}
+      Cite the current Task/AC. An approved plan omission alone does not prove a scope conflict.
+      Finish with one signal: CLEAR, REJECT or SCOPE_MISMATCH.
       Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
       Workspace: {{var:project_name}}. Verification only: {{var:VERIFY_ONLY}}.
       Worktree: {{var:LANE_WORKTREE}}.
@@ -648,6 +654,7 @@ nodes:
     on_signal:
       CLEAR: git_landing
       REJECT: reject_gate
+      SCOPE_MISMATCH: notify_failure
       REVIEW_INCOMPLETE: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
@@ -656,7 +663,7 @@ nodes:
       python3 - <<'PY'
       import json, os, pathlib, re, sys
 
-      VERDICTS = {"CLEAR", "REJECT"}
+      VERDICTS = {"CLEAR", "REJECT", "SCOPE_MISMATCH"}
       manifest = os.environ.get("MEDULLA_MANIFEST_EXPERT_REVIEW", "")
       if not manifest or not os.path.isfile(manifest):
           sys.exit("нет манифеста панели")
@@ -669,7 +676,7 @@ nodes:
           found = {n for n in names if n in VERDICTS}
           return found.pop() if len(found) == 1 else ""
 
-      go, findings, notes, incomplete = 0, [], [], []
+      go, findings, notes, incomplete, scope = 0, [], [], [], []
       art = pathlib.Path(os.environ["MEDULLA_RUN_DIR"]) / "artifacts"
       art.mkdir(parents=True, exist_ok=True)
       inputs = json.loads((pathlib.Path(manifest).parent / "inputs.json").read_text())
@@ -694,6 +701,17 @@ nodes:
           if not re.search(r"^COVERAGE:[ \t]*\S[^\r\n]*$", report, re.M):
               incomplete.append(f"{who}: missing report or coverage statement")
           high = re.findall(r"^[ \t]*[-*][ \t]+(?:\*\*|__)?HIGH(?![A-Za-z0-9])(?:\*\*|__)?[^\r\n]*", report, re.M)
+          if v == "SCOPE_MISMATCH":
+              try:
+                  proofs = re.findall(r"^SCOPE_MISMATCH:[ \t]*(.+)$", report, re.M)
+                  detail = json.loads(proofs[0]) if len(proofs) == 1 else None
+                  if (not isinstance(detail, dict) or set(detail) != {"restriction", "evidence", "required_change"}
+                          or not all(isinstance(value, str) and value.strip() for value in detail.values()) or not high):
+                      raise ValueError("Need an open HIGH and one scope proof with restriction, evidence and required_change")
+                  scope.append(f"{seat}: {json.dumps(detail, ensure_ascii=False)}")
+                  notes.append(scope[-1])
+              except (ValueError, TypeError) as error:
+                  incomplete.append(f"{who}: invalid SCOPE_MISMATCH proof: {error}")
           if v == "CLEAR" and high:
               v = "REJECT"
               result = "REJECT: HIGH findings contradict CLEAR"
@@ -720,6 +738,9 @@ nodes:
       if incomplete:
           detail = "; ".join(incomplete)
           print(f"<signal:REVIEW_INCOMPLETE>{detail}; full results: {art / 'panel-findings.txt'}</signal:REVIEW_INCOMPLETE>")
+      elif scope:
+          detail = "; ".join(scope)
+          print(f"<signal:SCOPE_MISMATCH>{detail}; full results: {art / 'panel-findings.txt'}</signal:SCOPE_MISMATCH>")
       elif go == len(rows):
           print(f"<signal:CLEAR>все {len(rows)} ревьюера сказали CLEAR</signal:CLEAR>")
       else:

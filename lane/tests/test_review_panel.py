@@ -27,7 +27,7 @@ class ReviewPanelTests(unittest.TestCase):
                 self.assertIn("<signal:REVIEW_LOOP>", result.stdout)
 
     def panel(self, report="## FINDINGS\nNONE\nCOVERAGE: assigned behavior and checks\n",
-              seats=("architecture", "codereview", "security"), missing=False):
+              seats=("architecture", "codereview", "security"), missing=False, signal="CLEAR", timed_out=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
@@ -36,7 +36,8 @@ class ReviewPanelTests(unittest.TestCase):
             (root / "inputs.json").write_text(json.dumps([{"slug": seat} for seat in seats]))
             for seat in seats:
                 rows.append({"slug": seat, "harness": seat, "ok": True, "rc": 0,
-                             "signals": [{"name": "CLEAR"}]})
+                             "signals": [{"name": signal if seat == seats[0] else "CLEAR"}],
+                             "timed_out": timed_out and seat == seats[-1]})
                 body = report if seat == seats[0] else "NONE\nCOVERAGE: assigned behavior\n"
                 if body is not None:
                     (artifacts / f"{seat}.md").write_text(body)
@@ -68,6 +69,26 @@ class ReviewPanelTests(unittest.TestCase):
     def test_nonblocking_findings_do_not_reject_a_complete_panel(self):
         output, _ = self.panel("## FINDINGS\n- MED - Optional improvement\nCOVERAGE: assigned behavior\n")
         self.assertIn("<signal:CLEAR>", output)
+
+    def test_scope_exit_requires_structured_evidence_and_a_complete_panel(self):
+        proof = {"restriction": "task:example: Modify only the reader.",
+                 "evidence": "writer.ts:write still omits the required value.",
+                 "required_change": "A prerequisite Task must change the writer."}
+        report = "## FINDINGS\n- HIGH - Required writer change\nSCOPE_MISMATCH: " + json.dumps(proof) + "\nCOVERAGE: Task and AC\n"
+        output, history = self.panel(report, signal="SCOPE_MISMATCH")
+        self.assertIn("<signal:SCOPE_MISMATCH>", output)
+        self.assertIn(proof["evidence"], history)
+        for changes in ({"missing": True}, {"timed_out": True}):
+            output, _ = self.panel(report, signal="SCOPE_MISMATCH", **changes)
+            self.assertIn("<signal:REVIEW_INCOMPLETE>", output)
+        for invalid in (report.replace(json.dumps(proof), "outside the plan"),
+                        report.replace(json.dumps(proof), json.dumps({**proof, "restriction": ""})),
+                        report.replace("- HIGH", "- LOW"),
+                        report + "SCOPE_MISMATCH: " + json.dumps(proof) + "\n"):
+            output, _ = self.panel(invalid, signal="SCOPE_MISMATCH")
+            self.assertIn("<signal:REVIEW_INCOMPLETE>", output)
+        output, _ = self.panel(report, signal="REJECT")
+        self.assertIn("<signal:REJECT>", output)
 
     def test_reviewers_come_from_workflow_configuration(self):
         for seats in (("quality",), ("correctness", "simplicity")):
