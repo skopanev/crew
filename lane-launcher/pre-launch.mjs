@@ -5,6 +5,10 @@ import {spawn} from 'node:child_process';
 
 export function validatePreLaunch(config) {
   const args = config.preLaunch;
+  if (config.preLaunchSecrets !== undefined && typeof config.preLaunchSecrets !== 'boolean') {
+    throw new Error('preLaunchSecrets must be true or false');
+  }
+  if (config.preLaunchSecrets === true && args == null) throw new Error('preLaunchSecrets requires preLaunch');
   if (args != null && (!Array.isArray(args) || !args.length ||
       args.some(arg => typeof arg !== 'string' || arg.includes('\0')) || !args[0].trim())) {
     throw new Error('preLaunch must be a command argument array');
@@ -17,9 +21,9 @@ export function validatePreLaunch(config) {
 
 const refusal = (code, message) => Object.assign(new Error(`${code}: ${message}`), {code});
 
-export async function runPreLaunch(run, dir, {signal, announce = () => {}} = {}) {
+export async function runPreLaunch(run, dir, {signal, announce = () => {}, logDir = dir} = {}) {
   if (run.config.preLaunch == null) return;
-  const logFile = path.join(dir, 'pre-launch.log');
+  const logFile = path.join(logDir, 'pre-launch.log');
   let fd, timer, child, failure;
   const stop = (code, message) => {
     failure ||= refusal(code, message);

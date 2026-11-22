@@ -43,6 +43,27 @@ The dashboard shows `PRE_LAUNCH_FAILED`, `PRE_LAUNCH_TIMEOUT` or `PRE_LAUNCH_ABO
 For a new unclaimed run, failure starts no lane and makes no Task mutation.
 The hook applies to Herdr and headless workers. Preview and dry-run do not execute it.
 
+Set `preLaunchSecrets: true` to let the hook provide private files to one lane.
+The hook then runs in a private temporary directory outside the configured shared mounts.
+`CREW_RUN_DIR` names this directory. It contains a copy of `launch.json`.
+The hook can write `mounts.json` there:
+
+```json
+[
+  {"host_path":"/absolute/CREW_RUN_DIR/token","container_path":"/run/secrets/cloud","mode":"0600"}
+]
+```
+
+Use absolute regular file paths inside that private `CREW_RUN_DIR`.
+Container paths must be outside `/workspace`. Symbolic links, hard links and duplicate mount targets are refused.
+The worker enforces file mode `0600` and passes each file through Medulla's read-only `--mount-file HOST:CONTAINER` option.
+Use a Medulla release that supports this option. File contents never enter environment variables or launch arguments.
+Keep each file unchanged while the lane runs.
+The worker stops its lane containers, then removes the entire private directory in `finally`.
+This includes successful runs, failed runs, hook failures and startup failures.
+Without `mounts.json`, the worker adds no file mounts. Without the opt-in, existing hook behavior stays unchanged.
+Logs still go to the original launch directory. The worker does not copy hook files into the source or artifact mounts.
+
 Each host keeps its own state directory, worktrees and `sharedLockDir`. Separate hosts can use the same dispatcher ID.
 Two dispatchers can select one Task, but only one revision-checked claim succeeds. The other worker stops before Docker.
 The lane limit applies to each host, not to the workspace total.

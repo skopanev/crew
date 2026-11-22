@@ -7,6 +7,23 @@ import {api, finishTask, noteHeldTask} from './joppa.mjs';
 import {parsePublication, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {repositoryGit} from './publication-guard.mjs';
 import {removeEmptyDiscardCheckout} from './failed-checkout.mjs';
+import {stopRunContainers} from './container-cleanup.mjs';
+
+export function cleanupWorkerResources({run, result, child, secrets, folders, announce}) {
+  if (child) {
+    try { announce(`[lane] stopped run containers: ${stopRunContainers(run.runFolder).length}`); }
+    catch (error) {
+      result.cleanupError = error.message;
+      announce(`[lane] CONTAINER_CLEANUP_FAILED: ${error.message}`);
+    }
+  }
+  try { secrets?.cleanup(); }
+  catch (error) {
+    result.cleanupError = [result.cleanupError, error.message].filter(Boolean).join('; ');
+    announce(`[lane] SECRET_CLEANUP_FAILED: ${error.message}`);
+  }
+  for (const folder of folders) if (folder) fs.rmSync(folder, {recursive: true, force: true});
+}
 
 // A host hook refusal precedes a new claim, so it is not a claim transport failure.
 export function startupFailure(run, error, signal, claimRefused) {

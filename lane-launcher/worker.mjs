@@ -12,7 +12,7 @@ import {requirementPlan, assertRequirementHead} from './requirement-delivery.mjs
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
-import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead, startupFailure, postLandWarning} from './worker-outcome.mjs';
+import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead, startupFailure, postLandWarning, cleanupWorkerResources} from './worker-outcome.mjs';
 import {publishLandedResults} from './test-results-publish.mjs';
 import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
@@ -20,8 +20,8 @@ import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.m
 import {prepareReuse} from './retained-checkout.mjs';
 import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
 import {laneOptionsEnv} from './lane-options.mjs';
-import {stopRunContainers} from './container-cleanup.mjs';
 import {runPreLaunch} from './pre-launch.mjs';
+import {prepareRunSecrets} from './run-secrets.mjs';
 
 const stateFile = path.resolve(process.argv[2]);
 const dir = path.dirname(stateFile);
@@ -63,13 +63,15 @@ process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGHUP', () => stop('SIGTERM'));
 let result, artifacts = null, claimRefused = false;
-let readerDir, contextDir, hooksDir, finalizationTicket;
+let readerDir, contextDir, hooksDir, finalizationTicket, secrets;
 try {
   announce(`[lane] START ${run.ticket || '(ticket)'} · ${run.pane ? `pane ${run.pane}` : 'headless'}`);
   announce(`[lane] logs: ${path.join(dir, 'output.log')}`);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   const laneWorkflow = workflowFile(run.config.workflow);
-  await runPreLaunch(run, dir, {signal: claimAbort.signal, announce});
+  secrets = prepareRunSecrets(run, dir);
+  await runPreLaunch(run, secrets?.dir || dir, {signal: claimAbort.signal, announce, logDir: dir});
+  const secretArgs = secrets?.mountArgs() || [];
   if (run.finalizeOnly) {
     if (run.config.delivery !== 'requirement') throw new Error('Finalization requires requirement delivery');
     run.repository = run.config.repositories.find(repo => repo.id === run.repositoryId);
@@ -128,10 +130,10 @@ try {
     }
     throw error;
   }
-  run.args = laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
+  run.args = [...laneArgs({...run.config, gateCommands: run.repository.gateCommands, testCommand: run.repository.testCommand,
     reviewCommands: run.repository.reviewCommands ?? run.config.reviewCommands,
     coderTimeoutSeconds: run.repository.coderTimeoutSeconds ?? run.config.coderTimeoutSeconds,
-    gateTimeoutSeconds: run.repository.gateTimeoutSeconds ?? run.config.gateTimeoutSeconds}, run.executionId);
+    gateTimeoutSeconds: run.repository.gateTimeoutSeconds ?? run.config.gateTimeoutSeconds}, run.executionId), ...secretArgs];
   save(stateFile, run);
   if (signal) throw new Error(`Startup interrupted by ${signal}`);
   run.runFolder = laneRunFolder(run.runFolder, run.config.id);
@@ -198,16 +200,7 @@ try {
   result = startupFailure(run, error, signal, claimRefused);
   process.exitCode = 2;
 } finally {
-  if (child) {
-    try { announce(`[lane] stopped run containers: ${stopRunContainers(run.runFolder).length}`); }
-    catch (error) {
-      result.cleanupError = error.message;
-      announce(`[lane] CONTAINER_CLEANUP_FAILED: ${error.message}`);
-    }
-  }
-  if (readerDir) fs.rmSync(readerDir, {recursive: true, force: true});
-  if (contextDir) fs.rmSync(contextDir, {recursive: true, force: true});
-  if (hooksDir) fs.rmSync(hooksDir, {recursive: true, force: true});
+  cleanupWorkerResources({run, result, child, secrets, folders: [readerDir, contextDir, hooksDir], announce});
   announce(`[lane] ${result.status === 'exited' ? 'EXIT' : 'FAILED'} · code ${result.code ?? '?'}${result.signal ? ` · ${result.signal}` : ''}${result.error ? ` · ${result.error}` : ''}`);
   if (result.status !== 'exited') {
     artifacts = failureDetails(run, announce);
