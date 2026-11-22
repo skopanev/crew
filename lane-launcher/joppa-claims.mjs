@@ -79,7 +79,8 @@ export async function claimTask(run, persist, runId, options = {}) {
   validateTaskFilter(run.config);
   const types = (await api(run.config, run.joppaWorker, 'joppa_tree', {workspace: run.workspace}))?.schema?.types;
   validateFailedTaskStage(run.config, types);
-  if (!run.claimRequest) {
+  let request = run.claimRequest;
+  if (!request) {
     const selected = [];
     for (const task of tasks) {
       const object = await read(run, task.address);
@@ -114,11 +115,10 @@ export async function claimTask(run, persist, runId, options = {}) {
       api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), selected.map(object => object.address));
     for (const object of selected) require(!matches || matches.get(object.address) === object.current_revision,
       `TASK_FILTER_MISMATCH: ${object.address} no longer matches joppa.filter at its claim revision; no Tasks claimed`);
-    run.claimRequest = batchRequest(run, selected.map(object =>
+    request = batchRequest(run, selected.map(object =>
       saveNode(object, {assignee}, 'Take this Task for a Crew lane run.')));
   }
-  persist();
-  await sendClaim(run, persist, options);
+  await sendClaim(run, persist, {...options, request});
   const objects = [];
   for (const task of tasks) {
     const object = await read(run, task.address);

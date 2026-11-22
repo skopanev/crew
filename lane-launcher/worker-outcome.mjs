@@ -27,7 +27,8 @@ export function cleanupWorkerResources({run, result, child, secrets, folders, an
 
 // A host hook refusal precedes a new claim, so it is not a claim transport failure.
 export function startupFailure(run, error, signal, claimRefused) {
-  const message = run.claim || signal || run.finalizeOnly || String(error.code || '').startsWith('PRE_LAUNCH_') ? error.message :
+  const message = run.claim || signal || run.finalizeOnly || String(error.code || '').startsWith('PRE_LAUNCH_') ||
+    !run.claimRequest && String(error.code || '').startsWith('DISPATCH_GATE_') ? error.message :
     claimRefused || error.rejected ? `CLAIM_REFUSED: ${error.message}` :
       `CLAIM_UNCERTAIN: ${error.message}; check ${run.ticket} in Joppa before retrying`;
   return {status: 'failed', code: 2, error: message};

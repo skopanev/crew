@@ -7,6 +7,7 @@ import {save, readRun, alive, command, herdr, runDirectories} from './runtime.mj
 import {runScope} from './scope.mjs';
 import {createDashboard} from './dashboard.mjs';
 import {nextTask, executionId} from './joppa.mjs';
+import {runDispatchGate} from './dispatch-gate.mjs';
 import {formatDependencyIssue} from './dependencies.mjs';
 import {configFrom, dolberIdentity, preflight} from './launcher-config.mjs';
 import {configReloader} from './config-reload.mjs';
@@ -63,9 +64,16 @@ function snapshots(config) {
   return {containers, panes: new Set(result.panes.map(pane => pane.pane_id))};
 }
 
-export async function tick(config, display = null) {
+export async function tick(config, display = null, {signal} = {}) {
   const print = display ? message => { display.message = message; } : console.log;
   if (display) { display.message = 'Checking tickets'; display.error = null; }
+  try {
+    await runDispatchGate(config, {signal, announce: print});
+    signal?.throwIfAborted();
+  } catch (error) {
+    print('Dispatch paused: ' + error.message);
+    return;
+  }
   const {containers, panes} = snapshots(config);
   const active = activeCount(config, containers, panes);
   if (display) display.containers = containers;
@@ -169,7 +177,14 @@ export async function main(argv) {
     return;
   }
   preflight(config);
-  if (mode === 'dry-run') { await tick(config); return; }
+  const admissionAbort = new AbortController();
+  if (mode === 'dry-run') {
+    const abort = () => admissionAbort.abort(new Error('Dispatcher interrupted'));
+    process.once('SIGINT', abort); process.once('SIGTERM', abort);
+    try { await tick(config, null, {signal: admissionAbort.signal}); }
+    finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
+    return;
+  }
   fs.mkdirSync(config.stateDir, {recursive: true, mode: 0o700});
   const lock = path.join(config.stateDir, 'dispatcher.lock');
   try { fs.mkdirSync(lock); }
@@ -182,7 +197,7 @@ export async function main(argv) {
   const reload = configReloader(file, raw => { const next = configFrom(file, process.env, {bytes: raw}); preflight(next); return next; },
     dolberIdentity, config, bytes);
   let stopped = false, wake;
-  const stop = () => { stopped = true; wake?.(); };
+  const stop = () => { stopped = true; admissionAbort.abort(new Error('Dispatcher interrupted')); wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   let dashboard, ticker;
   try {
@@ -201,7 +216,7 @@ export async function main(argv) {
         config = loaded.config;
         dashboard?.use(config);
         if (loaded.reloaded && !dashboard) console.log('config reloaded');
-        await tick(config, dashboard?.state);
+        await tick(config, dashboard?.state, {signal: admissionAbort.signal});
         if (loaded.reloaded && dashboard) dashboard.state.message = `config reloaded · ${dashboard.state.message}`;
       }
       catch (error) {

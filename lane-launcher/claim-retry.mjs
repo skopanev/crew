@@ -2,6 +2,8 @@ import {setTimeout as sleep} from 'node:timers/promises';
 import {api, mutateTasks} from './joppa-common.mjs';
 import {nodeAssignee} from './joppa-nodes.mjs';
 import {JoppaTransportError} from './mcp-client.mjs';
+import path from 'node:path';
+import {runDispatchGate} from './dispatch-gate.mjs';
 
 export function validateClaimRetries(config) {
   const delays = config.joppa?.claimRetryDelaysSeconds;
@@ -26,12 +28,15 @@ async function noOwnedTasks(run, options) {
 }
 
 // Retry only this durable claim. A successful receipt still needs claimTask's live assignee confirmation.
-export async function sendClaim(run, persist, {signal, announce = () => {}} = {}) {
+export async function sendClaim(run, persist, {signal, announce = () => {}, request = run.claimRequest} = {}) {
   validateClaimRetries(run.config);
   const delays = run.config.joppa.claimRetryDelaysSeconds || [];
   let ambiguous = false;
   for (let attempt = 0; ; attempt++) {
     signal?.throwIfAborted();
+    await runDispatchGate(run.config, {dir: path.dirname(run.runFolder), signal, announce});
+    signal?.throwIfAborted();
+    if (!run.claimRequest) { run.claimRequest = request; persist(); }
     try { await mutateTasks(run, run.claimRequest, {signal}); return; }
     catch (error) {
       const transport = error instanceof JoppaTransportError && !error.rejected;

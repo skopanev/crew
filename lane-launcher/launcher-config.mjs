@@ -11,6 +11,7 @@ import {defaultWorkflow, validateWorkflow, validateWorkflowVars} from './workflo
 import {validateLaneOptions} from './lane-options.mjs';
 import {validateSelectionNotify} from './selection-notify.mjs';
 import {validatePreLaunch} from './pre-launch.mjs';
+import {validateDispatchGate} from './dispatch-gate.mjs';
 
 const hostOwned = key => /^(MEDULLA_|LANE_|CBM_|REQUIREMENT_|DELIVERY(?:_|$))/.test(key) ||
   ['TOOLING_ROOT', 'TARGET_BRANCH', 'IMAGE', 'TICKET_SOURCE', 'LAUNCH_CLAIM_FILE', 'SCOUT_ENABLED',
@@ -28,6 +29,7 @@ export function configFrom(file, env = process.env, {dryRun = false, bytes = nul
   config.source = 'joppa';
   validateSelectionNotify(config.selectionNotify);
   validatePreLaunch(config);
+  validateDispatchGate(config);
   config.delivery ??= 'branch';
   validateJoppa(config);
   validateLaneOptions(config);

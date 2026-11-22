@@ -21,9 +21,9 @@ export function validatePreLaunch(config) {
 
 const refusal = (code, message) => Object.assign(new Error(`${code}: ${message}`), {code});
 
-export async function runPreLaunch(run, dir, {signal, announce = () => {}, logDir = dir} = {}) {
-  if (run.config.preLaunch == null) return;
-  const logFile = path.join(logDir, 'pre-launch.log');
+export async function runHostHook(config, dir, {args, seconds, name, prefix, validate,
+  signal, announce = () => {}, logDir = dir}) {
+  const logFile = path.join(logDir, name + '.log');
   let fd, timer, child, failure;
   const stop = (code, message) => {
     failure ||= refusal(code, message);
@@ -32,37 +32,44 @@ export async function runPreLaunch(run, dir, {signal, announce = () => {}, logDi
       catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   };
-  const abort = () => stop('PRE_LAUNCH_ABORTED', 'host command interrupted');
+  const abort = () => stop(prefix + '_ABORTED', 'host command interrupted');
   try {
-    validatePreLaunch(run.config);
-    if (signal?.aborted) throw refusal('PRE_LAUNCH_ABORTED', 'host command interrupted');
-    const seconds = run.config.preLaunchTimeoutSeconds ?? 60;
+    validate();
+    if (signal?.aborted) throw refusal(prefix + '_ABORTED', 'host command interrupted');
     fd = fs.openSync(logFile, 'a', 0o600);
-    fs.writeSync(fd, `[pre-launch] ${new Date().toISOString()} · timeout ${seconds}s\n`);
-    announce(`[lane] PRE_LAUNCH · timeout ${seconds}s · log: ${logFile}`);
+    fs.writeSync(fd, `[${name}] ${new Date().toISOString()} · timeout ${seconds}s\n`);
+    announce(`[lane] ${prefix} · timeout ${seconds}s · log: ${logFile}`);
     const started = performance.now();
-    const [command, ...args] = run.config.preLaunch;
-    child = spawn(command, args, {cwd: dir, detached: true, stdio: ['ignore', fd, fd],
-      env: {...process.env, CREW_DISPATCHER_ID: run.config.id, CREW_RUN_DIR: dir}});
+    const [command, ...argv] = args;
+    child = spawn(command, argv, {cwd: dir, detached: true, stdio: ['ignore', fd, fd],
+      env: {...process.env, CREW_DISPATCHER_ID: config.id, CREW_RUN_DIR: dir}});
     signal?.addEventListener('abort', abort, {once: true});
-    timer = setTimeout(() => stop('PRE_LAUNCH_TIMEOUT', `host command exceeded ${seconds}s`), seconds * 1000);
+    timer = setTimeout(() => stop(prefix + '_TIMEOUT', `host command exceeded ${seconds}s`), seconds * 1000);
+    if (signal?.aborted) abort();
     await new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('close', (code, receivedSignal) => {
         if (failure) reject(failure);
-        else if (code !== 0) reject(refusal('PRE_LAUNCH_FAILED', `host command exited ${code ?? receivedSignal}`));
+        else if (code !== 0) reject(refusal(prefix + '_FAILED', `host command exited ${code ?? receivedSignal}`));
         else resolve();
       });
     });
-    announce(`[lane] PRE_LAUNCH OK · ${((performance.now() - started) / 1000).toFixed(1)}s`);
+    announce(`[lane] ${prefix} OK · ${((performance.now() - started) / 1000).toFixed(1)}s`);
   } catch (error) {
     const message = `${error.message}; log: ${logFile}`;
-    if (fd !== undefined) fs.writeSync(fd, `[pre-launch] ${error.message}\n`);
-    throw refusal(String(error.code || '').startsWith('PRE_LAUNCH_') ? error.code : 'PRE_LAUNCH_FAILED',
-      message.replace(/^PRE_LAUNCH_[A-Z]+: /, ''));
+    if (fd !== undefined) fs.writeSync(fd, `[${name}] ${error.message}\n`);
+    throw refusal(String(error.code || '').startsWith(prefix + '_') ? error.code : prefix + '_FAILED',
+      message.replace(new RegExp('^' + prefix + '_[A-Z]+: '), ''));
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);
     if (fd !== undefined) fs.closeSync(fd);
   }
+}
+
+export async function runPreLaunch(run, dir, options = {}) {
+  if (run.config.preLaunch == null) return;
+  return runHostHook(run.config, dir, {...options, args: run.config.preLaunch,
+    seconds: run.config.preLaunchTimeoutSeconds ?? 60, name: 'pre-launch', prefix: 'PRE_LAUNCH',
+    validate: () => validatePreLaunch(run.config)});
 }

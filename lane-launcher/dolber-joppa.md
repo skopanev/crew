@@ -43,6 +43,30 @@ The dashboard shows `PRE_LAUNCH_FAILED`, `PRE_LAUNCH_TIMEOUT` or `PRE_LAUNCH_ABO
 For a new unclaimed run, failure starts no lane and makes no Task mutation.
 The hook applies to Herdr and headless workers. Preview and dry-run do not execute it.
 
+Set `dispatchGate` to check admission before Task selection and each Task claim attempt:
+
+```json
+{"dispatchGate":["/absolute/bin/check-admission","/absolute/project/config.json"],"dispatchGateTimeoutSeconds":60}
+```
+
+Crew executes the argument array directly. Omit it or set it to `null` to keep the existing behavior.
+The selection check runs before `nextTask`, including preview and dry-run.
+The claim check runs after `preLaunch` and the claim reads, immediately before each mutation attempt, including transport retries.
+Both checks use the same host command runner as `preLaunch`.
+The command runs in the dispatcher state directory during selection and the launch directory during a claim.
+`CREW_RUN_DIR` names that directory. `CREW_DISPATCHER_ID` gives the dispatcher ID.
+Both output streams append to `dispatch-gate.log` in that directory, with mode `0600` for new logs.
+`dispatchGateTimeoutSeconds` defaults to 60 and accepts integers from 1 to 2147483.
+A timeout or interruption kills the command's process group.
+A nonzero exit, execution error, timeout or interruption prevents the selection or claim attempt.
+Selection refusal reads no Task queue and reserves no lane. The next dispatcher cycle can check again.
+First claim refusal saves no claim request and leaves no uncertain Task reservation.
+A refused retry preserves the saved claim request and its uncertain reservation after a lost response.
+The error names are `DISPATCH_GATE_FAILED`, `DISPATCH_GATE_TIMEOUT` and `DISPATCH_GATE_ABORTED`.
+Workers keep their saved config. Restart existing workers to apply a new hook.
+Crew does not interpret project state files. The command supplies the admission decision.
+The check and the remote mutation are separate operations. A state change between them can still permit a mutation.
+
 Set `preLaunchSecrets: true` to let the hook provide private files to one lane.
 The hook then runs in a private temporary directory outside the configured shared mounts.
 `CREW_RUN_DIR` names this directory. It contains a copy of `launch.json`.
