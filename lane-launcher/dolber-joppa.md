@@ -58,6 +58,8 @@ Use absolute regular file paths inside that private `CREW_RUN_DIR`.
 Container paths must be outside `/workspace`. Symbolic links, hard links and duplicate mount targets are refused.
 The worker enforces file mode `0600` and passes each file through Medulla's read-only `--mount-file HOST:CONTAINER` option.
 Use a Medulla release that supports this option. File contents never enter environment variables or launch arguments.
+For a non-root image user, the file owner UID must match the image UID.
+A mismatch stops the worker before its Task claim. Crew does not loosen file permissions or require host `chown` privileges.
 Keep each file unchanged while the lane runs.
 The worker stops its lane containers, then removes the entire private directory in `finally`.
 This includes successful runs, failed runs, hook failures and startup failures.

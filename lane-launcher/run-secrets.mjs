@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {execFileSync} from 'node:child_process';
 
 const require = (ok, message) => {
   if (!ok) throw Object.assign(new Error(`PRE_LAUNCH_SECRETS_INVALID: ${message}`), {code: 'PRE_LAUNCH_SECRETS_INVALID'});
@@ -11,8 +12,17 @@ const plainPath = value => typeof value === 'string' && value.length > 0 && !/[\
 const invalid = error => error.code === 'PRE_LAUNCH_SECRETS_INVALID' ? error :
   Object.assign(new Error(`PRE_LAUNCH_SECRETS_INVALID: ${error.message}`), {code: 'PRE_LAUNCH_SECRETS_INVALID'});
 
+function imageUid(image) {
+  const docker = args => execFileSync('docker', args, {encoding: 'utf8', timeout: 30000,
+    stdio: ['ignore', 'pipe', 'pipe']}).trim();
+  const user = docker(['image', 'inspect', image, '--format', '{{.Config.User}}']).split(':')[0] || '0';
+  const uid = /^\d+$/.test(user) ? user :
+    docker(['run', '--rm', '--network', 'none', '--read-only', '--entrypoint', 'id', image, '-u']);
+  return /^\d+$/.test(uid) ? Number(uid) : NaN;
+}
+
 // The private directory is never part of the shared source or run-artifact mounts.
-export function prepareRunSecrets(run, outerDir) {
+export function prepareRunSecrets(run, outerDir, {imageUid: resolveUid = () => imageUid(run.config.image)} = {}) {
   if (run.config.preLaunchSecrets !== true) return null;
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-run-secrets-')));
   const cleanup = () => fs.rmSync(dir, {recursive: true, force: true});
@@ -27,13 +37,13 @@ export function prepareRunSecrets(run, outerDir) {
     fs.copyFileSync(path.join(outerDir, 'launch.json'), path.join(dir, 'launch.json'));
     fs.chmodSync(path.join(dir, 'launch.json'), 0o600);
     return {dir, cleanup, mountArgs: () => {
-      try { return manifestMounts(dir); }
+      try { return manifestMounts(dir, resolveUid); }
       catch (error) { throw invalid(error); }
     }};
   } catch (error) { cleanup(); throw invalid(error); }
 }
 
-function manifestMounts(dir) {
+function manifestMounts(dir, resolveUid) {
   const manifest = path.join(dir, 'mounts.json');
   let stat;
   try { stat = fs.lstatSync(manifest); }
@@ -43,6 +53,9 @@ function manifestMounts(dir) {
   try { rows = JSON.parse(fs.readFileSync(manifest, 'utf8')); }
   catch { require(false, 'mounts.json must contain a JSON list'); }
   require(Array.isArray(rows), 'mounts.json must contain a JSON list');
+  if (!rows.length) return [];
+  const uid = resolveUid();
+  require(Number.isSafeInteger(uid) && uid >= 0, 'cannot determine the image user UID');
   const hosts = new Set(), targets = new Set();
   return rows.flatMap(row => {
     require(row && Object.keys(row).sort().join(',') === 'container_path,host_path,mode' && row.mode === '0600',
@@ -63,6 +76,8 @@ function manifestMounts(dir) {
     try {
       const file = fs.fstatSync(fd);
       require(file.isFile() && file.nlink === 1, 'host_path must be a regular file without other hard links');
+      require(uid === 0 || file.uid === uid,
+        'secret file owner differs from the image UID; use an image built for the hook account');
       fs.fchmodSync(fd, 0o600);
     } finally { fs.closeSync(fd); }
     return ['--mount-file', `${host}:${target}`];

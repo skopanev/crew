@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn, execFileSync} from 'node:child_process';
+import {spawn, spawnSync, execFileSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {setup, execute, worker} from '../test-support/launcher.fixture.mjs';
 import {save, read, runDirectories} from '../runtime.mjs';
 import {scopeDirectory} from '../scope.mjs';
@@ -112,12 +113,24 @@ test('interrupting a secret-writing hook removes its private directory', async t
   assert.equal(fs.existsSync(f.capture), false);
 });
 
+test('an image UID mismatch stops before claim and removes the secret', async t => {
+  const f = await fixture(t);
+  fs.writeFileSync(path.join(f.bins, 'docker'), `#!/bin/sh\nprintf '%s\\n' '${process.getuid() + 1}'\n`, {mode: 0o755});
+  const result = await execute(worker, [f.file], f.env);
+  assert.equal(result.code, 2, result.stderr);
+  assert.match(read(f.file).result.error, /secret file owner differs from the image UID/);
+  assert.equal(fs.existsSync(read(f.notice).dir), false);
+  assert.equal(fs.existsSync(f.capture), false);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
 test('one lane cannot mount another lane file or escape its private directory', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-validation-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   save(path.join(root, 'launch.json'), {});
   const config = {preLaunchSecrets: true, sourceRoot: root};
-  const a = prepareRunSecrets({config}, root), b = prepareRunSecrets({config}, root);
+  const options = {imageUid: () => process.getuid()};
+  const a = prepareRunSecrets({config}, root, options), b = prepareRunSecrets({config}, root, options);
   t.after(a.cleanup); t.after(b.cleanup);
   assert.deepEqual(a.mountArgs(), [], 'No manifest adds no mounts');
   const secret = path.join(a.dir, 'token');
@@ -163,10 +176,28 @@ test('a peer container cannot see the hook file during writing or lane execution
   const mount = read(f.capture);
   docker(['exec', peer, 'test', '!', '-e', mount.host]);
   docker(['exec', peer, 'test', '!', '-e', mount.target]);
-  docker(['run', '--rm', '--network', 'none', '--user', `${process.getuid()}:${process.getgid()}`, '--entrypoint', '/bin/sh',
+  docker(['run', '--rm', '--network', 'none', '--entrypoint', '/bin/sh',
     '--mount', `type=bind,src=${mount.host},dst=${mount.target},readonly`, image, '-c',
     'cat /run/secrets/cloud >/dev/null && ! (printf changed > /run/secrets/cloud)']);
   fs.writeFileSync(f.laneRelease, '');
   await exited;
   assert.equal(fs.existsSync(notice.dir), false);
+});
+
+test('Linux mode 0600 permits the owner UID and denies another UID', {
+  skip: !process.env.CREW_SECRET_DOCKER_IMAGE,
+}, t => {
+  const image = process.env.CREW_SECRET_DOCKER_IMAGE, volume = 'crew-secret-uid-' + randomUUID();
+  const docker = args => execFileSync('docker', args, {encoding: 'utf8', timeout: 30000});
+  docker(['volume', 'create', volume]);
+  t.after(() => docker(['volume', 'rm', volume]));
+  docker(['run', '--rm', '--network', 'none', '--user', '0', '--entrypoint', '/bin/sh',
+    '-v', `${volume}:/proof`, image, '-c',
+    'printf fixture >/proof/token && chown 1001:1001 /proof/token && chmod 600 /proof/token && chmod 755 /proof']);
+  const args = ['run', '--rm', '--network', 'none', '--entrypoint', '/bin/sh',
+    '-v', `${volume}:/proof:ro`];
+  docker([...args, '--user', '1001:1001', image, '-c', 'cat /proof/token >/dev/null']);
+  const other = spawnSync('docker', [...args, '--user', '1002:1002', image, '-c', 'cat /proof/token >/dev/null'], {encoding: 'utf8'});
+  assert.notEqual(other.status, 0);
+  assert.match(other.stderr, /Permission denied/);
 });
