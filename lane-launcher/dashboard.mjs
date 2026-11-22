@@ -101,7 +101,8 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     ...(recent.some(row => row.title) ? [{key: 'title', label: titleLabel,
       width: Math.min(60, Math.max(length(titleLabel), ...recent.map(row => length(row.title)))), value: row => row.title || ''}] : []),
     {key: 'status', label: 'STATUS', width: statusWidth, value: row => row.status},
-    {key: 'stage', label: 'STAGE / REASON CODE', width: 24, value: row => row.stage || ''},
+    {key: 'stage', label: 'STAGE / REASON CODE', width: Math.min(48, Math.max(24, ...recent.map(row => length(row.stage || '')))),
+      value: row => row.stage || ''},
     {key: 'run', label: 'RUN ID', width: Math.max(6, ...recent.map(row => length(row.runId))), value: row => row.runId},
     {key: 'time', label: 'ELAPSED', width: 8, value: row => duration(row.start, row.end || Date.now())},
   ];
@@ -133,7 +134,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
     const overtime = new Date(row.end || Date.now()) - new Date(row.start) > 3600000;
     const cells = columns.map(column => cell(column.value(row), column));
     output.push(cells.map((value, index) =>
-      columns[index].key === 'time' && overtime ? paint('red', value) : success ? paint('ready', value) :
+      columns[index].key === 'time' && overtime ? paint('red', value) : row.outcomeTone ? paint(row.outcomeTone, value) : success ? paint('ready', value) :
       columns[index].key === 'status' ? paint(tone, value) : row.active ? value : paint('finished', value)).join('  '));
   }
   if (!rows.length) output.push(clip('No runs yet', width));

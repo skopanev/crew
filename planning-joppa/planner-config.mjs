@@ -14,6 +14,11 @@ export const HANDOFF_CHANGED = 75;
 // The pass receives the digest of these exact bytes and refuses a file that differs.
 export function plannerConfig(configFile, {ac = null, automatic = false} = {}, bytes = fs.readFileSync(configFile)) {
   const config = JSON.parse(bytes.toString('utf8'));
+  if (config.result_colors !== undefined && (!config.result_colors || typeof config.result_colors !== 'object' ||
+      Array.isArray(config.result_colors) || Object.entries(config.result_colors).some(([key, value]) => !key.trim() ||
+        !['ready', 'red', 'yellow', 'blue', 'gray', 'orange', 'finished'].includes(value)))) {
+    throw new Error('result_colors must map stage or reason codes to supported display colors');
+  }
   const ids = criterionIds(config);
   if (config.execution !== undefined && (!config.workflow || !['inline', 'detached'].includes(config.execution))) {
     throw new Error('execution must be inline or detached for a configured workflow');

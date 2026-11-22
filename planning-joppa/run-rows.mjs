@@ -68,6 +68,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       if (scope && (input?.workspace && input.workspace !== scope.workspace ||
           claim?.server && claim.server !== scope.url)) return [];
       const publication = json(path.join(artifacts, 'publication.json'));
+      const writtenStage = publication?.status === 'confirmed' ? publication.arguments?.operations?.flatMap(({command}) =>
+        command?.op === 'save_object' && `${command.kind}:${command.id}` === ac &&
+        typeof command.data?.stage === 'string' ? [command.data.stage] : []).at(-1) : undefined;
       const recovery = result?.needs_recovery || !result && (
         [claim, publication, released].some(receipt => ['pending', 'uncertain'].includes(receipt?.status)) ||
         released?.skipped_claims?.some(item => item.unknown === true) ||
@@ -76,6 +79,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         recovery ? 'HELD' : result?.reason?.startsWith('Required owner decision:') ? 'HUMAN' :
         result?.status === 'blocked' ? 'BLOCKED' : last?.next === '__exit_fail__' || launch?.result?.code ? 'FAILED' : 'STOPPED';
       let stage = '';
+      let reasonCode = result?.reason_code;
       if (active) {
         stage = last?.next && !last.next.startsWith('__') ? last.next : last?.node || 'prepare';
         try {
@@ -85,9 +89,15 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       } else if (status !== 'READY') {
         const failure = [...journal].reverse().find(row => ['failed', 'needs_human', '__exit_fail__'].includes(row.next)
           && !['failed', 'needs_human'].includes(row.node));
+        reasonCode ||= failure?.node === 'rejected' ? 'REJECTED' : failure?.signal;
         stage = recovery ? 'RECOVERY_REQUIRED' : status === 'HUMAN' ? 'HUMAN' :
-          result?.reason_code || failure?.signal || (released?.status === 'confirmed' && !result ? 'INTERRUPTED' : status);
+          reasonCode || (released?.status === 'confirmed' && !result ? 'INTERRUPTED' : status);
       }
+      if (!active && !recovery && (publication?.status === 'confirmed' || reasonCode)) {
+        stage = [writtenStage ? `→ ${writtenStage}` : '', reasonCode].filter(Boolean).join(' · ') || 'NO_STAGE_WRITE';
+      }
+      const outcomeTone = !active && scope?.result_colors ? recovery ? 'yellow' : scope.result_colors[reasonCode] ||
+        scope.result_colors[writtenStage] || (status === 'FAILED' ? 'red' : scope.result_colors.default || 'yellow') : undefined;
       const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})-(.+)$/.exec(entry.name);
       const start = match ? new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}`).toISOString() : modified(folder);
       const end = active ? undefined : trackedRun?.finishedAt || launch?.result?.finishedAt ||
@@ -98,7 +108,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
           .map(([address, value]) => JSON.stringify([address, value]))} : {}),
-        runId: match?.[5] || entry.name, start, end, active, status, stage}];
+        runId: match?.[5] || entry.name, start, end, active, status, stage, ...(outcomeTone ? {outcomeTone} : {})}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 
