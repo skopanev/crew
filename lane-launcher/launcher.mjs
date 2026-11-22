@@ -71,7 +71,6 @@ export async function tick(config, display = null) {
   if (display) display.containers = containers;
   else divider();
   print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
-  if (active >= config.limit) { if (display) display.message = ''; return; }
   const selected = await nextTask(config);
   const selectionIssues = selected.selectionIssues || [];
   const candidate = selected.candidate;
@@ -94,6 +93,7 @@ export async function tick(config, display = null) {
     try { await reportSelectionIssues(config, selectionIssues, {terminal: Boolean(display)}); }
     catch (error) { if (display) display.error = error.message; else console.error(error.message); }
   };
+  if (active >= config.limit) { if (display) display.message = ''; await report(); return; }
   if (!candidate) { if (display) display.message = 'No ready tickets'; await report(); return; }
   if (typeof candidate.id !== 'string' || !candidate.id) throw new Error('Joppa returned a Task without an id');
   try {

@@ -46,8 +46,8 @@ test('an available Task launches once; the pending tab consumes the only slot', 
   result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
-  assert.doesNotMatch(result.stdout, /Joppa Tasks/);
-  assert.equal(queueReads(f), 1);
+  assert.match(result.stdout, /Joppa Tasks.*1 available · 0 held Tasks/);
+  assert.equal(queueReads(f), 2);
 });
 test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only previews', async t => {
   const f = await setup(t, {launchLanes: false});
@@ -126,13 +126,37 @@ test('terminal dashboard refreshes the countdown and Ctrl+C releases the lock', 
   assert.equal(queueReads(f), 1);
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
-test('an existing Docker lane of this dispatcher prevents a queue read', async t => {
+test('an existing Docker lane prevents a launch but still refreshes the queue counts', async t => {
   const f = await setup(t);
   fs.writeFileSync(f.docker, JSON.stringify({workflow: 'lane', runFolder: scopeDirectory('/manual, runs', f.config.id)}));
   const result = await f.run();
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Running lanes 1 of 1/);
-  assert.equal(f.calls.length, 0);
+  assert.match(result.stdout, /Joppa Tasks.*2 available · 0 held Tasks/);
+  assert.equal(queueReads(f), 1);
+  assert.equal(claims(f), 0);
+  assert.ok(!herdrEvents(f).some(args => args[1] === 'create'));
+});
+test('a full dispatcher refreshes available and held counts each interval without a claim', async t => {
+  const f = await setup(t);
+  save(f.configFile, {...f.config, intervalSeconds: 1});
+  fs.writeFileSync(f.docker, JSON.stringify({workflow: 'lane', runFolder: scopeDirectory('/manual, runs', f.config.id)}));
+  const child = spawn(process.execPath, [launcher, '--config', f.configFile], {env: f.env});
+  let changed = false;
+  const {code, output, errors} = await interrupted(t, child, text => {
+    if (!changed && /2 available · 0 held Tasks/.test(text)) {
+      f.joppa.objects.get('task:t2').document.data.assignee = 'another-run';
+      changed = true;
+    }
+    return /1 available · 1 held Tasks/.test(text);
+  }, 6000);
+  assert.equal(code, 0, errors);
+  assert.equal(changed, true);
+  assert.match(output, /Running lanes 1 of 1/);
+  assert.equal(queueReads(f), 2);
+  assert.equal(claims(f), 0);
+  assert.ok(!herdrEvents(f).some(args => args[1] === 'create'));
+  assert.deepEqual(runDirectories(f.stateDir), []);
 });
 test('another dispatcher and unscoped containers do not occupy this dispatcher', async t => {
   const f = await setup(t);
