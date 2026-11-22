@@ -154,6 +154,8 @@ This mode requires `sharedLockDir` and a server-enforced read-only `joppa.reader
 Crew mounts a temporary copy of that reader token. Worker mutation tokens stay on the host.
 The host confirms the remote SHA before it saves `data.commit`, removes the assignee and sets the completion stage.
 The same batch archives the Task at the saved revision. `DONE_TASK_STAGE` defaults to `done` and must exist in its schema.
+An older saved completion without a stage stops with `LEGACY_COMPLETION_REQUEST` before another mutation.
+Crew preserves its request ID and payload. Inspect its receipt before recovery. It does not replay a stage-less archive.
 The command sends that SHA in `commit`. The host then checks the returned Task commit.
 An existing-code check sends the verified remote SHA. It does not create a commit.
 A completed Task records delivered work. Criterion test results decide acceptance separately.

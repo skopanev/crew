@@ -95,6 +95,10 @@ export async function finishTask(run, stateFile, result, artifacts) {
     const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
     const schema = (await read('joppa_tree', {})).schema;
     const stages = current.map(object => doneTaskStage(run.config, schema, object));
+    require(!run.completionRequest?.operations.some(({command}) => command.op === 'save_object' &&
+      claims.some(claim => claim.address === `${command.kind}:${command.id}`) &&
+      !Object.hasOwn(command.data || {}, 'stage')),
+    'LEGACY_COMPLETION_REQUEST: saved completion has no stage; inspect its receipt before recovery. Request unchanged.');
     const bindings = frozenBindings(run, artifacts, current, coveredBy(run.config, schema.types));
     const nodes = bindings.rows.length ? await missingTestNodes(read, schema, bindings.rows) : [];
     packageBudget(current.length, nodes.length);
@@ -116,8 +120,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       isDeepStrictEqual(created.map(({command}) => command), nodes) && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
-        // Replay old durable requests unchanged. New requests always contain the stage.
-        (!Object.hasOwn(save.data, 'stage') || save.data.stage === stages[index]) &&
+        save.data.stage === stages[index] &&
         isDeepStrictEqual(save.data.test_bindings, bound(current[index]).length ? bound(current[index]) : undefined) &&
         !save.data.assignee && typeof ref === 'string' && archive.op === 'archive_object' &&
         archive.target === claim.address && isDeepStrictEqual(archive.revision, {$ref: `${ref}/saved_revision`});
@@ -151,7 +154,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
       require(confirmed?.address === claim.address && confirmed.historical === false &&
         Number.isSafeInteger(confirmed.current_revision) && confirmed.current_revision > savedRevisions[index] &&
         confirmed.document?.present === false && confirmed.document.data?.commit === sha && !confirmed.document.data.assignee &&
-        (!Object.hasOwn(sent, 'stage') || confirmed.document.data.stage === sent.stage),
+        confirmed.document.data.stage === sent.stage,
         'Joppa did not confirm every Task completion at the checked SHA');
       result.tasks.push({address: claim.address, status: 'done', revision: confirmed.current_revision});
     }

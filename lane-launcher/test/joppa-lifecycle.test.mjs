@@ -153,7 +153,7 @@ test('success saves the commit and done stage and archives at the saved revision
   }
 });
 
-test('completion uses the configured stage and replays legacy requests without changing them', async t => {
+test('completion uses the configured stage and refuses a legacy request without changing it', async t => {
   const {f, result, finish} = await complete(t);
   f.run.config.DONE_TASK_STAGE = 'closed';
   f.schema.types.task.fields.stage.values.push('closed');
@@ -167,9 +167,12 @@ test('completion uses the configured stage and replays legacy requests without c
       data: {assignee: null, commit: legacy.sha}, reason: 'Done'}},
     {command: {op: 'archive_object', target: `task:${id}`, revision: {$ref: `done${index}/saved_revision`}, reason: 'Done'}}])};
   const saved = structuredClone(legacy.f.run.completionRequest);
-  await legacy.finish();
-  assert.equal(legacy.result.completed, true);
+  const calls = batches(legacy.f).length;
+  await assert.rejects(legacy.finish(), /LEGACY_COMPLETION_REQUEST/);
+  assert.equal(legacy.result.completed, undefined);
   assert.deepEqual(legacy.f.run.completionRequest, saved);
+  assert.equal(batches(legacy.f).length, calls);
+  assert(legacy.f.run.tasks.every(task => legacy.f.objects.get(task.address).document.present === true));
   const invalid = await packageFixture(t);
   invalid.schema.types.task.fields.stage.values = ['ready', 'review'];
   await assert.rejects(claimTask(invalid.run, invalid.persist, invalid.runId), /DONE_TASK_STAGE/);
@@ -236,7 +239,8 @@ test('a saved completion request without a saved-revision reference is not sent'
   const {f, sha, finish} = await complete(t);
   const sent = batches(f).length;
   f.run.completionRequest = {workspace: 'fixture', request_id: 'saved', operations: ['t1', 't2'].flatMap((id, index) => [
-    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4, data: {commit: sha}, reason: 'Done'}},
+    {ref: `done${index}`, command: {op: 'save_object', kind: 'task', id, revision: 4,
+      data: {assignee: null, commit: sha, stage: 'done'}, reason: 'Done'}},
     {command: {op: 'archive_object', target: `task:${id}`, revision: 5}}])};
   await assert.rejects(finish(), /Saved completion request/);
   assert.equal(batches(f).length, sent);

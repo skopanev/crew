@@ -87,6 +87,8 @@ class FlowBatchTests(unittest.TestCase):
         self.assertEqual(assignment["claim_revisions"], {"work:t1": 4, "work:t2": 4, "work:t3": 4})
         self.assertNotIn("assignee", self.api.nodes["work:t4"]["document"]["data"])
         write(self.target / "operations.json", {"operations": [
+            {"command": {"op": "save_object", "kind": "work", "id": "t1", "revision": 4,
+                         "data": {"stage": "done"}, "reason": "Pinned head landed."}},
             {"command": {"op": "archive_object", "target": "work:t1", "revision": 4, "reason": "Pinned head landed."}},
             {"command": {"op": "save_object", "kind": "work", "id": "t2", "revision": 4,
                          "data": {"stage": "failed"}, "reason": "This branch failed checks."}},
@@ -94,11 +96,27 @@ class FlowBatchTests(unittest.TestCase):
         flow_publication.publish(self.api, self.config, self.target)
         self.assertFalse(self.api.nodes["work:t1"]["document"]["present"])
         self.assertEqual(self.api.nodes["work:t1"]["document"]["data"]["commit"], "1" * 40)
+        self.assertEqual(self.api.nodes["work:t1"]["document"]["data"]["stage"], "done")
         self.assertEqual(self.api.nodes["work:t2"]["document"]["data"]["stage"], "failed")
         self.assertEqual(self.api.nodes["work:t3"]["document"]["data"]["stage"], "pending")
         for node in assignment["items"]:
             self.assertNotIn("assignee", self.api.nodes[node["address"]]["document"]["data"])
         self.assertEqual(read(self.target / "result.json")["item_revisions"], {"work:t1": 6, "work:t2": 5, "work:t3": 5})
+
+    def test_archive_after_save_keeps_the_claim_guard_and_refuses_repeated_changes(self):
+        flow_stages.prepare()
+        assignment, claim = read(self.target / "input.json"), read(self.target / "claim.json")
+        save = {"command": {"op": "save_object", "kind": "work", "id": "t1", "revision": 4,
+                            "data": {"stage": "done"}, "reason": "Landed."}}
+        archive = {"command": {"op": "archive_object", "target": "work:t1", "revision": 4, "reason": "Landed."}}
+        for rows in ([save, save], [save, archive, archive], [archive, save]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "one guarded save"):
+                flow_publication.operations(self.config, assignment, claim, {"operations": rows})
+        stale = deepcopy(archive)
+        stale["command"]["revision"] = 3
+        with self.assertRaisesRegex(ValueError, "stale revision"):
+            flow_publication.operations(self.config, assignment, claim, {"operations": [save, stale]})
+        self.assertEqual(len(self.api.batches), 1)
 
     def test_stale_member_refuses_the_whole_claim(self):
         self.api.move_before_claim = True

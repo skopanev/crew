@@ -74,6 +74,8 @@ New objects must use a configured creation kind and belong to the selected objec
 Updates must use a configured update kind and target the selected object or a captured direct child.
 Every update uses its captured revision. For the selected object, use `assignment.claim_revision`.
 The host combines a selected-object save with the claim release. Archiving the selected object ends that claim.
+A claimed item can emit one save followed by one archive, both with its captured claim revision.
+The host archives at the revision of that guarded save. A second save, repeated archive or reversed order is refused.
 Without either operation, the host adds a partial claim release to the same batch.
 Native data merges preserve unspecified fields. The host refuses moves, whole-document replacements and assignee changes.
 It rechecks the schema, references, child membership, revisions and claim before publication.

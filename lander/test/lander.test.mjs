@@ -60,6 +60,33 @@ function fixture(t, gate = 'test ! -e bad.txt') {
   return {root, seed, source, origin, repo, state, heads, row, pins,
     calls: () => fs.existsSync(count) ? fs.readFileSync(count, 'utf8').length : 0};
 }
+test('a landed branch emits the configured completion stage before archive', t => {
+  const f = fixture(t), folder = path.join(f.root, 'flow'), artifacts = path.join(folder, 'artifacts');
+  fs.mkdirSync(artifacts, {recursive: true});
+  const configFile = path.join(f.root, 'config.json'), item = {...f.row('one'), kind: 'task', current_revision: 2};
+  item.document.present = true;
+  item.document.data.stage = 'pending';
+  item.document.data.repository = f.repo.id;
+  fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({selected: item, items: [item],
+    claim_revisions: {[item.address]: 3}, schema: {types: {task: {role: 'task',
+      fields: {stage: {type: 'enum', values: ['pending', 'closed']}}}}}}));
+  fs.writeFileSync(configFile, JSON.stringify({repositories: [f.repo], DONE_TASK_STAGE: 'closed',
+    publication: {file: 'operations.json'}}));
+  const script = path.resolve('lander/lander.mjs');
+  const env = {...process.env, MEDULLA_RUN_DIR: folder, MEDULLA_RUN_ID: 'stage-proof',
+    PLANNING_JOPPA_CONFIG: configFile, WORKTREE_ROOT: path.join(f.root, 'candidates'),
+    FAILED_DATA: JSON.stringify({stage: 'failed'})};
+  for (const command of ['build', 'push']) {
+    const result = spawnSync(process.execPath, [script, command], {env, encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  }
+  const value = JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json')));
+  assert.equal(value.outcome.reason_code, 'LANDED');
+  assert.deepEqual(value.operations.map(row => row.command.op), ['save_object', 'archive_object']);
+  assert.deepEqual(value.operations[0].command.data, {stage: 'closed'});
+  assert.equal(value.operations[0].command.revision, 3);
+  assert.equal(value.operations[1].command.revision, 3, 'The host replaces this with the guarded save reference');
+});
 test('a green batch runs the full gates once and reuses the exact receipt', t => {
   const f = fixture(t), heads = f.pins(['one', 'two']);
   f.repo.preflight = 'printf "node_modules/\\n" > .git/info/exclude; mkdir -p node_modules; touch node_modules/ready';

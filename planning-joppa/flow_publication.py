@@ -21,7 +21,7 @@ def operations(config, assignment, claim, value):
     owned = claims.claimed_revisions(claim)
     require(set(owned) == set(items), "claim does not match the configured batch")
     revisions.update(owned)
-    result, refs, modified, updates = [], set(), set(), {}
+    result, refs, modified, updates, archived = [], set(), set(), {}, set()
     release_refs = {address: "flow_release" + ("_" + str(index) if index else "")
                     for index, address in enumerate(items)}
     for row in deepcopy(rows):
@@ -45,9 +45,13 @@ def operations(config, assignment, claim, value):
             require(address in editable and editable[address]["kind"] in policy.get("update_kinds", []),
                     "update is outside the configured claimed objects and direct children")
             if op != "note":
-                require(address not in modified, "one revision-changing operation per object is permitted")
+                require(address not in modified or op == "archive_object" and address in owned
+                        and address in updates and address not in archived,
+                        "one guarded save followed by one archive is permitted for a claimed object")
                 require(cmd.get("revision") == revisions[address], "operation has a stale revision: " + address)
                 modified.add(address)
+                if op == "archive_object":
+                    archived.add(address)
             else:
                 # A note needs a revision-checked save in this same batch.
                 require(address in modified or address in owned, "note needs a preceding guarded update")

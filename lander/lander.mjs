@@ -4,6 +4,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
+import {doneTaskStage} from '../lane-launcher/joppa-nodes.mjs';
 import {read, write, require, git, ancestor, remoteHead, targetHead, create, pin, candidate,
   environment, cleanup, tooling} from './git.mjs';
 
@@ -29,6 +30,8 @@ function settings() {
   require(failedData && typeof failedData === 'object' && !Array.isArray(failedData) && Object.keys(failedData).length &&
     !Object.keys(failedData).some(key => ['assignee', 'commit', 'repository', 'delivery', 'acceptance'].includes(key)),
   'FAILED_DATA must be a nonempty native patch without host-owned fields');
+  for (const item of items) require(doneTaskStage(value, assignment.schema, item) !== failedData.stage,
+    'DONE_TASK_STAGE must differ from FAILED_DATA.stage');
   return {value, assignment, items, repo, failedData};
 }
 function output(state, landed = []) {
@@ -37,6 +40,9 @@ function output(state, landed = []) {
   for (const item of items) {
     const address = item.address, reason = state.failed[address] || state.pending || 'NOT_LANDED';
     if (done.has(address)) {
+      operations.push({command: {op: 'save_object', kind: item.kind, id: address.slice(address.indexOf(':') + 1),
+        revision: assignment.claim_revisions[address], data: {stage: doneTaskStage(value, assignment.schema, item)},
+        reason: 'Checked target ancestry confirms completed work.'}});
       operations.push({command: {op: 'archive_object', target: address,
         revision: assignment.claim_revisions[address], reason: 'Checked head ' + item.document.data.commit +
           ' is in target ancestry. Tested candidate: ' + state.checked.commit}});

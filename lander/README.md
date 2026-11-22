@@ -19,6 +19,8 @@ A successful branch publication keeps the Task live, clears its assignee, and re
 Its `data.delivery` contains `state: pending`, `branch`, `head`, `target`, the producer run ID, and `pushed_at`.
 The timestamp records the confirmed branch handoff and stays fixed across publication retries.
 Coder selection skips pending delivery. Only Lander archives a Task after target integration.
+Lander saves `DONE_TASK_STAGE` before the archive in the same guarded publication batch.
+The default is `done`. The Task schema must permit that editable value.
 
 The Lander config supplies repository paths, target branches, full gate commands, and an optional setup command.
 The commands select their runtime. Docker projects must supply Docker commands or a project wrapper.
