@@ -156,7 +156,7 @@ test('a configured flow selects one ordered native item, skips excluded and star
     selected: {address: 'ac:a1', current_revision: 2, document: {data: {title: 'Configured title'}}}}));
   fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published', selected_revision: 3, item_revisions: {'ac:a1': 3, 'ac:a3': 5}}));
   const run = f.start();
-  await run.until(output => count(output, /Items: 2 selected · no unattempted items/g) >= 2);
+  await run.until(output => count(output, /Items: 2 selected · 1 excluded by filters/g) >= 2);
   assert.deepEqual(f.passes(), []);
   assert.match(run.output(), /ITEM/);
   assert.deepEqual(plannerRows(f.config.runs_folder).map(row => [row.ac, row.acTitle, row.attemptKey]),

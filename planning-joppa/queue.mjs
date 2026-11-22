@@ -204,8 +204,10 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   }
   rows.sort(compare(flow.order));
   const eligible = [];
+  let filtered = 0;
   for (const row of rows) {
-    if (skip(row) || config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) continue;
+    if (skip(row)) continue;
+    if (config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) { filtered++; continue; }
     let excluded = false;
     if (flow.exclude) {
       for await (const page of nodePages(read, {...flow.exclude, parent: row.address, depth: 1, fields: ['parent']})) {
@@ -213,14 +215,14 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
       }
     }
     if (!excluded) {
-      if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row};
+      if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row, filtered};
       eligible.push(row);
-    }
+    } else filtered++;
   }
   for (const row of eligible) {
     const group = batch.by ? eligible.filter(item => batchField(item, batch.by) === batchField(row, batch.by)) : eligible;
     const items = batchItems(batch, [row, ...group.filter(item => item !== row)]);
-    if (batchReady(batch, items)) return {count: rows.length, next: items[0]};
+    if (batchReady(batch, items)) return {count: rows.length, next: items[0], filtered};
   }
-  return {count: rows.length, next: null};
+  return {count: rows.length, next: null, filtered};
 }

@@ -162,7 +162,7 @@ export async function main(argv) {
             // Retry policy affects selection only. Busy and held runs remain excluded.
             selection = new AbortController();
             const skipRetry = retryFilter(config, rows, attempted, cooldowns);
-            const {count, next} = await nextConfiguredItem(config, tokenFile, selection.signal,
+            const {count, next, filtered} = await nextConfiguredItem(config, tokenFile, selection.signal,
               row => busy(row.address) || skipRetry(row));
             selection = null;
             if (next) {
@@ -170,7 +170,7 @@ export async function main(argv) {
               scope = '--item-id';
               attempted.add(attemptKey);
               state.message = `${notice}Planning ITEM ${next.address} · ${next.title}`;
-            } else state.message = `${notice}Items: ${count} selected · no unattempted items · next check in ${interval}s`;
+            } else state.message = `${notice}Items: ${count} selected · ${filtered ? `${filtered} excluded by filters` : 'no unattempted items'} · next check in ${interval}s`;
           } else {
             selection = new AbortController();
             const candidates = await readyRequirements(config, tokenFile, selection.signal);
