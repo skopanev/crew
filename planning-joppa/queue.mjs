@@ -162,10 +162,13 @@ export function flowSettings(config) {
     validateNodeFilter(filters, 'exclude_children');
   }
   const order = config.order ?? [];
-  if (!Array.isArray(order) || order.some(item => !object(item) || Object.keys(item).sort().join() !== 'direction,field' ||
+  if (!Array.isArray(order) || order.some(item => !object(item) ||
+      Object.keys(item).some(key => !['direction', 'field', 'values'].includes(key)) ||
       typeof item.field !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(item.field) ||
-      !['asc', 'desc'].includes(item.direction))) {
-    throw new Error('order must list {field, direction} with direction asc or desc');
+      !['asc', 'desc'].includes(item.direction) || item.values !== undefined &&
+      (!Array.isArray(item.values) || !item.values.length || new Set(item.values).size !== item.values.length ||
+        item.values.some(value => typeof value !== 'string' || !value.trim())))) {
+    throw new Error('order needs field, direction asc or desc, and optional distinct nonempty text values');
   }
   batchSettings(config.batch);
   retryPolicy(config);
@@ -173,10 +176,14 @@ export function flowSettings(config) {
 }
 
 const compare = order => (a, b) => {
-  for (const {field, direction} of order) {
-    const left = batchField(a, field) ?? null, right = batchField(b, field) ?? null;
+  for (const {field, direction, values} of order) {
+    let left = batchField(a, field) ?? null, right = batchField(b, field) ?? null;
     if (left === right) continue;
     if (left === null || right === null) return left === null ? 1 : -1;
+    if (values) {
+      const rank = value => { const index = values.indexOf(value); return index < 0 ? values.length : index; };
+      left = rank(left); right = rank(right);
+    }
     const result = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right));
     if (result) return direction === 'desc' ? -result : result;
   }

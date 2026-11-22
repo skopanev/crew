@@ -12,10 +12,14 @@ sh ./lane-launcher/planner-joppa.sh /absolute/path/to/flow.json --item-id ac:cri
 Set these fields in the flow config:
 
 - `workflow`: the absolute path to a Medulla `workflow.yaml`.
-- `selection`: native Joppa filters, including `kind`. Optional `order` lists `{field, direction}` entries.
+- `selection`: native Joppa filters, including `kind`. Optional `order` lists `{field, direction}` entries with optional `values`.
 - `exclude_children`: an optional native filter for direct children that exclude a selected item.
 - `references`: selected data reference fields to read. Optional `children` supplies a native direct-child query.
 - `publication`: `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Pass workflow models and stages through `vars`.
+
+`order` can read computed fields such as `status`.
+Set `values: ["blue", "orange", "green"]` with `direction: "asc"` to use that sequence.
+Unlisted values share a later rank. `desc` reverses these ranks. Missing values stay last.
 
 The dispatcher adds no stage, Task, Requirement or dependency selection rule to this path.
 The configured filter decides eligibility. The existing claim prevents two flows from editing the same selected object.

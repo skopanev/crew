@@ -57,10 +57,14 @@ def ordered(rows, config):
                 continue
             if a is None or b is None:
                 return 1 if a is None else -1
+            if "values" in order:
+                values = order["values"]
+                a, b = (values.index(value) if value in values else len(values) for value in (a, b))
             if not (type(a) in (int, float) and type(b) in (int, float)):
                 a, b = str(a), str(b)
             result = (a > b) - (a < b)
-            return -result if order["direction"] == "desc" else result
+            if result:
+                return -result if order["direction"] == "desc" else result
         return (left["address"] > right["address"]) - (left["address"] < right["address"])
     return sorted(rows, key=cmp_to_key(compare))
 

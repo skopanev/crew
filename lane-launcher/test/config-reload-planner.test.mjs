@@ -185,6 +185,33 @@ test('a configured flow selects one ordered native item, skips excluded and star
   }
 });
 
+test('configured value order ranks computed fields and keeps unlisted items eligible', async t => {
+  const f = await plannerFixture(t);
+  const workflow = path.join(f.root, 'workflow.yaml');
+  fs.writeFileSync(workflow, 'nodes: {}\n');
+  const template = structuredClone(f.objects.get('ac:a1'));
+  for (const [index, tone] of ['green', 'orange', 'blue', 'yellow'].entries()) {
+    const node = structuredClone(template);
+    node.address = `ac:a${index + 1}`; node.status.tone = tone;
+    f.objects.set(node.address, node);
+  }
+  const config = {...f.config, workflow, selection: {kind: 'ac'},
+    order: [{field: 'status', direction: 'asc', values: ['blue', 'orange', 'green']}]};
+  const seen = new Set();
+  for (const address of ['ac:a3', 'ac:a2', 'ac:a1', 'ac:a4']) {
+    const selected = await nextConfiguredItem(config, config.token_file, undefined, row => seen.has(row.address));
+    assert.equal(selected.count, 4); assert.equal(selected.next.address, address); seen.add(address);
+  }
+  assert.equal((await nextConfiguredItem(config, config.token_file, undefined, row => seen.has(row.address))).next, null);
+  assert.ok(f.calls.filter(call => call.name === 'joppa_objects').every(call => call.args.fields.includes('status')));
+  const descending = {...config, order: [{...config.order[0], direction: 'desc'}]};
+  assert.equal((await nextConfiguredItem(descending, config.token_file)).next.address, 'ac:a4');
+  for (const values of [[], ['blue', 'blue'], [''], [1], 'blue']) {
+    assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...config,
+      order: [{field: 'status', direction: 'asc', values}]}))), /order/);
+  }
+});
+
 test('configured batches wait for distinct units or the oldest timestamp within their group', async t => {
   const f = await plannerFixture(t);
   const config = {...f.config, workflow: '/tmp/workflow.yaml', selection: {kind: 'ac'},

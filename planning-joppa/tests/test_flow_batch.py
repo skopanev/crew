@@ -30,7 +30,8 @@ class AtomicTracker(Tracker):
             result = super().call(tool, args)
             if tool == "joppa_objects" and not args.get("address"):
                 from flow_batch import field
-                result["items"] = [{"address": row["address"], **{key: field(row, key)
+                result["items"] = [{"address": row["address"], **{key:
+                    self.nodes[row["address"]].get("status", {}).get("tone") if key == "status" else field(row, key)
                     for key in args["fields"]}} for row in result["items"]]
             return result
         if self.move_before_claim:
@@ -153,6 +154,27 @@ class FlowBatchTests(unittest.TestCase):
         rows = read(self.target / "input.json")["items"]
         self.assertEqual(len(rows), 50)
         self.assertEqual({row["document"]["data"]["delivery"]["branch"] for row in rows}, {"one", "three"})
+
+    def test_batch_load_uses_configured_computed_status_order(self):
+        from flow_context import load
+        self.config["batch"] = {"size": 2}
+        self.config["order"] = [{"field": "status", "direction": "asc", "values": ["blue", "orange", "green"]}]
+        self.api.nodes = {"work:" + name: item("work:" + name, "criterion:a", {"title": name})
+                          for name in ("b", "o", "g", "y", "z")}
+        for name, tone in (("b", "blue"), ("o", "orange"), ("g", "green"), ("y", "yellow")):
+            self.api.nodes["work:" + name]["status"] = {"tone": tone}
+        for anchor, expected in (("b", "o"), ("o", "b")):
+            assignment = load(self.api, self.config, "work:" + anchor)
+            self.assertEqual([node["address"] for node in assignment["items"]], ["work:" + anchor, "work:" + expected])
+        self.assertEqual(self.api.batches, [])
+        from flow_batch import ordered
+        rows = [{"address": "work:" + name, "status": tone} for name, tone in
+                (("b", "blue"), ("o", "orange"), ("g", "green"), ("y", "yellow"), ("z", None))]
+        self.assertEqual([row["address"] for row in ordered(rows, self.config)],
+                         ["work:b", "work:o", "work:g", "work:y", "work:z"])
+        self.config["order"][0]["direction"] = "desc"
+        self.assertEqual([row["address"] for row in ordered(rows, self.config)],
+                         ["work:y", "work:g", "work:o", "work:b", "work:z"])
 
     def test_blocked_business_outcome_releases_all_items_without_archiving(self):
         flow_stages.prepare()
