@@ -151,6 +151,11 @@ export async function nextTask(config) {
     for (const task of inventory) {
       if (!open(task)) continue;
         try {
+          if (matches?.has(task.address)) {
+            const data = (await object(task.address)).document.data;
+            try { taskRepositoryChoice(config, data, {required: true}); }
+            catch (error) { error.code ||= 'CANDIDATE_INVALID'; throw error; }
+          }
           const context = await group(task.address);
           if (!context) continue;
           const dependency = await dependencies(task.address);
@@ -172,7 +177,7 @@ export async function nextTask(config) {
           eligible.push({...task, ...context});
         } catch (error) {
           if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
-          if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID'].includes(error.code)) {
+          if (['DEPENDENCY_INVALID', 'CANDIDATE_INVALID', 'REPOSITORY_MISSING'].includes(error.code)) {
             selectionIssues.set(task.address, {task: task.address, revision: task.revision,
               code: error.code, message: error.message});
             continue;

@@ -30,10 +30,17 @@ function declared(config, data, name) {
 }
 
 // One of this config's repositories, or null for a Task of another repository or with several possible repositories.
-export function taskRepositoryChoice(config, data) {
+export function taskRepositoryChoice(config, data, {required = false} = {}) {
   const repositories = config?.repositories || [], values = declared(config, data, 'repository');
   const known = values.filter(id => repositories.some(repo => repo.id === id));
-  if (!known.length) return null;
+  if (!known.length) {
+    if (required) {
+      const field = config?.taskFields?.repository, label = field?.startsWith('body:') ? field.slice(5) : field || 'taskFields.repository';
+      const line = values.length ? values.map(value => `${label}: ${value}`).join('\n') : `${label}: (missing)`;
+      throw Object.assign(new Error(`No configured repository matches ${JSON.stringify(line)}.`), {code: 'REPOSITORY_MISSING'});
+    }
+    return null;
+  }
   require(values.length === 1, 'Task repository declaration is ambiguous');
   return repositories.find(repo => repo.id === known[0]);
 }

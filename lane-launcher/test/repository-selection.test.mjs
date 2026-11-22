@@ -96,6 +96,45 @@ for (const body of ['Goal: no repository', 'Repository: unknown\nModule: unknown
   });
 }
 
+test('filtered Tasks report missing repository choices and preserve literal matching', async t => {
+  const f = await packageFixture(t), task = f.objects.get('task:t1');
+  f.run.config.joppa.filter = {data: {stage: 'ready'}};
+  f.objects.get('task:t2').document.data.body += '\nTarget repo: app';
+  const original = structuredClone(task.document.data);
+  for (const declaration of ['Repository: app.', 'Repository: app,', 'Repository: app. Module: core',
+    'Repository: unknown', 'Repo: app', 'Target repo: app.']) {
+    f.run.config.taskFields = {repository: declaration.startsWith('Target repo:') ? 'body:Target repo' : 'body:Repository'};
+    task.document.data = {...original, body: 'Goal: scoped change\n' + declaration};
+    const before = structuredClone(task);
+    const selected = await nextTask(f.run.config);
+    assert.equal(selected.candidate.id, 'task:t2');
+    assert.equal(selected.available, 1);
+    assert.deepEqual(selected.selectionIssues, [{task: task.address, revision: task.current_revision,
+      code: 'REPOSITORY_MISSING', message: declaration.startsWith('Repo:')
+        ? 'No configured repository matches "Repository: (missing)".'
+        : `No configured repository matches ${JSON.stringify(declaration)}.`}]);
+    assert.deepEqual(task, before);
+  }
+  task.document.data = {...original, stage: 'done', body: 'Repo: app'};
+  f.run.config.taskFields = {repository: 'body:Repository'};
+  assert.deepEqual((await nextTask(f.run.config)).selectionIssues, []);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('an ambiguous filtered repository reports an issue without stopping selection', async t => {
+  const f = await packageFixture(t), task = f.objects.get('task:t1');
+  f.run.config.joppa.filter = {data: {stage: 'ready'}};
+  task.document.data.body = 'Goal: scoped change\nRepository: app\nRepository: app';
+  const before = structuredClone(task);
+  const selected = await nextTask(f.run.config);
+  assert.equal(selected.candidate.id, 'task:t2');
+  assert.equal(selected.available, 1);
+  assert.deepEqual(selected.selectionIssues, [{task: task.address, revision: task.current_revision,
+    code: 'CANDIDATE_INVALID', message: 'Task repository declaration is ambiguous'}]);
+  assert.deepEqual(task, before);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
 test('held Tasks count only configured repositories regardless of project membership', async t => {
   const f = await packageFixture(t), task = f.objects.get('task:t2');
   task.document.data.assignee = 'another-run';
