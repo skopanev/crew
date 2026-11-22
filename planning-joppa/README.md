@@ -28,6 +28,45 @@ It does not require repositories or CBM for a flow that does not use them.
 The workflow controls its stages, model calls, review decisions and revision loop.
 Writer is the first bundled example in [writer](../writer/README.md).
 
+Optional `inputs` lists ordered profiles. Each profile requires `selection` with native filters.
+The dispatcher selects the first eligible item from the first eligible profile.
+Each profile replaces only its named fields: `selection`, `order`, `exclude_tags`, `exclude_children`, `children`, `references`, `related` and `publication`.
+Other fields come from the root config. Profiles cannot replace authentication, workflow variables or workspace identity.
+Use scalar stage filters in separate profiles. Native `data` arrays mean containment, not alternatives.
+Set `children: {}`, `references: []` and `exclude_children: null` to disable inherited context filters.
+The launcher freezes the effective profile. It leaves the dispatcher config unchanged.
+The assignment contains its zero-based `input` index. A manual launch selects index zero unless `PLANNING_JOPPA_INPUT` supplies another index.
+Single-input configs retain their existing behavior.
+
+Set `failure_notes: false` to release failed flow claims without adding business notes.
+The default is `true`. The frozen config controls failure handlers and shutdown cleanup.
+Uncertain receipts still retain the claim for recovery.
+
+For related context, set:
+
+```json
+"related": {
+  "limit": 90,
+  "parent": {"kind": "ac", "exclude_tags": ["hold"], "children": {"kind": "test"}, "references": ["sources"]},
+  "incoming": {"kind": "task", "relation": "depends_on"}
+}
+```
+
+`flow_context.related_context` captures the full parent, its configured children and references, and present incoming consumers.
+The assignment adds `context.parent`, `context.children`, `context.references` and `context.incoming`. Native `relations` retain their metadata.
+The limit bounds unique related object reads, including archived consumers excluded after their detail read. Related context cannot use `batch`.
+The host captures related context again after its own claim. This accounts for parent revisions advanced by child saves.
+It refuses held parents and consumers. Archived consumers keep their historical relations unchanged.
+
+Optional `publication.related_updates` adds two narrow permissions: `"parent": ["stage"]` and `"incoming": "remove_selected_edge"`.
+The configured `update_kinds` must also permit these targets.
+The parent save changes only `data.stage` and uses `context.parent.current_revision`.
+Each consumer save removes only the edge to the selected object. It requires that selected object's archive in the same publication.
+Send the complete native relation group after removal. Preserve its title, color, facts and all other edges.
+`flow_publication.operations` places the parent save before Task saves and archives. All operations and claim releases share one batch of at most 100 operations.
+The host rechecks captured revisions and current present consumer membership before publication.
+A new incoming consumer can appear after this check. Native per-object revisions cannot fence that membership race.
+
 Set `concurrency: 3` to run up to three independent passes in one dashboard.
 The default is one. The dispatcher reserves each selected address before it starts a process.
 Each process keeps its own Medulla run folder, claim and output log.

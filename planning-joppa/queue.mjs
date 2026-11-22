@@ -144,6 +144,13 @@ export function flowSettings(config) {
   if (config.ac_ids !== undefined || config.covers_reference !== undefined) {
     throw new Error('ac_ids and covers_reference apply only to the planner flow without workflow');
   }
+  if (config.inputs !== undefined) {
+    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication']);
+    if (!Array.isArray(config.inputs) || !config.inputs.length || config.inputs.some(input => !object(input) ||
+        !object(input.selection) || Object.keys(input).some(key => !keys.has(key)))) throw new Error('inputs needs ordered native selection profiles');
+    for (const input of config.inputs) flowSettings({...config, ...input, inputs: undefined});
+    return {inputs: config.inputs};
+  }
   const {kind, ...selection} = object(config.selection) ? config.selection : {};
   if (!object(config.selection) || kind === undefined || !kindList(kind) || ![kind].flat().length) {
     throw new Error('selection needs a native kind and optional native filters');
@@ -154,7 +161,7 @@ export function flowSettings(config) {
     throw new Error('exclude_tags must be a list of nonempty tags');
   }
   const exclude = config.exclude_children;
-  if (exclude !== undefined) {
+  if (exclude != null) {
     const {kind: childKind, ...filters} = object(exclude) ? exclude : {};
     if (!object(exclude) || !kindList(childKind) || 'parent' in filters || 'depth' in filters) {
       throw new Error('exclude_children needs native child filters without parent or depth');
@@ -193,6 +200,15 @@ const compare = order => (a, b) => {
 // One pass takes the first ordered item that skip() allows and that has no excluded direct child.
 export async function nextConfiguredItem(config, tokenFile, signal, skip = () => false) {
   const flow = flowSettings(config);
+  if (flow.inputs) {
+    let count = 0, filtered = 0;
+    for (const [input, profile] of flow.inputs.entries()) {
+      const result = await nextConfiguredItem({...config, ...profile, inputs: undefined}, tokenFile, signal, skip);
+      count += result.count; filtered += result.filtered;
+      if (result.next) return {count, filtered, next: {...result.next, input}};
+    }
+    return {count, filtered, next: null};
+  }
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
   const batch = config.batch;
@@ -210,10 +226,18 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
     }
   }
   rows.sort(compare(flow.order));
-  const eligible = [];
+  const eligible = [], parents = new Map();
   let filtered = 0;
   for (const row of rows) {
     if (skip(row)) continue;
+    const guard = config.related?.parent;
+    if (guard) {
+      if (!row.parent) {filtered++; continue;}
+      if (!parents.has(row.parent)) parents.set(row.parent, read('joppa_objects', {address: row.parent}));
+      const parent = await parents.get(row.parent), data = parent.document?.data;
+      if (parent.document?.present !== true || parent.historical !== false || ![guard.kind].flat().includes(parent.kind) ||
+          data?.assignee || guard.exclude_tags?.some(tag => (data?.tags || []).includes(tag))) {filtered++; continue;}
+    }
     if (config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) { filtered++; continue; }
     let excluded = false;
     if (flow.exclude) {

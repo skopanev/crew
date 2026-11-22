@@ -69,6 +69,9 @@ def prepare():
     publication.mutate(api, target / "claim.json", "joppa_batch",
                        {"workspace": config["workspace"], "operations": operations})
     claim = read(target / "claim.json")
+    if config.get("related"):
+        assignment["context"] = flow_context.related_context(api, config, selected, assignment["schema"])
+        write(target / "joppa-snapshot.json", {"schema": assignment["schema"], "objects": flow_context.objects(assignment)})
     flow_context.verify(api, config, assignment, claim)
     assignment["claim_revision"] = claims.claimed_revisions(claim)[selected["address"]]
     assignment["claim_revisions"] = claims.claimed_revisions(claim)

@@ -131,7 +131,7 @@ export async function main(argv) {
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = requirement, attemptKey = null, scope = '--req-id';
+      let selected = requirement, attemptKey = null, inputIndex, scope = '--req-id';
       if (automatic && !detached && pool.size >= concurrency) { await pause(); continue; }
       if (automatic) {
         if (pool.size && !detached) {
@@ -167,6 +167,7 @@ export async function main(argv) {
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);
+              inputIndex = next.input;
               scope = '--item-id';
               attempted.add(attemptKey);
               state.message = `${notice}Planning ITEM ${next.address} · ${next.title}`;
@@ -190,7 +191,8 @@ export async function main(argv) {
       if (stopped) break;
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
-        const run = await pool.start(ac || item || selected, runArgs, handoff(), attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow));
+        const env = {...handoff(), ...(inputIndex === undefined ? {} : {PLANNING_JOPPA_INPUT: String(inputIndex)})};
+        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow));
         if (once || fixed) {
           const code = await (detached ? Promise.race([run.completion, dashboardStopped]) : run.completion);
           await termination;

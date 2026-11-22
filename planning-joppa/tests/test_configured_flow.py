@@ -117,6 +117,46 @@ class ConfiguredFlowTests(unittest.TestCase):
             flow_publication.publish(self.api, self.config, self.target)
         self.assertEqual(len(self.api.batches), 1)
 
+    def test_failure_without_notes_releases_claim_after_context_changes(self):
+        self.config["failure_notes"] = False
+        self.api.nodes["source:s"]["current_revision"] += 1
+        flow_publication.fail(self.api, self.config, self.target, "The source changed")
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual([cmd["op"] for cmd in commands], ["save_object"])
+        self.assertEqual(commands[0]["data"], {"assignee": None})
+        self.assertTrue(read(self.target / "result.json")["claim_released"])
+        self.assertEqual(read(self.target / "result.json")["selected_revision"], 5)
+
+    def test_failure_note_option_rejects_non_boolean_values(self):
+        for value in (None, "false", 0):
+            config = {**self.config, "workflow": str(ROOT / "writer/workflow.yaml"),
+                      "mcp_command": ["connector"], "failure_notes": value}
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "failure_notes"):
+                flow_launch.configuration(self.folder / "config.json", json.dumps(config))
+
+    def test_automatic_stage_failure_uses_the_frozen_failure_note_option(self):
+        self.config["failure_notes"] = False
+        snapshot = self.folder / "config.json"
+        write(snapshot, self.config)
+        self.api.nodes["source:s"]["current_revision"] += 1
+        with patch.dict(os.environ, {"PLANNING_JOPPA_CONFIG_SNAPSHOT": str(snapshot),
+                                     "PLANNING_JOPPA_CONFIG_DIGEST": digest(self.config)}), \
+             patch.object(sys, "argv", ["flow_stages.py", "verify"]):
+            self.assertEqual(flow_stages.main(), 1)
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual([cmd["op"] for cmd in commands], ["save_object"])
+        self.assertTrue(read(self.target / "result.json")["claim_released"])
+
+    def test_shutdown_cleanup_uses_the_same_failure_note_option(self):
+        import flow_runtime
+        self.config["failure_notes"] = False
+        self.api.stdio = None
+        with patch.object(flow_runtime, "Joppa", return_value=self.api):
+            flow_runtime.release(self.config, self.target.parent, "Interrupted", True)
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual([cmd["op"] for cmd in commands], ["save_object"])
+        self.assertTrue(read(self.target / "result.json")["claim_released"])
+
     def test_uncertain_claim_stays_held_without_another_mutation(self):
         receipt = read(self.target / "claim.json")
         write(self.target / "claim.json", {**receipt, "status": "uncertain"})

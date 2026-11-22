@@ -11,8 +11,19 @@ from common import digest, require, text
 from flow_batch import settings as batch_settings
 
 
-def configuration(path, raw=None):
+def configuration(path, raw=None, input_index=None):
     config = json.loads(raw if raw is not None else Path(path).read_bytes())
+    if "inputs" in config:
+        profiles = config["inputs"]
+        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication"}
+        require(isinstance(profiles, list) and profiles and all(isinstance(p, dict) and isinstance(p.get("selection"), dict) and
+                set(p) <= keys for p in profiles), "inputs needs ordered native selection profiles")
+        base = {key: value for key, value in config.items() if key != "inputs"}
+        variants = [configuration(path, json.dumps({**base, **profile, "input": index})) for index, profile in enumerate(profiles)]
+        if input_index is None:
+            return config
+        require(type(input_index) is int and 0 <= input_index < len(variants), "invalid input index")
+        return variants[input_index]
     for key in ("workspace", "url", "runs_folder", "workflow"):
         text(config.get(key), "config." + key)
     require(Path(config["workflow"]).is_absolute() and Path(config["workflow"]).is_file(),
@@ -43,14 +54,33 @@ def configuration(path, raw=None):
     require(isinstance(config.get("references", []), list) and
             all(isinstance(item, str) and item for item in config.get("references", [])), "references must be field names")
     batch_settings(config)
+    related = config.get("related")
+    if related is not None:
+        require(isinstance(related, dict) and set(related) <= {"limit", "parent", "incoming"} and
+                type(related.get("limit")) is int and 1 <= related["limit"] < 100 and isinstance(related.get("parent"), dict) and
+                related["parent"].get("kind"), "related needs a parent kind and limit 1..99")
+        require(not config.get("batch"), "related context does not support batches")
+        parent, incoming = related["parent"], related.get("incoming")
+        require(set(parent) <= {"kind", "exclude_tags", "children", "references"}, "unsupported related parent query")
+        require(incoming is None or isinstance(incoming, dict) and set(incoming) == {"kind", "relation"} and
+                incoming["kind"] and isinstance(incoming["relation"], str) and incoming["relation"], "invalid incoming query")
+    permission = publication.get("related_updates", {})
+    require(isinstance(permission, dict) and set(permission) <= {"parent", "incoming"} and
+            ("parent" not in permission or permission["parent"] == ["stage"]) and
+            ("incoming" not in permission or permission["incoming"] == "remove_selected_edge") and
+            (not permission or related is not None), "invalid related write permissions")
     require(type(config.get("repeat", False)) is bool, "config.repeat must be boolean")
     require(config.get("retry", "on_revision") in ("always", "on_revision", "never"),
             "config.retry must be always, on_revision or never")
+    require(type(config.get("failure_notes", True)) is bool, "config.failure_notes must be boolean")
     return config
 
 
 def launch(path, raw, item, dry_run):
-    config = configuration(path, raw)
+    profiled = "inputs" in json.loads(raw)
+    config = configuration(path, raw, int(os.environ.get("PLANNING_JOPPA_INPUT", "0")))
+    if profiled:
+        raw = json.dumps(config)
     require(isinstance(item, str) and ":" in item, "configured workflows need a full object address")
     executable = os.environ.get("MEDULLA_BIN", "medulla")
     variables = {**config.get("vars", {}), "PLANNING_JOPPA_CONFIG": str(path),
@@ -59,8 +89,6 @@ def launch(path, raw, item, dry_run):
         "CREW_FLOW_STAGES": str(Path(__file__).with_name("flow_stages.py").resolve()),
         "FLOW_PUBLICATION": config["publication"]}
     command = [executable, "-w", config["workflow"], "--runs-folder", config["runs_folder"], "--print-run-dir"]
-    for name, value in variables.items():
-        command.extend(["--var", name + "=" + (value if isinstance(value, str) else json.dumps(value))])
     if dry_run:
         print("ITEM: " + item)
         print("Workflow: " + config["workflow"])
@@ -74,7 +102,11 @@ def launch(path, raw, item, dry_run):
         snapshot = Path(memory) / "config.json"
         snapshot.write_bytes(raw.encode() if isinstance(raw, str) else raw)
         snapshot.chmod(0o600)
-        command.extend(["--var", "PLANNING_JOPPA_CONFIG_SNAPSHOT=" + str(snapshot)])
+        variables["PLANNING_JOPPA_CONFIG_SNAPSHOT"] = str(snapshot)
+        if profiled:
+            variables["PLANNING_JOPPA_CONFIG"] = str(snapshot)
+        for name, value in variables.items():
+            command.extend(["--var", name + "=" + (value if isinstance(value, str) else json.dumps(value))])
         working = Path(memory) / "work"
         working.mkdir()
         env = dict(os.environ)

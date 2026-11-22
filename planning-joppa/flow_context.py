@@ -34,6 +34,48 @@ def children(api, config, selected, query):
     return sorted(result, key=lambda item: item["address"])
 
 
+def related_context(api, config, selected, schema):
+    spec, cached = config["related"], {}
+    def full(address, allow_archived=False):
+        require(isinstance(address, str) and ":" in address, "related object needs a full address")
+        if address not in cached:
+            require(len(cached) < spec["limit"], "related context exceeds its limit")
+            cached[address] = object_read(api, config["workspace"], address, allow_archived=allow_archived)
+        return cached[address]
+    parent = full(selected["document"].get("parent"))
+    guard = spec["parent"]
+    require(parent["kind"] in ([guard["kind"]] if isinstance(guard["kind"], str) else guard["kind"]), "related parent kind differs")
+    require(not parent["document"]["data"].get("assignee") and
+            not set(parent["document"]["data"].get("tags") or []) & set(guard.get("exclude_tags", [])), "related parent is held or excluded")
+    context = {"parent": parent, "children": [], "references": {}, "incoming": []}
+    if guard.get("children"):
+        for row in pages(api, config["workspace"], {**guard["children"], "parent": parent["address"], "depth": 1, "fields": ["parent", "revision"]}):
+            node = full(row["address"])
+            require(node["document"]["parent"] == parent["address"] and node["current_revision"] == row["revision"], "related child changed")
+            context["children"].append(node)
+    for name in guard.get("references", []):
+        target = schema["types"][parent["kind"]]["references"][name]["target"]
+        values = parent["document"]["data"].get(name, [])
+        values = values if isinstance(values, list) else [values] if values else []
+        require(all(isinstance(value, str) and value for value in values), "invalid related reference")
+        context["references"][name] = [full(value if ":" in value else target + ":" + value) for value in values]
+    incoming = spec.get("incoming")
+    if incoming:
+        query = {"relations_of": selected["address"], "direction": "incoming", "relation": incoming["relation"]}
+        for row in pages(api, config["workspace"], query):
+            if row["kind"] not in ([incoming["kind"]] if isinstance(incoming["kind"], str) else incoming["kind"]):
+                continue
+            node = full(row["address"], allow_archived=True)
+            if node["document"]["present"] is False:
+                continue
+            require(not node["document"]["data"].get("assignee"), "related consumer is held")
+            require(any(edge.get("to") == selected["address"] for edge in
+                        node.get("relations", {}).get(incoming["relation"], {}).get("edges", [])), "incoming relation changed")
+            if node not in context["incoming"]:
+                context["incoming"].append(node)
+    return context
+
+
 def load(api, config, address):
     workspace = config["workspace"]
     schema = api.call("joppa_tree", {"workspace": workspace})["schema"]
@@ -63,7 +105,11 @@ def load(api, config, address):
         refs[field] = [object_read(api, workspace, value) for value in sorted(set(addresses))]
     assignment = {"workspace": workspace, "selected": selected, "schema": schema, "help": help,
             "references": refs,
-            "children": children(api, config, selected, config["children"]) if "children" in config else []}
+            "children": children(api, config, selected, config["children"]) if config.get("children") else []}
+    if "input" in config:
+        assignment["input"] = config["input"]
+    if config.get("related"):
+        assignment["context"] = related_context(api, config, selected, schema)
     if batch:
         group = flow_batch.field(selected, batch["by"]) if batch.get("by") else None
         require(not batch.get("by") or group is not None, "selected item lacks batch.by field")
@@ -96,8 +142,11 @@ def load(api, config, address):
 
 
 def objects(assignment):
+    context = assignment.get("context", {})
     return {item["address"]: item for item in [*flow_batch.members(assignment), *assignment["children"],
-            *(item for rows in assignment["references"].values() for item in rows)]}
+            *(item for rows in assignment["references"].values() for item in rows),
+            *([context["parent"]] if context else []), *context.get("children", []), *context.get("incoming", []),
+            *(item for rows in context.get("references", {}).values() for item in rows)]}
 
 
 def verify(api, config, assignment, claim):
@@ -115,8 +164,13 @@ def verify(api, config, assignment, claim):
     if config.get("exclude_children") is not None:
         for item in flow_batch.members(assignment):
             require(not children(api, config, item, config["exclude_children"]), "excluded children appeared during the flow")
-    if "children" in config:
+    if config.get("children"):
         current = children(api, config, selected, config["children"])
         require([(item["address"], item["current_revision"]) for item in current] ==
                 [(item["address"], item["current_revision"]) for item in assignment["children"]],
                 "configured children changed during the flow")
+    if config.get("related"):
+        current = related_context(api, config, selected, schema)
+        require(objects({**assignment, "context": current}).keys() == objects(assignment).keys(), "related membership changed")
+        require({item["address"] for item in current["incoming"]} ==
+                {item["address"] for item in assignment["context"]["incoming"]}, "incoming membership changed")

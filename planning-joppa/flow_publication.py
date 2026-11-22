@@ -17,11 +17,16 @@ def operations(config, assignment, claim, value):
     selected = assignment["selected"]
     items = {item["address"]: item for item in members(assignment)}
     editable = {item["address"]: item for item in [*items.values(), *assignment["children"]]}
+    context = assignment.get("context", {})
+    parent = context.get("parent", {}).get("address")
+    related = {item["address"]: item for item in [*([context["parent"]] if parent else []), *context.get("incoming", [])]}
+    require(not any(item["document"]["data"].get("assignee") for item in related.values()), "related node is held")
+    editable.update(related)
     revisions = {key: item["current_revision"] for key, item in editable.items()}
     owned = claims.claimed_revisions(claim)
     require(set(owned) == set(items), "claim does not match the configured batch")
     revisions.update(owned)
-    result, refs, modified, updates, archived = [], set(), set(), {}, set()
+    result, parent_updates, refs, modified, updates, archived = [], [], set(), set(), {}, set()
     release_refs = {address: "flow_release" + ("_" + str(index) if index else "")
                     for index, address in enumerate(items)}
     for row in deepcopy(rows):
@@ -42,6 +47,21 @@ def operations(config, assignment, claim, value):
         else:
             address = cmd.get("target") if op == "note" else cmd.get("ac") or cmd.get("target")
             address = address or str(cmd.get("kind")) + ":" + str(cmd.get("id"))
+            if address in related:
+                permission = policy.get("related_updates", {})
+                require(op == "save_object" and set(cmd) <= {"op", "kind", "id", "revision", "data", "relations", "reason"},
+                        "related update must be a scoped save")
+                if address == parent:
+                    require(permission.get("parent") == ["stage"] and set(cmd.get("data") or {}) == {"stage"} and
+                            isinstance(cmd["data"]["stage"], str) and cmd["data"]["stage"] and not cmd.get("relations"), "parent update permits stage only")
+                else:
+                    require(permission.get("incoming") == "remove_selected_edge" and not cmd.get("data") and any(
+                        row["command"].get("op") == "archive_object" and claims.address_of(row["command"]) == selected["address"]
+                        for row in rows), "consumer edge removal requires the selected archive")
+                    key = config["related"]["incoming"]["relation"]
+                    group = deepcopy(related[address]["relations"][key])
+                    group["edges"] = [edge for edge in group["edges"] if edge.get("to") != selected["address"]]
+                    require(cmd.get("relations") == {key: group}, "consumer update must preserve relation metadata and other edges")
             require(address in editable and editable[address]["kind"] in policy.get("update_kinds", []),
                     "update is outside the configured claimed objects and direct children")
             if op != "note":
@@ -59,6 +79,9 @@ def operations(config, assignment, claim, value):
         require("parent" not in cmd or cmd["parent"] in items and cmd.get("revision") == 0,
                 "flow cannot move existing objects")
         require("assignee" not in (cmd.get("data") or {}), "flow cannot change an execution claim")
+        if op == "save_object" and cmd.get("revision") != 0 and address == parent:
+            parent_updates.append(row)
+            continue
         if op != "note" and cmd.get("revision") != 0 and address in owned:
             require(ref is None, "a claimed-object change uses the host release ref")
             if op == "save_object":
@@ -72,8 +95,8 @@ def operations(config, assignment, claim, value):
                                    "Publish the configured workflow result and release its claim.")
         cmd["data"] = {**cmd.get("data", {}), "assignee": None}
         releases.append({"ref": release_refs[address], "command": cmd})
-    require(len(releases) + len(result) <= 100, "publication and claim releases exceed one native batch")
-    return [*releases, *result]
+    require(len(parent_updates) + len(releases) + len(result) <= 100, "publication and claim releases exceed one native batch")
+    return [*parent_updates, *releases, *result]
 
 
 def publish(api, config, target):
@@ -88,12 +111,13 @@ def publish(api, config, target):
     result = publication.mutate(api, target / "publication.json", "joppa_batch",
                                 {"workspace": config["workspace"], "operations": batch})
     require(len(result.get("results", [])) == len(batch), "publication response is incomplete; inspect its receipt")
-    revisions = {item["address"]: saved_revision(result, batch[index]["command"], index)
+    indices = [index for index, row in enumerate(batch) if str(row.get("ref", "")).startswith("flow_release")]
+    revisions = {item["address"]: saved_revision(result, batch[indices[index]]["command"], indices[index])
                  for index, item in enumerate(members(assignment))}
     value = {**outcome, "selected_revision": revisions[assignment["selected"]["address"]],
              "item_revisions": revisions, "claim_released": True, "acceptance_verified": False}
     write(target / "result.json", value)
-    if assignment.get("items"):
+    if assignment.get("items") or any(row["command"]["op"] == "archive_object" for row in batch):
         # The confirmed transaction is durable before optional reads of final node revisions.
         try:
             revisions = {address: object_read(api, config["workspace"], address, allow_archived=True)["current_revision"]
@@ -127,12 +151,14 @@ def fail(api, config, target, reason):
         batch, addresses = [], list(claims.claimed(claim))
         for address in addresses:
             selected = object_read(api, config["workspace"], address)
-            batch += [{"command": claims.save_command(selected, None, "Release the failed configured workflow claim.")},
-                      {"command": claims.note(address, {"id": "flow-" + claims.run_id(target)[:40], "text": reason[:1000]})}]
+            batch.append({"command": claims.save_command(selected, None, "Release the failed configured workflow claim.")})
+            if config.get("failure_notes", True):
+                batch.append({"command": claims.note(address, {"id": "flow-" + claims.run_id(target)[:40], "text": reason[:1000]})})
         result = publication.mutate(api, target / "release.json", "joppa_batch",
                                      {"workspace": config["workspace"], "operations": batch})
         released = True
-        revisions = {address: saved_revision(result, batch[index * 2]["command"], index * 2)
+        step = 2 if config.get("failure_notes", True) else 1
+        revisions = {address: saved_revision(result, batch[index * step]["command"], index * step)
                      for index, address in enumerate(addresses)}
         revision = revisions[addresses[0]]
     else:
