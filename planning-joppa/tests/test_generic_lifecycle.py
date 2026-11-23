@@ -225,13 +225,14 @@ class GenericLifecycleTests(unittest.TestCase):
                             and "assignee" not in args and "review_required" not in args["fields"] for args in lists))
         self.assertEqual({name for name, _ in calls}, {"joppa_objects"})
 
-    def test_digest_ignores_assignee_and_commit_but_not_other_fields(self):
+    def test_digest_ignores_execution_metadata_but_not_other_fields(self):
         types = {"criterion": {"role": "ac"}, "work": {"role": "task"}}
         for address, selected in (("criterion:a", ["criterion:a"]), ("work:t", None)):
             with self.subTest(address=address):
                 old = item(address)
                 current = deepcopy(old)
-                current["document"]["data"].update(assignee="crew-planning:h:r", commit="c" * 40)
+                current["document"]["data"].update(assignee="crew-planning:h:r", commit="c" * 40,
+                                                  returns=2, max_stage="legacy")
                 current["current_revision"] = current["document"]["revision"] = 9
                 context.unchanged(context.snapshot_source(old, types, selected),
                                   context.snapshot_source(current, types, selected))

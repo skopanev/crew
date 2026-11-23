@@ -16,6 +16,16 @@ import {readyCriteria, groupRequirements} from '../../planning-joppa/dashboard.m
 import {launcher, worker, queueReads, execute, notificationEnv, setup, workerFixture} from './launcher.fixture.mjs';
 import {packageFixture, blockedPackage, packageLanding} from './launcher-joppa.fixture.mjs';
 
+test('return counters preserve a claim but authored changes invalidate it', () => {
+  const object = {document: {parent: 'ac:a', data: {title: 'Implement', body: 'Keep the saved value'}, links: []}};
+  const original = contractDigest(object);
+  object.document.data.returns = 2;
+  object.document.data.max_stage = 'legacy';
+  assert.equal(contractDigest(object), original);
+  object.document.data.body = 'Replace the saved value';
+  assert.notEqual(contractDigest(object), original);
+});
+
 test('claim digest tracks authored remote pins without tracking live target status', () => {
   const object = {document: {parent: 'ac:a', data: {title: 'Implement'}, links: []}};
   const original = contractDigest(object);

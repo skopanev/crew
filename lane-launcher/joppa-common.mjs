@@ -27,6 +27,9 @@ export const contractDigest = object => {
   delete data.stage;
   // Tags classify the node. They do not change the authored contract.
   delete data.tags;
+  // Retry counters do not change the authored contract.
+  delete data.returns;
+  delete data.max_stage;
   return digestOf(object, data);
 };
 
