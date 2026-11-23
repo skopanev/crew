@@ -174,7 +174,7 @@ export async function main(argv) {
               inputIndex = next.input;
               scope = '--item-id';
               attempted.add(attemptKey);
-              state.message = `${notice}Planning ITEM ${next.address} · ${next.title}`;
+              state.message = notice.trim();
             } else state.message = `${notice}Items: ${count} selected · ${filtered ? `${filtered} excluded by filters` : 'no unattempted items'} · next check in ${interval}s`;
           } else {
             selection = new AbortController();
