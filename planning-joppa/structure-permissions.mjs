@@ -5,12 +5,23 @@ import {pathToFileURL} from 'node:url';
 const need = (ok, message) => { if (!ok) throw new Error(message); };
 const data = node => node.document?.data || {};
 const parent = node => node.document?.parent;
+// Every ref name that a command uses anywhere, for example {"$ref": "part/address"} gives part.
+const used = (value, names = new Set()) => {
+  if (Array.isArray(value)) value.forEach(item => used(item, names));
+  else if (value && typeof value === 'object') {
+    if (typeof value.$ref === 'string') names.add(value.$ref.split('/')[0]);
+    else Object.values(value).forEach(item => used(item, names));
+  }
+  return names;
+};
 const reference = value => value && typeof value === 'object' && Object.keys(value).join() === '$ref' &&
   typeof value.$ref === 'string' && value.$ref.endsWith('/address') ? value.$ref.slice(0, -8) : null;
 
 export async function authorize({config, assignment, rows}, read) {
   const policy = config.publication, structure = policy.structure, selected = assignment.selected;
-  const result = {creates: [], moves: [], notes: []}, created = new Map(), cache = new Map();
+  // early: creates that the publisher may run before the claim releases. A create under a claimed parent runs after
+  // the releases, so each row that uses its ref, directly or through another row, also runs after them.
+  const result = {creates: [], moves: [], notes: [], early: []}, created = new Map(), cache = new Map(), late = new Set();
   const owned = new Set((assignment.items || [selected]).map(node => node.address));
   const editable = new Map([selected, ...assignment.children].map(node => [node.address, node]));
   const fresh = async address => {
@@ -63,9 +74,12 @@ export async function authorize({config, assignment, rows}, read) {
           'The configured flow cannot create under this parent');
         result.creates.push(index);
       }
+      const after = !root && owned.has(command.parent) || [...used(command)].some(name => late.has(name));
+      if (!after) result.early.push(index);
       if (row.ref) {
         need(!created.has(row.ref) && policy.create_kinds.includes(command.kind), 'Invalid structural creation ref');
         created.set(row.ref, command.kind);
+        if (after) late.add(row.ref);
       }
     } else if (command?.op === 'save_object' && 'parent' in command) {
       const address = command.kind + ':' + command.id, node = editable.get(address);
@@ -74,6 +88,8 @@ export async function authorize({config, assignment, rows}, read) {
       need(address === selected.address || !data(node).assignee, 'The child being moved is held');
       need(await allowedParent(command.kind, command.parent, structure.move?.[command.kind] || []),
         'The configured flow cannot move to this parent');
+      need(address !== selected.address && !owned.has(address) || ![...used(command)].some(name => late.has(name)),
+        'A claimed object cannot move under a create that runs after its release');
       result.moves.push(index);
     } else if (command?.op === 'note' && reference(command.target)) {
       need(structure.note_created === true && created.has(reference(command.target)),

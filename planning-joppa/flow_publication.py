@@ -151,7 +151,8 @@ def operations(config, assignment, claim, value):
                 updates[address] = cmd
                 continue
             cmd["revision"] = {"$ref": release_refs[address] + "/saved_revision"}
-        (root_creates if root_create or index in permissions.get("creates", []) else result).append(row)
+        early = index in permissions["early"] if policy.get("structure") else root_create
+        (root_creates if early else result).append(row)
     releases = []
     for address, item in items.items():
         cmd = updates.get(address) or claims.save_command({**item, "current_revision": owned[address]}, None,
