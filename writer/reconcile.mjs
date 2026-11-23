@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual as equal} from 'node:util';
+import {acOutcome} from './returns.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = value => typeof value === 'string' && Boolean(value.trim());
@@ -33,7 +34,7 @@ export function validate(input, draft, kind) {
     used.add(row.id);
   }
   for (const row of draft.tests) {
-    need(Object.keys(row).every(key => ['id', 'action', 'title', 'data'].includes(key)), 'Unsupported Test field');
+    need(Object.keys(row).every(key => ['id', 'action', 'title', 'data', ...(row.action === 'update' ? ['finding'] : [])].includes(key)), 'Unsupported Test field');
     need(['keep', 'update', 'create'].includes(row.action) && text(row.title) && !titles.has(row.title), 'Invalid action or duplicate final title');
     titles.add(row.title);
     const node = byId.get(row.id), data = row.data ?? {};
@@ -44,7 +45,14 @@ export function validate(input, draft, kind) {
     } else {
       need(node && node.document.present !== false, 'Unknown or archived Test ID');
       if (row.action === 'keep') need(row.title === node.document.data.title && !Object.keys(data).length, 'Keep preserves all Test text');
-      else need(!node.document.data.assignee, 'Cannot rewrite a held Test');
+      else {
+        need(!node.document.data.assignee, 'Cannot rewrite a held Test');
+        // A Test that covers the AC stays. A rewrite quotes the captured Test line and gives a reason code.
+        const finding = row.finding, captured = ['title', 'body', 'command'].map(key => node.document.data[key]).filter(text);
+        need(object(finding) && Object.keys(finding).every(key => ['test_quote', 'reason_code'].includes(key)) && text(finding.test_quote) &&
+          finding.test_quote.length <= 600 && captured.some(value => value.includes(finding.test_quote)) &&
+          typeof finding.reason_code === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(finding.reason_code), 'Update needs a finding with a captured Test quote and a reason code');
+      }
     }
   }
   for (const row of draft.retire) {
@@ -68,27 +76,30 @@ export function validate(input, draft, kind) {
   }
 }
 
-export function review(input, draft, reviews, digest, kind, run, gapTag) {
+// outcome gives the configured AC stages for returns.mjs.
+export function review(input, draft, reviews, digest, kind, run, gapTag, outcome = {}) {
   validate(input, draft, kind);
   const valid = value => object(value) && value.draft_digest === digest && Array.isArray(value.tests) &&
     value.tests.every(row => object(row) && text(row.id) && typeof row.score === 'string' && /^[01]{5}$/.test(row.score)) && equal(ids(value.tests), ids(draft.tests)) &&
-    Array.isArray(value.retirements) && value.retirements.every(row => object(row) && text(row.id) &&
-      typeof row.agree === 'boolean' && text(row.evidence)) && equal(ids(value.retirements), ids(draft.retire)) &&
+    [[value.retirements, draft.retire], [value.updates, draft.tests.filter(row => row.action === 'update')]].every(([rows, plan]) =>
+      Array.isArray(rows) && rows.every(row => object(row) && text(row.id) && typeof row.agree === 'boolean' && text(row.evidence)) &&
+      equal(ids(rows), ids(plan))) &&
     ['complete', 'incomplete'].includes(value.coverage) && Array.isArray(value.missing) && value.missing.every(text) &&
     (value.coverage === 'complete' ? !value.missing.length : value.missing.length > 0);
   const clean = value => valid(value) && value.tests.every(row => row.score === '11111') &&
-    value.retirements.every(row => row.agree) && value.coverage === 'complete';
+    value.retirements.every(row => row.agree) && value.updates.every(row => row.agree) && value.coverage === 'complete';
   need(reviews.length === 2, 'Exactly two critic seats are required');
   const selected = input.selected;
   const save = (node, revision, data, reason) => ({command: {op: 'save_object', kind: node.kind,
     id: idOf(node), revision, data, reason}});
   if (!gap(draft) && reviews.every(clean)) {
     const nodes = new Map(existing(input, kind).map(node => [idOf(node), node]));
-    const operations = [save(selected, input.claim_revision, {stage: 'to_task'}, 'Both critics approved final Test coverage and retirement evidence.')];
+    const operations = acOutcome(input, 'ready', {...outcome, run});
     for (const row of draft.tests.filter(row => row.action === 'update')) {
       const node = nodes.get(row.id), data = Object.fromEntries(Object.entries({...row.data, title: row.title})
         .filter(([key, value]) => !equal(value, node.document.data[key])));
-      if (Object.keys(data).length) operations.push(save(node, node.current_revision, data, 'Rewrite the same Test and preserve its recorded results.'));
+      if (Object.keys(data).length) operations.push(save(node, node.current_revision, data,
+        'Rewrite the same Test and preserve its recorded results. ' + row.finding.reason_code + ': "' + row.finding.test_quote + '"'));
     }
     for (const row of draft.retire) operations.push({command: {op: 'archive_object', target: nodes.get(row.id).address,
       revision: nodes.get(row.id).current_revision, reason: (row.reason + ' Evidence: ' + row.evidence).slice(0, 1000)}});
@@ -100,16 +111,14 @@ export function review(input, draft, reviews, digest, kind, run, gapTag) {
   }
   if (gapTag && reviews.every(valid) && reviews.some(value => value.coverage === 'incomplete' && value.coverage_gap_kind === 'ac')) {
     const missing = [...new Set(reviews.flatMap(value => value.missing))];
-    const data = {stage: 'to_decide', tags: [...new Set([...(selected.document.data.tags || []), gapTag])]};
-    return {approved: false, decision_required: true, operations: [save(selected, input.claim_revision, data, 'The current AC or Sources need an owner decision.'),
-      {command: {op: 'note', target: selected.address, id: ('writer-missing-' + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-100),
-        text: ('Missing coverage:\n' + missing.join('\n')).slice(0, 1000)}}],
+    return {approved: false, decision_required: true, operations: acOutcome(input, 'gap', {...outcome, gapTag, run, reason: 'Missing coverage:\n' + missing.join('\n')}),
       outcome: {status: 'blocked', reason_code: gap(draft) ? 'SOURCE_GAP' : 'COVERAGE_INCOMPLETE', reason: missing.join('; ').slice(0, 1000)}};
   }
   return {approved: false, critique: Object.fromEntries(reviews.map((value, index) => [index ? 'second' : 'codex', valid(value)
     ? {failing: value.tests.filter(row => row.score !== '11111'), retirements: value.retirements.filter(row => !row.agree),
+      updates: value.updates.filter(row => !row.agree),
       coverage: value.coverage, missing: value.missing, summary: value.summary}
-    : {invalid: 'The critic must review this exact final Test set and every retirement.'}]))};
+    : {invalid: 'The critic must review this exact final Test set, every update and every retirement.'}]))};
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
@@ -121,7 +130,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
       need(mode === 'review', 'Use check or review');
       const digest = createHash('sha256').update(fs.readFileSync(path.join(dir, 'draft.json'))).digest('hex');
       console.log(JSON.stringify(review(input, draft, [read('critic-codex.json'), read('critic-second.json')], digest,
-        kind, path.basename(path.dirname(dir)), process.env.SOURCE_GAP_TAG || '')));
+        kind, path.basename(path.dirname(dir)), process.env.SOURCE_GAP_TAG || '', {readyStage: process.env.READY_STAGE})));
     }
   } catch (error) { console.error('writer-reconcile: ' + error.message); process.exitCode = 1; }
 }

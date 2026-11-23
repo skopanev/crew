@@ -73,18 +73,20 @@ For operation reconcile:
 7. Do not use a duplicate title.
 
 For action keep:
-1. Use keep when the current text still matches.
+1. Use keep for each Test that already covers the AC and its Sources. Do not change that Test.
 2. Keep the existing title.
 3. Choose either no data field or an empty data object.
 
 For action update:
-1. Use update when the text needs correction.
-2. Reuse the existing local ID.
-3. Preserve the case.
-4. Preserve the owner.
-5. Put only body, command and an unchanged case in data.
-6. Keep unmentioned fields unchanged.
-7. Keep recorded results unchanged.
+1. Use update only when the Test does not cover the current AC or its Sources.
+2. Quote the exact captured Test line that fails in finding.test_quote.
+3. Give a reason code in finding.reason_code, for example PREMISE_BROKEN or SCOPE_MISMATCH.
+4. Reuse the existing local ID.
+5. Preserve the case.
+6. Preserve the owner.
+7. Put only body, command and an unchanged case in data.
+8. Keep unmentioned fields unchanged.
+9. Keep recorded results unchanged.
 
 For retire:
 1. Put obsolete Tests in retire.
@@ -101,7 +103,8 @@ For reconcile coverage:
 Return this JSON for reconcile:
 
 {"tests":[{"id":"existing-id","action":"keep","title":"Existing title","data":{}},
- {"id":"another-id","action":"update","title":"Corrected title","data":{"body":"Current acceptance text"}},
+ {"id":"another-id","action":"update","title":"Corrected title","data":{"body":"Current acceptance text"},
+  "finding":{"test_quote":"Exact line of the captured Test","reason_code":"SCOPE_MISMATCH"}},
  {"id":"new_1","action":"create","title":"Missing behavior","data":{"body":"Required acceptance text"}}],
  "retire":[{"id":"obsolete-id","reason":"Why it is obsolete","evidence":"Exact current AC or Source evidence"}],
  "coverage":"How the final Tests cover the current AC and Sources"}

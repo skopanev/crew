@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {review} from './reconcile.mjs';
+import {acFindings, acOutcome, criteria} from './returns.mjs';
 
 const need = (value, message) => { if (!value) throw new Error(message); };
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -18,6 +19,13 @@ const write = (file, value) => {
 export function policy(env) {
   for (const name of ['CREW_FLOW_STAGES', 'FLOW_PUBLICATION', 'TEST_KIND']) need(env[name], name + ' is required');
   need(/^\d+$/.test(env.REWORK_LIMIT), 'REWORK_LIMIT must be a nonnegative integer');
+  need(/^[1-9]\d*$/.test(env.RETURNS_LIMIT ?? ''), 'RETURNS_LIMIT must be a positive integer');
+  need(env.STUCK_TAG, 'STUCK_TAG is required');
+  need(env.READY_STAGE && env.RETURN_STAGE && env.READY_STAGE !== env.RETURN_STAGE, 'READY_STAGE and RETURN_STAGE must be distinct stages');
+  need(criteria(env.FINDING_CRITERIA).length, 'FINDING_CRITERIA must name the criterion letters');
+  // The Writer skips an AC with a stuck or source-gap tag. The shared queue compares whole tags.
+  const excluded = read(env.PLANNING_JOPPA_CONFIG).exclude_tags || [];
+  need([env.STUCK_TAG, env.SOURCE_GAP_TAG].filter(Boolean).every(tag => excluded.includes(tag)), 'exclude_tags must hold STUCK_TAG and SOURCE_GAP_TAG');
   need(['create', 'update', 'reconcile'].includes(env.TEST_OPERATION), 'TEST_OPERATION must be create, update or reconcile');
   need(['true', 'false'].includes(env.DRY_RUN ?? 'false'), 'DRY_RUN must be true or false');
   const publication = JSON.parse(env.FLOW_PUBLICATION), kind = env.TEST_KIND;
@@ -60,33 +68,38 @@ function main() {
           : args(env.CRITIC_SECOND_HARNESS === 'codex' ? codex : claude))}]));
     return;
   }
-  const input = () => read(path.join(dir, 'input.json'));
+  const input = () => read(path.join(dir, 'input.json')), run = path.basename(path.dirname(dir));
+  const returns = {readyStage: env.READY_STAGE, returnStage: env.RETURN_STAGE, limit: env.RETURNS_LIMIT, stuckTag: env.STUCK_TAG, run};
   if (mode === 'review') {
-    if (env.TEST_OPERATION === 'reconcile') {
-      const draft = read(path.join(dir, 'draft.json'));
-      const digest = createHash('sha256').update(fs.readFileSync(path.join(dir, 'draft.json'))).digest('hex');
-      console.log(JSON.stringify(review(input(), draft, ['critic-codex.json', 'critic-second.json'].map(name => read(path.join(dir, name))),
-        digest, env.TEST_KIND, path.basename(path.dirname(dir)), env.SOURCE_GAP_TAG || '')));
-    } else {
-      const digest = createHash('sha256').update(fs.readFileSync(path.join(dir, 'draft.json'))).digest('hex');
-      console.log(execFileSync('jq', ['-nc', '--arg', 'digest', digest, '--arg', 'test', env.TEST_KIND,
-        '--arg', 'gap_tag', env.SOURCE_GAP_TAG || '', '--arg', 'run', path.basename(path.dirname(dir)), '--arg', 'mode', env.TEST_OPERATION,
+    const digest = createHash('sha256').update(fs.readFileSync(path.join(dir, 'draft.json'))).digest('hex');
+    const reviews = ['critic-codex.json', 'critic-second.json'].map(name => read(path.join(dir, name)));
+    let verdict = env.TEST_OPERATION === 'reconcile'
+      ? review(input(), read(path.join(dir, 'draft.json')), reviews, digest, env.TEST_KIND, run, env.SOURCE_GAP_TAG || '', returns)
+      : JSON.parse(execFileSync('jq', ['-nc', '--arg', 'digest', digest, '--arg', 'test', env.TEST_KIND,
+        '--arg', 'gap_tag', env.SOURCE_GAP_TAG || '', '--arg', 'run', run, '--arg', 'mode', env.TEST_OPERATION,
         ...Object.entries({draft: 'draft.json', input: 'input.json', codex: 'critic-codex.json', second: 'critic-second.json'})
           .flatMap(([name, file]) => ['--slurpfile', name, path.join(dir, file)]),
-        '-f', path.join(env.MEDULLA_WORKFLOW_DIR, 'publication.jq')], {encoding: 'utf8'}).trim());
+        '-f', path.join(env.MEDULLA_WORKFLOW_DIR, 'publication.jq')], {encoding: 'utf8'}));
+    // The jq verdicts of create and update hold no AC write. Create moves the AC on, and a GAP asks the owner.
+    if (env.TEST_OPERATION !== 'reconcile' && verdict.decision_required) {
+      const {missing, ...rest} = verdict;
+      verdict = {...rest, operations: acOutcome(input(), 'gap', {...returns, gapTag: env.SOURCE_GAP_TAG, reason: 'Missing coverage:\n' + missing.join('\n')})};
     }
+    if (env.TEST_OPERATION === 'create' && verdict.approved) verdict = {...verdict, operations: [...verdict.operations, ...acOutcome(input(), 'ready', returns)]};
+    // Only a three-part finding returns the AC to the return stage. The author cannot correct the AC.
+    const findings = verdict.approved ? [] : acFindings(input(), reviews, digest, criteria(env.FINDING_CRITERIA));
+    console.log(JSON.stringify(findings.length ? {approved: false, decision_required: true,
+      operations: acOutcome(input(), 'defect', {...returns, findings}),
+      outcome: {status: 'blocked', reason_code: 'AC_DEFECT', reason: findings.map(row => row.criterion + ': ' + row.ac_quote).join('; ').slice(0, 1000)}} : verdict));
     return;
   }
   const file = JSON.parse(env.FLOW_PUBLICATION).file;
   need(path.basename(file) === file && file.endsWith('.json'), 'Publication must name a JSON basename');
   const target = path.join(dir, file);
   if (mode === 'rejected') {
-    const assignment = input(), node = assignment.selected, reason = fs.readFileSync(path.join(dir, 'failure.txt'), 'utf8').slice(0, 1000);
-    write(target, {operations: [
-      {command: {op: 'save_object', kind: node.kind, id: node.address.split(':')[1], revision: assignment.claim_revision,
-        data: {stage: 'to_decide'}, reason: 'Writer did not get approved Tests for this AC. The AC goes to to_decide.'}},
-      {command: {op: 'note', target: node.address, id: ('writer-rejected-' + path.basename(path.dirname(dir))).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-100), text: reason}}],
-      outcome: {status: 'blocked', reason_code: 'REJECTED', reason}});
+    // A failed step keeps the stage and adds 1 to returns. The note keeps the critic findings.
+    const reason = fs.readFileSync(path.join(dir, 'failure.txt'), 'utf8');
+    write(target, {operations: acOutcome(input(), 'failure', {...returns, reason}), outcome: {status: 'blocked', reason_code: 'REJECTED', reason: reason.slice(0, 1000)}});
     return;
   }
   need(mode === 'preview', 'Use policy, review, rejected or preview');

@@ -21,7 +21,7 @@ function fixture(t, {mode = 'reconcile', dry = false, plan = draft()} = {}) {
   const read = name => JSON.parse(fs.readFileSync(path.join(a, name), 'utf8'));
   write('input.json', input()); write('draft.json', plan);
   const config = path.join(root, 'config.json');
-  fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: false}));
+  fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: false, exclude_tags: ['source-gap-cto', 'stuck']}));
   const engine = path.join(root, 'stages.mjs');
   fs.writeFileSync(engine, `import fs from 'node:fs';import path from 'node:path';
 const a=path.join(process.env.MEDULLA_RUN_DIR,'artifacts');
@@ -45,7 +45,8 @@ console.log('<signal:PREPARED>Ready</signal:PREPARED>');`);
   const env = {...process.env, PLANNING_PYTHON: process.execPath, CREW_FLOW_STAGES: engine,
     FLOW_PUBLICATION: JSON.stringify(publication), PLANNING_JOPPA_CONFIG: config, MEDULLA_RUN_DIR: root,
     MEDULLA_WORKFLOW_DIR: here, TEST_KIND: kind, TEST_OPERATION: mode, DRY_RUN: String(dry),
-    REWORK_LIMIT: '3', round: '4', SOURCE_GAP_TAG: 'source-gap-cto',
+    REWORK_LIMIT: '3', round: '4', SOURCE_GAP_TAG: 'source-gap-cto', RETURNS_LIMIT: '3', STUCK_TAG: 'stuck',
+    READY_STAGE: 'to_task', RETURN_STAGE: 'to_decide', FINDING_CRITERIA: 'G A U M V R',
     AUTHOR_MODEL: 'author', CRITIC_CODEX_MODEL: 'first', CRITIC_SECOND_MODEL: 'second', CRITIC_SECOND_HARNESS: 'claude-code'};
   const critics = (change = value => value) => {
     const digest = createHash('sha256').update(fs.readFileSync(path.join(a, 'draft.json'))).digest('hex');
@@ -65,7 +66,7 @@ test('the actual prepare validates dry policy and exposes only the supplied Test
   assert.equal(seats.length, 2);
   for (const name of ['shell_tool', 'view_image', 'apps', 'browser_use', 'multi_agent']) assert.ok(Object.values(seats[0]).includes('features.' + name + '=false'));
   assert.ok(Object.values(seats[1]).includes('--tools='));
-  fs.writeFileSync(f.config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: true}));
+  fs.writeFileSync(f.config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: true, exclude_tags: ['source-gap-cto', 'stuck']}));
   fs.unlinkSync(path.join(f.a, 'engine-calls'));
   const refused = spawnSync('bash', ['-c', body('prepare')], {env: f.env, encoding: 'utf8'});
   assert.equal(refused.status, 1); assert.match(refused.stderr, /failure_notes/);
@@ -79,7 +80,7 @@ test('the actual draft and review routes approve the whole reconcile plan before
   assert.match(f.run('review_join'), /<signal:APPROVED>/);
   const commands = f.read('operations.json').operations.map(row => row.command);
   assert.deepEqual(commands.map(row => row.op), ['save_object', 'save_object', 'archive_object', 'save_object']);
-  assert.deepEqual(commands[0].data, {stage: 'to_task'});
+  assert.deepEqual(commands[0].data, {stage: 'to_task', returns: 0});
   f.run('publish');
   assert.deepEqual(f.read('captured.json'), f.read('would-publish.json'));
 });
@@ -132,7 +133,7 @@ test('legacy update still updates the same Test and does not move the AC stage',
   assert.deepEqual(f.read('operations.json').operations.map(row => [row.command.kind, row.command.id]), [[kind, 'u']]);
 });
 
-test('legacy update refusals return the claimed AC to to_decide and keep dry runs empty', t => {
+test('legacy update refusals keep the AC stage, add 1 to returns and keep dry runs empty', t => {
   for (const dry of [false, true]) {
     const f = fixture(t, {mode: 'update', dry});
     fs.writeFileSync(path.join(f.a, 'failure.txt'), 'Fix: define the missing acceptance outcome.');
@@ -140,10 +141,10 @@ test('legacy update refusals return the claimed AC to to_decide and keep dry run
     f.run('publish');
     const proposed = f.read('would-publish.json'), selected = input().selected;
     assert.deepEqual(proposed.operations[0].command, {op: 'save_object', kind: selected.kind,
-      id: selected.address.split(':')[1], revision: input().claim_revision, data: {stage: 'to_decide'},
-      reason: 'Writer did not get approved Tests for this AC. The AC goes to to_decide.'});
+      id: selected.address.split(':')[1], revision: input().claim_revision, data: {returns: 1},
+      reason: 'Writer did not get approved Tests. The AC keeps its stage. Returns: 1.'});
     assert.equal(proposed.operations[1].command.target, selected.address);
-    assert.equal(proposed.operations[1].command.text, 'Fix: define the missing acceptance outcome.');
+    assert.match(proposed.operations[1].command.text, /\nFix: define the missing acceptance outcome\.$/);
     assert.ok(proposed.operations.every(row => row.command.kind !== kind));
     assert.deepEqual(f.read('captured.json').operations, dry ? [] : proposed.operations);
   }
@@ -208,4 +209,74 @@ test('blocked or failed shared prepare keeps the prior artifact and emits no ass
     assert.equal(Object.hasOwn(updates(result.stdout), 'writer_assignment_path'), false);
     assert.equal(fs.readFileSync(file, 'utf8'), '{"prior":true}'); assert.equal(fs.existsSync(file + '.tmp'), false);
   }
+});
+
+test('a three-part AC finding returns the AC to to_decide with returns + 1 and no Test change, in reconcile and create', t => {
+  for (const mode of ['reconcile', 'create']) {
+    const plan = mode === 'create' ? {tests: [{id: 'n1', title: 'spec/n.test.ts > new', data: {body: 'New text.'}}], retire: [], coverage: 'c'} : draft();
+    const f = fixture(t, {mode, plan});
+    const state = input(); state.selected.document.data.returns = 1;
+    state.references.sources.push({address: 'source:s1', kind: 'source', document: {data: {body: 'The Source says x.'}}});
+    f.write('input.json', state);
+    assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
+    const findings = [{criterion: 'G', ac_quote: 'correct u', source_quote: 'The Source says x.', source: 'source:s1'}];
+    f.critics(value => ({...value, coverage: 'incomplete', missing: ['m'], ac_findings: findings}));
+    assert.match(f.run('review_join'), /<signal:MISSING>/);
+    const result = f.read('operations.json'), commands = result.operations.map(row => row.command);
+    assert.equal(result.outcome.reason_code, 'AC_DEFECT');
+    assert.deepEqual(commands.map(row => row.op), ['save_object', 'note']);
+    assert.deepEqual(commands[0].data, {stage: 'to_decide', returns: 2});
+    assert.match(commands[1].text, /- G: "correct u" breaks "The Source says x\." \(source:s1\)/);
+  }
+});
+
+test('a critic rejection without a three-part finding keeps the AC stage, and the third return adds stuck', t => {
+  const f = fixture(t);
+  const state = input(); state.selected.document.data.returns = 2; f.write('input.json', state);
+  assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
+  f.critics(value => ({...value, coverage: 'incomplete', missing: ['m'],
+    ac_findings: [{criterion: 'G', ac_quote: 'a paraphrase of the AC', source_quote: 'x', source: 'source:none'}]}));
+  assert.match(f.run('review_join'), /<signal:REJECTED>/);
+  assert.match(f.run('rejected'), /<signal:RETURN>/);
+  const commands = f.read('operations.json').operations.map(row => row.command);
+  assert.deepEqual(commands[0].data, {returns: 3, tags: ['keep', 'stuck']});
+  assert.equal(commands.some(row => row.data?.stage), false);
+  assert.match(commands.at(-1).text, /^Question to the Owner: Writer failed on this AC 3 times/);
+  assert.equal(f.read('operations.json').outcome.reason_code, 'REJECTED');
+});
+
+test('a disputed rewrite of a covering Test reaches rejection with the critic evidence and changes no Test', t => {
+  const f = fixture(t);
+  assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
+  f.critics(value => ({...value, updates: [{id: 'u', agree: false, evidence: 'The captured Test u already covers the AC.'}]}));
+  assert.match(f.run('review_join'), /<signal:REJECTED>/);
+  assert.match(fs.readFileSync(path.join(f.a, 'failure.txt'), 'utf8'), /\nsecond:\n- Update u: The captured Test u already covers the AC\./);
+  f.run('rejected');
+  assert.ok(f.read('operations.json').operations.every(row => row.command.kind !== kind));
+});
+
+test('a rejection keeps every reason of every failing Test of both critics in failure.txt and in the AC note', t => {
+  const f = fixture(t);
+  assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
+  const reasons = id => ['First ' + id + ' reason ' + 'r'.repeat(500), 'Second ' + id + ' reason.'];
+  f.critics(value => ({...value, tests: value.tests.map(row => ({...row, score: '01111', reasons: reasons(row.id)})),
+    coverage: 'incomplete', missing: ['The refusal outcome.'], summary: 'Two critics disagree.'}));
+  assert.match(f.run('review_join'), /<signal:REJECTED>/);
+  const failure = fs.readFileSync(path.join(f.a, 'failure.txt'), 'utf8');
+  for (const id of ['k', 'u', 'new_1']) for (const text of reasons(id)) assert.ok(failure.includes(text), text.slice(0, 20));
+  assert.match(failure, /\nsecond:\n- Test k score 01111: First k reason/);
+  assert.match(failure, /- Missing: The refusal outcome\.\n- Two critics disagree\./);
+  f.run('rejected');
+  assert.ok(f.read('operations.json').operations[1].command.text.endsWith(failure));
+});
+
+test('approved create Tests end with the configured ready stage and returns 0', t => {
+  const plan = {tests: [{id: 'n1', title: 'spec/n.test.ts > new', data: {body: 'New text.'}}], retire: [], coverage: 'c'};
+  const f = fixture(t, {mode: 'create', plan});
+  assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
+  f.critics();
+  assert.match(f.run('review_join'), /<signal:APPROVED>/);
+  const commands = f.read('operations.json').operations.map(row => row.command);
+  assert.deepEqual(commands.map(row => row.kind), [kind, 'ac']);
+  assert.deepEqual(commands.at(-1).data, {stage: 'to_task', returns: 0});
 });

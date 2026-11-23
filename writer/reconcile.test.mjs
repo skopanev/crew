@@ -7,14 +7,15 @@ import {validate, review as reconcile} from './reconcile.mjs';
 import {dryOutput, policy} from './control.mjs';
 import {input, draft, review, node, kind} from './test-support/reconcile.fixture.mjs';
 
-const publish = (state, plan, reviews = [review(plan), review(plan)]) => reconcile(state, plan, reviews, 'exact', kind, 'run-1', 'source-gap-cto');
+const stages = {readyStage: 'to_task', returnStage: 'to_decide'};
+const publish = (state, plan, reviews = [review(plan), review(plan)]) => reconcile(state, plan, reviews, 'exact', kind, 'run-1', 'source-gap-cto', stages);
 
 test('keep/update/archive/create retain IDs and evidence and put the claimed parent first', () => {
   const state = input(), plan = draft(), before = structuredClone(state);
   validate(state, plan, kind);
   const value = publish(state, plan), commands = value.operations.map(row => row.command);
   assert.deepEqual(commands.map(row => row.op), ['save_object', 'save_object', 'archive_object', 'save_object']);
-  assert.deepEqual(commands[0].data, {stage: 'to_task'});
+  assert.deepEqual(commands[0].data, {stage: 'to_task', returns: 0});
   assert.deepEqual([commands[0].id, commands[0].revision], ['a', 11]);
   assert.deepEqual([commands[1].id, commands[1].revision, commands[1].data], ['u', 7, {body: plan.tests[1].data.body}]);
   assert.deepEqual([commands[2].target, commands[2].revision], ['test:r', 7]);
@@ -73,12 +74,13 @@ test('both critics review the exact final set and every retirement', () => {
   assert.throws(() => publish(state, plan, [review(plan)]), /Exactly two/);
 });
 
-test('a reviewed Source gap and incomplete AC coverage never publish Test changes', () => {
+test('a reviewed Source gap and incomplete AC coverage add the question tag, keep the stage and publish no Test changes', () => {
   for (const plan of [draft(), {tests: [], retire: [], coverage: 'GAP. The Source gives no refusal outcome.'}]) {
     const critic = {...review(plan), coverage: 'incomplete', coverage_gap_kind: 'ac', missing: ['The refusal outcome needs an owner decision.']};
     const value = publish(input(), plan, [critic, critic]);
     assert.equal(value.decision_required, true);
     assert.deepEqual(value.operations.map(row => row.command.op), ['save_object', 'note']);
+    assert.deepEqual(value.operations[0].command.data, {tags: ['keep', 'source-gap-cto']});
     assert.ok(value.operations.every(row => row.command.kind !== 'test'));
     assert.deepEqual(dryOutput(value, true).operations, []);
     assert.equal(dryOutput(value, true).outcome.reason_code, 'DRY_RUN');
@@ -99,13 +101,40 @@ test('a dry run requires the frozen central release policy before any claim', ()
   try {
     const config = path.join(folder, 'config.json');
     const env = {PLANNING_JOPPA_CONFIG: config, CREW_FLOW_STAGES: '/fixture/flow.py', REWORK_LIMIT: '3', TEST_KIND: kind,
+      RETURNS_LIMIT: '3', STUCK_TAG: 'stuck', READY_STAGE: 'to_task', RETURN_STAGE: 'to_decide', FINDING_CRITERIA: 'G A U M V R',
       TEST_OPERATION: 'reconcile', DRY_RUN: 'true', SOURCE_GAP_TAG: 'source-gap-cto',
       AUTHOR_MODEL: 'author', CRITIC_CODEX_MODEL: 'first', CRITIC_SECOND_MODEL: 'second', CRITIC_SECOND_HARNESS: 'claude-code',
       FLOW_PUBLICATION: JSON.stringify({create_kinds: [kind], update_kinds: ['ac', kind], allowed_operations: ['save_object', 'archive_object', 'note']})};
-    fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: false}));
+    const excluded = {exclude_tags: ['source-gap-cto', 'stuck']};
+    fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: false, ...excluded}));
     assert.doesNotThrow(() => policy(env));
-    fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: true}));
+    fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: true, ...excluded}));
     assert.throws(() => policy(env), /frozen failure_notes/);
     assert.throws(() => policy({...env, DRY_RUN: 'yes'}), /DRY_RUN/);
   } finally { fs.rmSync(folder, {recursive: true, force: true}); }
+});
+
+test('a rewrite of a captured Test needs a quote of that Test and a reason code', () => {
+  for (const change of [row => delete row.finding, row => row.finding.test_quote = 'Text that the Test does not hold',
+    row => row.finding.reason_code = 'scope', row => row.finding.extra = 'x', row => row.finding = 'SCOPE_MISMATCH']) {
+    const plan = draft(); change(plan.tests[1]);
+    assert.throws(() => validate(input(), plan, kind), /finding/);
+  }
+  const plan = draft(); plan.tests[0].finding = {test_quote: 'Current k', reason_code: 'SCOPE_MISMATCH'};
+  assert.throws(() => validate(input(), plan, kind), /Unsupported Test field/);
+  const commands = publish(input(), draft()).operations.map(row => row.command);
+  assert.match(commands[1].reason, /SCOPE_MISMATCH: "Current u"/);
+});
+
+test('both critics must agree that each rewritten Test does not cover the AC', () => {
+  const plan = draft();
+  for (const change of [value => value.updates = [], value => delete value.updates, value => value.updates[0].agree = false,
+    value => value.updates[0].evidence = '', value => value.updates[0].id = 'k']) {
+    const second = review(plan); change(second);
+    const value = publish(input(), plan, [review(plan), second]);
+    assert.equal(value.approved, false);
+    assert.equal(value.operations, undefined);
+  }
+  const second = review(plan); second.updates[0] = {id: 'u', agree: false, evidence: 'The captured Test covers the AC.'};
+  assert.deepEqual(publish(input(), plan, [review(plan), second]).critique.second.updates, [second.updates[0]]);
 });

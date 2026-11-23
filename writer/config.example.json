@@ -23,7 +23,7 @@
   "exclude_children": {
     "kind": "test"
   },
-  "exclude_tags": ["source-gap-owner"],
+  "exclude_tags": ["source-gap-owner", "stuck"],
   "children": {
     "kind": [
       "test"
@@ -50,6 +50,11 @@
     "SOURCE_GAP_TAG": "source-gap-owner",
     "TEST_OPERATION": "create",
     "REWORK_LIMIT": 1,
+    "READY_STAGE": "to_task",
+    "RETURN_STAGE": "to_decide",
+    "FINDING_CRITERIA": "G A U M V",
+    "RETURNS_LIMIT": "3",
+    "STUCK_TAG": "stuck",
     "CRITIC_SECOND_HARNESS": "claude-code",
     "CRITIC_SECOND_MODEL": "claude-sonnet-5-5"
   },

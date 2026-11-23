@@ -88,6 +88,19 @@ For each retirement:
 3. Refuse retirement when the behavior remains required.
 4. Require an update of the same ID when only the wording changed.
 
+For each update:
+1. Verify that the captured Test does not cover the current AC or its Sources.
+2. Verify the finding quote and the reason code against the captured Test.
+3. Refuse an update of a Test that already covers them.
+
+Add updates to the review JSON:
+1. Use exactly the IDs of the draft Tests with action update.
+
+"updates":[{"id":"changed-id","agree":true,"evidence":"Why the captured Test does not cover the current AC or Sources"}]
+
+2. Use an empty updates array when the draft updates nothing.
+3. Refuse publication for an update with agree false.
+
 Add retirements to the review JSON:
 1. Use exactly the IDs in draft.retire.
 
@@ -99,11 +112,26 @@ Add retirements to the review JSON:
 Before reconciliation publication:
 1. Require both critics to approve every final Test.
 2. Require both critics to approve complete final coverage.
-3. Require both critics to approve every retirement.
+3. Require both critics to approve every update.
+4. Require both critics to approve every retirement.
 
 For an empty GAP draft in reconcile:
 1. Review the missing Source detail.
 2. Use incomplete coverage and coverage_gap_kind ac only for a real owner decision.
+
+For a defect of the selected AC in any operation:
+1. Report it only when the AC breaks a criterion of rule ac.check.11111r.
+2. Give one criterion letter from the list in this prompt.
+3. Quote the exact AC line in ac_quote.
+4. Quote the exact text of a referenced Source of the selected AC in source_quote.
+5. Give the address of that Source in source.
+6. Do not report a defect without all three parts. The host does not count it.
+7. Do not quote a sibling AC or a node outside the Sources of the AC. The host does not count it. The auditor checks siblings.
+8. Use an empty ac_findings array when the AC has no defect.
+
+"ac_findings":[{"criterion":"One letter from the list","ac_quote":"Exact AC line","source_quote":"Exact Source text","source":"source:id"}]
+
+A valid finding returns the AC to its owner. The Tests are not published.
 
 Check:
 - Score every final Test once with its draft ID.

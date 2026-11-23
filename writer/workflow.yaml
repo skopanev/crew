@@ -1,6 +1,8 @@
 # Crew copy of runtime-d7eeb0d/writer (owner, 21 Nov 2026, process:sample0004 r4). The engine stays unchanged.
-# Changes: in create mode, READY moves the AC to to_task, and SOURCE_GAP, COVERAGE_INCOMPLETE, INVALID and REJECTED
-# move it to to_decide with a note. Update mode also returns refusals to to_decide.
+# Changes (scheme crew_team, step Writer): READY moves the AC to READY_STAGE and sets returns to 0.
+# Only an AC defect with a three-part finding moves it to RETURN_STAGE. A GAP adds the question tag and keeps the stage.
+# INVALID and REJECTED keep the stage. A defect or a failure adds 1 to returns.
+# At RETURNS_LIMIT the AC gets STUCK_TAG and a question to the Owner.
 version: '2'
 keep_runs: 1000
 start: prepare
@@ -26,6 +28,12 @@ vars:
   TEST_OPERATION: create
   DRY_RUN: 'false'
   REWORK_LIMIT: '1'
+  # The project config names the AC stages, the criterion letters, the returns limit and the stuck tag.
+  READY_STAGE: ''
+  RETURN_STAGE: ''
+  FINDING_CRITERIA: ''
+  RETURNS_LIMIT: ''
+  STUCK_TAG: ''
   round: '1'
   writer_assignment_path: ''
   draft: ''
@@ -167,6 +175,7 @@ nodes:
       Native Test kind: {{var:TEST_KIND}}
       Test operation: {{var:TEST_OPERATION}}
       Assignment: {{file:{{var:writer_assignment_path}}}}
+      Criterion letters of rule ac.check.11111r: {{var:FINDING_CRITERIA}}
       Draft digest: {{var:draft_digest}}
       Frozen draft: {{var:draft}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
@@ -195,10 +204,14 @@ nodes:
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The critics did not approve the draft. The author revises it within the configured limit.</signal:REVISE>'
       else
-        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + (if $limit == "1" then " rework. " else " reworks. " end) +
-          (.critique | to_entries | map(.key + ": " +
-            ((.value.failing[0].reasons[0] // .value.retirements[0].evidence // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
-          cut -c1-1000 > "$a/failure.txt"
+        # Keep every finding of both critics in full. The note on the AC holds this file without a cut.
+        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + (if $limit == "1" then " rework." else " reworks." end) +
+          (.critique | to_entries | map("\n" + .key + ":" + (.value | (
+            [.failing[]? | "\n- Test " + (.id | tostring) + " score " + (.score | tostring) + ": " + ((.reasons // []) | map(tostring) | join(" "))] +
+            [.updates[]? | "\n- Update " + (.id | tostring) + ": " + (.evidence | tostring)] +
+            [.retirements[]? | "\n- Retirement " + (.id | tostring) + ": " + (.evidence | tostring)] +
+            [.missing[]? | "\n- Missing: " + tostring] +
+            [(.invalid // empty), (.summary // empty) | "\n- " + tostring]) | join(""))) | join(""))' > "$a/failure.txt"
         echo '<signal:REJECTED>The critics did not approve the revised draft.</signal:REJECTED>'
       fi
     on_signal:
@@ -209,13 +222,13 @@ nodes:
       __failed__: failed
       __default__: failed
   rejected:
-    # Release the claim with the AC in to_decide and the reason as a note in every mode.
+    # Release the claim with the AC in its stage, returns + 1 and the reason as a note in every mode.
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       node "$MEDULLA_WORKFLOW_DIR/control.mjs" rejected "$a"
-      echo '<signal:RETURN>Return the AC to to_decide with the reason.</signal:RETURN>'
+      echo '<signal:RETURN>Count the failed step on the AC with the reason.</signal:RETURN>'
     on_signal:
       RETURN: publish
       __failed__: failed

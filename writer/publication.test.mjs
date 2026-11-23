@@ -31,24 +31,21 @@ const publication = (reviews, mode = 'create') => jq('publication.jq',
   {digest: 'd1', test: 'test', gap_tag: 'source-gap-cto', run: 'run-1', mode},
   {draft: [draft][0], input, codex: reviews[0], second: reviews[1]});
 
-test('approved Tests in create mode also move the AC to to_task', () => {
+test('approved Tests in create mode hold only Test writes, and the host adds the AC move', () => {
   const result = publication([review(), review()]);
   assert.equal(result.approved, true);
-  const commands = result.operations.map(row => row.command);
-  assert.equal(commands[0].kind, 'test');
-  assert.deepEqual(commands.at(-1), {op: 'save_object', kind: 'ac', id: 'sample0000', revision: 31, data: {stage: 'to_task'},
-    reason: 'Writer published the Tests that both critics approved. The AC goes to to_task.'});
+  assert.deepEqual(result.operations.map(row => [row.command.kind, row.command.parent]), [['test', ac]]);
 });
 
-test('a coverage gap moves the AC to to_decide in the same save as the gap tag', () => {
+test('a coverage gap gives the missing behaviors to the host and no AC write', () => {
   const gap = review({coverage: 'incomplete', missing: ['m'], coverage_gap_kind: 'ac'});
   const result = publication([review(), gap]);
   assert.equal(result.decision_required, true);
-  assert.deepEqual(result.operations[0].command.data, {stage: 'to_decide', tags: ['source-gap-cto', 'wallet']});
-  assert.equal(result.operations[1].command.op, 'note');
+  assert.deepEqual(result.missing, ['m']);
+  assert.equal(result.operations, undefined);
 });
 
-test('a source gap moves the AC to to_decide and adds the tag only when it is missing', () => {
+test('a source gap keeps the AC stage and adds the tag only when it is missing', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'writer-gap-'));
   try {
     fs.writeFileSync(path.join(dir, 'draft.json'), JSON.stringify({tests: [], coverage: 'GAP. No amount in the Source.'}));
@@ -57,8 +54,8 @@ test('a source gap moves the AC to to_decide and adds the tag only when it is mi
       return JSON.parse(execFileSync('jq', ['-c', '--arg', 'gap_tag', 'source-gap-cto', '--arg', 'run', 'run-1',
         '--slurpfile', 'input', 'input.json', '-f', path.join(here, 'source-gap.jq'), 'draft.json'], {cwd: dir, encoding: 'utf8'}));
     };
-    assert.deepEqual(run(['wallet']).operations[0].command.data, {stage: 'to_decide', tags: ['source-gap-cto', 'wallet']});
-    assert.deepEqual(run(['source-gap-cto']).operations[0].command.data, {stage: 'to_decide'});
+    assert.deepEqual(run(['wallet']).operations[0].command.data, {tags: ['source-gap-cto', 'wallet']});
+    assert.deepEqual(run(['source-gap-cto']).operations.map(row => row.command.op), ['note']);
     assert.equal(run([]).outcome.reason_code, 'SOURCE_GAP');
   } finally {
     fs.rmSync(dir, {recursive: true, force: true});

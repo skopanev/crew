@@ -21,7 +21,10 @@ The draft contains the complete final Test set and explicit retirements:
 ```
 
 Every captured Test needs exactly one keep, update or retirement disposition.
-Keep preserves all text. Update reuses the existing ID and changes only title, body, command or an unchanged case.
+Keep preserves all text. A Test that covers the AC and its Sources stays.
+Update reuses the existing ID and changes only title, body, command or an unchanged case.
+Each update row adds `finding: {test_quote, reason_code}`. The quote occurs in the captured Test.
+Both reviews add `updates: [{id, agree, evidence}]`, and both agree that the captured Test does not cover the AC.
 The host sends only changed authored fields. It preserves owner, results, history, relations and unmentioned metadata.
 Archive retains the obsolete node and its recorded evidence. Its journal reason includes the reviewed retirement evidence.
 Create cannot reuse an existing Test ID or title. It copies the AC owner.
@@ -38,6 +41,24 @@ Updates and archives use captured native revisions. Creates follow archives so t
 The shared engine combines the AC stage save with its claim release and sends one batch of at most 100 operations.
 The Writer adds no network publisher.
 
+## AC outcomes and returns (scheme crew_team)
+
+The project config names `READY_STAGE`, `RETURN_STAGE`, `FINDING_CRITERIA`, `RETURNS_LIMIT` and `STUCK_TAG`.
+The schema of the selected kind must hold both stages and the `returns` and `tags` fields.
+
+- READY moves the AC to `READY_STAGE` and sets `returns` to 0.
+- An AC defect moves the AC to `RETURN_STAGE`, adds 1 to `returns` and writes a note with every finding in full.
+  A critic reports it in `ac_findings: [{criterion, ac_quote, source_quote, source}]`.
+  The criterion is a letter of `FINDING_CRITERIA`. The AC quote occurs in the AC.
+  The source is a referenced Source of the AC, and the quote occurs in its text. Writer does not count a sibling AC.
+  The auditor checks siblings and R, so the Writer config omits R.
+  Without such a finding, the AC does not go to `RETURN_STAGE`.
+- A GAP adds `SOURCE_GAP_TAG` and keeps the stage and `returns`.
+- INVALID and REJECTED keep the stage, add 1 to `returns` and write a note with every critic finding in full.
+- At `RETURNS_LIMIT` the AC gets `STUCK_TAG` and a note with a question to the Owner.
+- `exclude_tags` holds `STUCK_TAG` and `SOURCE_GAP_TAG`. The shared queue compares whole tags.
+- The config has no `failure_escalation`. A technical failure releases the claim and keeps the stage.
+
 An empty Source-gap draft uses `tests: []`, `retire: []` and `coverage: "GAP. <missing detail>"`.
 Both critics review the gap. An owner decision changes no Tests.
 The existing source-gap, coverage-gap and rejection routes remain available in their respective modes.
@@ -52,7 +73,7 @@ Repeated preview preserves the original proposal.
 Run the bounded tests with:
 
 ```sh
-rtk proxy bun test --timeout 30000 writer/publication.test.mjs writer/reconcile.test.mjs writer/workflow.test.mjs
+node --test writer/
 ```
 
 The coordinator reviews the patch and runs three actual AC dry runs before joint release with the auditor.
