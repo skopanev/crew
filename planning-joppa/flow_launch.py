@@ -51,6 +51,19 @@ def configuration(path, raw=None, input_index=None):
                 "publication." + key + " must be a string list")
     require(set(publication.get("allowed_operations", [])) <= {"save_object", "archive_object", "note"},
             "publication contains an unsupported scoped operation")
+    structure = publication.get("structure")
+    if structure is not None:
+        require(isinstance(structure, dict) and set(structure) <= {"create", "move", "note_created"},
+                "publication.structure has unsupported permissions")
+        for operation, permitted in (("create", publication.get("create_kinds", [])),
+                                     ("move", publication.get("update_kinds", []))):
+            kinds = structure.get(operation, {})
+            require(isinstance(kinds, dict) and all(kind in permitted and isinstance(scopes, list) and scopes and
+                    set(scopes) <= {"context_parent", "fresh_parent", "created"} for kind, scopes in kinds.items()),
+                    "structural permissions need permitted kinds and parent scopes")
+        require(type(structure.get("note_created", False)) is bool and
+                (not structure.get("note_created") or "note" in publication.get("allowed_operations", [])),
+                "structural notes need note permission")
     require(isinstance(config.get("references", []), list) and
             all(isinstance(item, str) and item for item in config.get("references", [])), "references must be field names")
     batch_settings(config)

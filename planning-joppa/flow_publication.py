@@ -1,8 +1,9 @@
 """Fence configured native operations with the existing planner claim and receipt."""
 from copy import deepcopy
+import json
 from pathlib import Path
 
-from common import digest, read, require, write
+from common import digest, read, require, run, write
 from context_reads import object_read
 import planning_claims as claims
 import publication
@@ -66,6 +67,8 @@ def operations(config, assignment, claim, value):
     require(isinstance(value, dict) and set(value) <= {"operations", "outcome"}, "invalid flow publication envelope")
     rows = value["operations"]
     require(isinstance(rows, list) and len(rows) <= 100, "flow output exceeds the native operation limit")
+    permissions = json.loads(run(["bun", str(Path(__file__).with_name("structure-permissions.mjs"))],
+        input=json.dumps({"config": config, "assignment": assignment, "rows": rows}))) if policy.get("structure") else {}
     selected = assignment["selected"]
     items = {item["address"]: item for item in members(assignment)}
     editable = {item["address"]: item for item in [*items.values(), *assignment["children"]]}
@@ -81,7 +84,7 @@ def operations(config, assignment, claim, value):
     result, parent_updates, root_creates, refs, modified, updates, archived = [], [], [], set(), set(), {}, set()
     release_refs = {address: "flow_release" + ("_" + str(index) if index else "")
                     for index, address in enumerate(items)}
-    for row in deepcopy(rows):
+    for index, row in enumerate(deepcopy(rows)):
         require(isinstance(row, dict) and set(row) <= {"ref", "command"}, "invalid native operation envelope")
         cmd = row.get("command")
         require(isinstance(cmd, dict) and cmd.get("op") in policy.get("allowed_operations", []),
@@ -98,8 +101,11 @@ def operations(config, assignment, claim, value):
                     "creation kind or explicit id is outside the publication policy")
             root_create = "parent" in cmd and cmd["parent"] is None and \
                 assignment["schema"]["types"].get(cmd["kind"], {}).get("root") is True
-            require(root_create or cmd.get("parent") in items,
+            require(root_create or index in permissions.get("creates", []) or
+                    isinstance(cmd.get("parent"), str) and cmd["parent"] in items,
                     "new objects need a claimed parent or an explicitly permitted schema root")
+        elif op == "note" and index in permissions.get("notes", []):
+            pass
         else:
             address = cmd.get("target") if op == "note" else cmd.get("ac") or cmd.get("target")
             address = address or str(cmd.get("kind")) + ":" + str(cmd.get("id"))
@@ -132,7 +138,8 @@ def operations(config, assignment, claim, value):
                 # A note needs a revision-checked save in this same batch.
                 require(address in modified or address in owned, "note needs a preceding guarded update")
         require(not any(key in cmd for key in ("workspace", "request_id", "clean")), "flow command overrides a host field")
-        require("parent" not in cmd or cmd.get("revision") == 0 and (root_create or cmd["parent"] in items),
+        require("parent" not in cmd or cmd.get("revision") == 0 and
+                (root_create or index in permissions.get("creates", []) or cmd["parent"] in items) or index in permissions.get("moves", []),
                 "flow cannot move existing objects")
         require("assignee" not in (cmd.get("data") or {}), "flow cannot change an execution claim")
         if op == "save_object" and cmd.get("revision") != 0 and address == parent:
@@ -144,7 +151,7 @@ def operations(config, assignment, claim, value):
                 updates[address] = cmd
                 continue
             cmd["revision"] = {"$ref": release_refs[address] + "/saved_revision"}
-        (root_creates if root_create else result).append(row)
+        (root_creates if root_create or index in permissions.get("creates", []) else result).append(row)
     releases = []
     for address, item in items.items():
         cmd = updates.get(address) or claims.save_command({**item, "current_revision": owned[address]}, None,
