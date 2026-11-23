@@ -8,7 +8,7 @@
   "runs_folder": "/path/to/project/.crew/ac-auditor-runs",
   "interval_seconds": 60,
   "context": {
-    "url": "https://joppa.otion.us/api/data",
+    "url": "https://joppa.example/api/data",
     "workspace": "example",
     "token_file": "/path/to/example-read-key",
     "roles": {
