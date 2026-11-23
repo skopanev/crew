@@ -225,9 +225,10 @@ test('the actual prepare admits AC Test updates before author and preserves the 
   f.write('input.json', f.input); f.write('trees.json', f.trees);
   const stages = path.join(f.root, 'stages.mjs');
   fs.writeFileSync(stages, "console.log('<signal:PREPARED>Ready</signal:PREPARED>');");
+  fs.writeFileSync(path.join(f.root, 'completion.mjs'), "console.log('<signal:CONTINUE>Normal Tasker path.</signal:CONTINUE>');");
   fs.writeFileSync(path.join(f.root, 'trees.sh'), 'exit 0\n');
   const run = update_kinds => spawnSync('bash', ['-c', shell], {encoding: 'utf8', env: {...f.env,
-    PLANNING_PYTHON: process.execPath, CREW_FLOW_STAGES: stages, MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: f.root,
+    PLANNING_PYTHON: process.execPath, TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: f.root,
     FLOW_PUBLICATION: JSON.stringify({file: 'operations.json', allowed_operations: ['save_object', 'note'], create_kinds: ['task'], update_kinds}),
     TASKER_REPOS: '{}', TASKER_TREE_ROOT: f.root, CREW_WORKFLOW_DIR: path.join(here, '../workflow'), CBM_BIN: 'unused',
     CBM_CACHE_DIR: f.root, CBM_ALLOWED_ROOT: f.root, REWORK_LIMIT: '3', PLAN_MAX_FILES: '8', PLAN_MAX_LINES: '300',
