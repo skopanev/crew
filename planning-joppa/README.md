@@ -39,6 +39,12 @@ The assignment contains its zero-based `input` index. A manual launch selects in
 Single-input configs retain their existing behavior.
 
 Set `failure_notes: false` to release failed flow claims without adding business notes.
+Optionally set `failure_escalation: {"after": 3, "data": {"phase": "owner_decision"}}` to limit repeated technical failures.
+Use field names and values from your workspace schema. Permit saves and notes on the selected kind in the publication policy.
+The host counts confirmed failures for the same flow and item from existing run results. Successful publication resets the count.
+At the limit, the host saves the configured data, releases the claim and writes the last error in one batch.
+Dry runs, active-item skips, uncertain receipts and stops without a confirmed claim do not count.
+Without this option, failed flows keep their existing release behavior. Separate run folders keep independent flow histories.
 The default is `true`. The frozen config controls failure handlers and shutdown cleanup.
 Uncertain receipts still retain the claim for recovery.
 

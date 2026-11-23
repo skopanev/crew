@@ -1,12 +1,55 @@
 """Fence configured native operations with the existing planner claim and receipt."""
 from copy import deepcopy
+from pathlib import Path
 
-from common import read, require, write
+from common import digest, read, require, write
 from context_reads import object_read
 import planning_claims as claims
 import publication
 from flow_context import verify
 from flow_batch import members
+
+
+def failure_scope(config):
+    return digest([config["url"], config["workspace"], config.get("workflow"), config["selection"]["kind"]])
+
+
+def failure_counts(config, target, addresses):
+    counts = {address: 1 for address in addresses}
+    pending = set(addresses)
+    scope = failure_scope(config)
+    paths = []
+    for path in Path(config["runs_folder"]).glob("*/artifacts/result.json"):
+        try:
+            paths.append((path.stat().st_mtime_ns, str(path), path))
+        except OSError:
+            continue
+    for _, _, path in sorted(paths, reverse=True):
+        if path.parent.resolve() == target.resolve():
+            continue
+        try:
+            result = read(path)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(result, dict):
+            continue
+        if result.get("failure_scope") != scope or result.get("reason_code") in ("DRY_RUN", "ACTIVE_TASK"):
+            continue
+        if result.get("claim_released") is not True or result.get("needs_recovery"):
+            continue
+        revisions = result.get("item_revisions")
+        if not isinstance(revisions, dict):
+            continue
+        previous = result.get("retry_failures") or {}
+        for address in pending.intersection(revisions):
+            count = previous.get(address, 0) if isinstance(previous, dict) else 0
+            if type(count) is int and count > 0 and result.get("reason_code") in ("FLOW_FAILED", "FAILURE_LIMIT") and \
+                    address not in result.get("failure_escalated", []):
+                counts[address] += count
+            pending.remove(address)
+        if not pending:
+            break
+    return counts
 
 
 def operations(config, assignment, claim, value):
@@ -116,6 +159,8 @@ def publish(api, config, target):
                  for index, item in enumerate(members(assignment))}
     value = {**outcome, "selected_revision": revisions[assignment["selected"]["address"]],
              "item_revisions": revisions, "claim_released": True, "acceptance_verified": False}
+    if config.get("failure_escalation"):
+        value["failure_scope"] = failure_scope(config)
     write(target / "result.json", value)
     if assignment.get("items") or any(row["command"]["op"] == "archive_object" for row in batch):
         # The confirmed transaction is durable before optional reads of final node revisions.
@@ -147,11 +192,24 @@ def fail(api, config, target, reason):
         if receipt.exists() and read(receipt).get("status") in ("pending", "uncertain", "confirmed"):
             require(False, "publication needs receipt recovery; claim retained")
         claim = read(claim_path)
-        claims.owned(api, config["workspace"], claim)
+        owners = claims.owned(api, config["workspace"], claim)
+        owned_revisions = {**claims.claimed_revisions(claim), **claim.get("revisions", {})}
         batch, addresses = [], list(claims.claimed(claim))
+        policy = config.get("failure_escalation") if config.get("failure_notes", True) and \
+            str(config.get("vars", {}).get("DRY_RUN", "false")).lower() != "true" else None
+        counts = failure_counts(config, target, addresses) if policy else {}
+        escalated = []
         for address in addresses:
             selected = object_read(api, config["workspace"], address)
-            batch.append({"command": claims.save_command(selected, None, "Release the failed configured workflow claim.")})
+            require(selected["current_revision"] == owned_revisions[address] and
+                    claims.assignee_of(selected) == owners[address], "flow claim changed before failed release: " + address)
+            command = claims.save_command(selected, None, "Release the failed configured workflow claim.")
+            if policy and counts[address] >= policy["after"]:
+                require(selected["kind"] in config["publication"]["update_kinds"], "failure escalation kind is outside the publication policy")
+                command["data"].update(policy["data"])
+                command["reason"] = reason[:1000]
+                escalated.append(address)
+            batch.append({"command": command})
             if config.get("failure_notes", True):
                 batch.append({"command": claims.note(address, {"id": "flow-" + claims.run_id(target)[:40], "text": reason[:1000]})})
         result = publication.mutate(api, target / "release.json", "joppa_batch",
@@ -163,5 +221,9 @@ def fail(api, config, target, reason):
         revision = revisions[addresses[0]]
     else:
         revision, revisions = None, {}
-    write(target / "result.json", {"status": "blocked", "reason": reason, "claim_released": released,
-                                   "selected_revision": revision, "item_revisions": revisions, "acceptance_verified": False})
+    value = {"status": "blocked", "reason": reason, "claim_released": released,
+             "selected_revision": revision, "item_revisions": revisions, "acceptance_verified": False}
+    if released and policy:
+        value.update(failure_scope=failure_scope(config), retry_failures=counts, failure_escalated=escalated,
+                     reason_code="FAILURE_LIMIT" if escalated else "FLOW_FAILED")
+    write(target / "result.json", value)

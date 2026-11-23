@@ -73,6 +73,18 @@ def configuration(path, raw=None, input_index=None):
     require(config.get("retry", "on_revision") in ("always", "on_revision", "never"),
             "config.retry must be always, on_revision or never")
     require(type(config.get("failure_notes", True)) is bool, "config.failure_notes must be boolean")
+    escalation = config.get("failure_escalation")
+    if escalation is not None:
+        require(isinstance(escalation, dict) and set(escalation) == {"after", "data"} and
+                type(escalation["after"]) is int and escalation["after"] > 0,
+                "failure_escalation needs a positive after count and data")
+        require(isinstance(escalation["data"], dict) and escalation["data"] and
+                "assignee" not in escalation["data"] and all(isinstance(key, str) and key and
+                    isinstance(value, str) and value for key, value in escalation["data"].items()),
+                "failure_escalation.data needs text fields and cannot change assignee")
+        require("save_object" in publication.get("allowed_operations", []) and "note" in publication.get("allowed_operations", []) and
+                config["selection"]["kind"] in publication.get("update_kinds", []),
+                "failure_escalation needs permission to save and note the selected kind")
     return config
 
 
