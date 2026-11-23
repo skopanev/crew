@@ -101,9 +101,11 @@
     "CBM_BIN": "/path/to/codebase-memory-mcp",
     "CBM_CACHE_DIR": "/path/to/store",
     "CBM_ALLOWED_ROOT": "/path/to/example",
-    "TASKER_GATE_REPOSITORIES": [
-      "example-backend"
-    ]
+    "TASKER_GATE_REPOSITORIES": [],
+    "TASKER_READY_STAGE": "to_task",
+    "TASKER_IMPLEMENT_STAGE": "to_implement",
+    "TASKER_DONE_STAGE": "done",
+    "TASKER_LANE_CONFIG": "/path/to/crew/dolber.json"
   },
   "concurrency": 3,
   "execution": "detached",
@@ -127,6 +129,23 @@
         },
         "depth": 4
       }
+    },
+    {
+      "selection": {
+        "kind": "ac",
+        "data": {"stage": "to_implement"},
+        "depth": 4
+      },
+      "exclude_children": {"kind": "task"}
+    },
+    {
+      "selection": {
+        "kind": "ac",
+        "data": {"stage": "done"},
+        "status": ["blue", "yellow", "orange"],
+        "depth": 4
+      },
+      "exclude_children": {"kind": "task"}
     },
     {
       "selection": {

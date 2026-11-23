@@ -26,6 +26,7 @@ function fixture(t, role = 'ac') {
   fs.mkdirSync(path.join(engine, 'lane-launcher'));
   const stages = path.join(engine, 'planning-joppa', 'stages.sh');
   fs.writeFileSync(stages, `#!/bin/sh
+touch "$MEDULLA_RUN_DIR/shared-prepare-called"
 if [ "\${PREPARE_BLOCKED:-}" = true ]; then echo '<signal:BLOCKED>No item</signal:BLOCKED>'; exit 0; fi
 if [ "\${FLOW_ASSIGNMENT_INLINE:-true}" = true ]; then
   assignment="$(jq -c . "$MEDULLA_RUN_DIR/artifacts/input.json")"
@@ -38,6 +39,7 @@ echo '<signal:var key=critic_contract>Critic contract</signal:var>'
 echo '<signal:PREPARED>Ready</signal:PREPARED>'
 `);
   fs.writeFileSync(path.join(definition, 'trees.sh'), 'touch "$MEDULLA_RUN_DIR/trees-called"\n');
+  fs.writeFileSync(path.join(definition, 'completion.mjs'), 'console.log(process.argv[2]==="preclaim"&&process.env.COMPLETION_BLOCKED==="true"?"<signal:BLOCKED>Active lane.</signal:BLOCKED>":"<signal:CONTINUE>Context fixture.</signal:CONTINUE>");');
   fs.copyFileSync(path.join(here, 'repair-context.mjs'), path.join(definition, 'repair-context.mjs'));
   for (const name of ['repair-plan.mjs', 'retirement-proof.mjs', 'host-split-replan.mjs']) {
     fs.symlinkSync(path.join(here, name), path.join(definition, name));
@@ -59,7 +61,7 @@ export async function readJoppa() {
   const config = path.join(root, 'config.json'); fs.writeFileSync(config, '{"url":"fixture","token_file":"unused"}');
   const trees = {repo: {path: path.join(root, 'develop'), sha: 'a'.repeat(40), unused: 'not in the view'}};
   write('input.json', input); write('trees.json', trees);
-  const env = {...process.env, PLANNING_PYTHON: 'sh', CREW_FLOW_STAGES: stages, PLANNING_JOPPA_CONFIG: config,
+  const env = {...process.env, PLANNING_PYTHON: 'sh', TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, PLANNING_JOPPA_CONFIG: config,
     MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: definition, TASKER_REPOS: '{}', TASKER_TREE_ROOT: root,
     CREW_WORKFLOW_DIR: path.join(here, '../workflow'), CBM_BIN: 'unused', CBM_CACHE_DIR: root, CBM_ALLOWED_ROOT: root,
     REWORK_LIMIT: '3', PLAN_MAX_FILES: '8', PLAN_MAX_LINES: '300', DRY_RUN: 'false',
@@ -147,4 +149,14 @@ test('a failed repair leaves the prior assignment intact and emits no assignment
   assert.match(result.stderr, /pinned AC read returned another address/);
   assert.equal(fs.readFileSync(file, 'utf8'), '{"prior":true}');
   assert.equal(Object.hasOwn(updates(result.stdout), 'tasker_assignment_path'), false);
+});
+
+
+test('active work stops before the shared AC claim, without trees or models', t => {
+  const f = fixture(t); f.env.COMPLETION_BLOCKED='true';
+  const before=fs.readFileSync(path.join(f.artifacts,'input.json'),'utf8');
+  const result=f.run();assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/<signal:BLOCKED>/);
+  assert.equal(fs.existsSync(path.join(f.root,'shared-prepare-called')),false);
+  assert.equal(fs.existsSync(path.join(f.root,'trees-called')),false);
+  assert.equal(fs.readFileSync(path.join(f.artifacts,'input.json'),'utf8'),before);
 });

@@ -57,12 +57,16 @@ nodes:
         ((.create_kinds == ["task"] and (.update_kinds | sort) == ["ac", "test"]) or
          (.create_kinds == [] and (.update_kinds | sort) == ["ac", "task"]))' >/dev/null || {
         echo 'tasker: publication must match the AC or Task input policy' >&2; exit 2; }
+      preclaim="$("$TASKER_BUN" "$MEDULLA_WORKFLOW_DIR/completion.mjs" preclaim)"
+      case "$preclaim" in *'<signal:BLOCKED>'*) printf '%s\n' "$preclaim"; exit 0 ;; esac
       prepared="$(FLOW_ASSIGNMENT_INLINE=false "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
       # Keep the contracts. This node emits its own assignment path and routing signal after the active Task check.
       printf '%s\n' "$prepared" | grep -v -e '^<signal:PREPARED>' -e '^<signal:var key=assignment>' || true
       case "$prepared" in *'<signal:PREPARED>'*) ;; *) exit 0 ;; esac
       a="$(cd "$MEDULLA_RUN_DIR/artifacts" && pwd -P)"
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
+      completion="$("$TASKER_BUN" "$MEDULLA_WORKFLOW_DIR/completion.mjs" prepare)"
+      case "$completion" in *'<signal:DECISION>'*) printf '%s\n' "$completion"; exit 0 ;; esac
       # The native filter excludes an AC with a Task in to_implement. A Task in in_progress or to_review,
       # or a Task that a lane holds, also keeps the AC out: release the claim and write nothing else.
       active="$(jq -r '[.children[] | select(.kind == "task") | select(.document.data.stage == "in_progress" or
@@ -100,6 +104,7 @@ nodes:
     on_signal:
       READY_TO_WRITE: author
       ACTIVE: publish
+      DECISION: publish
       BLOCKED: __exit_fail__
       __failed__: failed
       __default__: failed
@@ -291,7 +296,8 @@ nodes:
     # The shared stage adds the claim release and refuses operations outside config.publication.
     shell: |
       rc=0
-      "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish || rc=$?
+      "$TASKER_BUN" "$MEDULLA_WORKFLOW_DIR/completion.mjs" verify || rc=$?
+      if [ "$rc" -eq 0 ]; then "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish || rc=$?; fi
       bash "$MEDULLA_WORKFLOW_DIR/trees.sh" remove >&2 || true
       exit "$rc"
     on_signal:
