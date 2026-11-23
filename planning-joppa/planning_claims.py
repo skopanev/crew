@@ -20,6 +20,12 @@ NOTE_ID_BASE = 120 - 13
 NOTE_TEXT = 1000
 
 
+class ClaimRefused(ValueError):
+    def __init__(self, address):
+        self.address = address
+        super().__init__(f"Requirement already has an active planning run on {address}")
+
+
 def run_id(target):
     """The run folder name of an artifacts folder."""
     return Path(target).resolve().parent.name
@@ -79,7 +85,8 @@ def claim_operations(assignment, criteria, assignee):
     for item in criteria:
         object = objects[item["id"]]
         require(object["current_revision"] == item["revision"], f"criterion changed before its claim: {item['id']}")
-        require(not assignee_of(object), f"Requirement already has an active planning run on {item['id']}")
+        if assignee_of(object) is not None:
+            raise ClaimRefused(item["id"])
         operations.append({"command": save_command(object, assignee, "Take this criterion for Crew planning.")})
     return operations
 

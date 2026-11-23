@@ -137,7 +137,7 @@ export async function readyRequirements(config, tokenFile, signal) {
     {workspace: config.workspace, ...args}, {signal}));
 }
 
-// A configured flow selects with native Joppa filters only. Crew adds no stage, assignee, Task or Requirement rule.
+// A configured flow uses native Joppa filters. Only unassigned items can enter a new claim.
 export function flowSettings(config) {
   if (config.workflow === undefined) return null;
   if (typeof config.workflow !== 'string' || !config.workflow.trim()) throw new Error('workflow must name a Medulla workflow.yaml file');
@@ -215,7 +215,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   const fields = [...new Set(['title', 'kind', 'parent', 'revision', ...(config.exclude_tags?.length ? ['data.tags'] : []), ...flow.order.map(item => item.field),
     ...[batch?.by, batch?.age_field, batch?.unit_field].filter(Boolean).map(batchProjection)])];
   const rows = [], seen = new Set();
-  for await (const page of nodePages(read, {...flow.selection, fields})) {
+  for await (const page of nodePages(read, {...flow.selection, assignee: '', fields})) {
     for (const row of page.items) {
       if (typeof row.address !== 'string' || !row.address.includes(':') || !Number.isSafeInteger(row.revision) || row.revision < 1) {
         throw new Error('Configured selection returned an item without a full address or revision');

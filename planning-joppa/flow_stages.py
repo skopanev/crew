@@ -78,6 +78,12 @@ def prepare():
     assignment["claim_revision"] = claims.claimed_revisions(claim)[selected["address"]]
     assignment["claim_revisions"] = claims.claimed_revisions(claim)
     write(target / "input.json", assignment)
+    policy = flow_publication.failure_policy(config)
+    if policy:
+        # Counts include this attempt. A prior limit stops prepare before PREPARED can start an agent.
+        counts = flow_publication.failure_counts(config, target, [item["address"] for item in items])
+        require(all(count <= policy["after"] for count in counts.values()),
+                "Failure limit reached before agent execution after prior failures or refused claims. Review the recorded failure reasons.")
     for role, contract in contracts.items():
         emit(role + "_contract", contract["content"])
     write(target / "contracts.json", contracts)
@@ -101,10 +107,12 @@ def capture(name):
 def failure(reason=None):
     target, config = artifacts(), release_settings()
     detail = target / "failure.txt"
+    refused = reason.address if isinstance(reason, claims.ClaimRefused) else None
+    reason = str(reason) if reason is not None else None
     # An explicit exception takes priority. Otherwise use the workflow's business diagnosis.
     reason = reason or (detail.read_text()[:1000].strip() if detail.is_file() else "") or \
              os.environ.get("MEDULLA_LAST_MESSAGE") or "Configured workflow stopped before publication"
-    flow_publication.fail(client(config), config, target, reason)
+    flow_publication.fail(client(config), config, target, reason, refused=refused)
     signal("BLOCKED", reason)
 
 
@@ -140,7 +148,7 @@ def main():
         print("planning-joppa/flow/" + command + ": " + str(error), file=sys.stderr)
         if command != "fail" and command != "capture":
             try:
-                failure(str(error))
+                failure(error)
             except Exception as release:
                 write(artifacts() / "result.json", {"status": "blocked", "reason": str(error),
                       "release_error": str(release), "needs_recovery": True, "acceptance_verified": False})

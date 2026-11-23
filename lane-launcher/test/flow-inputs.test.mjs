@@ -54,6 +54,31 @@ test('the dispatcher passes the selected profile index without editing its confi
   assert.equal(await run.stop(), 130);
 });
 
+test('native configured profiles exclude assigned items before claims and retain missing or null assignees', async t => {
+  const f = await plannerFixture(t);
+  f.queue.push('task:t1', 'task:t2');
+  for (const kind of ['ac', 'task']) {
+    const first = `${kind}:${kind === 'ac' ? 'a' : 't'}1`, second = `${kind}:${kind === 'ac' ? 'a' : 't'}2`;
+    const config = {...f.config, workflow: '/tmp/workflow.yaml', inputs: [
+      {selection: {kind, assignee: 'another-run', data: {stage: 'ready'}}},
+      {selection: {kind: 'req', data: {stage: 'absent'}}}]};
+    for (const address of [first, second]) f.objects.get(address).document.data.stage = 'ready';
+    f.objects.get(first).document.data.assignee = 'another-run';
+    delete f.objects.get(second).document.data.assignee;
+    const before = structuredClone(config);
+    const next = () => nextConfiguredItem(config, config.token_file);
+    assert.equal((await next()).next.address, second);
+    f.objects.get(second).document.data.assignee = null;
+    assert.equal((await next()).next.address, second);
+    f.objects.get(second).document.data.assignee = 'another-run';
+    assert.equal((await next()).next, null);
+    assert.deepEqual(config, before);
+  }
+  const selections = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address);
+  assert.ok(selections.length > 0 && selections.every(call => call.args.assignee === ''));
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
 test('the real configured queue skips conflicting contexts and selects a disjoint later profile', async t => {
   const f = await plannerFixture(t);
   f.queue.push('task:t1', 'task:t2');

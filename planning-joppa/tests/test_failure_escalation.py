@@ -42,6 +42,63 @@ class FailureEscalationTests(unittest.TestCase):
                  "retry_failures": {"criterion:a": 2}, **change}
         write(self.fixture.folder / name / "artifacts/result.json", value)
 
+    def prepare_result(self, name):
+        self.target = self.fixture.folder / name / "artifacts"
+        with patch.dict(os.environ, {"MEDULLA_RUN_DIR": str(self.target.parent)}), \
+                patch.object(sys, "argv", ["flow_stages.py", "prepare"]), redirect_stdout(io.StringIO()), \
+                patch.object(fixtures.flow_stages, "emit") as emit, patch.object(fixtures.flow_stages, "signal") as signal:
+            code = fixtures.flow_stages.main()
+        return code, emit, signal
+
+    def test_three_refusals_preserve_the_foreign_holder_and_escalate_only_after_an_owned_claim(self):
+        (self.target / "claim.json").unlink()
+        selected = self.api.nodes["criterion:a"]
+        selected["document"]["data"]["assignee"] = "crew-planning:another-run"
+        selected["current_revision"] += 1
+        selected["document"]["revision"] = selected["current_revision"]
+        before, batches = deepcopy(self.api.nodes), len(self.api.batches)
+        for index in range(1, 4):
+            code, emit, signal = self.prepare_result("refused-" + str(index))
+            self.assertEqual(code, 1)
+            emit.assert_not_called()
+            self.assertTrue(all(call.args[0] != "PREPARED" for call in signal.call_args_list))
+            result = read(self.target / "result.json")
+            self.assertEqual(result["claim_refused"], "criterion:a")
+            self.assertFalse(result["claim_released"])
+            self.assertEqual(result["retry_failures"], {"criterion:a": index})
+            self.assertEqual(result["failure_escalated"], [])
+            self.assertEqual(result["reason_code"], "FAILURE_LIMIT" if index == 3 else "CLAIM_REFUSED")
+            self.assertIn("active planning run", result["reason"])
+            self.assertEqual(self.api.nodes, before)
+            self.assertEqual(len(self.api.batches), batches)
+        selected["document"]["data"].pop("assignee")
+        selected["current_revision"] += 1
+        selected["document"]["revision"] = selected["current_revision"]
+        code, emit, signal = self.prepare_result("free-after-limit")
+        self.assertEqual(code, 1)
+        emit.assert_not_called()
+        self.assertTrue(all(call.args[0] != "PREPARED" for call in signal.call_args_list))
+        result = read(self.target / "result.json")
+        self.assertEqual(result["reason_code"], "FAILURE_LIMIT")
+        self.assertTrue(result["claim_released"])
+        self.assertEqual(result["failure_escalated"], ["criterion:a"])
+        self.assertEqual(len(self.api.batches), batches + 2, "One own claim precedes the guarded escalation batch")
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual(commands[0]["data"], {"assignee": None, "phase": "owner_decision"})
+        self.assertEqual(commands[1]["op"], "note")
+        self.assertIn("refused claims", commands[1]["text"])
+
+    def test_an_untyped_refusal_message_without_a_claim_cannot_count_or_escalate(self):
+        (self.target / "claim.json").unlink()
+        self.history("old-failure")
+        before, batches = deepcopy(self.api.nodes), len(self.api.batches)
+        flow.fail(self.api, self.config, self.target, "Requirement already has an active planning run on criterion:a")
+        result = read(self.target / "result.json")
+        self.assertNotIn("retry_failures", result)
+        self.assertNotIn("claim_refused", result)
+        self.assertEqual(self.api.nodes, before)
+        self.assertEqual(len(self.api.batches), batches)
+
     def test_third_confirmed_failure_changes_only_configured_fields_in_the_release_batch(self):
         for index in range(1, 4):
             if index > 1:

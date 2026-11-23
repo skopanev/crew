@@ -86,6 +86,7 @@ async function packageFixture(t, mode = 'success') {
       };
       const rows = [...objects.values()].filter(object => descendant(object) &&
         (!kinds || kinds.includes(object.kind)) && (object.kind !== 'task' || queue.includes(object.address)) &&
+        (args.assignee === undefined || (object.document.data.assignee ?? '') === args.assignee) &&
         Object.entries(args.data || {}).every(([key, value]) => JSON.stringify(object.document.data[key]) === JSON.stringify(value)))
         .map(object => ({address: object.address, revision: object.current_revision,
           kind: object.kind, parent: object.document.parent, present: object.document.present,

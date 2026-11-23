@@ -14,6 +14,11 @@ def failure_scope(config):
     return digest([config["url"], config["workspace"], config.get("workflow"), config["selection"]["kind"]])
 
 
+def failure_policy(config):
+    return config.get("failure_escalation") if config.get("failure_notes", True) and \
+        str(config.get("vars", {}).get("DRY_RUN", "false")).lower() != "true" else None
+
+
 def failure_counts(config, target, addresses):
     counts = {address: 1 for address in addresses}
     pending = set(addresses)
@@ -35,15 +40,19 @@ def failure_counts(config, target, addresses):
             continue
         if result.get("failure_scope") != scope or result.get("reason_code") in ("DRY_RUN", "ACTIVE_TASK"):
             continue
-        if result.get("claim_released") is not True or result.get("needs_recovery"):
+        refused = result.get("claim_refused")
+        refusal = isinstance(refused, str) and result.get("reason_code") in ("CLAIM_REFUSED", "FAILURE_LIMIT")
+        if (result.get("claim_released") is not True and not refusal) or result.get("needs_recovery"):
             continue
         revisions = result.get("item_revisions")
         if not isinstance(revisions, dict):
             continue
+        if refusal:
+            revisions = {refused: revisions[refused]} if refused in revisions else {}
         previous = result.get("retry_failures") or {}
         for address in pending.intersection(revisions):
             count = previous.get(address, 0) if isinstance(previous, dict) else 0
-            if type(count) is int and count > 0 and result.get("reason_code") in ("FLOW_FAILED", "FAILURE_LIMIT") and \
+            if type(count) is int and count > 0 and result.get("reason_code") in ("FLOW_FAILED", "CLAIM_REFUSED", "FAILURE_LIMIT") and \
                     address not in result.get("failure_escalated", []):
                 counts[address] += count
             pending.remove(address)
@@ -178,7 +187,7 @@ def saved_revision(result, command, index=0):
     return (first.get("object") or {}).get("revision", command["revision"] + 1)
 
 
-def fail(api, config, target, reason):
+def fail(api, config, target, reason, refused=None):
     for name in ("claim.json", "publication.json", "release.json"):
         receipt = target / name
         if receipt.exists() and read(receipt).get("status") in ("pending", "uncertain"):
@@ -187,6 +196,7 @@ def fail(api, config, target, reason):
             return
     claim_path = target / "claim.json"
     released = False
+    policy, counts, escalated = failure_policy(config), {}, []
     if claim_path.exists() and read(claim_path).get("status") == "confirmed":
         receipt = target / "publication.json"
         if receipt.exists() and read(receipt).get("status") in ("pending", "uncertain", "confirmed"):
@@ -195,10 +205,7 @@ def fail(api, config, target, reason):
         owners = claims.owned(api, config["workspace"], claim)
         owned_revisions = {**claims.claimed_revisions(claim), **claim.get("revisions", {})}
         batch, addresses = [], list(claims.claimed(claim))
-        policy = config.get("failure_escalation") if config.get("failure_notes", True) and \
-            str(config.get("vars", {}).get("DRY_RUN", "false")).lower() != "true" else None
         counts = failure_counts(config, target, addresses) if policy else {}
-        escalated = []
         for address in addresses:
             selected = object_read(api, config["workspace"], address)
             require(selected["current_revision"] == owned_revisions[address] and
@@ -221,9 +228,21 @@ def fail(api, config, target, reason):
         revision = revisions[addresses[0]]
     else:
         revision, revisions = None, {}
+        if refused:
+            assignment = read(target / "input.json")
+            item = next((item for item in members(assignment) if item["address"] == refused), None)
+            require(item and claims.assignee_of(item) is not None, "claim refusal lacks its captured holder")
+            revision = assignment["selected"]["current_revision"]
+            revisions = {refused: item["current_revision"]}
+            counts = failure_counts(config, target, [refused]) if policy else {}
     value = {"status": "blocked", "reason": reason, "claim_released": released,
              "selected_revision": revision, "item_revisions": revisions, "acceptance_verified": False}
     if released and policy:
         value.update(failure_scope=failure_scope(config), retry_failures=counts, failure_escalated=escalated,
                      reason_code="FAILURE_LIMIT" if escalated else "FLOW_FAILED")
+    elif refused:
+        value.update(claim_refused=refused, reason_code="CLAIM_REFUSED")
+        if policy:
+            value.update(failure_scope=failure_scope(config), retry_failures=counts, failure_escalated=[],
+                         reason_code="FAILURE_LIMIT" if counts[refused] >= policy["after"] else "CLAIM_REFUSED")
     write(target / "result.json", value)
