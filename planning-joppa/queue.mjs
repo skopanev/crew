@@ -229,7 +229,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   const eligible = [], parents = new Map();
   let filtered = 0;
   for (const row of rows) {
-    if (skip(row)) continue;
+    if (await skip(row, config, read)) continue;
     const guard = config.related?.parent;
     if (guard) {
       if (!row.parent) {filtered++; continue;}

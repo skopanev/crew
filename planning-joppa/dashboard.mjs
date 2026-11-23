@@ -12,6 +12,7 @@ import {configReloader} from '../lane-launcher/config-reload.mjs';
 import {PlannerRuns} from './planner-runs.mjs';
 import {retryFilter} from './retry.mjs';
 import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-runs.mjs';
+import {contextAdmission} from './context-admission.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -162,8 +163,11 @@ export async function main(argv) {
             // Retry policy affects selection only. Busy and held runs remain excluded.
             selection = new AbortController();
             const skipRetry = retryFilter(config, rows, attempted, cooldowns);
+            const active = detached ? pool.runs.filter(run => run.active) :
+              [...pool.active.values()].map(run => ({...run, config}));
+            const conflicts = contextAdmission(active);
             const {count, next, filtered} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              row => busy(row.address) || skipRetry(row));
+              (row, profile, read) => busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);

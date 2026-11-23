@@ -35,6 +35,8 @@ export class DetachedPlannerRuns {
   owns(address) { return this.runs.some(run => run.active && run.address === address); }
 
   async start(address, args, env, attemptKey) {
+    const input = Number(env.PLANNING_JOPPA_INPUT ?? 0);
+    if (!Number.isSafeInteger(input) || input < 0) throw new Error('Invalid worker input index');
     const stamp = new Date().toLocaleString('sv-SE').replace(' ', '_').replaceAll(':', '-');
     const folder = path.join(this.root, `${stamp}-${randomUUID()}`), file = path.join(folder, 'launch.json');
     fs.mkdirSync(folder, {recursive: true, mode: 0o700});
@@ -50,7 +52,7 @@ export class DetachedPlannerRuns {
     fs.writeFileSync(snapshot, raw, {mode: 0o600});
     const command = [...args];
     command[configIndex] = snapshot;
-    const run = {dispatcherId: this.owner, dispatcherPid: process.pid, address, attemptKey, workerScript: worker,
+    const run = {dispatcherId: this.owner, dispatcherPid: process.pid, address, input, attemptKey, workerScript: worker,
       args: command, createdAt: new Date().toISOString()};
     save(file, run);
     const log = fs.openSync(path.join(folder, 'output.log'), 'a', 0o600);

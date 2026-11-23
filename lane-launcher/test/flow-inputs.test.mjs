@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {flowSettings, nextConfiguredItem} from '../../planning-joppa/queue.mjs';
 import {plannerFixture} from '../test-support/config-reload.fixture.mjs';
+import {contextAdmission} from '../../planning-joppa/context-admission.mjs';
 
 test('ordered profiles retain scalar filters, skip excluded parents and select later inputs', async t => {
   const f = await plannerFixture(t);
@@ -51,4 +52,47 @@ test('the dispatcher passes the selected profile index without editing its confi
   assert.deepEqual(fs.readFileSync(f.configFile), bytes);
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
   assert.equal(await run.stop(), 130);
+});
+
+test('the real configured queue skips conflicting contexts and selects a disjoint later profile', async t => {
+  const f = await plannerFixture(t);
+  f.queue.push('task:t1', 'task:t2');
+  f.objects.get('ac:a1').document.data.stage = 'to_task';
+  const related = {limit: 90, parent: {kind: 'ac'}};
+  const config = {...f.config, workflow: '/tmp/workflow.yaml', inputs: [
+    {selection: {kind: 'ac', data: {stage: 'to_task'}}, exclude_children: null},
+    {selection: {kind: 'task', data: {stage: 'ready'}}, related, exclude_children: null}]};
+  const skip = contextAdmission([{address: 'task:t1', config: {...config, inputs: undefined, related}}]);
+  const result = await nextConfiguredItem(config, config.token_file, undefined, skip);
+  assert.equal(result.next.address, 'task:t2');
+  assert.equal(result.next.input, 1);
+  assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+});
+
+test('the dispatcher skips a shared parent before input.json while disjoint workers keep their slots', async t => {
+  const f = await plannerFixture(t, {concurrency: 3}, 0, '#!/bin/sh\nexec "$TEST_NODE" "$TEST_WORKER" "$5"\n');
+  f.queue.push('task:t1', 'task:t2', 'task:t3');
+  const third = structuredClone(f.objects.get('task:t1')); third.address = 'task:t3';
+  f.objects.set(third.address, third);
+  const workflow = path.join(f.root, 'workflow.yaml'), worker = path.join(f.root, 'startup.cjs');
+  const release = path.join(f.root, 'release'); fs.mkdirSync(release); fs.writeFileSync(workflow, 'nodes: {}\n');
+  fs.writeFileSync(worker, `const fs=require('node:fs'),path=require('node:path'),address=process.argv[2];
+fs.appendFileSync(process.env.TEST_PASSES,JSON.stringify({address,input:process.env.PLANNING_JOPPA_INPUT})+'\\n');
+process.on('SIGINT',()=>process.exit(0));process.on('SIGTERM',()=>process.exit(0));
+setInterval(()=>{if(fs.existsSync(path.join(process.env.TEST_RELEASE,address)))process.exit(0);},20);`);
+  Object.assign(f.env, {TEST_NODE: process.execPath, TEST_WORKER: worker, TEST_RELEASE: release});
+  f.write({...f.config, workflow, inputs: [{selection: {kind: 'ac', data: {stage: 'absent'}}},
+    {selection: {kind: 'task', data: {stage: 'ready'}}, related: {limit: 90, parent: {kind: 'ac'}}}]});
+  const starts = () => f.passes().map(line => JSON.parse(line));
+  const run = f.start();
+  try {
+    await run.until(() => starts().length === 2);
+    await run.until(output => /no unattempted items/.test(output));
+    assert.deepEqual(starts().map(row => row.address).sort(), ['task:t1', 'task:t2']);
+    assert.ok(starts().every(row => row.input === '1'));
+    fs.writeFileSync(path.join(release, 'task:t1'), '');
+    await run.until(() => starts().length === 3);
+    assert.equal(starts()[2].address, 'task:t3');
+    assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
+  } finally { if (run.child.exitCode === null) await run.stop(); }
 });

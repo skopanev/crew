@@ -52,6 +52,7 @@ test('detached passes survive dispatcher restart, keep capacity, and reload conf
   await first.until(() => f.passes().length === 1);
   const before = f.runs()[0];
   assert.equal(before.active, true);
+  assert.equal(before.input, 0, 'The launch record retains the selected profile before prepare');
   const row = plannerRows(f.config.runs_folder).find(row => row.active);
   assert.equal(row.ac, 'ac:a1');
   assert.equal(plannerRows(f.config.runs_folder).filter(row => row.active).length, 1,
@@ -108,4 +109,22 @@ test('Ctrl+C detaches a waiting --once dashboard without stopping its pass', asy
   const code = await new Promise(resolve => full.child.once('close', resolve));
   assert.equal(code, 0, full.output());
   assert.equal(f.passes().length, 1, 'A full dispatcher starts no extra pass');
+});
+
+test('a saved nonzero profile keeps its old context after detached config reload', async t => {
+  const inputs = [{selection: {kind: 'ac', data: {stage: 'absent'}}}, {selection: {kind: 'ac'}}];
+  const f = await fixture(t, {inputs}), run = f.start();
+  try {
+    await run.until(() => f.passes().length === 1);
+    await run.until(() => f.runs().some(row => row.active && row.medullaRun));
+    const old = f.runs().find(row => row.active);
+    assert.equal(old.input, 1);
+    assert.equal(read(path.join(old.medullaRun, 'artifacts/input.json')).input, undefined);
+    f.write({...f.config, concurrency: 2, inputs: [inputs[0], {...inputs[1],
+      related: {limit: 20, parent: {kind: 'req'}}}], vars: {VERSION: 'second'}});
+    await run.until(() => f.passes().length === 2);
+    assert.deepEqual(f.passes().map(line => JSON.parse(line).version), ['first', 'second']);
+    assert.equal(f.runs().filter(row => row.active).length, 2);
+    assert.equal(read(old.args[old.args.indexOf('--config') + 1]).inputs[1].related, undefined);
+  } finally { if (run.child.exitCode === null) await run.stop(); }
 });
