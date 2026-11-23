@@ -120,6 +120,8 @@ Use a distinct name for each parallel input. A hyphen becomes an underscore in t
 The publication file contains `{ "operations": [{ "command": { "op": "save_object", "...": "..." } }] }`.
 The host supports declared `save_object`, `archive_object` and `note` operations.
 New objects must use a configured creation kind and belong to the selected object.
+A schema root can instead use an explicit `parent: null` when its kind is in `publication.create_kinds`.
+The host creates those roots before the selected-object save, so that save can use native batch references to them.
 Updates must use a configured update kind and target the selected object or a captured direct child.
 Every update uses its captured revision. For the selected object, use `assignment.claim_revision`.
 The host combines a selected-object save with the claim release. Archiving the selected object ends that claim.

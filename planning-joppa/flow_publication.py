@@ -78,7 +78,7 @@ def operations(config, assignment, claim, value):
     owned = claims.claimed_revisions(claim)
     require(set(owned) == set(items), "claim does not match the configured batch")
     revisions.update(owned)
-    result, parent_updates, refs, modified, updates, archived = [], [], set(), set(), {}, set()
+    result, parent_updates, root_creates, refs, modified, updates, archived = [], [], [], set(), set(), {}, set()
     release_refs = {address: "flow_release" + ("_" + str(index) if index else "")
                     for index, address in enumerate(items)}
     for row in deepcopy(rows):
@@ -92,10 +92,14 @@ def operations(config, assignment, claim, value):
         if ref:
             refs.add(ref)
         op = cmd["op"]
+        root_create = False
         if op == "save_object" and cmd.get("revision") == 0:
             require(cmd.get("kind") in policy.get("create_kinds", []) and "id" not in cmd,
                     "creation kind or explicit id is outside the publication policy")
-            require(cmd.get("parent") in items, "new objects must belong to a claimed object")
+            root_create = "parent" in cmd and cmd["parent"] is None and \
+                assignment["schema"]["types"].get(cmd["kind"], {}).get("root") is True
+            require(root_create or cmd.get("parent") in items,
+                    "new objects need a claimed parent or an explicitly permitted schema root")
         else:
             address = cmd.get("target") if op == "note" else cmd.get("ac") or cmd.get("target")
             address = address or str(cmd.get("kind")) + ":" + str(cmd.get("id"))
@@ -128,7 +132,7 @@ def operations(config, assignment, claim, value):
                 # A note needs a revision-checked save in this same batch.
                 require(address in modified or address in owned, "note needs a preceding guarded update")
         require(not any(key in cmd for key in ("workspace", "request_id", "clean")), "flow command overrides a host field")
-        require("parent" not in cmd or cmd["parent"] in items and cmd.get("revision") == 0,
+        require("parent" not in cmd or cmd.get("revision") == 0 and (root_create or cmd["parent"] in items),
                 "flow cannot move existing objects")
         require("assignee" not in (cmd.get("data") or {}), "flow cannot change an execution claim")
         if op == "save_object" and cmd.get("revision") != 0 and address == parent:
@@ -140,15 +144,16 @@ def operations(config, assignment, claim, value):
                 updates[address] = cmd
                 continue
             cmd["revision"] = {"$ref": release_refs[address] + "/saved_revision"}
-        result.append(row)
+        (root_creates if root_create else result).append(row)
     releases = []
     for address, item in items.items():
         cmd = updates.get(address) or claims.save_command({**item, "current_revision": owned[address]}, None,
                                    "Publish the configured workflow result and release its claim.")
         cmd["data"] = {**cmd.get("data", {}), "assignee": None}
         releases.append({"ref": release_refs[address], "command": cmd})
-    require(len(parent_updates) + len(releases) + len(result) <= 100, "publication and claim releases exceed one native batch")
-    return [*parent_updates, *releases, *result]
+    require(len(parent_updates) + len(root_creates) + len(releases) + len(result) <= 100,
+            "publication and claim releases exceed one native batch")
+    return [*parent_updates, *root_creates, *releases, *result]
 
 
 def publish(api, config, target):
