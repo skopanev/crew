@@ -110,6 +110,9 @@ def failure(reason=None):
 
 def main():
     command = sys.argv[1]
+    if command == "prepare" and os.environ.get("FLOW_ASSIGNMENT_INLINE", "true") not in ("true", "false"):
+        print("planning-joppa/flow/prepare: FLOW_ASSIGNMENT_INLINE must be true or false", file=sys.stderr)
+        return 1
     try:
         if command == "prepare":
             prepare()

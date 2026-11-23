@@ -1,7 +1,8 @@
 """Exercise the real prepare and emitter with a revision-checked tracker fixture."""
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,4 +61,14 @@ class AssignmentTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "FLOW_ASSIGNMENT_INLINE must be true or false"):
                 self.prepare("no")
             load.assert_not_called()
+        self.assertEqual(self.api.batches, [])
+
+    def test_cli_invalid_mode_does_not_enter_failure_cleanup_or_initialize_the_api(self):
+        with patch.dict(os.environ, {"FLOW_ASSIGNMENT_INLINE": "invalid"}), \
+                patch.object(sys, "argv", ["flow_stages.py", "prepare"]), \
+                patch.object(flow_stages, "settings") as settings, \
+                patch.object(flow_stages, "client") as client, redirect_stderr(StringIO()):
+            self.assertEqual(flow_stages.main(), 1)
+            settings.assert_not_called()
+            client.assert_not_called()
         self.assertEqual(self.api.batches, [])
