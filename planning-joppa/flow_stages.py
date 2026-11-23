@@ -50,6 +50,8 @@ def release_settings():
 
 
 def prepare():
+    inline = os.environ.get("FLOW_ASSIGNMENT_INLINE", "true")
+    require(inline in ("true", "false"), "FLOW_ASSIGNMENT_INLINE must be true or false")
     target, config = artifacts(), settings()
     api = client(config)
     assignment = flow_context.load(api, config, os.environ["PLANNING_JOPPA_ITEM"])
@@ -79,7 +81,9 @@ def prepare():
     for role, contract in contracts.items():
         emit(role + "_contract", contract["content"])
     write(target / "contracts.json", contracts)
-    emit("assignment", assignment)
+    # File-based flows read input.json and do not need an assignment in the environment.
+    if inline == "true":
+        emit("assignment", assignment)
     signal("PREPARED", "Selected object, configured context and execution claim are ready")
 
 
