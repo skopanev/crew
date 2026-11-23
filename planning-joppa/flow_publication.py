@@ -223,7 +223,7 @@ def fail(api, config, target, reason, refused=None):
                 escalated.append(address)
             batch.append({"command": command})
             if config.get("failure_notes", True):
-                batch.append({"command": claims.note(address, {"id": "flow-" + claims.run_id(target)[:40], "text": reason[:1000]})})
+                batch.append({"command": claims.note(address, {"id": "flow-" + claims.run_id(target)[:40], "text": reason})})
         result = publication.mutate(api, target / "release.json", "joppa_batch",
                                      {"workspace": config["workspace"], "operations": batch})
         released = True

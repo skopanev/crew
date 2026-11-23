@@ -115,6 +115,19 @@ class FailureEscalationTests(unittest.TestCase):
             self.assertEqual(result["reason_code"], "FAILURE_LIMIT" if index == 3 else "FLOW_FAILED")
         self.assertEqual(self.api.nodes["criterion:a"]["document"]["data"]["title"], before["document"]["data"]["title"])
 
+    def test_failure_file_preserves_every_critic_finding_in_the_release_note(self):
+        self.history("two-earlier-failures")
+        diagnosis = ("Critic A: quote and reason. " * 70) + "\nCritic B: final quote and required correction."
+        (self.target / "failure.txt").write_text(diagnosis)
+        with redirect_stdout(io.StringIO()):
+            fixtures.flow_stages.failure()
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual(commands[0]["reason"], diagnosis[:1000])
+        self.assertEqual(commands[1]["text"], diagnosis)
+        self.assertEqual(commands[0]["data"], {"assignee": None, "phase": "owner_decision"})
+        self.assertEqual(read(self.target / "result.json")["reason"], diagnosis)
+        self.assertIn("Critic B: final quote and required correction.", commands[1]["text"])
+
     def test_successful_publication_resets_the_same_item_streak(self):
         self.history("old-failure")
         write(self.target / "operations.json", {"operations": [], "outcome": {"status": "published"}})

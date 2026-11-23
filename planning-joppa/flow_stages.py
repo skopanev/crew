@@ -110,7 +110,7 @@ def failure(reason=None):
     refused = reason.address if isinstance(reason, claims.ClaimRefused) else None
     reason = str(reason) if reason is not None else None
     # An explicit exception takes priority. Otherwise use the workflow's business diagnosis.
-    reason = reason or (detail.read_text()[:1000].strip() if detail.is_file() else "") or \
+    reason = reason or (detail.read_text().strip() if detail.is_file() else "") or \
              os.environ.get("MEDULLA_LAST_MESSAGE") or "Configured workflow stopped before publication"
     flow_publication.fail(client(config), config, target, reason, refused=refused)
     signal("BLOCKED", reason)
