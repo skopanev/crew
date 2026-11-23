@@ -67,6 +67,9 @@ export async function authorize({config, assignment, rows}, read) {
   };
   for (const [index, row] of rows.entries()) {
     const command = row.command;
+    // A save of a claimed object becomes its release, which runs before every late create.
+    if (command?.op === 'save_object' && command.revision !== 0 && owned.has(command.kind + ':' + command.id))
+      need(![...used(command)].some(name => late.has(name)), 'A claimed object save cannot use a create that runs after its release');
     if (command?.op === 'save_object' && command.revision === 0) {
       const root = command.parent === null && assignment.schema.types[command.kind]?.root === true;
       if (!root && !owned.has(command.parent)) {
@@ -88,8 +91,6 @@ export async function authorize({config, assignment, rows}, read) {
       need(address === selected.address || !data(node).assignee, 'The child being moved is held');
       need(await allowedParent(command.kind, command.parent, structure.move?.[command.kind] || []),
         'The configured flow cannot move to this parent');
-      need(address !== selected.address && !owned.has(address) || ![...used(command)].some(name => late.has(name)),
-        'A claimed object cannot move under a create that runs after its release');
       result.moves.push(index);
     } else if (command?.op === 'note' && reference(command.target)) {
       need(structure.note_created === true && created.has(reference(command.target)),

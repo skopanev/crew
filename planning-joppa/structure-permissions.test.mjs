@@ -30,6 +30,14 @@ test('the selected object cannot move under a create that runs after its release
   const rows = [create('own', 'test', 'ac:a'),
     {command: {op: 'save_object', kind: 'ac', id: 'a', revision: 4, parent: 'requirement:x', data: {note: {$ref: 'own/address'}}}}];
   await assert.rejects(authorize({config, assignment: assignment(), rows}, read), /after its release/);
+  // The same save without a parent change also becomes the release (verify2 case on ed5608b).
+  for (const save of [{op: 'save_object', kind: 'ac', id: 'a', revision: 4, data: {note: {$ref: 'child/address'}}},
+    {op: 'save_object', kind: 'ac', id: 'a', revision: 4, data: {note: {$ref: 'own/address'}}}])
+    await assert.rejects(authorize({config, assignment: assignment(), rows: [create('own', 'test', 'ac:a'),
+      create('child', 'test', {$ref: 'own/address'}), {command: save}]}, read), /after its release/);
+  const fine = await authorize({config, assignment: assignment(), rows: [create('own', 'test', 'ac:a'),
+    {command: {op: 'save_object', kind: 'ac', id: 'a', revision: 4, data: {stage: 's'}}}]}, read);
+  assert.deepEqual(fine.early, []);
   const moved = await authorize({config, assignment: assignment(), rows: [create('req', 'requirement', 'capability:c'),
     {command: {op: 'save_object', kind: 'ac', id: 'a', revision: 4, parent: {$ref: 'req/address'}, data: {}}}]}, read);
   assert.deepEqual(moved, {creates: [0], moves: [1], notes: [], early: [0]});
