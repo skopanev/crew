@@ -17,7 +17,7 @@ const legacyDigest = (object, includeStage = true) => {
   if (!includeStage) delete data.stage;
   return digestOf(object, data);
 };
-export const contractDigest = object => {
+const authoredDigest = (object, includeCounters = false) => {
   const data = {...object.document.data};
   delete data.assignee;
   delete data.commit;
@@ -28,12 +28,16 @@ export const contractDigest = object => {
   // Tags classify the node. They do not change the authored contract.
   delete data.tags;
   // Retry counters do not change the authored contract.
-  delete data.returns;
-  delete data.max_stage;
+  if (!includeCounters) {
+    delete data.returns;
+    delete data.max_stage;
+  }
   return digestOf(object, data);
 };
+export const contractDigest = object => authoredDigest(object);
 
-const matchesLegacy = (object, digest) => [true, false].some(stage => legacyDigest(object, stage) === digest);
+const previousDigests = object => [authoredDigest(object, true), ...[true, false].map(stage => legacyDigest(object, stage))];
+const matchesLegacy = (object, digest) => previousDigests(object).includes(digest);
 
 // Old claims include tags or stage. Use frozen data, never revision equality, to prove a match.
 export function sameContract(object, snapshot, claim = {}) {
@@ -58,9 +62,9 @@ export const contextDigest = (object, context) => context.source
   : contractDigest(object);
 
 export const sameContext = (object, context, claim) => context.source
-  ? contextDigest(object, context) === context.digest || [true, false].some(stage =>
+  ? contextDigest(object, context) === context.digest || previousDigests(object).some(contract =>
     createHash('sha256').update(JSON.stringify({revision: object.current_revision,
-      contract: legacyDigest(object, stage), files: sourceFiles(object)})).digest('hex') === context.digest)
+      contract, files: sourceFiles(object)})).digest('hex') === context.digest)
   : sameContract(object, context, claim);
 
 export function verifyRemoteDependencies(object) {
