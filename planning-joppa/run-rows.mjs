@@ -96,8 +96,11 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       if (!active && !recovery && (publication?.status === 'confirmed' || reasonCode)) {
         stage = [writtenStage ? `→ ${writtenStage}` : '', reasonCode].filter(Boolean).join(' · ') || 'NO_STAGE_WRITE';
       }
-      const outcomeTone = !active && scope?.result_colors ? recovery ? 'yellow' : scope.result_colors[reasonCode] ||
-        scope.result_colors[writtenStage] || (status === 'FAILED' ? 'red' : scope.result_colors.default || 'yellow') : undefined;
+      const displayStatus = !active && typeof reasonCode === 'string' && reasonCode ? reasonCode : status;
+      const negative = ['FAIL', 'DISPUTED', 'REJECTED'].includes(reasonCode) || writtenStage === 'to_decide';
+      const outcomeTone = !active ? negative ? 'red' : scope?.result_colors ? recovery ? 'yellow' :
+        scope.result_colors[reasonCode] || scope.result_colors[writtenStage] ||
+        (status === 'FAILED' ? 'red' : scope.result_colors.default || 'yellow') : status === 'READY' ? 'ready' : undefined : undefined;
       const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})-(.+)$/.exec(entry.name);
       const start = match ? new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}`).toISOString() : modified(folder);
       const end = active ? undefined : trackedRun?.finishedAt || launch?.result?.finishedAt ||
@@ -108,7 +111,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
           .map(([address, value]) => JSON.stringify([address, value]))} : {}),
-        runId: match?.[5] || entry.name, start, end, active, status, stage, ...(outcomeTone ? {outcomeTone} : {})}];
+        runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, ...(outcomeTone ? {outcomeTone} : {})}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 

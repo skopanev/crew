@@ -85,8 +85,8 @@ export async function main(argv) {
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
-    const table = renderRunTable(rows.map(row => ({...row, title: titleCell(row, 60), ticket: row.ac})),
-      paint, 6, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT'});
+    const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60), ticket: row.ac})),
+      paint, 6, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
     const footer = left == null ? 'Ctrl+C to stop' :
       `Next check in ${paint('blue', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`;
