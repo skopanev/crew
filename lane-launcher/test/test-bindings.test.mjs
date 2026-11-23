@@ -52,25 +52,33 @@ const ROWS = [{task: 'task:t1', ac: 'ac:a1', check: 'Run one => ok', test: ONE},
   {task: 'task:t2', ac: 'ac:a2', check: 'Run two => ok', test: TWO},
   {task: 'task:t2', ac: 'ac:a2', check: 'Run two => ok', test: TWO}];
 
-test('completion saves the bound names and creates only the missing criterion test nodes', async t => {
+test('completion refuses missing Test nodes without writing the AC or its Tests', async t => {
   const f = await bound(t);
   await claimTask(f.run, f.persist, f.runId);
-  assert.equal(f.run.claim.ticket.bindingNodeLimit, 96);
-  assert.deepEqual(f.run.claim.ticket.tasks[1].testAcceptance, [{ac: 'ac:a2', check: 'Run two => ok'}]);
+  const artifacts = packageLanding(f);
+  f.run.repository.testReport = testReport;
+  freeze(artifacts, ROWS);
+  await assert.rejects(finishTask(f.run, f.stateFile, {code: 0, status: 'exited'}, artifacts), /TEST_NODES_MISSING/);
+  assert.equal(batches(f).length, 1);
+  assert.equal(f.run.completionRequest, undefined);
+});
+
+test('completion writes only claimed Tasks when all Test nodes exist', async t => {
+  const f = await bound(t);
+  for (const [id, title] of [['one', ONE], ['two', TWO]]) {
+    f.objects.set('check:' + id, {address: 'check:' + id, kind: 'check', historical: false, current_revision: 1,
+      document: {present: true, parent: 'ac:a2', data: {title}, links: []}, process: {}, annotations: {}});
+  }
+  await claimTask(f.run, f.persist, f.runId);
   const artifacts = packageLanding(f), result = {code: 0, status: 'exited'};
   f.run.repository.testReport = testReport;
   freeze(artifacts, ROWS);
   await finishTask(f.run, f.stateFile, result, artifacts);
   assert.equal(result.completed, true);
   const operations = f.run.completionRequest.operations.map(({command}) => command);
-  assert.deepEqual(operations.map(command => command.op), ['save_object', 'archive_object', 'save_object', 'archive_object',
-    'save_object', 'save_object']);
-  assert.deepEqual(operations[0].data.test_bindings, [{ac: 'ac:a1', check: 'Run one => ok', test: ONE}]);
-  assert.equal(operations[2].data.test_bindings.length, 2);
-  assert.deepEqual(operations.slice(4).map(command => [command.kind, command.revision, command.parent, command.data.title,
-    command.data.owner, Object.hasOwn(command, 'question_checked'), command.id]),
-  [['check', 0, 'ac:a2', ONE, 'owner', false, undefined], ['check', 0, 'ac:a2', TWO, 'owner', false, undefined]]);
-  assert.deepEqual(result.testBindings, {status: 'bound', gaps: [], nodes: 2});
+  assert.deepEqual(operations.map(command => command.op), ['save_object', 'archive_object', 'save_object', 'archive_object']);
+  assert.ok(operations.every(command => command.target?.startsWith('task:') || command.kind === 'task'));
+  assert.deepEqual(result.testBindings, {status: 'bound', gaps: [], nodes: 0});
   assert.equal(f.objects.get('task:t1').document.data.test_bindings[0].test, ONE);
 });
 

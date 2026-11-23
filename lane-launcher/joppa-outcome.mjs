@@ -10,7 +10,7 @@ import {heldBy, released, contextLive} from './joppa-claims.mjs';
 import {dependencyCheck} from './dependencies.mjs';
 import {saveNode, doneTaskStage} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
-import {missingTestNodes, nodeResult} from './test-nodes.mjs';
+import {missingTestNodes} from './test-nodes.mjs';
 import {recordPendingDelivery} from './pending-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 
@@ -101,7 +101,8 @@ export async function finishTask(run, stateFile, result, artifacts) {
     'LEGACY_COMPLETION_REQUEST: saved completion has no stage; inspect its receipt before recovery. Request unchanged.');
     const bindings = frozenBindings(run, artifacts, current, coveredBy(run.config, schema.types));
     const nodes = bindings.rows.length ? await missingTestNodes(read, schema, bindings.rows) : [];
-    packageBudget(current.length, nodes.length);
+    require(nodes.length === 0, 'TEST_NODES_MISSING: Writer must prepare the Test nodes; a lane writes only its own Tasks.');
+    packageBudget(current.length, 0);
     run.testBindings = {status: bindings.status, gaps: bindings.gaps, nodes: nodes.length};
     const bound = object => bindings.rows.filter(row => row.task === object.address)
       .map(({ac, check, test}) => ({ac, check, test}));
@@ -111,13 +112,11 @@ export async function finishTask(run, stateFile, result, artifacts) {
         saveNode(object, {assignee: undefined, commit: sha, stage: stages[index], ...(bound(object).length ? {test_bindings: bound(object)} : {})},
           `${evidence.trim()}\nTask: ${object.address}\nPackage Tasks: ${claims.map(claim => claim.address).join(', ')}\nRequired gates and independent review passed. Run: ${runId}${findings ? '\nNonblocking findings:\n' + findings : ''}`),
         {op: 'archive_object', target: object.address, revision: {$ref: `done${index}/saved_revision`}, reason: `Crew lane landed ${sha}.`}]),
-        ...nodes]);
+        ]);
       current.forEach((_, index) => { run.completionRequest.operations[index * 2].ref = `done${index}`; });
     }
-    const operations = run.completionRequest.operations, created = operations.slice(claims.length * 2);
-    // Appended node saves must be exactly the recomputed missing nodes: type, parent, title and owner.
-    require(operations.length === claims.length * 2 + nodes.length &&
-      isDeepStrictEqual(created.map(({command}) => command), nodes) && claims.every((claim, index) => {
+    const operations = run.completionRequest.operations;
+    require(operations.length === claims.length * 2 && claims.every((claim, index) => {
       const [{command: save, ref}, {command: archive}] = operations.slice(index * 2, index * 2 + 2);
       return save.op === 'save_object' && `${save.kind}:${save.id}` === claim.address && save.data?.commit === sha &&
         save.data.stage === stages[index] &&
@@ -139,13 +138,6 @@ export async function finishTask(run, stateFile, result, artifacts) {
       'Joppa batch response does not map to the requested Task; inspect the saved request');
       return revision;
     });
-    // Match each returned node to its request, then read it: the exact criterion parent and test title.
-    for (const [index, saved] of receipt.results.slice(claims.length * 2).entries()) {
-      const {kind, parent, data} = created[index].command;
-      require(saved.command?.op === 'save_object' && String(saved.object?.address).startsWith(`${kind}:`) &&
-        Number.isSafeInteger(saved.object.revision), 'Joppa batch response does not confirm each test node; inspect the saved request');
-      await nodeResult(read, saved.object.address, parent, data.title);
-    }
     // An archived node keeps the commit and the stage sent in its saved request.
     result.tasks = [];
     for (const [index, claim] of claims.entries()) {
