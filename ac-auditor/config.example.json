@@ -1,0 +1,104 @@
+{
+  "workspace": "example",
+  "url": "https://joppa.example/mcp",
+  "mcp_command": [
+    "mcp-remote",
+    "https://joppa.example/mcp"
+  ],
+  "runs_folder": "/path/to/project/.crew/ac-auditor-runs",
+  "interval_seconds": 60,
+  "context": {
+    "url": "https://joppa.otion.us/api/data",
+    "workspace": "example",
+    "token_file": "/path/to/example-read-key",
+    "roles": {
+      "auditor": "ac-auditor",
+      "critic": "ac-auditor"
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "name": "LANE_MEMORY_PROCESS",
+      "project": "LANE_MEMORY_PROJECT"
+    },
+    "session": {
+      "kind": [
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ],
+      "max_chars": 32768
+    }
+  },
+  "workflow": "/path/to/crew/ac-auditor/workflow.yaml",
+  "selection": {
+    "kind": "ac",
+    "depth": 4,
+    "data": {
+      "stage": "to_audit"
+    }
+  },
+  "exclude_children": {
+    "kind": "task",
+    "data": {
+      "stage": "to_implement"
+    }
+  },
+  "references": [
+    "sources",
+    "consumer"
+  ],
+  "publication": {
+    "file": "operations.json",
+    "allowed_operations": [
+      "save_object",
+      "note"
+    ],
+    "create_kinds": [],
+    "update_kinds": [
+      "ac"
+    ]
+  },
+  "vars": {
+    "AUDITOR_MODEL": "claude-opus-5-5",
+    "CRITIC_CODEX_MODEL": "gpt-6.2-sol",
+    "CRITIC_SECOND_HARNESS": "claude-code",
+    "CRITIC_SECOND_MODEL": "claude-sonnet-5-5",
+    "REWORK_LIMIT": "2",
+    "DRY_RUN": "true",
+    "STAGE_WRITES": "true",
+    "AUDIT_FAIL_LIMIT": "3",
+    "AUDIT_FAIL_TAG": "manual-check"
+  },
+  "concurrency": 6,
+  "execution": "detached",
+  "order": [
+    {
+      "field": "status",
+      "direction": "asc",
+      "values": [
+        "blue",
+        "orange",
+        "green"
+      ]
+    }
+  ],
+  "result_colors": {
+    "to_task": "ready",
+    "to_prepare": "ready",
+    "to_implement": "ready",
+    "done": "ready",
+    "to_decide": "red",
+    "REJECTED": "red",
+    "FAIL": "red",
+    "__failed__": "red",
+    "default": "yellow"
+  },
+  "exclude_tags": [
+    "manual-check"
+  ],
+  "retry": "always"
+}

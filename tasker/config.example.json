@@ -1,0 +1,185 @@
+{
+  "workspace": "example",
+  "url": "https://joppa.example/mcp",
+  "mcp_command": [
+    "mcp-remote",
+    "https://joppa.example/mcp"
+  ],
+  "runs_folder": "/path/to/project/.crew/tasker-runs",
+  "interval_seconds": 60,
+  "context": {
+    "url": "https://joppa.otion.us/api/data",
+    "workspace": "example",
+    "token_file": "/path/to/example-read-key",
+    "roles": {
+      "author": {
+        "role": "tasker",
+        "process": "tasker.author",
+        "kind": "process"
+      },
+      "critic": {
+        "role": "tasker",
+        "process": "tasker.critic",
+        "kind": "process"
+      }
+    },
+    "filter_env": {
+      "role": "LANE_MEMORY_ROLE",
+      "name": "LANE_MEMORY_PROCESS",
+      "project": "LANE_MEMORY_PROJECT"
+    },
+    "session": {
+      "kind": [
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ],
+      "max_chars": 32768
+    }
+  },
+  "workflow": "/path/to/crew/tasker/workflow.yaml",
+  "selection": {
+    "kind": "ac",
+    "data": {
+      "stage": "to_task"
+    },
+    "depth": 4
+  },
+  "exclude_children": {
+    "kind": "task",
+    "data": {
+      "stage": "to_implement"
+    }
+  },
+  "exclude_tags": [
+    "source-gap-cto",
+    "source-gap-ceo"
+  ],
+  "children": {
+    "kind": [
+      "test",
+      "task"
+    ]
+  },
+  "references": [
+    "sources"
+  ],
+  "publication": {
+    "file": "operations.json",
+    "allowed_operations": [
+      "save_object",
+      "note"
+    ],
+    "create_kinds": [
+      "task"
+    ],
+    "update_kinds": [
+      "ac",
+      "test"
+    ]
+  },
+  "vars": {
+    "AUTHOR_MODEL": "claude-opus-5-5",
+    "CRITIC_CODEX_MODEL": "gpt-6.2-sol",
+    "CRITIC_SECOND_HARNESS": "claude-code",
+    "CRITIC_SECOND_MODEL": "claude-sonnet-5-5",
+    "REWORK_LIMIT": "3",
+    "TASK_STAGE": "to_implement",
+    "PLAN_MAX_FILES": "8",
+    "PLAN_MAX_LINES": "300",
+    "DRY_RUN": "true",
+    "TASKER_REPOS": {
+      "example-backend": "/path/to/example-backend",
+      "example-app": "/path/to/example-app"
+    },
+    "TASKER_TREE_ROOT": "/path/to/.worktrees",
+    "CREW_WORKFLOW_DIR": "/path/to/workflow",
+    "CBM_BIN": "/path/to/codebase-memory-mcp",
+    "CBM_CACHE_DIR": "/path/to/store",
+    "CBM_ALLOWED_ROOT": "/path/to/example",
+    "TASKER_GATE_REPOSITORIES": [
+      "example-backend"
+    ]
+  },
+  "concurrency": 3,
+  "execution": "detached",
+  "result_colors": {
+    "to_task": "ready",
+    "to_prepare": "ready",
+    "to_implement": "ready",
+    "done": "ready",
+    "to_decide": "red",
+    "REJECTED": "red",
+    "FAIL": "red",
+    "__failed__": "red",
+    "default": "yellow"
+  },
+  "inputs": [
+    {
+      "selection": {
+        "kind": "ac",
+        "data": {
+          "stage": "to_task"
+        },
+        "depth": 4
+      }
+    },
+    {
+      "selection": {
+        "kind": "task",
+        "data": {
+          "stage": "to_review"
+        },
+        "assignee": "",
+        "depth": 5
+      },
+      "exclude_children": null,
+      "exclude_tags": [],
+      "children": {},
+      "references": [],
+      "related": {
+        "limit": 90,
+        "parent": {
+          "kind": "ac",
+          "exclude_tags": [
+            "source-gap-ceo"
+          ],
+          "children": {
+            "kind": "test"
+          },
+          "references": [
+            "sources"
+          ]
+        },
+        "incoming": {
+          "kind": "task",
+          "relation": "depends_on"
+        }
+      },
+      "publication": {
+        "file": "operations.json",
+        "allowed_operations": [
+          "save_object",
+          "archive_object",
+          "note"
+        ],
+        "create_kinds": [],
+        "update_kinds": [
+          "task",
+          "ac"
+        ],
+        "related_updates": {
+          "parent": [
+            "stage"
+          ],
+          "incoming": "remove_selected_edge"
+        }
+      }
+    }
+  ],
+  "retry": "always"
+}

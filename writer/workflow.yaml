@@ -1,4 +1,8 @@
+# Crew copy of runtime-d7eeb0d/writer (owner, 21 Nov 2026, process:sample0004 r4). The engine stays unchanged.
+# Changes: in create mode, READY moves the AC to to_task, and SOURCE_GAP, COVERAGE_INCOMPLETE, INVALID and REJECTED
+# move it to to_decide with a note. Update mode also returns refusals to to_decide.
 version: '2'
+keep_runs: 1000
 start: prepare
 # The workflow deadline invokes failed once to release its claim.
 timeout: &workflow_timeout 3600
@@ -20,8 +24,10 @@ vars:
   TEST_KIND: ''
   SOURCE_GAP_TAG: ''
   TEST_OPERATION: create
+  DRY_RUN: 'false'
   REWORK_LIMIT: '1'
   round: '1'
+  writer_assignment_path: ''
   draft: ''
   draft_digest: ''
   critique: ''
@@ -29,47 +35,23 @@ nodes:
   prepare:
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TEST_KIND; do
-        eval "value=\${$name:-}"
-        [ -n "$value" ] || { echo "writer: $name is required" >&2; exit 2; }
-      done
-      case "$REWORK_LIMIT" in
-        ''|*[!0-9]*) echo 'writer: REWORK_LIMIT must be a nonnegative integer' >&2; exit 2 ;;
-      esac
-      case "$TEST_OPERATION" in
-        create) ;;
-        update)
-          printf '%s' "$FLOW_PUBLICATION" | jq -e --arg test "$TEST_KIND" \
-            '.create_kinds == [] and .update_kinds == [$test]' >/dev/null || {
-              echo 'writer: update requires no create kinds and only TEST_KIND in update_kinds' >&2; exit 2; }
-          ;;
-        *) echo 'writer: TEST_OPERATION must be create or update' >&2; exit 2 ;;
-      esac
-      if [ "$TEST_OPERATION" = create ] && [ -n "$SOURCE_GAP_TAG" ]; then
-        printf '%s' "$FLOW_PUBLICATION" | jq -e '.allowed_operations | index("note") != null' >/dev/null || {
-          echo 'writer: SOURCE_GAP_TAG requires note publication permission' >&2; exit 2; }
-      fi
-      [ -z "${CRITIC_CLAUDE_MODEL:-}" ] || { echo 'writer: rename CRITIC_CLAUDE_MODEL to CRITIC_SECOND_MODEL' >&2; exit 2; }
-      case "$CRITIC_SECOND_HARNESS" in
-        claude-code|codex) ;;
-        agy) [ -d "$AGY_PROFILE_HOME" ] || { echo 'writer: AGY_PROFILE_HOME is unavailable' >&2; exit 2; } ;;
-        *) echo 'writer: CRITIC_SECOND_HARNESS must be claude-code, codex or agy' >&2; exit 2 ;;
-      esac
-      [ -n "$CRITIC_SECOND_MODEL" ] && [ "$AUTHOR_MODEL" != "$CRITIC_SECOND_MODEL" ] || {
-        echo 'writer: CRITIC_SECOND_MODEL must be nonempty and differ from AUTHOR_MODEL' >&2; exit 2; }
-      [ -n "$CRITIC_CODEX_MODEL" ] && [ "$CRITIC_CODEX_MODEL" != "$CRITIC_SECOND_MODEL" ] || {
-        echo 'writer: critic models must be nonempty and distinct' >&2; exit 2; }
-      prepared="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" policy
+      prepared="$(FLOW_ASSIGNMENT_INLINE=false "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
+      printf '%s\n' "$prepared" | grep -v -e '^<signal:PREPARED>' -e '^<signal:var key=assignment>' || true
+      case "$prepared" in *'<signal:PREPARED>'*) ;; *) exit 0 ;; esac
+      a="$(cd "$MEDULLA_RUN_DIR/artifacts" && pwd -P)"
       # Agents derive acceptance from the item, its references and its existing Tests, not from Task plans.
       # input.json stays complete for the shared publication fence.
       view="$(jq -c --arg test "$TEST_KIND" '
         ([.selected.kind, $test] + [.references[]?[]?.kind]) as $kinds |
         del(.help, .claim_revision, .claim_revisions) | .children |= map(select(.kind == $test)) |
         .schema.types |= with_entries(select(.key as $kind | $kinds | index($kind) != null))' \
-        "$MEDULLA_RUN_DIR/artifacts/input.json")"
-      case "$view" in *'</signal:var>'*) echo 'writer: reserved signal delimiter in the assignment' >&2; exit 1;; esac
-      printf '%s\n' "$prepared"
-      printf '<signal:var key=writer_assignment>%s</signal:var>\n' "$view"
+        "$a/input.json")"
+      # Use the same escaped JSON artifact as Tasker and Auditor. Decoding preserves the complete view.
+      printf '%s' "$view" | jq -r 'tojson | gsub("\\{\\{"; "\\u007b\\u007b")' > "$a/writer-assignment.json.tmp"
+      mv "$a/writer-assignment.json.tmp" "$a/writer-assignment.json"
+      printf '<signal:var key=writer_assignment_path>%s</signal:var>\n' "$a/writer-assignment.json"
+      echo '<signal:PREPARED>The claim and the complete Writer view are ready.</signal:PREPARED>'
     on_signal:
       PREPARED: author
       BLOCKED: __exit_fail__
@@ -95,8 +77,7 @@ nodes:
         - --setting-sources=
         - --mcp-config
         - '{"mcpServers":{}}'
-        - --disallowedTools
-        - Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit
+        - --tools=
     prompt: |
       {{file:prompts/author.md}}
       Mandatory role contract:
@@ -105,7 +86,7 @@ nodes:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
       Test operation: {{var:TEST_OPERATION}}
-      Assignment: {{var:writer_assignment}}
+      Assignment: {{file:{{var:writer_assignment_path}}}}
       Your previous draft (empty in the first round): {{var:draft}}
       Critic findings on your previous draft (empty in the first round): {{var:critique}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
@@ -125,9 +106,9 @@ nodes:
         file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
         printf '%s\n' "$gap" > "$a/$file"
         echo '<signal:SOURCE_GAP>The source does not define a testable outcome. Return the item to its owner.</signal:SOURCE_GAP>'
-      elif jq -e --arg test "$TEST_KIND" \
-        --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
-        -f "$MEDULLA_WORKFLOW_DIR/draft.jq" "$a/draft.json" >/dev/null; then
+      elif { if [ "$TEST_OPERATION" = reconcile ]; then node "$MEDULLA_WORKFLOW_DIR/reconcile.mjs" check "$a";
+        else jq -e --arg test "$TEST_KIND" --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
+          -f "$MEDULLA_WORKFLOW_DIR/draft.jq" "$a/draft.json" >/dev/null; fi; }; then
         if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
         printf '<signal:var key=draft_digest>%s</signal:var>\n' "${hash%% *}"
         echo '<signal:DRAFTED>The draft is ready for independent review.</signal:DRAFTED>'
@@ -143,7 +124,7 @@ nodes:
       SOURCE_GAP: publish
       DRAFTED: critics
       REVISE: author
-      INVALID: failed
+      INVALID: rejected
       __failed__: failed
       __default__: failed
   critics:
@@ -161,15 +142,7 @@ nodes:
     # Two independent seats use different models. Neither seat sees the other seat or the author.
     inputs:
       shell: |
-        jq -nc --arg codex "$CRITIC_CODEX_MODEL" --arg harness "$CRITIC_SECOND_HARNESS" \
-          --arg model "$CRITIC_SECOND_MODEL" --arg profile "$AGY_PROFILE_HOME" '[
-          {slug: "codex", harness: "codex", model: $codex, a1: "--ignore-user-config", a2: "-c", a3: "mcp_servers={}"},
-          ({slug: "second", harness: $harness, model: $model} +
-           if $harness == "codex" then {a1: "--ignore-user-config", a2: "-c", a3: "mcp_servers={}"}
-           elif $harness == "claude-code" then {a1: "--strict-mcp-config", a2: "--setting-sources=",
-             a3: "--mcp-config", a4: "{\"mcpServers\":{}}", a5: "--disallowedTools",
-             a6: "Bash,Read,Glob,Grep,WebFetch,WebSearch,Task,Edit,Write,NotebookEdit"}
-           else {env: {BROKER_AGY_HOME: $profile, BROKER_ISOLATE_MCP: "1"}} end)]'
+        node "$MEDULLA_WORKFLOW_DIR/control.mjs" seats
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -182,13 +155,18 @@ nodes:
         - '{{input.a4:-}}'
         - '{{input.a5:-}}'
         - '{{input.a6:-}}'
+        - '{{input.a7:-}}'
+        - '{{input.a8:-}}'
+        - '{{input.a9:-}}'
+        - '{{input.a10:-}}'
+        - '{{input.a11:-}}'
     prompt: |
       {{file:prompts/critic.md}}
       Mandatory role contract:
       {{var:critic_contract}}
       Native Test kind: {{var:TEST_KIND}}
       Test operation: {{var:TEST_OPERATION}}
-      Assignment: {{var:writer_assignment}}
+      Assignment: {{file:{{var:writer_assignment_path}}}}
       Draft digest: {{var:draft_digest}}
       Frozen draft: {{var:draft}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
@@ -202,15 +180,9 @@ nodes:
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
-      if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
-      verdict="$(jq -nc --arg digest "${hash%% *}" --arg test "$TEST_KIND" \
-        --arg gap_tag "$SOURCE_GAP_TAG" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
-        --slurpfile draft "$a/draft.json" \
-        --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
-        --arg mode "$TEST_OPERATION" --slurpfile input "$a/input.json" \
-        -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"
+      verdict="$(node "$MEDULLA_WORKFLOW_DIR/control.mjs" review "$a")"
       if [ "$(printf '%s' "$verdict" | jq -r .approved)" = true ]; then
-        printf '%s' "$verdict" | jq 'if (.operations | length) == 0 then
+        printf '%s' "$verdict" | jq 'if .outcome then {operations, outcome} elif (.operations | length) == 0 then
           {operations, outcome: {status: "published", reason: "No Test text changed.", reason_code: "NO_CHANGES"}}
           else {operations} end' > "$a/$file"
         echo '<signal:APPROVED>Both independent critics approved every Test and complete coverage.</signal:APPROVED>'
@@ -225,7 +197,7 @@ nodes:
       else
         printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Writer stopped after " + $limit + (if $limit == "1" then " rework. " else " reworks. " end) +
           (.critique | to_entries | map(.key + ": " +
-            ((.value.failing[0].reasons[0] // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
+            ((.value.failing[0].reasons[0] // .value.retirements[0].evidence // .value.invalid // .value.summary // "Incomplete coverage") | .[0:400])) | join(" "))' |
           cut -c1-1000 > "$a/failure.txt"
         echo '<signal:REJECTED>The critics did not approve the revised draft.</signal:REJECTED>'
       fi
@@ -233,12 +205,27 @@ nodes:
       APPROVED: publish
       MISSING: publish
       REVISE: author
-      REJECTED: failed
+      REJECTED: rejected
+      __failed__: failed
+      __default__: failed
+  rejected:
+    # Release the claim with the AC in to_decide and the reason as a note in every mode.
+    shell: |
+      set -eu
+      a="$MEDULLA_RUN_DIR/artifacts"
+      file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" rejected "$a"
+      echo '<signal:RETURN>Return the AC to to_decide with the reason.</signal:RETURN>'
+    on_signal:
+      RETURN: publish
       __failed__: failed
       __default__: failed
   publish:
     # The shared stage adds the claim release and refuses operations outside config.publication.
-    shell: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish'
+    shell: |
+      set -eu
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" preview "$MEDULLA_RUN_DIR/artifacts"
+      "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish
     on_signal:
       READY: __exit_ok__
       BLOCKED: __exit_fail__

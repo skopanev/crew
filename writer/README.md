@@ -1,117 +1,58 @@
-# Writer
+# Writer reconciliation
 
-Writer writes reviewed acceptance Tests for one selected tracker item.
-It runs as a configured flow of the existing planning-joppa dispatcher. It has no dispatcher of its own.
+Set `TEST_OPERATION` to `reconcile` to process an AC that already has Tests.
+The `create` and `update` modes also return reviewed refusals to `to_decide` with a note.
+For `update`, permit the selected AC kind and the Test kind in `publication.update_kinds`.
+Permit `note` in `publication.allowed_operations`. Successful updates still change only the same Tests.
+The author uses the current AC, Sources and captured Tests. The agents receive no code tools.
 
-```sh
-sh lane-launcher/planner-joppa.sh /absolute/writer-config.json
-```
-
-## Flow
-
-1. `prepare` checks the required vars. The shared flow stage reads the selected item, its references and its direct children, and claims the item.
-2. `author` drafts the new Tests. It sees the selected item, its references, its existing Tests, the author contract and the critic questions.
-   Task children stay out of the agent view. Writer does not change Tasks.
-   The shared prepare stage checks that the selected item matches `selection`, such as AC stage `to_prepare`.
-3. `draft_check` checks the draft against the native Test schema. It records the digest of the exact draft bytes.
-4. `critics` runs two independent seats with different models in parallel. Codex is the first seat.
-   The second seat uses Claude Code by default. Set its harness to `agy` to use Gemini. Each seat scores every Test and the coverage.
-5. `review_join` publishes only when both seats reviewed the same digest, every Test scores `11111` and both seats find complete coverage.
-6. `publish` creates the Tests in one native transaction. It preserves the selected item's stage.
-   The shared stage releases the claim in that transaction and refuses operations outside `config.publication`.
-
-A refused draft returns to the author with the findings, up to `vars.REWORK_LIMIT` times.
-Set `vars.SOURCE_GAP_TAG` to tag source gaps and return them to the item owner immediately in create mode.
-Both critics must return valid reviews of the same draft.
-At least one critic must report incomplete coverage with a nonempty `missing` list.
-Without an identified AC gap, other refusals keep the existing rework path.
-The immediate return also requires `coverage_gap_kind: "ac"` from a critic with incomplete coverage.
-Use this marker only when the selected item's contract needs an owner decision.
-Missing Tests that the author can write use `coverage_gap_kind: "author"` and return to the author with the findings.
-An absent or unrecognized marker also keeps the rework path.
-For an AC gap, Writer publishes no Test or Task changes.
-It preserves the existing tags, adds the configured gap tag and a `missing` note, and releases its claim atomically.
-It never writes a stage. A source gap can require an owner decision even when a draft also has failed scores.
-This route publishes no Tests. Normal Test publication still requires both critics to score every Test `11111`.
-The result has `reason_code: COVERAGE_INCOMPLETE`. The full findings stay in the existing critic artifacts.
-The configured publication policy must allow `note` and updates to the selected kind.
-Replace the previous `DECISION_STAGE` option with `SOURCE_GAP_TAG` when upgrading.
-In create mode, an empty `tests` array with `coverage: "GAP. <missing source detail>"` takes the same decision route.
-Writer adds `SOURCE_GAP_TAG`, adds the source gap note and releases its claim atomically.
-It records `reason_code: SOURCE_GAP` and starts no critics for this draft. The full text stays in `artifacts/draft.json`.
-Use `exclude_children` with the Test kind to exclude items that already have Tests from the create queue.
-Set `exclude_tags` to a list that contains `SOURCE_GAP_TAG`. The dispatcher and manual runs then refuse marked items.
-The owner removes the tag after the source gap is resolved. An existing tag is not written again.
-An empty or omitted `SOURCE_GAP_TAG` keeps the existing rework path. Update mode keeps its existing stage behavior.
-The default permits one rework. Set `2` to permit two reworks after the initial draft.
-Invalid drafts and critic refusals use the same rework budget. The workflow has one deadline of 3600 seconds.
-The workflow sets no node timeouts. Its native `on_timeout` handler runs `failed` once after the deadline.
-The `failed` node records the reason in `failure.txt`, and the shared stage releases the claim with a note.
-
-To revise existing Tests, set `vars.TEST_OPERATION` to `update`, `publication.create_kinds` to `[]`,
-and `publication.update_kinds` to only the configured `TEST_KIND`. Include those direct children in `children`.
-Remove any `exclude_children` filter that excludes the existing Tests.
-The author uses their existing IDs. The same two critics review the revised text.
-Publication uses each child's frozen revision and sends only changed text fields. It preserves the parent, case, owner and relations.
-Earlier results remain as evidence for their earlier contract. Update mode changes no AC or Task stage.
-The host releases its existing selection claim. The normal revision checks refuse concurrent changes.
-The default operation remains `create`.
-Use `selection` to control which item stages can receive edits. Update mode adds no stage restriction of its own.
-An unchanged draft publishes no Test write and records `reason_code: NO_CHANGES`.
-
-For the kinds in the example config, the update overrides are:
+The draft contains the complete final Test set and explicit retirements:
 
 ```json
-{"vars":{"TEST_OPERATION":"update"},"publication":{"file":"operations.json","allowed_operations":["save_object"],"create_kinds":[],"update_kinds":["test"]}}
+{
+  "tests": [
+    {"id": "existing", "action": "keep", "title": "Existing title", "data": {}},
+    {"id": "changed", "action": "update", "title": "Corrected title", "data": {"body": "Current acceptance text"}},
+    {"id": "new_1", "action": "create", "title": "Missing behavior", "data": {"body": "Required acceptance text"}}
+  ],
+  "retire": [{"id": "obsolete", "reason": "Why it is obsolete", "evidence": "Current AC or Source evidence"}],
+  "coverage": "How the final set covers the current AC and Sources"
+}
 ```
 
-Use your configured Test kind in place of `test` when its name differs.
+Every captured Test needs exactly one keep, update or retirement disposition.
+Keep preserves all text. Update reuses the existing ID and changes only title, body, command or an unchanged case.
+The host sends only changed authored fields. It preserves owner, results, history, relations and unmentioned metadata.
+Archive retains the obsolete node and its recorded evidence. Its journal reason includes the reviewed retirement evidence.
+Create cannot reuse an existing Test ID or title. It copies the AC owner.
 
-## Configuration
+`reconcile.validate` reuses `draft.jq` for native name, field, case and required-field rules.
+It also checks the complete disposition set, final title uniqueness and the native batch limit.
+`reconcile.review` requires exactly two reviews with the current draft digest.
+Both reviews score every final Test and explicitly agree with every retirement.
+Each review adds `retirements: [{id, agree, evidence}]`, or an empty array when the draft retires nothing.
+Final coverage includes kept Tests and updated text. It excludes retired Tests and old updated text.
 
-See `config.example.json`. The project supplies every native name:
+Approved output saves the claimed AC to `to_task` before Test changes.
+Updates and archives use captured native revisions. Creates follow archives so the final Test count can respect the schema limit.
+The shared engine combines the AC stage save with its claim release and sends one batch of at most 100 operations.
+The Writer adds no network publisher.
 
-| key | use |
-|---|---|
-| `workflow` | Absolute path to this `workflow.yaml` |
-| `selection`, `order`, `exclude_children` | Native Joppa filters that select one item for each pass |
-| `exclude_tags` | Items with any of these tags stay out of the queue, including after a restart |
-| `children` | Native filter for the direct children. Include the Test kind |
-| `references` | Data fields of the selected item that name related objects |
-| `publication` | `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Permit selected-kind updates for the optional decision route |
-| `vars.TEST_KIND` | Native kind of the Tests |
-| `vars.SOURCE_GAP_TAG` | Optional tag for source gaps, such as `source-gap-owner` |
-| `vars.CRITIC_SECOND_HARNESS` | `claude-code` (default), `codex` or `agy`. The critic models must differ |
-| `vars.REWORK_LIMIT` | Optional nonnegative rework count. Defaults to `1` |
-| `vars.AUTHOR_MODEL`, `vars.CRITIC_CODEX_MODEL`, `vars.CRITIC_SECOND_MODEL` | Optional model overrides |
-| `context.roles.author`, `context.roles.critic` | Contract records of the two roles. The critic contract gives the five review questions |
+An empty Source-gap draft uses `tests: []`, `retire: []` and `coverage: "GAP. <missing detail>"`.
+Both critics review the gap. An owner decision changes no Tests.
+The existing source-gap, coverage-gap and rejection routes remain available in their respective modes.
 
-A role binding can name `{role, process, kind}` when these names differ.
-`role` and `process` supply their separate configured memory filters.
-`kind` requires a contract node of that kind in the reply. Common rules alone cannot satisfy this check.
-A string keeps the previous behavior: it supplies the same role and process name.
-The configured flow checks its live role contracts before it claims an item or starts an agent.
+For an actual dry run, set `vars.DRY_RUN` to `"true"` and frozen root `failure_notes` to `false`.
+Use a separate runs folder and the isolated workflow path.
+`control.policy` checks the central failure policy before the shared stage claims the AC.
+`control` stores the proposed business operations in `would-publish.json` and passes empty operations to the shared publisher.
+This applies to approvals, Source gaps, coverage gaps and rejections. Unexpected failures use the shared release-only policy.
+Repeated preview preserves the original proposal.
 
-For a Gemini second seat, set `CRITIC_SECOND_HARNESS=agy` and `CRITIC_SECOND_MODEL=gemini-4-carbon-high` in `vars`.
-For two Codex seats, set `CRITIC_CODEX_MODEL=gpt-6.2-sol`, `CRITIC_SECOND_HARNESS=codex` and `CRITIC_SECOND_MODEL=gpt-6.1-sol`.
-Both Codex seats use the read-only sandbox, ignore user configuration and have no MCP servers.
-Rename the previous `CRITIC_CLAUDE_MODEL` key to `CRITIC_SECOND_MODEL`.
-The launcher supplies `AGY_PROFILE_HOME`. Do not set it in `vars`.
-Reports use the stable seat names `critic-codex.json` and `critic-second.json` for any second harness.
+Run the bounded tests with:
 
-## Test fields
+```sh
+rtk proxy bun test --timeout 30000 writer/publication.test.mjs writer/reconcile.test.mjs writer/workflow.test.mjs
+```
 
-The schema entry of `TEST_KIND` supplies every rule. Writer has no own limit:
-
-- every required field, except `title`, in the Test data. Crew copies the selected item's owner as the new Test owner.
-- one listed value for each typed field, and no field that the schema computes.
-- `title_max_length`, `field_max_length`, `test_results.max_tests` and the `test_results.name` rules, when the schema gives them.
-- at most 98 Test writes. The host also releases the selected item's claim in the publication batch.
-
-## Isolation
-
-The agents get no tracker credentials and no MCP servers. The Claude seats have their file, shell and web tools disallowed.
-The AGY seat uses a temporary broker profile and `BROKER_ISOLATE_MCP=1`. The existing planning preflight verifies its empty MCP inventory.
-A failed isolation check stops the critic before its model call. The profile is removed when the flow exits.
-The Codex seat runs in the read-only sandbox without user configuration or MCP servers.
-A read-only sandbox can still read files. Start Medulla in an empty working directory to keep source out of reach.
+The coordinator reviews the patch and runs three actual AC dry runs before joint release with the auditor.

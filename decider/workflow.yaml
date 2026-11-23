@@ -1,0 +1,185 @@
+version: '2'
+keep_runs: 1000
+start: prepare
+timeout: &budget 7200
+on_timeout: failed
+defaults:
+  timeout: *budget
+vars:
+  PLANNING_PYTHON: python3
+  CREW_FLOW_STAGES: ''
+  FLOW_PUBLICATION: ''
+  AUTHOR_MODEL: ''
+  CRITIC_CODEX_MODEL: ''
+  CRITIC_SECOND_HARNESS: ''
+  CRITIC_SECOND_MODEL: ''
+  BRAIN_ROOT: ''
+  MANUALS_ROOT: ''
+  BRAIN_EXCLUDE: ''
+  REWORK_LIMIT: '1'
+  # Business dry runs still claim and release. Root trials replace prepare and publication locally.
+  DRY_RUN: 'false'
+  round: '1'
+  shape_retries: '0'
+  shape_feedback: ''
+  decider_assignment_path: ''
+  DECIDER_MCP_CONFIG: ''
+  draft: ''
+  draft_digest: ''
+  context_digest: ''
+  critique: ''
+nodes:
+  prepare:
+    shell: |
+      set -eu
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" policy
+      prepared="$(FLOW_ASSIGNMENT_INLINE=false "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" prepare)"
+      printf '%s\n' "$prepared" | grep -v -e '^<signal:PREPARED>' -e '^<signal:var key=assignment>' || true
+      case "$prepared" in *'<signal:PREPARED>'*) ;; *) exit 0 ;; esac
+      "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" prepare
+      echo '<signal:PREPARED>The decision context and the live contracts are ready.</signal:PREPARED>'
+    on_signal:
+      PREPARED: author
+      BLOCKED: __exit_fail__
+      __failed__: failed
+      __default__: failed
+  author:
+    max_attempts: 2
+    env:
+      LANE_MEMORY_CONFIG: ''
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
+    agent:
+      harness: claude-code
+      model: '{{var:AUTHOR_MODEL}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - --strict-mcp-config
+        - --setting-sources=
+        - --mcp-config
+        - '{{var:DECIDER_MCP_CONFIG}}'
+        - --tools=Read,Glob,Grep
+        - --add-dir
+        - '{{var:BRAIN_ROOT}}'
+        - --add-dir
+        - '{{var:MANUALS_ROOT}}'
+    prompt: |
+      {{file:prompts/author.md}}
+      Mandatory Decider contract:
+      {{var:decider_contract}}
+      Mandatory AC audit contract:
+      {{var:audit_contract}}
+      Brain root: {{var:BRAIN_ROOT}}
+      Excluded obsolete Brain folder: {{var:BRAIN_EXCLUDE}}
+      Vendor manuals root: {{var:MANUALS_ROOT}}
+      Assignment: {{file:{{var:decider_assignment_path}}}}
+      Previous draft: {{var:draft}}
+      Critic findings: {{var:critique}}
+      Format problems: {{var:shape_feedback}}
+    post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
+    on_signal:
+      CAPTURED: draft_check
+      __failed__: failed
+      __default__: failed
+  draft_check:
+    shell: |
+      set -eu
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" check "$MEDULLA_RUN_DIR/artifacts"
+    on_signal:
+      CHECKED: freeze
+      REVISE: author
+      FAILED: failed
+      __failed__: failed
+      __default__: failed
+  freeze:
+    shell: |
+      set -eu
+      rm -f "$MEDULLA_RUN_DIR/artifacts/critic-codex.json" "$MEDULLA_RUN_DIR/artifacts/critic-second.json"
+      "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" freeze
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" digest "$MEDULLA_RUN_DIR/artifacts"
+    on_signal:
+      FROZEN: critics
+      __failed__: failed
+      __default__: failed
+  critics:
+    max_attempts: 2
+    env:
+      LANE_MEMORY_CONFIG: ''
+      JOPPA_TOKEN: ''
+      JOPPA_TOKEN_FILE: ''
+      NTK_KEY: ''
+      NTK_CONFIG: /dev/null
+    max_parallel: 2
+    min_success: 2
+    inputs:
+      shell: |
+        node "$MEDULLA_WORKFLOW_DIR/../writer/control.mjs" seats
+    agent:
+      harness: '{{input.harness}}'
+      model: '{{input.model}}'
+      effort: high
+      sandbox: read-only
+      args:
+        - '{{input.a1:-}}'
+        - '{{input.a2:-}}'
+        - '{{input.a3:-}}'
+        - '{{input.a4:-}}'
+        - '{{input.a5:-}}'
+        - '{{input.a6:-}}'
+        - '{{input.a7:-}}'
+        - '{{input.a8:-}}'
+        - '{{input.a9:-}}'
+        - '{{input.a10:-}}'
+        - '{{input.a11:-}}'
+    prompt: |
+      {{file:prompts/critic.md}}
+      Mandatory Decider contract:
+      {{var:decider_contract}}
+      Mandatory AC audit contract:
+      {{var:audit_contract}}
+      Assignment and full frozen research evidence: {{file:{{var:decider_assignment_path}}}}
+      Draft digest: {{var:draft_digest}}
+      Context digest: {{var:context_digest}}
+      Frozen decision: {{var:draft}}
+    post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
+    on_signal:
+      __done__: review_join
+      __failed__: failed
+      __empty__: failed
+  review_join:
+    shell: |
+      set -eu
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" review "$MEDULLA_RUN_DIR/artifacts"
+    on_signal:
+      APPROVED: publish
+      REVISE: author
+      FAILED: failed
+      __failed__: failed
+      __default__: failed
+  publish:
+    shell: |
+      set -eu
+      "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" verify
+      "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" publish
+    on_signal:
+      READY: __exit_ok__
+      BLOCKED: __exit_fail__
+      __failed__: failed
+      __default__: failed
+  failed:
+    shell: |
+      set -eu
+      a="$MEDULLA_RUN_DIR/artifacts"
+      if [ -e "$a/result.json" ]; then
+        echo '<signal:BLOCKED>The shared stage already recorded the result.</signal:BLOCKED>'
+        exit 0
+      fi
+      [ -s "$a/failure.txt" ] || printf '%s\n' "${MEDULLA_LAST_MESSAGE:-Decider stopped before publication}" > "$a/failure.txt"
+      exec "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
+    on_signal:
+      BLOCKED: __exit_fail__
+      __failed__: __exit_fail__
+      __default__: __exit_fail__

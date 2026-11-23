@@ -1,0 +1,65 @@
+// Capture the immutable AC pin of an existing Task and build its reviewed native operations.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {retirementBinding} from './retirement-proof.mjs';
+import {hostSplitReceipt} from './host-split-replan.mjs';
+import {pathToFileURL} from 'node:url';
+import {changedText, repairView, repairPublication, repositoryData} from './repair-plan.mjs';
+
+export function bodyProblems(body, checker) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tasker-body-'));
+  try {
+    const file = path.join(root, 'ticket.json');
+    fs.writeFileSync(file, JSON.stringify({address:'draft', body}));
+    return ['tests-line','restriction-line'].flatMap(mode => {
+      const output = execFileSync(process.execPath, [checker, mode, file], {encoding:'utf8'}).trim();
+      return output ? [output] : [];
+    });
+  } finally { fs.rmSync(root, {recursive:true, force:true}); }
+}
+
+export async function captureRepair(input, read) {
+  const task = input.selected, parent = input.context.parent;
+  const pin = /^Criterion: ([^\s@]+)@([1-9]\d*)[.\s]/m.exec(task.document.data.body || '');
+  if (pin && pin[1] !== parent.address) throw new Error('The Task Criterion names another parent');
+  const revision = pin ? Number(pin[2]) : null;
+  const pinned = pin ? await read(parent.address, revision) : null;
+  if (pinned && pinned.address !== parent.address) throw new Error('The pinned AC read returned another address');
+  return {pinned_revision:revision, pinned, ac_text_changed:changedText(parent,pinned)};
+}
+
+async function main() {
+  const [mode, dir] = process.argv.slice(2), read = name => JSON.parse(fs.readFileSync(path.join(dir,name),'utf8'));
+  const input = read('input.json');
+  if (mode === 'repository') {
+    const task = input.schema?.types?.[input.selected.kind]?.role === 'task';
+    console.log(JSON.stringify(task && process.env.DRY_RUN !== 'true' ? repositoryData(input, input.selected) : {}));
+    return;
+  }
+  if (mode === 'publication') {
+    const draft = read('draft.json'), digest = createHash('sha256').update(fs.readFileSync(path.join(dir,'draft.json'))).digest('hex');
+    console.log(JSON.stringify(repairPublication({input, draft, repair:read('repair.json'), trees:read('trees.json'),
+      reviews:[read('critic-codex.json'), read('critic-second.json')], digest,
+      run:path.basename(path.dirname(dir)), dry:process.env.DRY_RUN==='true'})));
+    return;
+  }
+  if (mode !== 'prepare') throw new Error('repair-context needs prepare, publication or repository');
+  const config = JSON.parse(fs.readFileSync(process.env.PLANNING_JOPPA_CONFIG,'utf8'));
+  const engine = path.dirname(path.dirname(process.env.CREW_FLOW_STAGES));
+  const {readJoppa} = await import(pathToFileURL(path.join(engine,'lane-launcher/joppa-api.mjs')).href);
+  const repair = await captureRepair(input,(address,revision)=>readJoppa(config.url,config.token_file,'joppa_objects',
+    {workspace:input.workspace,address,revision},{mcpCommand:config.mcp_command}));
+  const trees = read('trees.json');
+  const split = hostSplitReceipt({input, repair, trees});
+  if (split) repair.split_replan = split;
+  fs.writeFileSync(path.join(dir,'repair.json'),JSON.stringify(repair,null,2)+'\n');
+  const view = repairView(input,repair);
+  view.repair.retirement_binding = retirementBinding(input, trees);
+  console.log(JSON.stringify({...view,develop_trees:Object.fromEntries(Object.entries(trees).map(([id,tree])=>[id,{path:tree.path,sha:tree.sha}]))}));
+}
+if (import.meta.url===pathToFileURL(process.argv[1]||'').href) {
+  main().catch(error=>{console.error('tasker-repair: '+error.message);process.exitCode=2;});
+}

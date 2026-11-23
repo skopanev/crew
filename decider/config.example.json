@@ -1,0 +1,81 @@
+{
+  "workspace": "example",
+  "url": "https://joppa.example/mcp",
+  "mcp_command": [
+    "mcp-remote",
+    "https://joppa.example/mcp"
+  ],
+  "runs_folder": "/path/to/project/.crew/decider-runs",
+  "workflow": "/path/to/crew/decider/workflow.yaml",
+  "selection": {
+    "kind": "ac",
+    "assignee": "",
+    "data": {
+      "stage": "to_decide"
+    }
+  },
+  "references": [
+    "sources",
+    "consumer"
+  ],
+  "publication": {
+    "file": "operations.json",
+    "allowed_operations": [
+      "save_object",
+      "note"
+    ],
+    "create_kinds": [
+      "source"
+    ],
+    "update_kinds": [
+      "ac"
+    ]
+  },
+  "vars": {
+    "AUTHOR_MODEL": "claude-opus-5-5",
+    "CRITIC_CODEX_MODEL": "gpt-6.2-sol",
+    "CRITIC_SECOND_HARNESS": "claude-code",
+    "CRITIC_SECOND_MODEL": "claude-sonnet-5-5",
+    "BRAIN_ROOT": "/path/to/project/policies",
+    "MANUALS_ROOT": "/path/to/project/manuals",
+    "BRAIN_EXCLUDE": "obsolete",
+    "REWORK_LIMIT": "1",
+    "DRY_RUN": "true"
+  },
+  "concurrency": 6,
+  "retry": "always",
+  "exclude_tags": [
+    "source-gap-cto",
+    "source-gap-ceo",
+    "manual-check"
+  ],
+  "context": {
+    "url": "https://joppa.example/api/data",
+    "workspace": "example",
+    "token_file": "/path/to/project/read-key",
+    "roles": {
+      "decider": {
+        "role": "decider",
+        "process": "decider",
+        "kind": "process"
+      },
+      "audit": {
+        "role": "ac-auditor",
+        "process": "ac-auditor",
+        "kind": "process"
+      }
+    },
+    "session": {
+      "kind": [
+        "process",
+        "rule"
+      ],
+      "fields": [
+        "title",
+        "body",
+        "ends_when"
+      ],
+      "max_chars": 32768
+    }
+  }
+}

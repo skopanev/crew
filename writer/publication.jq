@@ -18,16 +18,20 @@ if all($reviews[]; clean) then {approved: true, operations: (
       data: ((.data + {title}) | with_entries(select(.value != $target.document.data[.key])))}}
   else {ref: ("test-" + .id), command: {op: "save_object", kind: $test, revision: 0,
     parent: $in.selected.address, reason: "Publish a Test that both independent critics approved.",
-    data: (.data + $owner + {title})}} end | select(.command.data | length > 0)])}
+    data: (.data + $owner + {title})}} end | select(.command.data | length > 0)] +
+  # Owner, 21 Nov 2026 (process:sample0004 r4): Tests written, the AC goes to to_task for tasker.
+  if $mode == "create" then [{command: {op: "save_object", kind: $in.selected.kind,
+    id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision, data: {stage: "to_task"},
+    reason: "Writer published the Tests that both critics approved. The AC goes to to_task."}}] else [] end)}
 elif $mode == "create" and $gap_tag != "" and all($reviews[]; coverage_review) and
   any($reviews[]; .coverage == "incomplete" and .coverage_gap_kind == "ac") then
   ([$reviews[].missing[]] | unique) as $missing |
   {approved: false, decision_required: true, operations: [
-    (if (($in.selected.document.data.tags // []) | index($gap_tag)) == null then
-     {command: {op: "save_object", kind: $in.selected.kind,
+    {command: {op: "save_object", kind: $in.selected.kind,
       id: ($in.selected.address | sub("^[^:]*:"; "")), revision: $in.claim_revision,
-      data: {tags: (($in.selected.document.data.tags // []) + [$gap_tag] | unique)},
-      reason: "Return the item to its owner for missing acceptance coverage."}} else empty end),
+      data: ({stage: "to_decide"} + if (($in.selected.document.data.tags // []) | index($gap_tag)) == null
+        then {tags: (($in.selected.document.data.tags // []) + [$gap_tag] | unique)} else {} end),
+      reason: "Return the item to its owner for missing acceptance coverage. The AC goes to to_decide."}},
     {command: {op: "note", target: $in.selected.address,
       id: ("writer-missing-" + ($run | gsub("[^A-Za-z0-9_.-]"; "_") | .[-80:])),
       text: ("Missing coverage:\n" + ($missing | join("\n") | .[0:750]) +
