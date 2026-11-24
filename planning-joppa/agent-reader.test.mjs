@@ -41,7 +41,7 @@ test('a profile grants artifacts and source roots without enabling legacy snapsh
 
 test('the CLI accepts a manifest and preserves a custom reader with its environment', t => {
   const f = fixture(t), existing = path.join(f.root, 'reader.json'), manifest = path.join(f.root, 'manifest.json');
-  const cbm = {command: '/host/cbm', args: ['read-only']};
+  const cbm = {command: '/host/cbm', args: ['read-only'], enabled_tools: ['search_code'], disabled_tools: ['index_repository']};
   fs.writeFileSync(existing, JSON.stringify({mcpServers: {'codebase-memory': cbm,
     sources: {command: 'python3', args: ['/role/reader.py'], env: {ROLE: 'value'}}}}));
   fs.writeFileSync(manifest, JSON.stringify({files: [path.join(f.root, 'draft.json')], roots: []}));
@@ -57,6 +57,12 @@ test('the CLI accepts a manifest and preserves a custom reader with its environm
   assert.equal(config.mcpServers.sources, undefined);
   assert.deepEqual(Bun.TOML.parse(agentArgs('codex', path.join(f.run, 'artifacts/critic-reader.json')).at(-1))
     .mcp_servers['codebase-memory'], cbm);
+  const claude = agentArgs('claude-code', path.join(f.run, 'artifacts/critic-reader.json'));
+  assert.ok(claude.includes('mcp__joppa__*,mcp__codebase-memory__search_code'));
+  assert.ok(claude.includes('mcp__codebase-memory__index_repository'));
+  const plain = JSON.parse(fs.readFileSync(claude[3])).mcpServers['codebase-memory'];
+  assert.equal(plain.enabled_tools, undefined);
+  assert.equal(plain.disabled_tools, undefined);
   fs.writeFileSync(existing, JSON.stringify({mcpServers: {'codebase-memory': cbm}}));
   const defaultProfile = prepare('default', [], existing, f.env);
   const defaultServers = JSON.parse(fs.readFileSync(defaultProfile.file)).mcpServers;

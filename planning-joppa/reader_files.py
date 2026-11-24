@@ -12,6 +12,26 @@ TOOL = {
         "path": {"type": "string"}, "offset": {"type": "integer", "minimum": 0},
         "length": {"type": "integer", "minimum": 1, "maximum": 100000}},
         "required": ["path"], "additionalProperties": False}}
+CONTEXT_TOOL = {
+    "name": "read_context", "description": "Find this role's instructions, contracts, frozen input and feedback files. Read these before evidence.",
+    "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
+
+
+def read_bytes(file):
+    # Open each component through its directory descriptor. A changed symlink never redirects the read.
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    directory = os.open(file.anchor, flags | os.O_DIRECTORY)
+    try:
+        for part in file.parts[1:-1]:
+            child = os.open(part, flags | os.O_DIRECTORY, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        descriptor = os.open(file.name, flags, dir_fd=directory)
+        with os.fdopen(descriptor, "rb") as stream:
+            return stream.read()
+    finally:
+        os.close(directory)
 
 
 class Files:
@@ -37,9 +57,15 @@ class Files:
         offset, length = args.get("offset", 0), args.get("length", 20000)
         if type(offset) is not int or offset < 0 or type(length) is not int or not 1 <= length <= 100000:
             raise ValueError("Use offset >= 0 and length 1..100000")
-        raw = resolved.read_bytes()
+        raw = read_bytes(resolved)
         text = raw.decode("utf-8")
         end = min(offset + length, len(text))
         return {"path": str(file.resolve()), "text": text[offset:end], "offset": offset,
                 "next_offset": end if end < len(text) else None, "total_chars": len(text),
                 "sha256": hashlib.sha256(raw).hexdigest()}
+
+    def context(self, args, workspace):
+        if not isinstance(args, dict) or args:
+            raise ValueError("read_context takes an empty object")
+        return {"workspace": workspace, "profile": os.environ.get("CREW_READER_PROFILE", ""),
+                "files": sorted(self.paths), "roots": [str(root) for root in self.roots]}

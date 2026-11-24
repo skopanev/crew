@@ -152,11 +152,13 @@ class Reader:
                     "workspace": {"type": "string", "default": self.workspace}}}
             tools.append(tool)
         if self.files.paths or self.files.roots:
-            from reader_files import TOOL
-            tools.append(TOOL)
+            from reader_files import CONTEXT_TOOL, TOOL
+            tools.extend((CONTEXT_TOOL, TOOL))
         return tools
 
     def call(self, name, arguments):
+        if name == "read_context":
+            return self.files.context(arguments, self.workspace)
         if name == "read_file":
             return self.files.read(arguments)
         if name not in READ_TOOLS:

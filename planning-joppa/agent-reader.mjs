@@ -32,7 +32,7 @@ export function prepare(name, files, existing, env = process.env) {
         : ['--token-file', config.reader_token_file ?? config.token_file])]};
   need(typeof source.command === 'string' && Array.isArray(source.args), 'Use a configured read-only reader');
   const server = {...source, env: {...source.env, CREW_READER_FILES: JSON.stringify(grant.files),
-    CREW_READER_ROOTS: JSON.stringify(grant.roots ?? [])}};
+    CREW_READER_ROOTS: JSON.stringify(grant.roots ?? []), CREW_READER_PROFILE: name}};
   const file = path.join(artifacts, `${name}-reader.json`);
   fs.mkdirSync(artifacts, {recursive: true});
   if (servers.sources === source) delete servers.sources;
@@ -46,7 +46,22 @@ export function agentArgs(harness, configFile) {
   if (harness === 'codex') return ['--ignore-user-config',
     ...['shell_tool', 'view_image', 'apps', 'browser_use', 'multi_agent'].flatMap(key => ['-c', `features.${key}=false`]),
     '-c', 'mcp_servers=' + toml({...servers, joppa: {...joppa, required: true}})];
-  if (harness === 'claude-code') return ['--strict-mcp-config', '--setting-sources=', '--mcp-config', configFile, '--tools='];
+  if (harness === 'claude-code') {
+    const allowed = ['mcp__joppa__*'], denied = [];
+    let filtered = false;
+    const cleaned = Object.fromEntries(Object.entries(servers).map(([name, server]) => {
+      const {enabled_tools, disabled_tools, ...plain} = server;
+      if (enabled_tools || disabled_tools) filtered = true;
+      for (const tool of enabled_tools ?? []) allowed.push(`mcp__${name}__${tool}`);
+      for (const tool of disabled_tools ?? []) denied.push(`mcp__${name}__${tool}`);
+      return [name, plain];
+    }));
+    const file = filtered ? configFile.replace(/\.json$/, '-claude.json') : configFile;
+    if (filtered) save(file, {mcpServers: cleaned});
+    return ['--strict-mcp-config', '--setting-sources=', '--mcp-config', file, '--tools=',
+      ...(filtered ? ['--allowedTools', allowed.join(',')] : []),
+      ...(denied.length ? ['--disallowedTools', denied.join(',')] : [])];
+  }
   need(harness === 'agy', 'Unsupported reader harness');
   return [];
 }
@@ -54,7 +69,12 @@ export function prepareAgy(configFile, home, env = process.env) {
   need(home && path.isAbsolute(home), 'AGY needs a private reader profile');
   fs.mkdirSync(home, {recursive: true, mode: 0o700});
   const config = path.join(home, '.gemini/config/mcp_config.json');
-  const next = read(configFile);
+  const source = read(configFile);
+  const next = {mcpServers: Object.fromEntries(Object.entries(source.mcpServers).map(([name, server]) => {
+    const {enabled_tools, disabled_tools, ...plain} = server;
+    return [name, {...plain, ...(enabled_tools ? {includeTools: enabled_tools} : {}),
+      ...(disabled_tools ? {excludeTools: disabled_tools} : {})}];
+  }))};
   const childEnv = {...env, BROKER_AGY_HOME: home, BROKER_ISOLATE_MCP: '1'};
   const query = () => {
     const result = spawnSync(env.AGY_BIN || 'agy', ['mcp', 'list'], {env: childEnv, encoding: 'utf8', timeout: 45_000});

@@ -31,7 +31,8 @@ class ReaderFilesTest(unittest.TestCase):
             self.assertEqual(first['text'] + second['text'], content)
             self.assertIsNone(second['next_offset'])
             self.assertEqual(first['sha256'], hashlib.sha256(file.read_bytes()).hexdigest())
-            self.assertEqual([tool['name'] for tool in reader.tools()], ['read_file'])
+            self.assertEqual([tool['name'] for tool in reader.tools()], ['read_context', 'read_file'])
+            self.assertEqual(reader.call('read_context', {})['files'], [str(file.resolve())])
             request = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
                        'params': {'name': 'read_file', 'arguments': {'path': str(file), 'length': 2}}}
             output = io.StringIO()
@@ -56,3 +57,18 @@ class ReaderFilesTest(unittest.TestCase):
                 with self.assertRaises(ValueError): reader.call('read_file', args)
             for name in ('joppa_batch', 'joppa_record_results', 'write_file'):
                 with self.assertRaisesRegex(MCPError, 'does not permit'): reader.call(name, {})
+
+    def test_a_symlink_swap_after_authorization_cannot_read_outside_the_grant(self):
+        with tempfile.TemporaryDirectory() as folder:
+            file, other = Path(folder) / 'allowed.txt', Path(folder) / 'outside.txt'
+            file.write_text('allowed'); other.write_text('outside-grant-marker')
+            with patch.dict(os.environ, CREW_READER_FILES=json.dumps([str(file)]), CREW_READER_ROOTS='[]'):
+                reader = Reader(API(), 'example', None)
+            original = Path.resolve
+            def swap(item, *args, **kwargs):
+                result = original(item, *args, **kwargs)
+                if item == file and not file.is_symlink():
+                    file.unlink(); file.symlink_to(other)
+                return result
+            with patch.object(Path, 'resolve', swap), self.assertRaises(OSError):
+                reader.call('read_file', {'path': str(file)})
