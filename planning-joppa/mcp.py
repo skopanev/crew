@@ -1,18 +1,13 @@
 """Authenticated MCP calls for the separate Joppa planner."""
 import json
 import sys
-import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import DETAIL_FIELDS, MCPError, Maintenance, Rejected, complete_object, detail_read, is_maintenance, normalize_detail
-
-# During a deploy Joppa answers maintenance (JSON-RPC -32000 or HTTP 503 with Retry-After). A tool call waits and sends
-# the same payload again, with the same arguments and request_id, at most MAINTENANCE_RETRIES times.
-MAINTENANCE_RETRIES, MAINTENANCE_WAIT = 3, 30
+from joppa_reads import DETAIL_FIELDS, MCPError, Maintenance, Rejected, complete_object, detail_read, is_maintenance, maintenance_retry, normalize_detail
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -52,17 +47,8 @@ class Joppa:
                 print("Joppa MCP connection failed; reconnecting once before any tool call", file=sys.stderr)
                 self.stdio = StdioRPC(mcp_command)
 
+    @maintenance_retry
     def rpc(self, method, params, notification=False):
-        for attempt in range(MAINTENANCE_RETRIES + 1):
-            try:
-                return self.send(method, params, notification)
-            except Maintenance:
-                if method != "tools/call" or attempt == MAINTENANCE_RETRIES:
-                    raise
-                print(f"Joppa is in maintenance; the same request is sent again in {MAINTENANCE_WAIT} s", file=sys.stderr)
-                time.sleep(MAINTENANCE_WAIT)
-
-    def send(self, method, params, notification=False):
         if self.stdio:
             return self.stdio.request(method, params, notification)
         self.sequence += 1
@@ -93,17 +79,14 @@ class Joppa:
             else:
                 message = json.loads(raw)
         except HTTPError as error:
-            if error.code == 503 and error.headers and error.headers.get("Retry-After"):
-                raise Maintenance("Joppa MCP HTTP 503 maintenance") from None
-            raise MCPError(f"Joppa MCP HTTP {error.code}") from None
+            busy = error.code == 503 and error.headers and error.headers.get("Retry-After")
+            raise (Maintenance if busy else MCPError)(f"Joppa MCP HTTP {error.code}") from None
         except (URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError):
             raise MCPError("Joppa MCP transport failed") from None
         if not isinstance(message, dict) or message.get("id") != self.sequence:
             raise MCPError("Joppa returned a different MCP response")
-        if is_maintenance(message.get("error")):
-            raise Maintenance("Joppa is in maintenance")
         if "error" in message or "result" not in message:
-            raise MCPError("Joppa rejected the MCP operation")
+            raise (Maintenance if is_maintenance(message.get("error")) else MCPError)("Joppa rejected the MCP operation")
         return message["result"]
 
     def tools(self):
