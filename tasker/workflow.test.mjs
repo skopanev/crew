@@ -12,7 +12,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const settings = JSON.parse(fs.readFileSync(path.join(here, "config.example.json"), "utf8")).vars;
 const workflow = fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8');
 const prepare = workflow.split('  prepare:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
-const updates = output => Object.fromEntries([...output.matchAll(/^<signal:var key=([A-Za-z_]+)>(.*?)<\/signal:var>$/gm)]
+const updates = output => Object.fromEntries([...output.matchAll(/^<signal:var key=([A-Za-z_][A-Za-z0-9_]*)>(.*?)<\/signal:var>$/gm)]
   .map(([, key, value]) => [key, value]));
 const object = (address, body) => ({address, kind: address.split(':')[0], current_revision: 4,
   document: {data: {title: address, body, stage: 'to_task'}, present: true}});
@@ -29,6 +29,7 @@ function fixture(t, role = 'ac') {
   fs.writeFileSync(stages, `#!/bin/sh
 touch "$MEDULLA_RUN_DIR/shared-prepare-called"
 if [ "\${PREPARE_BLOCKED:-}" = true ]; then echo '<signal:BLOCKED>No item</signal:BLOCKED>'; exit 0; fi
+cp "$MEDULLA_RUN_DIR/contracts-source.json" "$MEDULLA_RUN_DIR/artifacts/contracts.json"
 if [ "\${FLOW_ASSIGNMENT_INLINE:-true}" = true ]; then
   assignment="$(jq -c . "$MEDULLA_RUN_DIR/artifacts/input.json")"
   [ "$(printf '%s' "$assignment" | wc -c)" -lt 100000 ] || { echo 'assignment: context too large' >&2; exit 2; }
@@ -50,6 +51,14 @@ export async function readJoppa() {
   return JSON.parse(fs.readFileSync(process.env.MEDULLA_RUN_DIR + '/pinned.json', 'utf8'));
 }
 `);
+  fs.writeFileSync(path.join(engine, 'planning-joppa', 'agent-reader.mjs'), `import fs from 'node:fs';import path from 'node:path';
+export const agentArgs=(harness,config)=>['--strict-mcp-config','--setting-sources=','--mcp-config',config,'--tools='];
+if(process.argv[2]==='prepare'){
+const [mode,role,files,mcp]=process.argv.slice(2);
+const a=path.join(process.env.MEDULLA_RUN_DIR,'artifacts');
+fs.writeFileSync(path.join(a,role+'-files.json'),files.startsWith('@')?fs.readFileSync(files.slice(1),'utf8'):files);
+fs.writeFileSync(path.join(a,role+'-config.json'),fs.readFileSync(mcp,'utf8'));
+for(const [key,value]of Object.entries({[role+'_reader_config']:path.join(a,role+'-config.json'),[role+'_reader_home']:path.join(a,role+'-home')}))console.log('<signal:var key='+key+'>'+value+'</signal:var>');}`);
   const write = (name, value) => fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value));
   const parent = object('ac:a', 'Required outcome'), selected = role === 'task'
     ? object('task:t', 'Criterion: ac:a@4. Required outcome\nRead only: context.ts') : parent;
@@ -59,6 +68,9 @@ export async function readJoppa() {
   if (role === 'task') input.context = {parent, children: input.children, references: input.references,
     incoming: [object('task:dependent', 'Dependent work')]};
   fs.writeFileSync(path.join(root, 'pinned.json'), JSON.stringify(parent));
+  fs.writeFileSync(path.join(root, 'contracts-source.json'), JSON.stringify({author: {content: 'Author contract'}, critic: {content: 'Critic contract'}}));
+  fs.mkdirSync(path.join(definition, 'prompts'));
+  for (const name of ['author.md', 'critic.md']) fs.copyFileSync(path.join(here, 'prompts', name), path.join(definition, 'prompts', name));
   const config = path.join(root, 'config.json'); fs.writeFileSync(config, '{"url":"fixture","token_file":"unused"}');
   const trees = {repo: {path: path.join(root, 'develop'), sha: 'a'.repeat(40), unused: 'not in the view'}};
   write('input.json', input); write('trees.json', trees);
@@ -86,7 +98,9 @@ for (const role of ['ac', 'task']) test(`${role} prepare keeps the complete larg
   assert.match(result.stdout, /<signal:READY_TO_WRITE>/);
   const vars = updates(result.stdout), file = vars.tasker_assignment_path;
   assert.equal(path.isAbsolute(file), true);
-  assert.equal(vars.author_contract, 'Author contract'); assert.equal(vars.critic_contract, 'Critic contract');
+  assert.equal(Object.hasOwn(vars, 'author_contract'), false); assert.equal(Object.hasOwn(vars, 'critic_contract'), false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'contracts.json'))),
+    {author: {content: 'Author contract'}, critic: {content: 'Critic contract'}});
   assert.equal(Object.hasOwn(vars, 'assignment'), false); assert.equal(Object.hasOwn(vars, 'tasker_assignment'), false);
   assert.ok(Buffer.byteLength(result.stdout) < 4000);
   assert.ok(Object.values(vars).every(value => Buffer.byteLength(value) < 2000));
@@ -108,8 +122,88 @@ for (const role of ['ac', 'task']) test(`${role} prepare keeps the complete larg
   assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
 });
 
-test('both agent prompts include the assignment file and no assignment blob remains', () => {
-  assert.equal((workflow.match(/Assignment: \{\{file:\{\{var:tasker_assignment_path\}\}\}\}/g) || []).length, 2);
+test('assembled author and critic prompts stay below 15000 characters for large AC and repair reworks', t => {
+  const definition = Bun.YAML.parse(workflow);
+  const payload = 'MUST_STAY_IN_FILE_' + 'я🧪'.repeat(60000) + '{{file:/no-inline-file}}';
+  for (const role of ['ac', 'task']) {
+    const f = fixture(t, role);
+    f.input.selected.document.data.body += payload;
+    f.input.references.sources[0].document.data.body = payload;
+    f.write('input.json', f.input);
+    const contracts = {author: {content: payload}, critic: {content: payload}};
+    fs.writeFileSync(path.join(f.root, 'contracts-source.json'), JSON.stringify(contracts));
+    const result = f.run(); assert.equal(result.status, 0, result.stderr);
+    const vars = {...updates(result.stdout), author_contract: payload, critic_contract: payload, draft: payload,
+      critique: payload, check: payload, draft_digest: 'a'.repeat(64)};
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'contracts.json'))), contracts);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'tasker-limits.json'))),
+      {max_files: 8, max_changed_lines: 300, migration_size_exempt: true, finding_criteria: ['G', 'A', 'U', 'M', 'V', 'R']});
+    const authorManifest = JSON.parse(fs.readFileSync(path.join(f.artifacts, 'tasker_author-files.json')));
+    const criticManifest = JSON.parse(fs.readFileSync(path.join(f.artifacts, 'tasker_critic-files.json')));
+    assert.deepEqual(authorManifest.roots, [f.trees.repo.path]);
+    assert.deepEqual(criticManifest.roots, [f.trees.repo.path]);
+    const authorFiles = authorManifest.files, criticFiles = criticManifest.files;
+    assert.ok(authorFiles.includes(path.join(f.artifacts, 'critic-feedback.json')));
+    assert.ok(!criticFiles.includes(path.join(f.artifacts, 'critic-feedback.json')));
+    for (const files of [authorFiles, criticFiles]) {
+      assert.ok(files.every(file => path.isAbsolute(file)));
+      assert.ok(files.every(file => !/critic-(?:codex|second)\.json$/.test(file)));
+    }
+    assert.match(definition.nodes.author.pre, /agentArgs\("claude-code", process.env.tasker_author_reader_config\)/);
+    assert.ok(definition.nodes.author.agent.args.includes('{{var:tasker_author_arg13:-}}'));
+    assert.match(definition.nodes.critics.inputs.shell, /seats "\$tasker_critic_reader_config" "\$tasker_critic_reader_home"/);
+    assert.ok(definition.nodes.critics.agent.args.includes('{{input.a13:-}}'));
+    const cbm = JSON.parse(fs.readFileSync(path.join(f.artifacts, 'tasker-base-mcp.json'))).mcpServers['codebase-memory'];
+    assert.equal(cbm.enabled_tools.length, 10);
+    assert.deepEqual(cbm.disabled_tools, ['index_repository', 'delete_project', 'manage_adr', 'ingest_traces']);
+    const pre = spawnSync('bash', ['-c', definition.nodes.author.pre], {encoding: 'utf8',
+      env: {...f.env, tasker_author_reader_config: vars.tasker_author_reader_config}});
+    assert.equal(pre.status, 0, pre.stderr);
+    const args = updates(pre.stdout);
+    assert.equal(args.tasker_author_arg4, vars.tasker_author_reader_config);
+    assert.equal(args.tasker_author_arg5, '--tools=');
+    for (const round of [1, 2, 4]) {
+      if (round > 1) for (const name of ['draft.json', 'check.json', 'critic-feedback.json']) f.write(name, {body: payload});
+      for (const seat of ['author', 'codex', 'second']) {
+        const template = definition.nodes[seat === 'author' ? 'author' : 'critics'].prompt;
+        assert.deepEqual([...template.matchAll(/\{\{var:([A-Za-z_]+)\}\}/g)].map(match => match[1]),
+          seat === 'author' ? ['tasker_item_address'] : ['tasker_item_address', 'tasker_draft_path']);
+        assert.doesNotMatch(template, /\{\{file:|\{\{var:(?:draft|check|critique|author_contract|critic_contract)\}\}/);
+        const assembled = template.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, key) => {
+          assert.equal(typeof vars[key], 'string', key); return vars[key];
+        });
+        assert.ok([...assembled].length < 15000, `${role} ${seat} round ${round}: ${[...assembled].length}`);
+        assert.doesNotMatch(assembled, /\{\{|MUST_STAY_IN_FILE_|Author contract|Critic contract/);
+        assert.ok(assembled.includes(f.input.selected.address));
+        for (const file of ['contracts.json', 'tasker-assignment.json', 'tasker-limits.json', 'check.json', 'critic-feedback.json', 'draft-digest.txt']) {
+          assert.equal(assembled.includes(file), false, file);
+        }
+        assert.doesNotMatch(assembled, /prompts\/(?:author|critic)\.md/);
+        if (seat === 'author') assert.equal(assembled.includes(f.artifacts), false);
+        else assert.ok(assembled.includes(path.join(f.artifacts, 'draft.json')));
+        if (seat !== 'author') assert.doesNotMatch(assembled, /critic-(?:codex|second)\.json/);
+      }
+    }
+    const capture = path.join(f.root, 'capture.mjs');
+    fs.writeFileSync(capture, `import fs from 'node:fs';import path from 'node:path';
+if(process.env.CAPTURE_FAIL==='true')process.exit(7);
+const name=process.argv[3],value=JSON.parse(fs.readFileSync(path.join(process.env.MEDULLA_RUN_DIR,'contracts-source.json'),'utf8'));
+fs.writeFileSync(path.join(process.env.MEDULLA_RUN_DIR,'artifacts',name+'.json'),JSON.stringify(value));
+console.log('<signal:var key='+name.replaceAll('-','_')+'>'+JSON.stringify(value)+'</signal:var>');
+console.log('<signal:CAPTURED>Saved.</signal:CAPTURED>');`);
+    for (const seat of ['author', 'codex', 'second']) {
+      const node = definition.nodes[seat === 'author' ? 'author' : 'critics'];
+      const env = {...f.env, PLANNING_PYTHON: process.execPath, CREW_FLOW_STAGES: capture, MEDULLA_INPUT: JSON.stringify({slug: seat})};
+      const saved = spawnSync('bash', ['-c', node.post], {env, encoding: 'utf8'});
+      assert.equal(saved.status, 0, saved.stderr);
+      assert.match(saved.stdout, /<signal:CAPTURED>/);
+      assert.doesNotMatch(saved.stdout, /<signal:var|MUST_STAY_IN_FILE_/);
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.artifacts, (seat === 'author' ? 'draft' : 'critic-' + seat) + '.json'))), contracts);
+      const failed = spawnSync('bash', ['-c', node.post], {env: {...env, CAPTURE_FAIL: 'true'}, encoding: 'utf8'});
+      assert.equal(failed.status, 7);
+      assert.doesNotMatch(failed.stdout, /<signal:CAPTURED>/);
+    }
+  }
   assert.doesNotMatch(workflow, /\{\{var:tasker_assignment\}\}|key=tasker_assignment>/);
 });
 

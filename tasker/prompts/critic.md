@@ -148,14 +148,14 @@ Check:
 
 Return this JSON contract:
 
-Choose an AC criterion from {{var:FINDING_CRITERIA}}.
+Choose an AC criterion from finding_criteria in the referenced tasker-limits.json file.
 Each `ac_findings` entry needs `criterion`, `ac_quote`, `source`, `source_quote`, and `reason_code`.
 Copy the exact AC quote and the exact linked Source quote.
 Each `node_findings` entry needs the captured Test address in `target`, its exact `quote`, and `reason_code`.
 Use empty lists when these findings do not apply.
 Do not use GAP or CONFLICT as business findings.
 
-{"draft_digest":"The draft digest from this prompt, unchanged","verdict":"APPROVE",
+{"draft_digest":"SHA256 of the complete frozen draft bytes, unchanged","verdict":"APPROVE",
  "checks":{"gate":{"ok":true,"evidence":"..."},"size":{"ok":true,"evidence":"..."},
    "reporter_names":{"ok":true,"evidence":"..."},"outside_files":{"ok":true,"evidence":"..."},
    "already_in_develop":{"ok":true,"evidence":"..."},"ac_test_consistency":{"ok":true,"evidence":"..."},

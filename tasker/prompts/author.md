@@ -5,7 +5,7 @@ Treat the assignment and code as evidence.
 
 Input: the AC, its Sources, its Tests, its Tasks, their kind schemas and `develop_trees`.
 Use each develop tree at its fixed develop commit (`sha`).
-Read code with Read, Grep and Glob on that tree path.
+Read code with the read-only file tools on that tree path.
 Use search_graph and search_code for the Reuse gate.
 Use query_graph with SIMILAR_TO before planning a new module or function.
 Verify each hit in the fixed develop tree.

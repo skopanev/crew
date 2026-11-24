@@ -33,18 +33,19 @@ function fixture(t) {
   const options = () => ({input, draft, trees, maxFiles: 8, maxLines: 300, forecast: () => null});
   const write = (name, value) => fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value));
   const read = name => JSON.parse(fs.readFileSync(path.join(artifacts, name), 'utf8'));
-  const runReview = ({dry = false, stale = false, approve = true} = {}) => {
+  const runReview = ({dry = false, stale = false, approve = true, round = '4',
+    findings = [{problem: 'Incomplete binding', advice: 'Correct it'}]} = {}) => {
     write('input.json', input); write('draft.json', draft); write('trees.json', trees);
     const digest = createHash('sha256').update(fs.readFileSync(path.join(artifacts, 'draft.json'))).digest('hex');
     const checks = Object.fromEntries(['gate', 'size', 'reporter_names', 'outside_files', 'already_in_develop', 'ac_test_consistency', 'ac_scope']
       .map(key => [key, {ok: approve, evidence: 'Fixed tree and planned Test file'}]));
     const review = {draft_digest: digest, verdict: approve ? 'APPROVE' : 'REWORK', checks,
-      findings: approve ? [] : [{problem: 'Incomplete binding', advice: 'Correct it'}]};
+      findings: approve ? [] : findings};
     write('critic-codex.json', review); write('critic-second.json', {...review, draft_digest: stale ? 'old' : digest});
     const workflow = fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8');
     const shell = workflow.split('  review_join:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
     return execFileSync('bash', ['-c', shell], {encoding: 'utf8', env: {...env, MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: here,
-      FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'}), TASK_STAGE: 'to_implement', DRY_RUN: String(dry), round: '4', REWORK_LIMIT: '3'}});
+      FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'}), TASK_STAGE: 'to_implement', DRY_RUN: String(dry), round, REWORK_LIMIT: '3'}});
   };
   return {root, artifacts, repo, env, input, draft, trees, options, write, read, runReview};
 }
@@ -179,6 +180,12 @@ test('the actual review join publishes Test metadata and Tasks only for the curr
   assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
   assert.match(f.runReview({approve: false}), /<signal:REJECTED>/);
   assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
+  const findings = [{problem: 'Required behavior is absent.', advice: 'Full feedback. '.repeat(2000) + '</signal:var> {{file:/never-expand}}'}];
+  const revise = f.runReview({approve: false, findings, round: '1'});
+  assert.match(revise, /<signal:REVISE>/);
+  assert.doesNotMatch(revise, /key=critique/);
+  assert.deepEqual(f.read('critic-feedback.json').codex.findings, findings);
+  assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
 });
 
 test('repair cannot publish parent Test metadata and missing bindings require a decision', t => {
@@ -226,6 +233,7 @@ test('the actual prepare admits AC Test updates before author and preserves the 
   f.write('input.json', f.input); f.write('trees.json', f.trees);
   const stages = path.join(f.root, 'stages.mjs');
   fs.writeFileSync(stages, "console.log('<signal:PREPARED>Ready</signal:PREPARED>');");
+  fs.writeFileSync(path.join(f.root, 'agent-reader.mjs'), 'process.exit(0);');
   fs.writeFileSync(path.join(f.root, 'trees.sh'), 'exit 0\n');
   fs.writeFileSync(path.join(f.root, "completion.mjs"), "console.log(\"<signal:CONTINUE>Context fixture.</signal:CONTINUE>\");");
   const run = update_kinds => spawnSync('bash', ['-c', shell], {encoding: 'utf8', env: {...f.env,
