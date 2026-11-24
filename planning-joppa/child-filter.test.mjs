@@ -25,7 +25,7 @@ test('only free red pending review evidence passes queue, fresh completion and t
   const stages = await completionPolicy(config, root);
   const configFile = path.join(f.root, 'config.json'), inputFile = path.join(f.root, 'input.json');
   fs.writeFileSync(configFile, JSON.stringify(config));
-  for (const [change, expected] of [[{}, true], [{assignee: 'worker'}, false], [{tags: []}, false],
+  for (const [change, expected] of [[{}, true], [{stage: 'failed', tags: []}, true], [{assignee: 'worker'}, false], [{tags: []}, false],
     [{delivery: {state: 'other'}}, false], [{stage: 'ready'}, false]]) {
     task.document.data = {...normal, stage: 'review', tags: ['red'], delivery: {state: 'pending'}, ...change};
     const selected = await nextConfiguredItem(config, f.run.joppaWorker.tokenFile);

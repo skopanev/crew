@@ -41,9 +41,10 @@ export function ignoredChild(item, filters) {
 }
 
 export function activeChildren(input, config) {
+  const active = [config.vars?.TASK_STAGE, config.vars?.TASKER_TASK_REVIEW_STAGE, config.vars?.TASKER_WORKING_STAGE].filter(Boolean);
   return (input.children ?? []).filter(item => input.schema.types[item.kind]?.role === 'task' &&
     (item.document?.present ?? item.present) !== false && (batchField(item, 'data.assignee') ||
-      !ignoredChild(item, config.exclude_children) && batchField(item, 'data.stage') !== config.vars?.TASKER_DONE_STAGE))
+      !ignoredChild(item, config.exclude_children) && active.includes(batchField(item, 'data.stage'))))
     .map(item => item.address);
 }
 
