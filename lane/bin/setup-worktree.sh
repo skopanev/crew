@@ -16,8 +16,9 @@ export PATH="/home/medulla/.bun/bin:${PATH}"
 deps=""
 pf="${REPOSITORY_PREFLIGHT:-}"
 if [ -n "$pf" ]; then
-  if [ -x "${LANE_WORKTREE}/$pf" ]; then
-    if (cd "$LANE_WORKTREE" && timeout 600 "./$pf" > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
+  case "$pf" in /*) preflight="$pf" ;; *) preflight="$LANE_WORKTREE/$pf" ;; esac
+  if [ -x "$preflight" ]; then
+    if (cd "$LANE_WORKTREE" && timeout 600 "$preflight" > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
       deps=" Repository preflight ($pf) ran."
     else
       cat "$MEDULLA_RUN_DIR/artifacts/preflight.txt" >&2
