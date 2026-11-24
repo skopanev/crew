@@ -6,8 +6,8 @@ import {api, batchRequest, mutateTasks, claimTasks, sameContract} from './joppa-
 import {save} from './runtime.mjs';
 import {nodeAssignee, saveNode} from './joppa-nodes.mjs';
 import {heldBy} from './joppa-claims.mjs';
-import {writerGone, checkoutPath} from './retained-checkout.mjs';
-import {repairSettings, repairCandidate, repairParentReady} from './repair-delivery.mjs';
+import {writerGone, checkoutPath, laneGit} from './retained-checkout.mjs';
+import {repairSettings, repairCandidate, repairParentReady, failedRepairChanges} from './repair-delivery.mjs';
 const need = (ok, message) => { if (!ok) throw new Error('DELIVERY_REPAIR: ' + message); };
 
 export async function finishRepairFailure(run, stateFile, result, objects, artifacts) {
@@ -15,6 +15,8 @@ export async function finishRepairFailure(run, stateFile, result, objects, artif
   need(policy && run.repairDelivery && objects.length === 1 && claims.length === 1, 'failure needs one repair claim');
   need(!result.publicationUncertain && !result.cleanupError && (!run.launchPgid || writerGone(run, checkoutPath(run))),
     'publication or stopped writers remain unconfirmed');
+  const checkout = checkoutPath(run);
+  if (fs.existsSync(path.join(checkout, '.git'))) laneGit(checkout);
   const read = (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args});
   const task = objects[0], source = run.repairDelivery;
   need(repairCandidate(run.config, task) && task.document.data.delivery.head === source.head &&
@@ -26,7 +28,7 @@ export async function finishRepairFailure(run, stateFile, result, objects, artif
   const finding = (file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : origin.message || result.error || 'Repair did not finish').slice(0, 2500);
   if (!run.repairFailureRequest) {
     need(heldBy(run, task), 'only this run can release its repair claim');
-    const commands = [saveNode(task, {assignee: undefined, ...(defect ? {stage: policy.defectTaskStage} : {})}, 'Release this repair claim and preserve the original pending branch.'),
+    const commands = [saveNode(task, {assignee: undefined, ...failedRepairChanges(run.config, task), ...(defect ? {stage: policy.defectTaskStage} : {})}, 'Release this repair claim and preserve the original pending branch.'),
       {op: 'note', target: task.address, id: randomUUID(), text: `CREW_REPAIR_FAILURE\nBranch: ${source.branch}\nHead: ${source.head}\n${finding}\nEvidence: ${artifacts || run.runFolder}`}];
     if (defect) {
       const parent = await read('joppa_objects', {address: task.document.parent});
@@ -47,6 +49,7 @@ export async function finishRepairFailure(run, stateFile, result, objects, artif
   const confirmed = await read('joppa_objects', {address: task.address});
   need(confirmed?.address === task.address && confirmed.historical === false && confirmed.document?.present === true &&
     !nodeAssignee(confirmed) && repairCandidate(run.config, confirmed) &&
+    JSON.stringify(confirmed.document.data[policy.attemptField]) === JSON.stringify(run.repairFailureRequest.operations[0].command.data[policy.attemptField]) &&
     confirmed.document.data.delivery.head === source.head && confirmed.document.data.delivery.branch === source.branch,
   'the release did not confirm the original red pending branch');
   const parentSave = run.repairFailureRequest.operations.map(row => row.command).find(command =>

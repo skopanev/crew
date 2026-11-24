@@ -10,7 +10,7 @@ const data = node => node.document?.data ?? node.data ?? node;
 const value = (node, key) => node.document?.data?.[key] ?? node.data?.[key] ?? node['data.' + key];
 const digest = (node, policy) => {
   const authored = {...node.document.data};
-  for (const key of ['delivery', ...Object.keys(policy.redData)]) delete authored[key];
+  for (const key of ['delivery', policy.attemptField, ...Object.keys(policy.redData)]) delete authored[key];
   return contractDigest({...node, document: {...node.document, data: authored}});
 };
 
@@ -18,12 +18,15 @@ export function repairSettings(config) {
   const policy = config.repairDelivery;
   if (policy === undefined) return null;
   need(policy && typeof policy === 'object' && !Array.isArray(policy) &&
-    ['redTag', 'runsFolder', 'parentStage', 'returnStage', 'defectTaskStage'].every(key => text(policy[key])) &&
+    ['redTag', 'runsFolder', 'parentStage', 'returnStage', 'defectTaskStage', 'attemptField', 'exhaustedTag'].every(key => text(policy[key])) &&
+    Number.isSafeInteger(policy.maxAttempts) && policy.maxAttempts > 0 &&
     path.isAbsolute(policy.runsFolder) && policy.redData && typeof policy.redData === 'object' && !Array.isArray(policy.redData),
-  'configure redTag, runsFolder, parentStage, returnStage, defectTaskStage and redData');
+  'configure repair stages, markers, evidence folder and attempt limit');
   need(!Object.keys(policy.redData).some(key => ['stage', 'assignee', 'commit', 'delivery', 'repository', 'tags'].includes(key)),
     'redData cannot change lifecycle fields');
   need(config.delivery === 'branch', 'repair needs branch delivery');
+  need(!['stage', 'assignee', 'commit', 'delivery', 'repository', 'tags', ...Object.keys(policy.redData)].includes(policy.attemptField) &&
+    config.joppa.excludeTags?.includes(policy.exhaustedTag), 'the attempt field must be separate and exhaustedTag must be excluded');
   return policy;
 }
 
@@ -42,6 +45,7 @@ export function repairEvidence(config, node) {
   const policy = repairSettings(config);
   need(repairCandidate(config, node), 'the Task no longer has its configured red pending marker');
   const delivery = data(node).delivery, repo = taskRepositoryChoice(config, data(node), {required: true});
+  need(repairAttempts(config, node) < policy.maxAttempts, 'the repair attempt limit is reached for this branch head');
   need(repo && delivery.target === repo.targetBranch && delivery.head === data(node).commit &&
     /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(delivery.head), 'the saved branch head, commit and target must match');
   const source = fs.realpathSync(config.sourceRoot), root = fs.realpathSync(policy.runsFolder);
@@ -95,8 +99,22 @@ export async function validateRepairTask(config, object, read, expected) {
 export function clearRepairMarkers(config, node) {
   const policy = repairSettings(config);
   if (!policy) return {};
-  const changes = {};
+  const changes = {[policy.attemptField]: null};
   if (Array.isArray(data(node).tags)) changes.tags = data(node).tags.filter(tag => tag !== policy.redTag);
   for (const [key, expected] of Object.entries(policy.redData)) if (data(node)[key] === expected) changes[key] = null;
   return changes;
+}
+
+export function repairAttempts(config, node) {
+  const policy = repairSettings(config), previous = data(node)[policy.attemptField], delivery = data(node).delivery;
+  if (previous == null) return 0;
+  need(previous && typeof previous === 'object' && Number.isSafeInteger(previous.count) && previous.count >= 0 &&
+    text(previous.branch) && text(previous.head), 'the saved repair attempt count is invalid');
+  return previous.branch === delivery.branch && previous.head === delivery.head ? previous.count : 0;
+}
+
+export function failedRepairChanges(config, node) {
+  const policy = repairSettings(config), delivery = data(node).delivery, count = repairAttempts(config, node) + 1;
+  return {[policy.attemptField]: {branch: delivery.branch, head: delivery.head, count},
+    ...(count >= policy.maxAttempts ? {tags: [...new Set([...(data(node).tags || []), policy.exhaustedTag])]} : {})};
 }

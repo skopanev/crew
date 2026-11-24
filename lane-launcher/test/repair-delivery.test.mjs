@@ -12,6 +12,7 @@ async function fixture(t) {
   const f = await packageFixture(t), address = 'task:t2', head = 'a'.repeat(40), branch = 'saved-task-branch';
   f.run.config.delivery = 'branch';
   f.run.config.sourceRoot = f.root;
+  f.run.config.worktreeRoot = path.join(f.root, 'worktrees');
   f.run.config.pendingDeliveryData = {stage: 'ready'};
   f.run.config.repositories[0].targetBranch = 'main';
   const task = f.objects.get(address);
@@ -26,7 +27,9 @@ async function fixture(t) {
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({selected: original}));
   fs.writeFileSync(path.join(artifacts, 'lander.json'), JSON.stringify({repository: 'app', target: 'main',
     failed: {[address]: 'BRANCH_GATE_FAIL'}, pins: [{address, branch, head}]}));
-  const policy = {redTag: 'integration-red', redData: {hold: 'RED'}, runsFolder, parentStage: 'ready', returnStage: 'decide', defectTaskStage: 'review'};
+  f.run.config.joppa.excludeTags = [...(f.run.config.joppa.excludeTags || []), 'stuck'];
+  const policy = {redTag: 'integration-red', redData: {hold: 'RED'}, runsFolder, parentStage: 'ready', returnStage: 'decide', defectTaskStage: 'review',
+    attemptField: 'repair_attempt', maxAttempts: 2, exhaustedTag: 'stuck'};
   return {...f, policy, address, head, branch, task};
 }
 function chooseRepair(f) {
@@ -86,6 +89,31 @@ test('failed repair releases only its claim and preserves the original pending b
   assert.equal(f.task.document.data.delivery.branch, f.branch);
   assert.equal(f.task.document.data.assignee, undefined);
   assert.equal(f.task.document.data.hold, 'RED');
+  assert.deepEqual(f.task.document.data.repair_attempt, {branch: f.branch, head: f.head, count: 1});
+});
+
+test('the configured attempt limit excludes a persistent repair and preserves its pending branch', async t => {
+  const f = await fixture(t); chooseRepair(f);
+  f.task.document.data.repair_attempt = {branch: f.branch, head: f.head, count: 1};
+  await claimTask(f.run, f.persist, f.runId);
+  const result = {code: 2, status: 'failed'};
+  await finishTask(f.run, f.stateFile, result, null);
+  assert.equal(f.task.document.data.repair_attempt.count, 2);
+  assert.ok(f.task.document.data.tags.includes('stuck'));
+  assert.equal(f.task.document.data.delivery.head, f.head);
+  assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
+});
+
+test('an unfinished merge keeps the repair claim and checkout before any release request', async t => {
+  const f = await fixture(t); chooseRepair(f);
+  await claimTask(f.run, f.persist, f.runId);
+  const directory = path.join(f.run.config.worktreeRoot, f.run.executionId, '.git');
+  fs.mkdirSync(directory, {recursive: true});
+  fs.writeFileSync(path.join(directory, 'MERGE_HEAD'), f.head + '\n');
+  await assert.rejects(finishTask(f.run, f.stateFile, {code: 2, status: 'failed'}, null), /MERGE_HEAD/);
+  assert.equal(f.task.document.data.assignee, f.run.claim.assignee);
+  assert.equal(f.run.repairFailureRequest, undefined);
+  assert.equal(fs.readFileSync(path.join(directory, 'MERGE_HEAD'), 'utf8'), f.head + '\n');
 });
 
 test('an explicit acceptance defect returns its parent with a finding and preserves the pending Task', async t => {

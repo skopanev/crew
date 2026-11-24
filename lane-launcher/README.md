@@ -175,7 +175,7 @@ The dispatcher selects one executable Task per lane.
 An optional `repairDelivery` config resumes an excluded integration branch before new work:
 
 ```json
-{"repairDelivery":{"redTag":"integration-red","redData":{"hold":"RED"},"runsFolder":"/absolute/source/integration-runs","parentStage":"implement","returnStage":"decide","defectTaskStage":"review"}}
+{"repairDelivery":{"redTag":"integration-red","redData":{"hold":"RED"},"runsFolder":"/absolute/source/integration-runs","parentStage":"implement","returnStage":"decide","defectTaskStage":"review","attemptField":"repair_attempt","maxAttempts":2,"exhaustedTag":"stuck"}}
 ```
 
 Use the workspace's own stages and metadata fields. The evidence folder must stay inside `sourceRoot`.
