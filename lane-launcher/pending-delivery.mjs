@@ -2,6 +2,7 @@
 import {isDeepStrictEqual} from 'node:util';
 import {api, batchRequest, mutateTasks} from './joppa-common.mjs';
 import {saveNode} from './joppa-nodes.mjs';
+import {clearRepairMarkers} from './repair-delivery.mjs';
 const require = (ok, message) => { if (!ok) throw new Error(message); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -21,7 +22,7 @@ export async function recordPendingDelivery({run, objects, sha, branch, runId, p
     ...(saved ? saved.pushed_at ? {pushed_at: saved.pushed_at} : {} : {pushed_at: new Date().toISOString()})};
   const changes = {...run.config.pendingDeliveryData, assignee: undefined, commit: sha,
     repository: run.repository.id, delivery};
-  const commands = objects.map(node => saveNode(node, changes,
+  const commands = objects.map(node => saveNode(node, {...changes, ...(run.repairDelivery ? clearRepairMarkers(run.config, node) : {})},
     `Checked branch ${branch} at ${sha} waits for target ${run.repository.targetBranch}. Run: ${runId}`));
   if (run.pendingDeliveryRequest) {
     require(isDeepStrictEqual(run.pendingDeliveryRequest.operations.map(row => row.command), commands),
@@ -35,7 +36,8 @@ export async function recordPendingDelivery({run, objects, sha, branch, runId, p
     const data = current.document?.data;
     require(current.address === node.address && current.historical === false && current.document.present === true &&
       !data.assignee && data.commit === sha && data.repository === run.repository.id &&
-      isDeepStrictEqual(data.delivery, delivery) && Object.entries(run.config.pendingDeliveryData)
+      isDeepStrictEqual(data.delivery, delivery) && (!run.repairDelivery ||
+        Object.entries(clearRepairMarkers(run.config, node)).every(([key, value]) => value === null ? !Object.hasOwn(data, key) : isDeepStrictEqual(data[key], value))) && Object.entries(run.config.pendingDeliveryData)
         .every(([key, value]) => value === null ? !Object.hasOwn(data, key) : isDeepStrictEqual(data[key], value)),
     'Joppa did not confirm the pending branch handoff for every Task');
     tasks.push({address: node.address, status: 'pending', revision: current.current_revision});

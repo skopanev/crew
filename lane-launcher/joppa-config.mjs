@@ -7,6 +7,7 @@ import {validateTaskFilter} from './task-filter.mjs';
 import {validateTaskFields} from './task-contract.mjs';
 import {validateClaimRetries} from './claim-retry.mjs';
 import {validatePendingDelivery} from './pending-delivery.mjs';
+import {repairSettings} from './repair-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,7 @@ export function validateJoppa(config) {
   validateTaskFields(config);
   validateClaimRetries(config);
   validatePendingDelivery(config);
+  repairSettings(config);
   require(text(config.FAILED_TASK_STAGE) && config.FAILED_TASK_STAGE === config.FAILED_TASK_STAGE.trim() &&
     config.FAILED_TASK_STAGE !== 'done', 'Config needs FAILED_TASK_STAGE: a nonterminal native Task stage');
   const url = new URL(joppa.url);

@@ -12,6 +12,7 @@ import {saveNode, doneTaskStage} from './joppa-nodes.mjs';
 import {frozenBindings, packageBudget, coveredBy} from './test-bindings.mjs';
 import {missingTestNodes} from './test-nodes.mjs';
 import {recordPendingDelivery} from './pending-delivery.mjs';
+import {finishRepairFailure} from './repair-outcome.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 
 export async function finishTask(run, stateFile, result, artifacts) {
@@ -64,6 +65,7 @@ export async function finishTask(run, stateFile, result, artifacts) {
     }
   };
   const objects = await currentTasks(result.code === 0, result.code !== 0);
+  if (result.code !== 0 && run.repairDelivery) return finishRepairFailure(run, stateFile, result, objects, artifacts);
   if (result.code === 0) {
     const report = ['landing.txt', 'verification.txt'].map(name => path.join(artifacts || '', name)).find(file => fs.existsSync(file));
     require(report, 'Checked publication evidence is missing; Task remains held');

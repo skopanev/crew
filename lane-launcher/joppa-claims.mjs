@@ -11,6 +11,7 @@ import {criterionTests} from './test-nodes.mjs';
 import {criterionSources} from './source-context.mjs';
 import {filteredTasks, validateTaskFilter} from './task-filter.mjs';
 import {sendClaim} from './claim-retry.mjs';
+import {repairCandidate, validateRepairTask, attachDeliveryRepair} from './repair-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -90,7 +91,8 @@ export async function claimTask(run, persist, runId, options = {}) {
       require(!excludedNodeTag(object, run.config.joppa.excludeTags), `QUESTION_TAG: ${task.address}; no Tasks claimed`);
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
       require(!nodeStageDone(object), `TASK_COMPLETED: ${task.address} is done; no Tasks claimed`);
-      require(!nodePendingDelivery(object), `TASK_PENDING_DELIVERY: ${task.address} awaits target integration; no Tasks claimed`);
+      require(!nodePendingDelivery(object) || repairCandidate(run.config, object), `TASK_PENDING_DELIVERY: ${task.address} awaits target integration; no Tasks claimed`);
+      await validateRepairTask(run.config, object, (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
       selected.push(object);
     }
     const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
@@ -213,6 +215,7 @@ export async function claimTask(run, persist, runId, options = {}) {
   run.repository = inputs[0].repo;
   // Keep the original receipt fields for readers of single-Task runs.
   if (objects.length === 1) Object.assign(run.claim, run.claim.tasks[0]);
+  if (objects.length === 1) attachDeliveryRepair(run, objects[0]);
   if (sources.size) run.claim.ticket.sources = [...sources.values()].map(item => item.input);
   // The lane refuses more distinct (AC, test) node saves than the completion batch can hold.
   run.claim.ticket = {...run.claim.ticket, bindingNodeLimit: packageBudget(objects.length, 0)};
@@ -232,6 +235,7 @@ export async function guardTaskClaims(run, persist) {
     require(!excludedNodeTag(object, run.config.joppa.excludeTags), `QUESTION_TAG: ${claim.address}; lane did not start`);
     require(object?.address === claim.address && heldBy(run, object),
       'Task holder changed before lane startup; claims remain held for inspection');
+    if (run.repairDelivery) await validateRepairTask(run.config, object, (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), run.repairDelivery);
     verifyRemoteDependencies(object);
     const dependency = await dependencies(claim.address);
     require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);

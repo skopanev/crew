@@ -172,6 +172,19 @@ A child workspace status is a display summary. It does not prove the parent AC p
 
 `dolber-joppa.sh` passes `--source joppa`; `launcher.mjs` accepts it for compatibility.
 The dispatcher selects one executable Task per lane.
+An optional `repairDelivery` config resumes an excluded integration branch before new work:
+
+```json
+{"repairDelivery":{"redTag":"integration-red","redData":{"hold":"RED"},"runsFolder":"/absolute/source/integration-runs","parentStage":"implement","returnStage":"decide","defectTaskStage":"review"}}
+```
+
+Use the workspace's own stages and metadata fields. The evidence folder must stay inside `sourceRoot`.
+The host verifies the same Task contract, saved branch, head and Lander failure before it claims repair work.
+The workflow merges the fresh target into that branch and sends its evidence directly to implementation.
+Every new head needs current checks and review. Successful repair preserves the branch and removes only its configured red markers.
+Failed repair keeps the original pending branch. Only `AC_DEFECT` returns the AC and Task to their configured stages with a finding.
+Exclude the configured red tag from the Tasker repair profile before enabling this mode.
+Without this config, the ordinary Dolber continues to skip every pending delivery.
 Task title prefixes such as `[01]` and `[02]` break selection ties within one Requirement and repository.
 Blocking dependencies control eligibility, including dependencies within the same Requirement and repository.
 One lane uses one coder session, checkout, gate cycle, expert review, and landing for that Task.

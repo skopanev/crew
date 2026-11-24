@@ -12,6 +12,7 @@ import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
 import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage, excludedNodeTag} from './joppa-nodes.mjs';
 import {reservationReleased} from './reservation-release.mjs';
+import {repairCandidate, repairEvidence, repairParentReady} from './repair-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
@@ -83,6 +84,7 @@ export async function occupancyReader(config, read) {
       seen.add(parent);
       const context = await object(parent, {allowArchived: true});
       if (context.document.present !== true) return null;
+      if (repairCandidate(config, current) && schema.schema.types[context.kind]?.role === 'ac' && !repairParentReady(config, context)) return null;
       if (excludedNodeTag(context, config.joppa.excludeTags)) return null;
       if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
       parent = context.document.parent;
@@ -136,7 +138,7 @@ export async function nextTask(config) {
     const priorities = config.joppa.priorities;
     if (priorities !== undefined) require(Array.isArray(priorities) && priorities.length && priorities.every(text),
       'joppa.priorities must contain priority values');
-    const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) && !nodePendingDelivery(task) &&
+    const open = task => task.present === true && !reserved.has(task.address) && !nodeStageDone(task) && (!nodePendingDelivery(task) || repairCandidate(config, task)) &&
       !nodeAssignee(task) && !(priorities && !priorities.includes(task['data.priority'])) &&
       (!matches || matches.get(task.address) === task.revision);
     // Batch the Task details, then their immediate parents and local dependencies. Deeper reads stay single.
@@ -170,6 +172,7 @@ export async function nextTask(config) {
             continue;
           }
           const current = await object(task.address);
+          if (repairCandidate(config, current)) repairEvidence(config, current);
           if (!text(task.address) || !Number.isSafeInteger(task.revision) ||
               current.current_revision !== task.revision) continue;
           // A shared Task may name its configured covered criteria in data.acceptance_checks.
@@ -198,7 +201,7 @@ export async function nextTask(config) {
       const index = priorityOrder.indexOf(task['data.priority']);
       return index < 0 ? Number.MAX_SAFE_INTEGER : index;
     };
-    eligible.sort((a, b) => rank(a) - rank(b) || a.address.localeCompare(b.address));
+    eligible.sort((a, b) => Number(repairCandidate(config, b)) - Number(repairCandidate(config, a)) || rank(a) - rank(b) || a.address.localeCompare(b.address));
     available = Math.max(available, eligible.length);
     if (config.delivery === 'requirement') {
       const candidate = await finalizationCandidate({config, worker,
@@ -210,7 +213,7 @@ export async function nextTask(config) {
     while (eligible.length) {
       const first = eligible[0];
       const task = eligible.filter(item => item.requirement === first.requirement && item.repository === first.repository)
-        .sort((a, b) => rank(a) - rank(b) || taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
+        .sort((a, b) => Number(repairCandidate(config, b)) - Number(repairCandidate(config, a)) || rank(a) - rank(b) || taskOrder(a) - taskOrder(b) || a.address.localeCompare(b.address))[0];
       const tasks = [{address: task.address, revision: task.revision, title: task.title}];
       if (config.delivery === 'requirement') {
         let paused = true;

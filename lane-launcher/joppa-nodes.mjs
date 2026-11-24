@@ -79,4 +79,5 @@ export async function* taskPages(read, filters = {}, extraFields = []) {
     ...filters});
 }
 
-export const coversFields = config => config?.joppa?.coversReference ? [`data.${config.joppa.coversReference}`] : [];
+export const coversFields = config => [...(config?.joppa?.coversReference ? [`data.${config.joppa.coversReference}`] : []),
+  ...(config.repairDelivery ? ['data.tags', ...Object.keys(config.repairDelivery.redData || {}).map(key => `data.${key}`)] : [])];
