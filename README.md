@@ -37,6 +37,38 @@ See [lane-launcher/dolber-joppa.md](lane-launcher/dolber-joppa.md).
 
 ## Runtime
 
+Start a panel in a versioned environment with:
+
+```sh
+node lane-launcher/environment.mjs /path/to/environment.json --run
+```
+
+The environment specification declares the code sources and path bindings:
+
+```json
+{
+  "root": "/path/to/environments",
+  "sources": {
+    "engine": {"repository": "/path/to/crew", "ref": "main"},
+    "role": {"repository": "/path/to/roles", "ref": "main"}
+  },
+  "config": {"source": "role", "path": "panel.json"},
+  "bindings": {
+    "workflow": "{role}/workflow/workflow.yaml",
+    "vars.CODE_DIR": "{role}/workflow"
+  },
+  "external": ["context.token_file"],
+  "command": ["sh", "{engine}/lane-launcher/planner-joppa.sh", "{config}"]
+}
+```
+
+The installer resolves each Git ref to a commit and creates detached worktrees.
+It binds only the declared fields. External fields remain live, including credential paths.
+It checks the code and generated config again before reuse.
+Without `--run`, it installs the environment and prints its manifest.
+Old panels and workers retain their paths. Remove an old environment only after all its processes finish.
+Keep run artifacts outside the code worktrees.
+
 The entire source root is read-only. Each Task run has a writable private checkout
 at `<worktreeRoot>/<execution-id>` with its own `.git`. Run artifacts are
 stored separately. Retained work is never reset by a new launch.
