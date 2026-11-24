@@ -23,13 +23,17 @@ export function prepare(name, files, existing, env = process.env) {
     'Grant explicit absolute file paths');
   need(Array.isArray(grant.roots ?? []) && (grant.roots ?? []).every(root => typeof root === 'string' && path.isAbsolute(root)),
     'Grant explicit absolute directory paths');
-  const config = read(env.PLANNING_JOPPA_CONFIG), artifacts = path.join(env.MEDULLA_RUN_DIR, 'artifacts');
+  const artifacts = path.join(env.MEDULLA_RUN_DIR, 'artifacts');
   const servers = existing ? {...read(existing).mcpServers} : {};
-  const source = servers.joppa ?? servers.sources ?? {
+  let source = servers.joppa ?? servers.sources;
+  if (!source) {
+    const config = read(env.PLANNING_JOPPA_CONFIG);
+    source = {
     command: env.PLANNING_PYTHON ?? 'python3', args: [path.join(here, 'mcp.py'),
       '--url', config.url, '--workspace', config.workspace,
       ...(config.mcp_command ? ['--mcp-command', JSON.stringify(config.mcp_command)]
         : ['--token-file', config.reader_token_file ?? config.token_file])]};
+  }
   need(typeof source.command === 'string' && Array.isArray(source.args), 'Use a configured read-only reader');
   const server = {...source, env: {...source.env, CREW_READER_FILES: JSON.stringify(grant.files),
     CREW_READER_ROOTS: JSON.stringify(grant.roots ?? []), CREW_READER_PROFILE: name}};

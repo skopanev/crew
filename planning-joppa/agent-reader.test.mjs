@@ -44,6 +44,8 @@ test('the CLI accepts a manifest and preserves a custom reader with its environm
   const cbm = {command: '/host/cbm', args: ['read-only'], enabled_tools: ['search_code'], disabled_tools: ['index_repository']};
   fs.writeFileSync(existing, JSON.stringify({mcpServers: {'codebase-memory': cbm,
     sources: {command: 'python3', args: ['/role/reader.py'], env: {ROLE: 'value'}}}}));
+  const {PLANNING_JOPPA_CONFIG, ...adapterEnv} = f.env;
+  assert.ok(prepare('generic', [], existing, adapterEnv).file);
   fs.writeFileSync(manifest, JSON.stringify({files: [path.join(f.root, 'draft.json')], roots: []}));
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('./agent-reader.mjs', import.meta.url)),
     'prepare', 'critic', '@' + manifest, existing], {env: f.env, encoding: 'utf8'});
