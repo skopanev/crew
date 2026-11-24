@@ -107,3 +107,25 @@ test('an invalid second draft or critic output is technical, and only a critic r
   assert.equal(call('rejected', {DRY_RUN: 'true'}).status, 0);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'operations.json'))).operations, []);
 });
+
+test('freeze evidence issues return to the author once, then fail without returns', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'decider-freeze-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  for (const [name, value] of [['input', input()], ['draft', draft()], ['decider-assignment', packet()]])
+    fs.writeFileSync(path.join(root, name + '.json'), JSON.stringify(value));
+  fs.writeFileSync(path.join(root, 'freeze-issues.json'), JSON.stringify(['source:s: the exact quote is absent from the Source body: X']));
+  const call = extra => spawnSync(process.execPath, [path.join(here, 'control.mjs'), 'digest', root],
+    {encoding: 'utf8', env: {...process.env, ...vars, ...extra}});
+  const first = call({shape_retries: '0'});
+  assert.equal(first.status, 0, first.stderr); assert.match(first.stdout, /<signal:REVISE>/);
+  assert.match(first.stdout, /key=shape_feedback>.*the exact quote is absent/); assert.doesNotMatch(first.stdout, /FROZEN/);
+  const second = call({shape_retries: '1'});
+  assert.equal(second.status, 0, second.stderr); assert.match(second.stdout, /<signal:FAILED>/);
+  assert.match(fs.readFileSync(path.join(root, 'failure.txt'), 'utf8'), /^INVALID: the evidence quotes stayed wrong/);
+  assert.equal(fs.existsSync(path.join(root, 'operations.json')), false);
+  fs.rmSync(path.join(root, 'freeze-issues.json'));
+  assert.match(call({shape_retries: '1'}).stdout, /<signal:FROZEN>/);
+  const workflow = Bun.YAML.parse(fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8'));
+  assert.deepEqual([workflow.nodes.freeze.on_signal.REVISE, workflow.nodes.freeze.on_signal.FAILED], ['author', 'failed']);
+  assert.match(workflow.nodes.freeze.shell, /rm -f .*freeze-issues\.json/);
+});

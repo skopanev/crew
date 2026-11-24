@@ -110,11 +110,13 @@ nodes:
   freeze:
     shell: |
       set -eu
-      rm -f "$MEDULLA_RUN_DIR/artifacts/critic-codex.json" "$MEDULLA_RUN_DIR/artifacts/critic-second.json"
+      rm -f "$MEDULLA_RUN_DIR/artifacts/critic-codex.json" "$MEDULLA_RUN_DIR/artifacts/critic-second.json" "$MEDULLA_RUN_DIR/artifacts/freeze-issues.json"
       "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" freeze
       node "$MEDULLA_WORKFLOW_DIR/control.mjs" digest "$MEDULLA_RUN_DIR/artifacts"
     on_signal:
       FROZEN: critics
+      REVISE: author
+      FAILED: failed
       __failed__: failed
       __default__: failed
   critics:

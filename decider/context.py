@@ -92,16 +92,26 @@ def main():
             require(set(research['searches']) == {'joppa', 'brain', 'manuals'} and
                     all(isinstance(query, str) and query.strip() for query in research['searches'].values()),
                     'SEARCH_UNAVAILABLE: all three routes need their actual search queries')
-            sources = []
+            # A wrong quote or revision is an author mistake, not a crash: control.mjs digest returns it to the author.
+            sources, issues = [], []
             for item in research.get('sources', []):
                 node = full(connection(), config['workspace'], item['address'])
-                require(node['kind'] == 'source' and node['current_revision'] == item['revision'], 'Source revision changed')
-                require(item['quote'] in node['document']['data'].get('body', ''), 'The exact Source quote is absent')
-                sources.append(node)
+                if node['kind'] != 'source' or node['current_revision'] != item['revision']:
+                    issues.append(f"{item['address']}: revision {item['revision']} is not the current revision {node['current_revision']}")
+                elif item['quote'] not in node['document']['data'].get('body', ''):
+                    issues.append(f"{item['address']}: the exact quote is absent from the Source body: {item['quote']}")
+                else:
+                    sources.append(node)
             files = {}
             for item in [*research.get('files', []), *draft.get('new_sources', [])]:
-                frozen = evidence_file(item, config)
-                files[frozen['path']] = frozen
+                document = read_document(item['path'], config)
+                if not item.get('quote') or item['quote'] not in document['text']:
+                    issues.append(f"{item['path']}: the exact quote is absent from the file: {item.get('quote')}")
+                else:
+                    files[document['path']] = document
+            if issues:
+                write(target / 'freeze-issues.json', issues)
+                return
             value = read(target / 'decider-assignment.json')
             value['research_evidence'] = {'sources': sources, 'files': list(files.values()), 'searches': research['searches']}
             assignment(target, value, run)

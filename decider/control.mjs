@@ -227,6 +227,14 @@ function main() {
     return;
   }
   if (command === 'digest') {
+    // freeze found a wrong quote or revision: one correction by the author, then a technical failure.
+    const evidence = path.join(directory, 'freeze-issues.json');
+    if (fs.existsSync(evidence)) {
+      const issues = read(evidence);
+      if (Number(env.shape_retries || 0) < 1) { emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); signal('REVISE'); }
+      else { fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the evidence quotes stayed wrong after one correction.\n' + issues.join('\n')); signal('FAILED'); }
+      return;
+    }
     emit('draft_digest', hash(file('draft'))); emit('context_digest', hash(path.join(directory, 'decider-assignment.json')));
     emit('shape_feedback', ''); emit('shape_retries', '0'); signal('FROZEN'); return;
   }

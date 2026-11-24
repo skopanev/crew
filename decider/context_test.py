@@ -70,6 +70,40 @@ class ContextTest(unittest.TestCase):
                     with self.assertRaisesRegex(OSError, 'EIO'): context.main()
                 save.assert_not_called()
 
+    def test_wrong_evidence_quotes_and_revisions_return_to_the_author_instead_of_a_crash(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); brain = root / 'brain'; manuals = root / 'manuals'; brain.mkdir(); manuals.mkdir()
+            policy = brain / 'policy.md'; policy.write_text('The exact Brain rule.')
+            config = {'workspace': 'w', 'vars': {'BRAIN_ROOT': str(brain), 'MANUALS_ROOT': str(manuals), 'BRAIN_EXCLUDE': 'obsolete'}}
+            node = lambda address, revision: {'address': address, 'kind': 'source', 'current_revision': revision,
+                                              'document': {'data': {'body': 'The current Source rule.'}}}
+            research = {'searches': {'joppa': 'q', 'brain': 'q', 'manuals': 'q'}, 'unavailable': [],
+                        'sources': [{'address': 'source:a', 'revision': 2, 'quote': 'An invented rule.'},
+                                    {'address': 'source:b', 'revision': 1, 'quote': 'The current Source rule.'}],
+                        'files': [{'path': str(policy), 'quote': 'A paraphrase of the rule.'}]}
+            values = {'input.json': {}, 'draft.json': {'outcome': 'READY', 'new_sources': [], 'research': research},
+                      'decider-assignment.json': {}}
+            written = {}
+            def require(ok, message):
+                if not ok: raise ValueError(message)
+            helpers = (lambda: root, lambda config: None, lambda: config, None,
+                       lambda api, workspace, address: node(address, 2), None,
+                       lambda file: copy.deepcopy(values[file.name]), lambda file, value: written.update({file.name: value}),
+                       require, None)
+            with patch.object(context, 'native', return_value=helpers), patch.object(sys, 'argv', ['context.py', 'freeze']), \
+                    patch.object(context, 'assignment') as save:
+                context.main()
+                save.assert_not_called()
+                issues = written['freeze-issues.json']
+                self.assertEqual(len(issues), 3)
+                self.assertIn('source:a: the exact quote is absent from the Source body: An invented rule.', issues)
+                self.assertIn('source:b: revision 1 is not the current revision 2', issues)
+                self.assertIn(str(policy) + ': the exact quote is absent from the file: A paraphrase of the rule.', issues)
+                research['sources'] = [{'address': 'source:b', 'revision': 2, 'quote': 'The current Source rule.'}]
+                research['files'] = [{'path': str(policy), 'quote': 'The exact Brain rule.'}]
+                written.clear(); context.main()
+                save.assert_called_once(); self.assertNotIn('freeze-issues.json', written)
+
     def test_full_requirement_all_34_siblings_and_32_notes_reuse_native_pagination(self):
         api = API()
         value = context.collect(api, {'workspace': 'fixture'}, {'address': 'ac:selected', 'document': {'parent': 'requirement:r'}}, pages, object_read)
