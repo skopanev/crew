@@ -44,7 +44,7 @@ export function prepare(name, files, existing, env = process.env) {
   const home = env.AGY_PROFILE_HOME ? path.join(env.AGY_PROFILE_HOME, name) : '';
   return {file, home};
 }
-export function agentArgs(harness, configFile) {
+export function agentArgs(harness, configFile, home) {
   const servers = read(configFile).mcpServers ?? {}, {joppa} = servers;
   need(joppa?.command && Array.isArray(joppa.args), 'Reader config needs the read-only joppa adapter');
   if (harness === 'codex') return ['--ignore-user-config',
@@ -67,11 +67,26 @@ export function agentArgs(harness, configFile) {
       ...(denied.length ? ['--disallowedTools', denied.join(',')] : [])];
   }
   need(harness === 'agy', 'Unsupported reader harness');
-  return [];
+  need(home && path.isAbsolute(home), 'AGY needs a private reader profile');
+  const cache = path.join(home, '.gemini/antigravity-cli/mcp');
+  need(!fs.lstatSync(cache).isSymbolicLink(), 'AGY MCP descriptors need a fresh private profile');
+  const allow = [], deny = [];
+  for (const [name, server] of Object.entries(servers)) {
+    for (const tool of server.enabled_tools ?? server.includeTools ?? ['*']) allow.push(`mcp(${name}/${tool})`);
+    for (const tool of server.disabled_tools ?? server.excludeTools ?? []) deny.push(`mcp(${name}/${tool})`);
+  }
+  return ['--add-dir', fs.realpathSync(cache), '--settings', JSON.stringify({permissions: {allow, deny}})];
 }
 export function prepareAgy(configFile, home, env = process.env) {
   need(home && path.isAbsolute(home), 'AGY needs a private reader profile');
   fs.mkdirSync(home, {recursive: true, mode: 0o700});
+  // Keep MCP descriptors in this profile before Broker mirrors the shared home.
+  for (const relative of ['.gemini', '.gemini/antigravity-cli', '.gemini/antigravity-cli/mcp']) {
+    const directory = path.join(home, relative);
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory, {mode: 0o700});
+    need(!fs.lstatSync(directory).isSymbolicLink() && fs.statSync(directory).isDirectory(),
+      'AGY MCP descriptors need a fresh private profile');
+  }
   const config = path.join(home, '.gemini/config/mcp_config.json');
   const source = read(configFile);
   const next = {mcpServers: Object.fromEntries(Object.entries(source.mcpServers).map(([name, server]) => {
@@ -96,7 +111,7 @@ export function prepareAgy(configFile, home, env = process.env) {
 }
 export function criticSeats(configFile, home, env = process.env) {
   const pack = values => Object.fromEntries(values.map((value, i) => ['a' + (i + 1), value]));
-  const make = (slug, harness, model) => ({slug, harness, model, ...pack(agentArgs(harness, configFile)),
+  const make = (slug, harness, model) => ({slug, harness, model, ...pack(agentArgs(harness, configFile, home)),
     ...(harness === 'agy' ? {env: {BROKER_AGY_HOME: home, BROKER_ISOLATE_MCP: '1'}} : {})});
   if (env.CRITIC_SECOND_HARNESS === 'agy') prepareAgy(configFile, home, env);
   return [make('codex', 'codex', env.CRITIC_CODEX_MODEL),

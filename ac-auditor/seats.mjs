@@ -12,4 +12,5 @@ console.log(JSON.stringify([
   {slug: 'one', harness: 'codex', model: env.FINDER_ONE_MODEL, ...pack(agentArgs('codex', env.auditor_finder_one_reader_config))},
   {slug: 'two', harness: 'codex', model: env.FINDER_TWO_MODEL, ...pack(agentArgs('codex', env.auditor_finder_two_reader_config))},
   {slug: 'three', harness: 'agy', model: env.FINDER_THREE_MODEL,
+    ...pack(agentArgs('agy', env.auditor_finder_three_reader_config, env.auditor_finder_three_reader_home)),
     env: {BROKER_AGY_HOME: env.auditor_finder_three_reader_home, BROKER_ISOLATE_MCP: '1'}}]));
