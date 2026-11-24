@@ -1,0 +1,66 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {prepareDeliveryRepair, deliveryRepairContext} from '../bin/delivery-repair-worktree.mjs';
+
+function fixture(t, conflict = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-repair-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const remote = path.join(root, 'remote.git'), seed = path.join(root, 'seed');
+  const checkout = path.join(root, 'checkout'), run = path.join(root, 'run');
+  const git = (cwd, ...args) => execFileSync('git', args, {cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']}).trim();
+  fs.mkdirSync(seed); fs.mkdirSync(path.join(run, 'artifacts'), {recursive: true});
+  git(root, 'init', '--bare', remote); git(seed, 'init', '-b', 'develop');
+  git(seed, 'config', 'user.name', 'Fixture'); git(seed, 'config', 'user.email', 'fixture@example.test');
+  fs.writeFileSync(path.join(seed, 'shared.txt'), 'base\n'); git(seed, 'add', '.'); git(seed, 'commit', '-m', 'Base');
+  const base = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'checkout', '-b', 'repair-task');
+  fs.writeFileSync(path.join(seed, conflict ? 'shared.txt' : 'task.txt'), 'existing Task work\n');
+  git(seed, 'add', '.'); git(seed, 'commit', '-m', 'Task'); const head = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'checkout', 'develop');
+  fs.writeFileSync(path.join(seed, conflict ? 'shared.txt' : 'develop.txt'), 'fresh develop\n');
+  git(seed, 'add', '.'); git(seed, 'commit', '-m', 'New target'); const target = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'remote', 'add', 'origin', remote); git(seed, 'push', 'origin', 'develop', 'repair-task');
+  git(root, 'clone', '-b', 'develop', remote, checkout);
+  git(checkout, 'config', 'user.name', 'Fixture'); git(checkout, 'config', 'user.email', 'fixture@example.test');
+  const repair = {branch: 'repair-task', head, target: 'develop', reason: 'BRANCH_GATE_FAIL', evidence: '/evidence/checks', run: 'lander-run'};
+  const env = {MEDULLA_RUN_DIR: run, LANE_WORKTREE: checkout, TARGET_BRANCH: 'develop', ticket_id: 'example'};
+  const write = value => fs.writeFileSync(path.join(run, 'artifacts/ticket.json'), JSON.stringify({integrationRepair: value}));
+  write(repair);
+  return {root, checkout, run, git, base, head, target, repair, env, write};
+}
+
+test('keeps Task work and merges fresh develop for a normal push to the same branch', t => {
+  const f = fixture(t);
+  const result = prepareDeliveryRepair(f.env);
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(deliveryRepairContext(f.env).branch, f.repair.branch);
+  assert.equal(f.git(f.checkout, 'rev-parse', 'HEAD'), f.head);
+  assert.equal(fs.readFileSync(path.join(f.checkout, 'task.txt'), 'utf8'), 'existing Task work\n');
+  assert.equal(fs.readFileSync(path.join(f.checkout, 'develop.txt'), 'utf8'), 'fresh develop\n');
+  assert.equal(fs.readFileSync(path.join(f.checkout, '.git/lane-base'), 'utf8').trim(), f.target);
+  f.git(f.checkout, 'commit', '-m', 'Merge current target for repair');
+  f.git(f.checkout, 'push', 'origin', 'HEAD:refs/heads/repair-task');
+  const published = f.git(f.checkout, 'ls-remote', 'origin', 'refs/heads/repair-task').split(/\s/)[0];
+  assert.equal(published, f.git(f.checkout, 'rev-parse', 'HEAD'));
+  f.git(f.checkout, 'merge-base', '--is-ancestor', f.head, published);
+  f.git(f.checkout, 'merge-base', '--is-ancestor', f.target, published);
+});
+
+test('rejects a changed branch and preserves merge conflicts for the coder', t => {
+  const f = fixture(t, true);
+  f.write({...f.repair, head: f.base});
+  assert.throws(() => prepareDeliveryRepair(f.env), /branch changed/);
+  assert.equal(f.git(f.checkout, 'rev-parse', 'HEAD'), f.target);
+  f.write(f.repair);
+  const result = prepareDeliveryRepair(f.env);
+  assert.deepEqual(result.conflicts, ['shared.txt']);
+  assert.equal(f.git(f.checkout, 'rev-parse', 'HEAD'), f.head);
+  assert.equal(f.git(f.checkout, 'rev-parse', 'MERGE_HEAD'), f.target);
+  assert.match(fs.readFileSync(path.join(f.checkout, 'shared.txt'), 'utf8'), /<<<<<<< HEAD/);
+  assert.ok(f.git(f.checkout, 'ls-files', '-u'));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.run, 'artifacts/integration-repair-prepared.json'))).head, f.head);
+});

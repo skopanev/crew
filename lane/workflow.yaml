@@ -67,6 +67,7 @@ nodes:
       RESUME: create_worktree
       SCOUT_SKIPPED: create_worktree
       REPAIR_READY: create_worktree
+      DELIVERY_REPAIR: create_worktree
       __failed__: notify_failure
       __timeout__: notify_failure
       __default__: notify_failure
@@ -110,6 +111,10 @@ nodes:
       fi
       # Full Task contract and acceptance criteria, read from the host claim receipt.
       node "${TOOLING_ROOT}/lane/bin/ticket-input.mjs"
+      if jq -e '.ticket.integrationRepair != null' "$claim" >/dev/null; then
+        echo '<signal:DELIVERY_REPAIR>Prepare the recorded integration repair branch.</signal:DELIVERY_REPAIR>'
+        exit 0
+      fi
       if jq -e '.ticket.retained != null' "$claim" >/dev/null; then
         inputs="$(dirname "$LAUNCH_CLAIM_FILE")/resume-inputs"
         for name in scout.txt test-bindings.json; do
@@ -200,6 +205,7 @@ nodes:
     timeout: 900
     on_signal:
       READY: implement_code
+      DELIVERY_REPAIR: delivery_repair
       VERIFY_EXISTING: prepare_review
       RESUME_REVIEW: prepare_review
       REQUIREMENT_SCOUT: cbm_discovery
@@ -217,7 +223,7 @@ nodes:
     shell: |
       set -euo pipefail
       worktree_started=$SECONDS
-      if jq -e '.ticket.retained != null' "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null; then
+      if jq -e '.ticket.retained != null and .ticket.integrationRepair == null' "$MEDULLA_RUN_DIR/artifacts/claim.json" >/dev/null; then
         bash "$TOOLING_ROOT/lane/bin/retained-worktree.sh"
         exit 0
       fi
@@ -333,6 +339,16 @@ nodes:
         exit 0
       fi
       checkout_base="origin/${target}"
+      if jq -e '.integrationRepair != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null; then
+        TARGET_BRANCH="$target" node "$TOOLING_ROOT/lane/bin/delivery-repair-worktree.mjs"
+        if [ -z "$(git diff --name-only --diff-filter=U)" ]; then
+          source "$TOOLING_ROOT/lane/bin/setup-worktree.sh"
+        else
+          echo 'Integration repair setup waits for conflict resolution.'
+        fi
+        echo '<signal:DELIVERY_REPAIR>Repair existing work on the fresh target.</signal:DELIVERY_REPAIR>'
+        exit 0
+      fi
       if [ -n "${REQUIREMENT_BRANCH:-}" ]; then
         actual="$(git rev-parse --verify --quiet "refs/remotes/origin/${REQUIREMENT_BRANCH}^{commit}" || true)"
         [ "$actual" = "${REQUIREMENT_HEAD:-}" ] || {
@@ -401,6 +417,21 @@ nodes:
       fi
       echo "<signal:READY>Worktree: ${LANE_WORKTREE}; branch ticket-${ticket_id}; base origin/${target}.${deps:-}${recovery_note:-}</signal:READY>"
 
+  delivery_repair:
+    env:
+      TOOLING_ROOT: '{{var:TOOLING_ROOT}}'
+      LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
+    on_signal:
+      READY: implement_code
+      __failed__: notify_failure
+      __default__: notify_failure
+    shell: |
+      set -euo pipefail
+      node "$TOOLING_ROOT/lane/bin/delivery-repair-worktree.mjs" context
+      printf '<signal:var key=PLAN_ACTIVE>false</signal:var>\n'
+      printf '<signal:var key=VERIFY_ONLY>false</signal:var>\n'
+      echo '<signal:READY>Continue the existing Task with integration failure evidence.</signal:READY>'
+
   implement_code:
     timeout: 2400
     pre: 'node "$TOOLING_ROOT/lane/bin/prompt-context.mjs" coder'
@@ -417,6 +448,7 @@ nodes:
       LANE_WORKTREE: '{{var:LANE_WORKTREE}}'
     on_signal:
       OK: prepare_review
+      AC_DEFECT: notify_failure
       GATE_FAIL: notify_failure
       __failed__: notify_failure
       __timeout__: notify_failure
@@ -437,6 +469,7 @@ nodes:
     prompt: |
       You are the coder for Task {{var:ticket_id}}.
       Read and follow {{var:RUN_ARTIFACTS}}/coder-context.json.
+      When present, also read {{var:RUN_ARTIFACTS}}/integration-repair-context.json.
 
   prepare_review:
     env:
