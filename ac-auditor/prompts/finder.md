@@ -1,5 +1,6 @@
 Find violations of rule ac.check.11111r in one AC.
 Follow the Finder part of the role contract below.
+All input is in this prompt. Do not read files. Do not run commands. Answer only with the JSON object.
 
 Return ONLY one JSON object. Add no signal tags:
 
