@@ -42,6 +42,7 @@ vars:
   # true: run the whole flow, publish nothing and release the claim with outcome DRY_RUN.
   DRY_RUN: 'false'
   round: '1'
+  check_round: '1'
   tasker_assignment_path: ''
   tasker_item_address: ''
   tasker_draft_path: ''
@@ -206,9 +207,10 @@ nodes:
         printf '<signal:var key=draft_digest>%s</signal:var>\n' "${hash%% *}"
         printf '%s\n' "${hash%% *}" > "$a/draft-digest.txt"
         echo '<signal:CHECKED>The draft passed the machine checks. The critics review it.</signal:CHECKED>'
-      elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
+      elif [ "${check_round:-1}" -le "$REWORK_LIMIT" ]; then
+        # A machine-check return has its own bounded counter. It does not use a critic round.
         printf '{}\n' > "$a/critic-feedback.json"
-        printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
+        printf '<signal:var key=check_round>%s</signal:var>\n' "$(( ${check_round:-1} + 1 ))"
         echo '<signal:REVISE>The draft failed the machine checks. The author corrects it.</signal:REVISE>'
       else
         jq -r '"Tasker stopped: the draft still fails the machine checks. " + (.problems | join("\n"))' "$a/check.json" > "$a/failure.txt"
@@ -275,7 +277,7 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg run "$(basename "$MEDULLA_RUN_DIR")" --arg stage "$TASK_STAGE" --arg dry "$DRY_RUN" \
-        --arg implement_stage "$TASKER_IMPLEMENT_STAGE" --arg done_stage "$TASKER_DONE_STAGE" --argjson gap_tags "$TASKER_GAP_TAGS" \
+        --arg implement_stage "$TASKER_IMPLEMENT_STAGE" --arg done_stage "$TASKER_DONE_STAGE" --argjson gap_tags "$TASKER_GAP_TAGS" --arg finding_criteria "$FINDING_CRITERIA" \
         --slurpfile draft "$a/draft.json" --slurpfile input "$a/input.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
         -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"

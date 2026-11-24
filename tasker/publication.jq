@@ -1,10 +1,14 @@
 # The review verdict of one tasker draft. Approved: the native operations to publish. Else: the critique for the author.
 # Crew Sources ogbu6poe, w5cbnd87 and u1m9xabz: reset returns on success and preserve question stages.
 # DONE uses the configured implementation stage and records the existing develop evidence.
+# crew m_49e4475b: an AC or Test check blocks only with a supported AC or Test finding. A Task check blocks as before.
+# A finding without that support is advice: it does not stop the draft.
+include "findings" {search: "./"};
 $draft[0] as $d | $input[0] as $in | $in.selected.address as $ac |
 ([$in.schema.types | to_entries[] | select(.value.role == "task") | .key] | if length == 1 then .[0] else error("The schema needs one Task role") end) as $task_kind |
 {codex: $codex[0], second: $second[0]} as $reviews |
 ["gate", "size", "reporter_names", "outside_files", "already_in_develop", "ac_test_consistency", "ac_scope"] as $questions |
+["ac_test_consistency", "ac_scope"] as $business_checks |
 def text: type == "string" and length > 0;
 def valid: type == "object" and .draft_digest == $digest and (.verdict == "APPROVE" or .verdict == "REWORK") and
   (.checks | type == "object" and all($questions[] as $q | .[$q]; type == "object" and (.ok | type == "boolean") and (.evidence | text))) and
@@ -13,7 +17,10 @@ def valid: type == "object" and .draft_digest == $digest and (.verdict == "APPRO
 def gap_question: type == "object" and (.owner == "cto" or .owner == "ceo") and
   all([.question, .a, .b][]; type == "string" and test("\\S")) and
   (.recommended == "A" or .recommended == "B");
-def clean: valid and .verdict == "APPROVE" and all(.checks[]; .ok) and
+def supported: (ac_findings($in; $ARGS.named.finding_criteria // "") + test_findings($in) | length) > 0;
+def blocking: supported as $supported |
+  [.checks | to_entries[] | .key as $check | select((.value.ok | not) and (($business_checks | index($check)) == null or $supported))];
+def clean: valid and (blocking | length) == 0 and
   (if $in.schema.types[$in.selected.kind].role == "task" and $d.verdict == "STALE" and $d.retirement_proof != null then
     .checks.already_in_develop.task_deliverables_complete == true else true end);
 def checked_stage($kind; $value):
@@ -74,5 +81,5 @@ elif all($reviews[]; clean) then
       reason: ("Dry run, nothing published. Would be " + $result.outcome.reason_code + ": " + $result.outcome.reason | .[0:1000])}}
     else $result end), would_publish: $result}
 else {approved: false, critique: ($reviews | map_values(if valid then
-  {verdict, failing: [.checks | to_entries[] | select(.value.ok | not) | {check: .key, evidence: .value.evidence}], findings, ac_findings: (.ac_findings // []), node_findings: (.node_findings // []), summary} else
+  {verdict, failing: [blocking[] | {check: .key, evidence: .value.evidence}], findings, ac_findings: (.ac_findings // []), node_findings: (.node_findings // []), summary} else
   {invalid: "The review does not match the critic output contract or reviewed another draft.", review: .} end))} end

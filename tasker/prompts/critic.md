@@ -141,6 +141,8 @@ For DECISION_REQUIRED:
 
 For each check:
 1. Set ok true or false.
+   Set ac_test_consistency or ac_scope false only with a node_findings or ac_findings entry.
+   Without that entry, the host counts the check as advice.
 2. Give evidence as a file, symbol, Test address or machine-check fact.
 3. For a check that does not apply, set ok true.
    Use evidence "not applicable" with the reason.
@@ -150,6 +152,8 @@ For the verdict:
 2. Otherwise, use REWORK with at least one finding.
 3. Give the exact problem and exact advice in each finding.
 4. Use no findings when no exact problem needs correction.
+5. A finding alone is advice. Only a false Task check, a node_findings entry or an ac_findings entry stops the draft.
+   The Task checks are gate, size, reporter_names, outside_files and already_in_develop.
 
 Check:
 - Bind the result to the unchanged draft_digest.

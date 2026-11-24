@@ -255,3 +255,21 @@ test('active work stops before the shared AC claim, without trees or models', t 
   assert.equal(fs.existsSync(path.join(f.root,'trees-called')),false);
   assert.equal(fs.readFileSync(path.join(f.artifacts,'input.json'),'utf8'),before);
 });
+
+test('crew m_49e4475b: a machine-check return uses its own bounded counter and keeps the critic round', t => {
+  const shell = Bun.YAML.parse(workflow).nodes.draft_check.shell;
+  assert.equal(Bun.YAML.parse(workflow).vars.check_round, '1');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tasker-check-round-')); t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const artifacts = path.join(root, 'artifacts'); fs.mkdirSync(artifacts);
+  fs.writeFileSync(path.join(root, 'check.mjs'), "import fs from 'node:fs';fs.writeFileSync(process.argv[2]+'/check.json',JSON.stringify({problems:['too large']}));process.exit(1);");
+  const run = vars => spawnSync('bash', ['-c', shell], {encoding: 'utf8',
+    env: {...process.env, MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: root, REWORK_LIMIT: '3', ...vars}});
+  for (const [vars, signal, next] of [[{round: '9', check_round: '1'}, 'REVISE', '2'], [{round: '1', check_round: '3'}, 'REVISE', '4'],
+    [{round: '1', check_round: '4'}, 'REJECTED', null], [{round: '1'}, 'REVISE', '2']]) {
+    const result = run(vars); assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp('<signal:' + signal + '>'));
+    assert.doesNotMatch(result.stdout, /key=round>/);
+    if (next) assert.match(result.stdout, new RegExp('<signal:var key=check_round>' + next + '</signal:var>'));
+  }
+  assert.match(fs.readFileSync(path.join(artifacts, 'failure.txt'), 'utf8'), /too large/);
+});

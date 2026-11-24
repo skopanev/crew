@@ -52,7 +52,7 @@ function review(draftValue, reviews, dry = 'false', owner = 'fixture-owner', ext
     write('codex.json', reviews[0]);
     write('second.json', reviews[1]);
     return JSON.parse(execFileSync('jq', ['-nc', '--arg', 'digest', 'd1', '--arg', 'run', 'run-1', '--arg', 'stage', 'to_implement',
-      '--arg', 'dry', dry, '--arg', 'done_stage', config.TASKER_DONE_STAGE, "--arg", "implement_stage", config.TASKER_IMPLEMENT_STAGE, "--argjson", "gap_tags", config.TASKER_GAP_TAGS, '--slurpfile', 'draft', 'draft.json', '--slurpfile', 'input', 'input.json',
+      '--arg', 'dry', dry, '--arg', 'done_stage', config.TASKER_DONE_STAGE, "--arg", "implement_stage", config.TASKER_IMPLEMENT_STAGE, "--argjson", "gap_tags", config.TASKER_GAP_TAGS, "--arg", "finding_criteria", config.FINDING_CRITERIA, '--slurpfile', 'draft', 'draft.json', '--slurpfile', 'input', 'input.json',
       '--slurpfile', 'codex', 'codex.json', '--slurpfile', 'second', 'second.json',
       '-f', path.join(here, 'publication.jq')], {cwd: dir, encoding: 'utf8'}));
   } finally {
@@ -88,6 +88,47 @@ test('publishes the Tasks in to_implement only when both critics approve every c
   assert.deepEqual(refused.critique.second.failing, [{check: 'outside_files', evidence: 'b.ts::run'}]);
   assert.match(review(okDraft, [approve, {...approve, draft_digest: 'old'}]).critique.second.invalid, /another draft/);
   assert.match(review(okDraft, [approve, {...approve, checks: {gate: approve.checks.gate}}]).critique.second.invalid, /output contract/);
+});
+
+test('crew m_49e4475b: an AC or Test check blocks only with a supported finding, a Task check always blocks', () => {
+  const okDraft = {verdict: 'OK', reason: 'r', tasks: [{id: 't1', title: 'Do it', body: 'B', repository: 'example-backend', depends_on: []}]};
+  const test = {kind: 'test', address: 'test:t', document: {data: {title: 'T', body: 'Expected result'}}};
+  const input = {selected: {address: ac, kind: 'ac', document: {data: {owner: 'o', body: 'Required outcome'}}}, claim_revision: 31, children: [test],
+    references: {sources: [{address: 'source:s', document: {data: {body: 'Approved rule'}}}]},
+    schema: {types: {ac: {role: 'ac', fields: {stage: {values: [settings.TASKER_IMPLEMENT_STAGE]}}}, task: {role: 'task', fields: {stage: {values: ['to_implement']}}}, test: {role: 'test'}}}};
+  const failed = (check, extra = {}) => ({...approve, verdict: 'REWORK', checks: {...checks(true), [check]: {ok: false, evidence: 'e'}},
+    findings: [{problem: 'p', advice: 'a'}], ...extra});
+  const node = {target: 'test:t', quote: 'Expected result', reason_code: 'WRONG_EXPECTED'};
+  const acFinding = {criterion: 'A', ac_quote: 'Required outcome', source_quote: 'Approved rule', source: 'source:s', reason_code: 'SCOPE'};
+  const result = critic => review(okDraft, [approve, critic], 'false', 'o', input);
+  for (const check of ['ac_test_consistency', 'ac_scope']) {
+    // A freeform finding, an uncaptured Test, a wrong quote and an unlinked Source are advice: the draft publishes.
+    for (const extra of [{}, {node_findings: [{...node, target: 'test:other'}]}, {node_findings: [{...node, quote: 'not captured'}]},
+      {node_findings: [{...node, reason_code: 'GAP'}]}, {ac_findings: [{...acFinding, source: 'source:unlinked'}]}, {ac_findings: [{...acFinding, criterion: 'Z'}]}])
+      assert.equal(result(failed(check, extra)).approved, true, check + ' ' + JSON.stringify(extra));
+    for (const extra of [{node_findings: [node]}, {ac_findings: [acFinding]}]) {
+      const blocked = result(failed(check, extra));
+      assert.equal(blocked.approved, false);
+      assert.deepEqual(blocked.critique.second.failing, [{check, evidence: 'e'}]);
+    }
+  }
+  // A Task check blocks without a structured finding, also with an APPROVE verdict.
+  for (const check of ['gate', 'size', 'reporter_names', 'outside_files', 'already_in_develop']) {
+    assert.equal(result(failed(check)).approved, false, check);
+    assert.equal(result({...failed(check), verdict: 'APPROVE', findings: []}).approved, false, check);
+  }
+  // A Task repair finds the AC, its Sources and its Tests in the related parent context.
+  const repair = {selected: {address: 'task:r', kind: 'task', document: {data: {body: 'Criterion: ac:sample0003@1. Work'}}}, claim_revision: 4,
+    context: {parent: input.selected, children: [test], references: input.references}, schema: input.schema};
+  const repairResult = critic => review({verdict: 'STALE', reason: 'r', needs_code: true}, [approve, critic], 'false', 'o', repair);
+  assert.equal(repairResult(failed('ac_scope')).approved, true);
+  assert.equal(repairResult(failed('ac_scope', {node_findings: [node]})).approved, false);
+  assert.equal(repairResult(failed('ac_scope', {ac_findings: [acFinding]})).approved, false);
+  // A REWORK with every check true and only freeform findings is advice.
+  assert.equal(result({...approve, verdict: 'REWORK', findings: [{problem: 'p', advice: 'a'}]}).approved, true);
+  // The review contract and the digest stay strict.
+  assert.equal(result({...failed('ac_scope'), draft_digest: 'old'}).approved, false);
+  assert.equal(result({...approve, verdict: 'REWORK', findings: []}).approved, false);
 });
 
 test('publication orders prerequisites before reversed dependents and uses existing native refs', () => {
