@@ -45,6 +45,18 @@ test('archived prerequisites enter repair while the optional guard preserves oth
   assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
   prerequisite.document.present = false;
   assert.equal((await nextConfiguredItem(config, config.token_file)).next.address, task.address);
+  const pending = structuredClone(prerequisite);
+  pending.address = 'work:pending'; pending.document.present = true;
+  f.objects.set(pending.address, pending);
+  const original = task.document.links[0];
+  const waiting = {relation: 'depends_on', blocking: true, target: pending.address};
+  for (const links of [[original, waiting], [waiting, original]]) {
+    task.document.links = links;
+    assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
+  }
+  pending.document.data.stage = 'done'; pending.current_revision++;
+  assert.equal((await nextConfiguredItem(config, config.token_file)).next.address, task.address);
+  task.document.links = [original];
   task.document.data.commit = 'b'.repeat(40);
   assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
   delete task.document.data.commit;

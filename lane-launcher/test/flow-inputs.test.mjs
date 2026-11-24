@@ -167,10 +167,11 @@ test('Tasker retries check current prerequisites before any claim, trees or mode
   const link={relation:'depends_on',blocking:true,target:prerequisite.address};task.document.links=[link];
   const base=JSON.parse(fs.readFileSync(new URL('../../tasker/config.example.json',import.meta.url)));
   const profile=base.inputs.find(input=>input.selection.kind==='task');
-  const config={...base,...f.config,mcp_command:f.config.mcp_command,workflow:base.workflow,retry:'always',inputs:[profile]};f.write(config);
+  const laneConfig=path.join(f.root,'lane.json');
+  fs.writeFileSync(laneConfig,JSON.stringify({workspace:'fixture',joppa:{url:f.config.url},stateDir:f.root,id:'fixture'}));
+  const config={...base,...f.config,mcp_command:f.config.mcp_command,workflow:base.workflow,retry:'always',inputs:[profile],
+    vars:{...base.vars,TASKER_LANE_CONFIG:laneConfig}};f.write(config);
   const definition=new URL('../../tasker/',import.meta.url).pathname;
-  const workflow=fs.readFileSync(path.join(definition,'workflow.yaml'),'utf8');
-  const prepare=workflow.split('  prepare:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
   const filter=retryFilter(config,[{attemptKey:JSON.stringify([task.address,task.current_revision])}],new Set(),new Map());
   const vars=Object.fromEntries(Object.entries(config.vars).map(([key,value])=>[key,typeof value==='string'?value:JSON.stringify(value)]));
   const invoke=async(index,command)=>{
@@ -179,7 +180,7 @@ test('Tasker retries check current prerequisites before any claim, trees or mode
       CREW_FLOW_STAGES:new URL('../../planning-joppa/flow_stages.py',import.meta.url).pathname,
       PLANNING_JOPPA_CONFIG:f.configFile,PLANNING_JOPPA_ITEM:task.address,TASKER_BUN:process.execPath,
       FLOW_PUBLICATION:JSON.stringify(profile.publication)};
-    const child=Bun.spawn(command??['bash','-c',prepare],{env,stdout:'pipe',stderr:'pipe'});
+    const child=Bun.spawn(command??[process.execPath,path.join(definition,'completion.mjs'),'preclaim'],{env,stdout:'pipe',stderr:'pipe'});
     const [code,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
     return {code,stdout,stderr,run};
   };
@@ -189,11 +190,10 @@ test('Tasker retries check current prerequisites before any claim, trees or mode
     for(let pass=0;pass<3;pass++){
       assert.equal((await nextConfiguredItem(config,config.token_file,undefined,filter)).next.address,task.address);
       const result=await invoke(`${inherited}-${pass}`);
-      assert.equal(result.code,0,result.stderr);assert.match(result.stdout,/<signal:BLOCKED>/);
+      assert.equal(result.code,0,result.stderr);assert.match(result.stdout,/<signal:CONTINUE>DEPENDENCY_REPLAN:/);
       assert.doesNotMatch(result.stdout,/<signal:READY_TO_WRITE>|<signal:var key=tasker_assignment_path>/);
       const artifacts=path.join(result.run,'artifacts');
-      const outcome=JSON.parse(fs.readFileSync(path.join(artifacts,'result.json')));
-      assert.equal(outcome.reason_code,'TASK_PREREQUISITE_ARCHIVED');assert.equal(outcome.claim_released,false);
+      assert.equal(fs.existsSync(path.join(artifacts,'result.json')),false);
       assert.equal(fs.existsSync(path.join(artifacts,'input.json')),false);
       assert.equal(fs.existsSync(path.join(artifacts,'tasker-assignment.json')),false);
       assert.equal(fs.existsSync(path.join(artifacts,'trees.json')),false);

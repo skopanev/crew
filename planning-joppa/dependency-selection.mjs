@@ -17,20 +17,17 @@ export function dependencySelection(read) {
       throw new Error('Dependency selection needs a current full object');
     }
     if (selected.document.present !== true || nodeAssignee(selected)) return false;
+    let archived = false;
     const check = dependencyCheck(async (tool, args) => {
       const target = await current(tool, args);
       if (tool === 'joppa_objects' && args.address !== address && target?.address === args.address &&
           target.historical === false && Number.isSafeInteger(target.current_revision) &&
           schema?.types?.[target.kind]?.role === 'task' && target.document?.present === false &&
           !target.document.data?.commit) {
-        throw Object.assign(new Error('Archived prerequisite needs plan repair'), {code: 'DEPENDENCY_REPLAN'});
+        archived = true;
       }
       return target;
     });
-    try { return (await check(address)).ready; }
-    catch (error) {
-      if (error.code === 'DEPENDENCY_REPLAN') return !selected.document.data?.commit;
-      throw error;
-    }
+    return (await check(address)).ready && (!archived || !selected.document.data?.commit);
   };
 }
