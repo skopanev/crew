@@ -89,7 +89,7 @@ export function installEnvironment(spec, base = process.cwd()) {
     const pinned = value => {
       need(noParent(value), 'Parent path segments are not supported in pinned code paths');
       need(path.isAbsolute(value) && fs.existsSync(value), 'A pinned code path must exist and be absolute');
-      const real = fs.realpathSync(value);
+      const real = fs.realpathSync.native(value);
       need(Object.values(roots).some(root => inside(root, real)), 'A pinned code path escapes its snapshot');
     };
     for (const [field, value] of Object.entries(bindings)) {
@@ -102,6 +102,8 @@ export function installEnvironment(spec, base = process.cwd()) {
     const originDirectory = path.dirname(path.join(roots[spec.config.source], configPath));
     const check = (value, field = '') => {
       if (typeof value === 'string' && !Object.hasOwn(bindings, field) && !external.includes(field)) {
+        need(!/[\\/]/.test(value) || noParent(value),
+          'Parent path segments need a binding or exact external field: ' + field);
         const resolved = path.resolve(originDirectory, value);
         const real = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
         const isPath = path.isAbsolute(value) || value.startsWith('./') || value.startsWith('../') || fs.existsSync(resolved);

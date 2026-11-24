@@ -64,7 +64,9 @@ The environment specification declares the code sources and path bindings:
 
 The installer resolves each Git ref to a commit and creates detached worktrees.
 It binds only the declared fields. External fields remain live, including credential paths.
-Pinned code paths and command paths cannot contain a `..` segment. Name another source explicitly instead.
+Managed paths cannot contain a `..` segment. Name another source explicitly instead.
+The native filesystem resolver checks the complete symbolic link chain before a code path can run.
+Use absolute paths for external resources and run artifacts.
 It checks the code and generated config again before reuse.
 Without `--run`, it installs the environment and prints its manifest.
 Old panels and workers retain their paths. Remove an old environment only after all its processes finish.

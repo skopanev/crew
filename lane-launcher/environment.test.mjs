@@ -116,5 +116,18 @@ test('refuses unbound live code and paths that escape snapshots', () => {
     const actual = spawnSync(process.execPath, [new URL('./environment.mjs', import.meta.url).pathname,
       specFile, '--run'], {encoding: 'utf8'});
     assert.equal(actual.status, 2); assert.ok(!actual.stdout.includes('OUTSIDE'));
+    const parentConfig = JSON.parse(fs.readFileSync(path.join(value.repository, 'panel.json')));
+    parentConfig.vars.HELPER = '../../../../live/repo/helper.mjs';
+    fs.writeFileSync(path.join(value.repository, 'panel.json'), JSON.stringify(parentConfig));
+    git(value.repository, 'add', '.'); git(value.repository, 'commit', '-m', 'Unbound parent path');
+    assert.throws(() => installEnvironment(missing), /Parent path segments/);
+    fs.symlinkSync('door/../panel.sh', path.join(value.repository, 'linked.sh'));
+    git(value.repository, 'add', '.'); git(value.repository, 'commit', '-m', 'Nested directory link');
+    const nested = structuredClone(value.spec); nested.command = ['bash', '{engine}/linked.sh'];
+    assert.throws(() => installEnvironment(nested), /escapes its snapshot/);
+    fs.writeFileSync(specFile, JSON.stringify(nested));
+    const chained = spawnSync(process.execPath, [new URL('./environment.mjs', import.meta.url).pathname,
+      specFile, '--run'], {encoding: 'utf8'});
+    assert.equal(chained.status, 2); assert.ok(!chained.stdout.includes('OUTSIDE'));
   } finally { cleanup(value); }
 });
