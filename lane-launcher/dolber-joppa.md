@@ -264,7 +264,7 @@ Completion failures also write a Joppa note. Branch delivery uses a separate can
 | `dockerMemory` | Optional memory ceiling for the whole lane container, such as `8g`. Requires Medulla support for `MEDULLA_DOCKER_MEMORY` |
 | `dockerMemorySwap` | Optional total memory plus swap ceiling. Requires `dockerMemory`. Use the same value to disable swap |
 | `preflight` | Run the configured repository executable in the private checkout, or use `null` |
-| `afterLand` | Optional host executable relative to the canonical repository. Run after successful target delivery, before checkout removal |
+| `afterLand` | Optional host executable. Use an absolute path or a path relative to the canonical repository. Run after successful target delivery, before checkout removal |
 | `delivery` | `branch`, `target`, or `requirement` |
 | `testReport` | Optional per repository. Record the JUnit results of the final gate run in Joppa. See below |
 | `joppa.coversReference` | Optional Task reference field that lists covered criteria. Use the planner `covers_reference` value. It cannot be `acceptance`, `acceptance_checks` or `test_bindings` |

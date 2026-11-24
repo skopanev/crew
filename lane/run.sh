@@ -203,6 +203,7 @@ fi
 export MEDULLA_BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 mkdir -p "$MEDULLA_BRIDGE"
 joppa_reader_command=""
+after_land_mcp_command="${LANE_JOPPA_MCP_COMMAND_JSON:-}"
 if [[ -n "${LANE_JOPPA_MCP_COMMAND_JSON:-}" ]]; then
   joppa_connector_dir="$(mktemp -d "$MEDULLA_BRIDGE/joppa-connector.XXXXXX")"
   joppa_connector="$(python3 "$WORKFLOW_DIR/bridge/cbm-connect.py" --joppa "$joppa_connector_dir/mcp.cjs")"

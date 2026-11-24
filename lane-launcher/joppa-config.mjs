@@ -86,10 +86,11 @@ export function validateJoppa(config) {
     require(repo.preflight === null || (text(repo.preflight) && !path.isAbsolute(repo.preflight) &&
       inside(path.resolve(folder, repo.preflight), folder)), 'Repository needs preflight: relative executable path or null');
     if (repo.afterLand != null) {
-      require(text(repo.afterLand) && !path.isAbsolute(repo.afterLand) &&
-        inside(path.resolve(folder, repo.afterLand), folder), 'afterLand must be a relative repository executable');
+      require(text(repo.afterLand) && (path.isAbsolute(repo.afterLand) ||
+        inside(path.resolve(folder, repo.afterLand), folder)), 'afterLand must be an absolute or repository-relative executable');
       const hook = fs.realpathSync(path.resolve(folder, repo.afterLand));
-      require(inside(hook, folder) && fs.statSync(hook).isFile(), 'afterLand must stay inside its repository');
+      require((path.isAbsolute(repo.afterLand) || inside(hook, folder)) && fs.statSync(hook).isFile(),
+        'A relative afterLand must stay inside its repository');
       fs.accessSync(hook, fs.constants.X_OK);
     }
     if (repo.testReport != null) validateTestReport(repo.testReport);

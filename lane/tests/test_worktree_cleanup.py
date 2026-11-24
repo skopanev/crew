@@ -100,7 +100,7 @@ class WorktreeCleanupTests(unittest.TestCase):
                     self.assertEqual((wt / folder / 'warm').read_text(), 'preserve\n')
 
     def test_confirmed_delivery_cleans_checkout_and_preserves_failed_hook(self):
-        for case in ('none', 'success', 'failed', 'mutation', 'verified'):
+        for case in ('none', 'success', 'absolute', 'absolute-failed', 'failed', 'mutation', 'verified'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 wt, repo = root / 'ticket', root / 'source'
@@ -126,19 +126,26 @@ class WorktreeCleanupTests(unittest.TestCase):
                 hook = repo / 'after-land'
                 hook.write_text('#!/usr/bin/env python3\nimport json,os,pathlib,sys\n'
                     'pathlib.Path(os.environ["HOOK_ARGS"]).write_text(json.dumps(sys.argv[1:]))\n'
+                    'pathlib.Path(os.environ["HOOK_ARGS"]+".mcp").write_text(os.environ["LANE_JOPPA_MCP_COMMAND_JSON"])\n'
                     'if os.environ["HOOK_CASE"] == "mutation": pathlib.Path("source.txt").write_text("unexpected")\n'
-                    'sys.exit(42 if os.environ["HOOK_CASE"] == "failed" else 0)\n')
+                    'sys.exit(42 if os.environ["HOOK_CASE"] in ("failed", "absolute-failed") else 0)\n')
                 hook.chmod(0o755)
                 env = dict(os.environ, worktree=str(wt), worktree_created='true', target='main',
-                    LANE_DELIVERY='target', repo=str(repo), after_land='' if case == 'none' else 'after-land',
-                    HOOK_ARGS=str(root / 'args.json'), HOOK_CASE=case)
-                script = 'say() { printf "%s\\n" "$*"; }\n' + CLEANUP + '\ntrap cleanup EXIT\nexit 0\n'
+                    LANE_DELIVERY='target', repo=str(repo), after_land=(str(hook) if case.startswith('absolute')
+                        else '' if case == 'none' else 'after-land'),
+                    HOOK_ARGS=str(root / 'args.json'), HOOK_CASE=case,
+                    LANE_JOPPA_MCP_COMMAND_JSON='["host-client", "https://host.invalid/mcp"]')
+                capture = next(line for line in TEXT.splitlines() if line.startswith('after_land_mcp_command='))
+                script = ('say() { printf "%s\\n" "$*"; }\n' + capture + '\nunset LANE_JOPPA_MCP_COMMAND_JSON\n'
+                    + '[ -z "$(env | sed -n \'/^after_land_mcp_command=/p\')" ] || exit 91\n'
+                    + CLEANUP + '\ntrap cleanup EXIT\nexit 0\n')
                 result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(wt.exists(), case in ('failed', 'mutation'))
+                self.assertEqual(wt.exists(), case in ('failed', 'absolute-failed', 'mutation'))
                 self.assertEqual((root / 'args.json').exists(), case not in ('none', 'verified'))
                 if (root / 'args.json').exists():
                     self.assertEqual(json.loads((root / 'args.json').read_text()), [str(wt), head, 'main', base])
+                    self.assertEqual((root / 'args.json.mcp').read_text(), env['LANE_JOPPA_MCP_COMMAND_JSON'])
                 if wt.exists():
                     self.assertIn('POST_LAND_FAILED', result.stdout)
                     self.assertEqual(git('rev-parse', 'HEAD'), head)
