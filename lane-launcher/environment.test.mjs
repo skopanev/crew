@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {installEnvironment} from './environment.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']}).trim();
@@ -100,5 +100,21 @@ test('refuses unbound live code and paths that escape snapshots', () => {
     assert.throws(() => installEnvironment(relativeCommand), /live source path/);
     fs.unlinkSync(path.join(value.repository, 'tools/runner.mjs'));
     assert.throws(() => installEnvironment(relativeCommand), /live source path/);
+    fs.mkdirSync(path.join(value.root, 'outside/child'), {recursive: true});
+    fs.writeFileSync(path.join(value.root, 'outside/panel.sh'), 'echo OUTSIDE\n');
+    fs.writeFileSync(path.join(value.repository, 'panel.sh'), 'echo INSIDE\n');
+    fs.symlinkSync(path.join(value.root, 'outside/child'), path.join(value.repository, 'door'));
+    git(value.repository, 'add', '.'); git(value.repository, 'commit', '-m', 'Directory link');
+    const traversalCommand = structuredClone(value.spec);
+    traversalCommand.command = ['bash', '{engine}/door/../panel.sh'];
+    assert.throws(() => installEnvironment(traversalCommand), /Parent path segments/);
+    const traversalBinding = structuredClone(value.spec);
+    traversalBinding.bindings['vars.HELPER'] = '{engine}/door/../panel.sh';
+    assert.throws(() => installEnvironment(traversalBinding), /Parent path segments/);
+    const specFile = path.join(value.root, 'traversal.json');
+    fs.writeFileSync(specFile, JSON.stringify(traversalCommand));
+    const actual = spawnSync(process.execPath, [new URL('./environment.mjs', import.meta.url).pathname,
+      specFile, '--run'], {encoding: 'utf8'});
+    assert.equal(actual.status, 2); assert.ok(!actual.stdout.includes('OUTSIDE'));
   } finally { cleanup(value); }
 });

@@ -11,6 +11,7 @@ const canonical = value => JSON.stringify(value && typeof value === 'object' ?
   Array.isArray(value) ? value.map(item => JSON.parse(canonical(item))) :
     Object.fromEntries(Object.keys(value).sort().map(key => [key, JSON.parse(canonical(value[key]))])) : value);
 const inside = (root, file) => file === root || file.startsWith(root + path.sep);
+const noParent = value => !value.split(/[\\/]/).includes('..');
 const git = (root, ...args) => execFileSync('git', ['-C', root, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']}).trim();
 const fieldParts = field => {
   const parts = field.split('.');
@@ -86,6 +87,7 @@ export function installEnvironment(spec, base = process.cwd()) {
       need(Object.hasOwn(values, name), 'Unknown environment placeholder'); return values[name];
     });
     const pinned = value => {
+      need(noParent(value), 'Parent path segments are not supported in pinned code paths');
       need(path.isAbsolute(value) && fs.existsSync(value), 'A pinned code path must exist and be absolute');
       const real = fs.realpathSync(value);
       need(Object.values(roots).some(root => inside(root, real)), 'A pinned code path escapes its snapshot');
@@ -117,8 +119,9 @@ export function installEnvironment(spec, base = process.cwd()) {
     check(command);
     for (const value of command) {
       const candidate = /^--?[A-Za-z0-9_-]+=(.*)$/.exec(value)?.[1] ?? value;
-      const normalized = path.resolve(folder, candidate);
       const isPath = path.isAbsolute(candidate) || candidate.includes('/');
+      need(!isPath || noParent(candidate), 'Parent path segments are not supported in environment commands');
+      const normalized = path.resolve(folder, candidate);
       if (isPath && Object.values(roots).some(root => inside(root, normalized))) pinned(normalized);
       else need(!Object.values(roots).some(root => value.includes(root)),
         'A snapshot command path must be an argument or an option value');
