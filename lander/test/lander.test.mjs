@@ -98,8 +98,10 @@ for (const count of [0, 2]) test(`a red branch preserves its pending evidence an
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({selected: item, items: [item],
     claim_revisions: {[item.address]: 3}, schema: {types: {task: {role: 'task', fields: {stage: {values: ['pending', 'done']}}}}}}));
   const configFile = path.join(f.root, 'red-config.json');
+  const dolberConfig = path.join(f.root, 'dolber.json');
+  fs.writeFileSync(dolberConfig, JSON.stringify({repairDelivery: {attemptField: 'repair_attempt', maxAttempts: 2, exhaustedTag: 'stuck'}}));
   fs.writeFileSync(configFile, JSON.stringify({repositories: [f.repo], retain_failed_delivery: true,
-    repair_budget: {field: 'repair_attempt', max_attempts: 2, exhausted_tag: 'stuck'},
+    repair_budget: dolberConfig,
     exclude_tags: ['integration-red', 'stuck'], publication: {file: 'operations.json'}}));
   const result = spawnSync(process.execPath, [path.resolve('lander/lander.mjs'), 'build'], {encoding: 'utf8', env: {
     ...process.env, MEDULLA_RUN_DIR: folder, MEDULLA_RUN_ID: 'red-proof', PLANNING_JOPPA_CONFIG: configFile,

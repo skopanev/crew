@@ -13,6 +13,15 @@ const stateFile = path.join(root, 'lander.json');
 const signal = (code, message) => console.log('<signal:' + code + '>' + message + '</signal:' + code + '>');
 const config = () => read(process.env.PLANNING_JOPPA_CONFIG);
 const repository = state => config().repositories.find(repo => repo.id === state.repository);
+function repairBudget(value) {
+  if (value.repair_budget == null) return null;
+  require(typeof value.repair_budget === 'string' && path.isAbsolute(value.repair_budget), 'repair_budget needs an absolute Dolber config path');
+  const policy = read(value.repair_budget).repairDelivery;
+  require(policy && typeof policy.attemptField === 'string' && policy.attemptField.trim() &&
+    Number.isSafeInteger(policy.maxAttempts) && policy.maxAttempts > 0 &&
+    typeof policy.exhaustedTag === 'string' && value.exclude_tags?.includes(policy.exhaustedTag), 'Invalid shared repair budget');
+  return {field: policy.attemptField, max_attempts: policy.maxAttempts, exhausted_tag: policy.exhaustedTag};
+}
 function settings() {
   const value = config(), assignment = read(path.join(root, 'input.json'));
   const items = assignment.items || [assignment.selected], ids = new Set(items.map(item => item.document.data.repository));
@@ -36,25 +45,23 @@ function settings() {
     Array.isArray(failedData.tags) && failedData.tags.length > 0 && failedData.tags.every(tag =>
       typeof tag === 'string' && tag && value.exclude_tags?.includes(tag)),
   'Retained failed delivery needs excluded failure tags and must preserve the Task stage');
-  const budget = value.repair_budget;
+  const budget = repairBudget(value);
   if (budget != null) {
-    require(value.retain_failed_delivery && typeof budget.field === 'string' && budget.field.trim() &&
-      Number.isSafeInteger(budget.max_attempts) && budget.max_attempts > 0 &&
-      typeof budget.exhausted_tag === 'string' && value.exclude_tags?.includes(budget.exhausted_tag), 'Invalid repair_budget');
+    require(value.retain_failed_delivery, 'Repair budget needs retained delivery');
     for (const item of items) if (item.document.data[budget.field] != null) require(
       Number.isSafeInteger(item.document.data[budget.field].count) && item.document.data[budget.field].count >= 0,
       'Invalid repair attempt count');
   }
   for (const item of items) require(doneTaskStage(value, assignment.schema, item) !== failedData.stage,
     'DONE_TASK_STAGE must differ from FAILED_DATA.stage');
-  return {value, assignment, items, repo, failedData};
+  return {value, assignment, items, repo, failedData, budget};
 }
 function output(state, landed = []) {
-  const {value, assignment, items, failedData} = settings(), operations = [];
+  const {value, assignment, items, failedData, budget} = settings(), operations = [];
   const done = new Set(landed.map(item => item.address));
   for (const item of items) {
     const address = item.address, reason = state.failed[address] || state.pending || 'NOT_LANDED';
-    const budget = value.repair_budget, exhausted = budget && item.document.data[budget.field]?.count >= budget.max_attempts;
+    const exhausted = budget && item.document.data[budget.field]?.count >= budget.max_attempts;
     if (done.has(address)) {
       operations.push({command: {op: 'save_object', kind: item.kind, id: address.slice(address.indexOf(':') + 1),
         revision: assignment.claim_revisions[address], data: {stage: doneTaskStage(value, assignment.schema, item)},
