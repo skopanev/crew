@@ -118,8 +118,8 @@ export function installEnvironment(spec, base = process.cwd()) {
     for (const value of command) {
       const candidate = /^--?[A-Za-z0-9_-]+=(.*)$/.exec(value)?.[1] ?? value;
       const normalized = path.resolve(folder, candidate);
-      const isPath = candidate && (path.isAbsolute(candidate) || candidate.includes('/') || fs.existsSync(normalized));
-      if (isPath && inside(folder, normalized) && normalized !== file) pinned(normalized);
+      const isPath = path.isAbsolute(candidate) || candidate.includes('/');
+      if (isPath && Object.values(roots).some(root => inside(root, normalized))) pinned(normalized);
       else need(!Object.values(roots).some(root => value.includes(root)),
         'A snapshot command path must be an argument or an option value');
     }

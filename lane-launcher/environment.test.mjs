@@ -47,6 +47,9 @@ test('pins each code version, preserves old environments, and verifies reuse', (
     const output = execFileSync(process.execPath, [new URL('./environment.mjs', import.meta.url).pathname,
       specFile, '--run'], {encoding: 'utf8'});
     assert.equal(output.trim(), 'panel');
+    const withOutput = structuredClone(value.spec);
+    withOutput.command.push('--output={environment}/out/log.txt', '--watch');
+    assert.ok(installEnvironment(withOutput));
     fs.writeFileSync(path.join(value.repository, 'workflow.yaml'), 'version: new\n');
     git(value.repository, 'add', '.'); git(value.repository, 'commit', '-m', 'New code');
     const second = installEnvironment(value.spec);
