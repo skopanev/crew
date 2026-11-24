@@ -23,8 +23,8 @@ def body: (.document.data // .data // {}) | ((.title // "") + "\n" + (.body // "
 (if $business then
   ($ARGS.named.return_limit | if type == "number" and . > 0 and . == floor then . else error("TASKER_RETURN_LIMIT must be positive") end) as $limit |
   ((($data.returns // 0) | if type == "number" and . >= 0 and . == floor then . else error("AC returns must be a nonnegative integer") end) + 1) as $count |
-  {returns: $count} + if $count >= $limit then {tags: (($data.tags // []) + [$ARGS.named.stuck_tag | if text then . else error("STUCK_TAG is required") end] | unique)}
-    else {stage: (if ($ac_findings | length) > 0 then $ARGS.named.return_stage else $ARGS.named.test_return_stage end | checked_stage(.))} end
+  {returns: $count, stage: (if ($ac_findings | length) > 0 then $ARGS.named.return_stage else $ARGS.named.test_return_stage end | checked_stage(.))} +
+    if $count >= $limit then {tags: (($data.tags // []) + [$ARGS.named.stuck_tag | if text then . else error("STUCK_TAG is required") end] | unique)} else {} end
  elif $role == "task" then {stage: ($ARGS.named.task_review_stage | checked_stage(.))} + ($ARGS.named.repository // {})
  else {} end) as $update |
 ($business and ($update.tags // [] | index($ARGS.named.stuck_tag)) != null) as $stuck |

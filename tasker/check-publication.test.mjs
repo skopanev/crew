@@ -203,16 +203,21 @@ test('ACTIVE_TASK and unsupported refusals preserve the AC, while valid findings
     input.schema.types.ac.fields.stage.values.push("decide-again", "prepare-again"); saveInput();
     writeReview({...rework, ac_findings: [{...acFinding, criterion: "Z"}]});
     assert.deepEqual(execute(false, 3, configured).operations[0].command.data, {stage: "decide-again", returns: 2});
-    assert.deepEqual(execute(false, 2, configured).operations[0].command.data, {returns: 2, tags: ["keep", "needs-owner"]});
+    assert.deepEqual(execute(false, 2, configured).operations[0].command.data, {stage: "decide-again", returns: 2, tags: ["keep", "needs-owner"]});
     assert.throws(() => execute(false, 3, {...configured, TASKER_RETURN_STAGE: "missing"}), /absent from the selected schema/);
     writeReview({...rework, ac_findings: [], node_findings: [{target: "spec:t", quote: "Expected result", reason_code: "WRONG_EXPECTED"}]});
     assert.deepEqual(execute(false, 3, configured).operations[0].command.data, {stage: "prepare-again", returns: 2});
     writeReview(rework);
     assert.deepEqual(execute(false, 3, configured).operations.map(row => row.command.op), ["note"]);
-    for (const limit of [2, 3]) {
+    for (const limit of [2, 3]) for (const [critic, stage] of [
+      [rework, settings.TASKER_RETURN_STAGE],
+      [{...rework, ac_findings: [], node_findings: [{target: 'spec:t', quote: 'Expected result', reason_code: 'WRONG_EXPECTED'}]}, settings.TASKER_TEST_RETURN_STAGE],
+    ]) {
+      writeReview(critic);
       input.selected.document.data.returns = limit - 1; saveInput();
       publication = execute(false, limit);
-      assert.deepEqual(publication.operations[0].command.data, {returns: limit, tags: ['keep', 'stuck']});
+      assert.equal(publication.operations.filter(row => row.command.op === 'save_object').length, 1);
+      assert.deepEqual(publication.operations[0].command.data, {stage, returns: limit, tags: ['keep', 'stuck']});
       assert.equal(publication.outcome.reason_code, 'STUCK');
       assert.ok(publication.operations[1].command.text.startsWith(reason));
       assert.match(publication.operations[1].command.text, /Owner: CTO\nQuestion:/);
