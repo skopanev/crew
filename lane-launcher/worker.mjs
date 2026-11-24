@@ -18,6 +18,7 @@ import {prepareContext} from './context-config.mjs';
 import {prepareHooks} from './hooks-config.mjs';
 import {workflowFile, workflowDigest, defaultWorkflow} from './workflow-config.mjs';
 import {prepareReuse} from './retained-checkout.mjs';
+import {clearPreviousCheckout} from './prelaunch-checkout.mjs';
 import {prepareDiscardCheckout, discardFailedCheckout} from './failed-checkout.mjs';
 import {laneOptionsEnv} from './lane-options.mjs';
 import {runPreLaunch} from './pre-launch.mjs';
@@ -147,6 +148,7 @@ try {
       ['rev-parse', '--verify', `refs/remotes/origin/${run.repository.targetBranch}^{commit}`]);
     save(stateFile, run);
   }
+  clearPreviousCheckout(run, dir, () => save(stateFile, run), announce);
   const ownedCheckout = prepareDiscardCheckout(run, () => save(stateFile, run));
   const claimFile = writeLaunchClaim(run, dir, finalizationTicket);
   readerDir = prepareClaimReader(run);
