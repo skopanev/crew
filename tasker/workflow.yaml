@@ -180,11 +180,9 @@ nodes:
         - '{{var:tasker_author_arg12:-}}'
         - '{{var:tasker_author_arg13:-}}'
     prompt: |
-      Act as the Tasker author for {{var:tasker_item_address}}.
-      Call mcp__joppa__read_context({}) to locate your full rules, contracts, frozen assignment, limits and available feedback.
-      Read required files with mcp__joppa__read_file. Continue until next_offset is null.
-      Read Joppa nodes as needed. Use the fixed develop trees and preserve the frozen publication scope.
-      Return only the JSON object required by the author rules.
+      Tasker author: {{var:tasker_item_address}}
+      Call mcp__joppa__read_context({}). Read all rules and context with mcp__joppa__read_file until next_offset is null.
+      Return required JSON.
     post: |
       set -eu
       captured="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft)"
@@ -256,12 +254,10 @@ nodes:
         - '{{input.a12:-}}'
         - '{{input.a13:-}}'
     prompt: |
-      Act as an independent Tasker critic for {{var:tasker_item_address}}.
+      Independent Tasker critic: {{var:tasker_item_address}}
       Draft: {{var:tasker_draft_path}}
-      Call mcp__joppa__read_context({}) to locate your full rules, contract, frozen assignment, limits and machine check.
-      Read required files with mcp__joppa__read_file. Continue until next_offset is null.
-      Use the frozen draft's SHA256 as draft_digest. Preserve the frozen publication scope and fixed develop trees.
-      Return only the JSON object required by the critic rules. Do not read another critic's response.
+      Call mcp__joppa__read_context({}). Read all rules and context with mcp__joppa__read_file until next_offset is null.
+      Return required JSON. Read no peer reports.
     post: |
       set -eu
       captured="$("$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)")"

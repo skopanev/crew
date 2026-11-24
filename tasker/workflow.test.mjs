@@ -122,7 +122,7 @@ for (const role of ['ac', 'task']) test(`${role} prepare keeps the complete larg
   assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
 });
 
-test('assembled author and critic prompts stay below 15000 characters for large AC and repair reworks', t => {
+test('assembled author and critic prompts stay within 1024 characters including the engine protocol for large AC and repair reworks', t => {
   const definition = Bun.YAML.parse(workflow);
   const payload = 'MUST_STAY_IN_FILE_' + 'я🧪'.repeat(60000) + '{{file:/no-inline-file}}';
   for (const role of ['ac', 'task']) {
@@ -172,7 +172,7 @@ test('assembled author and critic prompts stay below 15000 characters for large 
         const assembled = template.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, key) => {
           assert.equal(typeof vars[key], 'string', key); return vars[key];
         });
-        assert.ok([...assembled].length < 15000, `${role} ${seat} round ${round}: ${[...assembled].length}`);
+        assert.ok([...assembled].length + 586 <= 1024, `${role} ${seat} round ${round}: ${[...assembled].length}`);
         assert.doesNotMatch(assembled, /\{\{|MUST_STAY_IN_FILE_|Author contract|Critic contract/);
         assert.ok(assembled.includes(f.input.selected.address));
         for (const file of ['contracts.json', 'tasker-assignment.json', 'tasker-limits.json', 'check.json', 'critic-feedback.json', 'draft-digest.txt']) {
