@@ -160,6 +160,7 @@ test('binding updates respect Test schema, frozen revisions and DONE precedence'
   const done = {verdict: 'DONE', reason: 'Already in develop', done_commit: f.trees[binding.repository].sha};
   Object.assign(f.draft, done); delete f.draft.test_bindings;
   assert.match(check(f.options()).problems.join(), /recorded PASS/);
+  f.input.children[0].document.present = true;
   f.input.children[0].status = {tone: 'green'};
   f.input.children[0].result = {status: 'pass', commit: done.done_commit};
   assert.deepEqual(check(f.options()).problems, []);
