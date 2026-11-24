@@ -21,9 +21,7 @@ class Joppa:
         local = parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1")
         if not (parsed.scheme == "https" or local) or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise MCPError("Joppa needs HTTPS or loopback HTTP, without URL credentials")
-        self.url = url
-        self.stdio = None
-        self.token = ""
+        self.url, self.stdio, self.token = url, None, ""
         if mcp_command is not None:
             from stdio import StdioRPC
             self.stdio = StdioRPC(mcp_command)
@@ -32,12 +30,22 @@ class Joppa:
         if not self.stdio and not self.token:
             raise MCPError("Joppa token file is empty")
         self.opener = build_opener(NoRedirect)
-        self.sequence = 0
-        self.session = None
-        result = self.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
-                          "clientInfo": {"name": "crew-planning-joppa", "version": "1"}})
-        self.protocol = result.get("protocolVersion", "2025-03-26")
-        self.rpc("notifications/initialized", {}, notification=True)
+        self.sequence, self.session = 0, None
+        for attempt in range(2):
+            try:
+                result = self.rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
+                                  "clientInfo": {"name": "crew-planning-joppa", "version": "1"}})
+                self.protocol = result.get("protocolVersion", "2025-03-26")
+                self.rpc("notifications/initialized", {}, notification=True)
+                break
+            except ValueError as error:
+                if self.stdio:
+                    self.stdio.close()
+                if (not self.stdio or attempt or str(error) not in
+                        ("Joppa MCP command timed out", "Joppa MCP command disconnected")):
+                    raise
+                print("Joppa MCP connection failed; reconnecting once before any tool call", file=sys.stderr)
+                self.stdio = StdioRPC(mcp_command)
 
     def rpc(self, method, params, notification=False):
         if self.stdio:

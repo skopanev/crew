@@ -97,7 +97,7 @@ class StdioRPC:
         for action in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(self.process.pid, action)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 break
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline:
