@@ -61,6 +61,17 @@ test('repair refuses failure evidence from a different contract or saved head', 
   assert.throws(() => repairEvidence(f.run.config, f.task), /original Task contract changed/);
 });
 
+test('repair cannot take another worker claim or start after its acceptance parent leaves implementation', async t => {
+  const f = await fixture(t); chooseRepair(f);
+  f.task.document.data.assignee = 'another-worker';
+  await assert.rejects(claimTask(f.run, f.persist, f.runId), /TASK_ASSIGNED/);
+  f.task.document.data.assignee = undefined;
+  await claimTask(f.run, f.persist, f.runId);
+  f.objects.get('ac:a2').document.data.stage = 'decide';
+  await assert.rejects(guardTaskClaims(f.run, f.persist), /acceptance parent/);
+  assert.equal(f.task.document.data.assignee, f.run.claim.assignee);
+});
+
 test('failed repair releases only its claim and preserves the original pending branch without Tasker stage', async t => {
   const f = await fixture(t); chooseRepair(f);
   await claimTask(f.run, f.persist, f.runId);
