@@ -205,7 +205,7 @@ export function createDashboard(config, paint) {
     });
     output.push(...renderRunTable(rows, paint, 6 + footer.length + Number(Boolean(state.progress)), {finished: true}));
     output.push(...footer);
-    output.push(stopped ? 'Stopped' : 'Ctrl+C to stop');
+    output.push('', stopped ? 'Stopped' : 'Ctrl+C to stop');
     return output.join('\n');
   }
   refresh();

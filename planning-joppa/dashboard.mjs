@@ -91,7 +91,7 @@ export async function main(argv) {
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
-      closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
+      '', closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
   };
   const draw = () => {
     try { if (screen) screen.draw(); else process.stdout.write(render() + '\n'); }
