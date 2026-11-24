@@ -41,7 +41,7 @@ test('on_revision waits above the final release revision, including batch member
   const f = await fixture(t, 'on_revision');
   history(f, {item_revisions: {'ac:a1': 3}});
   const run = f.start();
-  await run.until(output => /no unattempted items/.test(output));
+  await run.until(() => f.calls.some(call => call.name === 'joppa_objects' && !call.args.address));
   assert.deepEqual(f.passes(), []);
   f.objects.get('ac:a1').current_revision = 3;
   await pause(1200);
@@ -58,7 +58,7 @@ test('never excludes a previously attempted address after its revision grows', a
   history(f);
   f.objects.get('ac:a1').current_revision = 10;
   const run = f.start();
-  await run.until(output => /no unattempted items/.test(output));
+  await run.until(() => f.calls.some(call => call.name === 'joppa_objects' && !call.args.address));
   await pause(1200);
   assert.deepEqual(f.passes(), []);
   assert.equal(await run.stop(), 130);

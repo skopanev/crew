@@ -112,7 +112,8 @@ setInterval(()=>{if(fs.existsSync(path.join(process.env.TEST_RELEASE,address)))p
   const run = f.start();
   try {
     await run.until(() => starts().length === 2);
-    await run.until(output => /no unattempted items/.test(output));
+    const checked = f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address).length;
+    await run.until(() => f.calls.filter(call => call.name === 'joppa_objects' && !call.args.address).length > checked);
     assert.deepEqual(starts().map(row => row.address).sort(), ['task:t1', 'task:t2']);
     assert.ok(starts().every(row => row.input === '1'));
     fs.writeFileSync(path.join(release, 'task:t1'), '');

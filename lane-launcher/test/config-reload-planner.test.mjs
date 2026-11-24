@@ -12,22 +12,20 @@ import {batchItems} from '../../planning-joppa/flow-batch.mjs';
 import {pause, plannerFixture} from '../test-support/config-reload.fixture.mjs';
 
 const count = (text, pattern) => (text.match(pattern) || []).length;
+const queueReads = f => f.calls.filter(call => call.name === 'joppa_tree').length;
 
 test('planner picks up new ac_ids between passes and stays quiet while the config is unchanged', async t => {
   const f = await plannerFixture(t, {ac_ids: ['ac:missing']});
   const run = f.start();
-  await run.until(output => count(output, /Requirements: 0 ready/g) >= 3);
-  assert.doesNotMatch(run.output(), /config reloaded/);
+  await run.until(() => queueReads(f) >= 3);
   assert.deepEqual(f.passes(), []);
-  const mark = run.mark();
   f.write({...f.config, ac_ids: ['ac:a1']});
   await run.until(() => f.passes().includes('end'));
-  assert.match(run.since(mark), /config reloaded · Planning req:r · Requirement/);
+  assert.equal(f.passes().length, 2);
   assert.match(f.passes()[0], /"ac:a1"/);
-  await run.until(output => /Requirements: 1 ready · no unattempted/.test(output.slice(mark)));
-  const quiet = run.mark();
-  await run.until(output => count(output.slice(quiet), /Requirements: 1 ready · no unattempted/g) >= 2);
-  assert.doesNotMatch(run.since(quiet), /config reloaded/);
+  const quiet = queueReads(f);
+  await run.until(() => queueReads(f) >= quiet + 2);
+  assert.equal(f.passes().length, 2, 'The unchanged config does not repeat the completed pass');
   assert.equal(await run.stop(), 130);
 });
 
@@ -35,7 +33,8 @@ test('invalid planner config shows CONFIG_INVALID, starts nothing and recovers w
   const f = await plannerFixture(t, {ac_ids: ['ac:a1']});
   const run = f.start();
   await run.until(() => f.passes().includes('end'));
-  await run.until(output => /no unattempted/.test(output));
+  const checked = queueReads(f);
+  await run.until(() => queueReads(f) > checked);
   f.write('{"workspace": "fixture", "secret-value-in-broken-file": ');
   await run.until(output => /CONFIG_INVALID: the file is not valid JSON/.test(output));
   const calls = f.calls.length, mark = run.mark();
@@ -46,10 +45,9 @@ test('invalid planner config shows CONFIG_INVALID, starts nothing and recovers w
   assert.doesNotMatch(run.output(), /secret-value-in-broken-file/);
   f.write({...f.config, ac_ids: ['ac:a1'], interval_seconds: 'soon'});
   await run.until(output => /CONFIG_INVALID: interval_seconds must be 1 to 3600/.test(output));
-  const fixed = run.mark();
   f.write({...f.config, ac_ids: ['ac:a1', 'ac:a2']});
   await run.until(() => f.passes().length === 4);
-  assert.match(run.since(fixed), /config reloaded · Planning req:r/);
+  assert.equal(f.passes()[3], 'end');
   assert.match(f.passes()[2], /"ac:a2"/);
   assert.equal(await run.stop(), 130);
 });
@@ -57,7 +55,7 @@ test('invalid planner config shows CONFIG_INVALID, starts nothing and recovers w
 test('locked planner identity changes show CONFIG_RESTART_REQUIRED and start nothing', async t => {
   const f = await plannerFixture(t, {ac_ids: ['ac:missing']});
   const run = f.start();
-  await run.until(output => /Requirements: 0 ready/.test(output));
+  await run.until(() => queueReads(f) > 0);
   for (const change of [{workspace: 'other'}, {runs_folder: path.join(f.root, 'other-runs')},
     {url: 'http://127.0.0.1:1/mcp'}, {mcp_command: ['node', 'broker.cjs']}]) {
     const mark = run.mark();
@@ -68,9 +66,9 @@ test('locked planner identity changes show CONFIG_RESTART_REQUIRED and start not
     await pause(1500);
     assert.equal(f.calls.length, calls, `${Object.keys(change)} must not read the queue`);
     assert.deepEqual(f.passes(), []);
-    const back = run.mark();
+    const back = queueReads(f);
     f.write(f.config);
-    await run.until(output => /config reloaded · Requirements: 0 ready/.test(output.slice(back)));
+    await run.until(() => queueReads(f) > back);
   }
   assert.equal(await run.stop(), 130);
 });
@@ -79,11 +77,11 @@ test('a planner pass keeps its config; the dispatcher reloads only after the pas
   const f = await plannerFixture(t, {ac_ids: ['ac:a1']}, 2);
   const run = f.start();
   await run.until(() => f.passes().length === 1);
-  const mark = run.mark();
+  const mark = queueReads(f);
   f.write({...f.config, ac_ids: ['ac:a1', 'ac:a2']});
   await pause(800);
-  assert.doesNotMatch(run.since(mark), /config reloaded/, 'No reload during an active pass');
-  await run.until(output => /config reloaded/.test(output.slice(mark)));
+  assert.equal(queueReads(f), mark, 'No queue read during an active pass');
+  await run.until(() => f.passes().length >= 3);
   assert.equal(f.passes()[1], 'end', 'The reload waits for the active pass to end');
   assert.doesNotMatch(f.passes()[0], /"ac:a2"/);
   await run.until(() => f.passes().length === 3);
@@ -120,10 +118,10 @@ test('a config edited between selection and spawn makes no claim, starts no Medu
   assert.ok(!fs.existsSync(started), 'Medulla must not start for the replacement config');
   assert.equal(f.calls.filter(call => call.name === 'joppa_batch').length, 0, 'No claim was made');
   assert.deepEqual(f.passes(), []);
-  const mark = run.mark();
   f.write(f.config);
   await run.until(() => f.passes().length === 1);
-  await run.until(output => count(output.slice(mark), /Requirements: 1 ready · no unattempted/g) >= 3);
+  const checked = queueReads(f);
+  await run.until(() => queueReads(f) >= checked + 3);
   assert.deepEqual(f.passes(), ['start req:r'], 'The same item starts exactly once after the restore');
   assert.equal(await run.stop(), 130);
 });
@@ -133,7 +131,8 @@ test('a genuine pass failure stays attempted', async t => {
   const f = await plannerFixture(t, {ac_ids: ['ac:a1']}, 0, pass);
   const run = f.start();
   await run.until(() => f.passes().length === 1);
-  await run.until(output => count(output, /Requirements: 1 ready · no unattempted/g) >= 3);
+  const checked = queueReads(f);
+  await run.until(() => queueReads(f) >= checked + 3);
   assert.deepEqual(f.passes(), ['start req:r']);
   assert.equal(await run.stop(), 130);
 });
@@ -156,7 +155,7 @@ test('a configured flow selects one ordered native item, skips excluded and star
     selected: {address: 'ac:a1', current_revision: 2, document: {data: {title: 'Configured title'}}}}));
   fs.writeFileSync(path.join(artifacts, 'result.json'), JSON.stringify({status: 'published', selected_revision: 3, item_revisions: {'ac:a1': 3, 'ac:a3': 5}}));
   const run = f.start();
-  await run.until(output => count(output, /Items: 2 selected · 1 excluded by filters/g) >= 2);
+  await run.until(() => f.calls.filter(call => call.name === 'joppa_objects' && call.args.parent === 'ac:a2' && call.args.kind === 'task').length >= 2);
   assert.deepEqual(f.passes(), []);
   assert.match(run.output(), /ITEM/);
   assert.deepEqual(plannerRows(f.config.runs_folder).map(row => [row.ac, row.acTitle, row.attemptKey]),

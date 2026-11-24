@@ -125,15 +125,17 @@ test('a changed config waits for all active passes and SIGTERM stops the next pa
   try {
     await run.until(() => f.starts().length === 2);
     f.objects.set('ac:a3', {...structuredClone(f.objects.get('ac:a1')), address: 'ac:a3'});
+    const checked = f.calls.length;
     f.write({...f.config, concurrency: 4});
-    await run.until(output => /Config changed; waiting for active passes to end/.test(output));
+    await pause(1200);
+    assert.equal(f.calls.length, checked, 'A changed config does not select work while old passes remain');
     assert.equal(f.starts().length, 2);
     f.release('ac:a1');
     await pause(200);
     assert.equal(f.starts().length, 2, 'No pass starts with an old digest while another pass remains active');
     f.release('ac:a2');
     await run.until(() => f.starts().length === 3);
-    assert.match(run.output(), /config reloaded/);
+    assert.equal(f.starts()[2].address, 'ac:a3');
     assert.match(run.output(), /concurrency 4/);
     const closed = new Promise(resolve => run.child.once('close', resolve));
     run.child.kill('SIGTERM');
