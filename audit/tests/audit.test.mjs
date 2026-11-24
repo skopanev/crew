@@ -582,15 +582,32 @@ if (name === 'cbm') {
       assert.ok(f.dataCalls.every(call => call.auth === `Bearer ${f.readKey}`));
       assert.deepEqual(fs.readFileSync(path.join(f.root, 'events'), 'utf8').trim().split('\n'), found ? ['codex', 'claude'] : ['codex']);
       const auditPrompt = fs.readFileSync(path.join(f.root, 'codex'), 'utf8');
-      assert.match(auditPrompt, /Step 10 common rules/);
-      assert.match(auditPrompt, /Step 20 audit phase rules/);
+      const artifactRoot = path.join(runs, run, 'artifacts');
+      const auditContract = fs.readFileSync(path.join(artifactRoot, 'audit-contract.md'), 'utf8');
+      assert.match(auditPrompt, /audit-instructions\.md/);
+      assert.ok(auditPrompt.length <= 1024);
+      const auditInstructions = fs.readFileSync(path.join(artifactRoot, 'audit-instructions.md'), 'utf8');
+      assert.match(auditInstructions, /audit-contract\.md/);
+      assert.doesNotMatch(auditInstructions, /\{\{/);
+      assert.doesNotMatch(auditPrompt, /Step 10 common rules|Step 20 audit phase rules/);
+      assert.match(auditContract, /Step 10 common rules/);
+      assert.match(auditContract, /Step 20 audit phase rules/);
       assert.doesNotMatch(auditPrompt, /Step 30 review phase rules/);
       if (found) {
         const reviewPrompt = fs.readFileSync(path.join(f.root, 'claude'), 'utf8');
-        assert.match(reviewPrompt, /Step 10 common rules/);
-        assert.match(reviewPrompt, /Step 30 review phase rules/);
+        const reviewContract = fs.readFileSync(path.join(artifactRoot, 'review-contract.md'), 'utf8');
+        assert.match(reviewPrompt, /review-instructions\.md/);
+        assert.ok(reviewPrompt.length <= 1024);
+        const reviewInstructions = fs.readFileSync(path.join(artifactRoot, 'review-instructions.md'), 'utf8');
+        assert.match(reviewInstructions, /review-contract\.md/);
+        assert.doesNotMatch(reviewInstructions, /\{\{/);
+        assert.match(reviewContract, /Step 10 common rules/);
+        assert.match(reviewContract, /Step 30 review phase rules/);
+        assert.doesNotMatch(reviewPrompt, /Step 10 common rules|Step 30 review phase rules/);
         assert.doesNotMatch(reviewPrompt, /Step 20 audit phase rules/);
-        assert.match(reviewPrompt, /Start with CBM search_graph or search_code.*backend-index/);
+        assert.match(reviewInstructions, /review-context\.json/);
+        const reviewContext = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'review-context.json')));
+        assert.deepEqual(reviewContext.scope, [{repository: 'backend', project: 'backend-index'}]);
       }
     });
   }

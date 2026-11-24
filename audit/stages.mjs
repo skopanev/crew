@@ -42,8 +42,25 @@ async function prepare() {
   write(path.join(artifacts, 'config.json'), settings);
   variable('AUDIT_CONFIG', path.join(artifacts, 'config.json'));
   variable('AUDIT_INPUT', path.join(artifacts, 'input.json'));
-  variable('AUDIT_CONTRACT', rules.audit);
-  variable('AUDIT_REVIEW_CONTRACT', rules.review);
+  fs.writeFileSync(path.join(artifacts, 'audit-contract.md'), rules.audit, {mode: 0o600});
+  fs.writeFileSync(path.join(artifacts, 'review-contract.md'), rules.review, {mode: 0o600});
+  variable('AUDIT_CONTRACT_PATH', path.join(artifacts, 'audit-contract.md'));
+  variable('AUDIT_REVIEW_CONTRACT_PATH', path.join(artifacts, 'review-contract.md'));
+  const paths = {AUDIT_INPUT: path.join(artifacts, 'input.json'),
+    AUDIT_FINDINGS: path.join(artifacts, 'findings.json'),
+    AUDIT_REVIEW_CONTEXT: path.join(artifacts, 'review-context.json'),
+    AUDIT_CONTRACT_PATH: path.join(artifacts, 'audit-contract.md'),
+    AUDIT_REVIEW_CONTRACT_PATH: path.join(artifacts, 'review-contract.md')};
+  for (const [role, key] of [['audit', 'AUDIT_INSTRUCTIONS'], ['review', 'AUDIT_REVIEW_INSTRUCTIONS']]) {
+    const template = fs.readFileSync(new URL(`./prompts/${role}.md`, import.meta.url), 'utf8');
+    const instructions = template.replace(/\{\{var:([^}]+)\}\}/g, (_, name) => {
+      require(paths[name], `Unknown audit role path: ${name}`);
+      return paths[name];
+    });
+    const file = path.join(artifacts, `${role}-instructions.md`);
+    fs.writeFileSync(file, instructions, {mode: 0o600});
+    variable(key, file);
+  }
   variable('AUDIT_MCP_TOML', settings.reader_toml);
   variable('AUDIT_MCP_CONFIG', settings.reader_config);
   variable('AUDIT_READ_TOOLS', settings.reader_tools);
@@ -71,9 +88,12 @@ async function capture(kind) {
   if (kind === 'audit') {
     write(path.join(artifacts, 'findings.json'), report);
     variable('AUDIT_FINDINGS', path.join(artifacts, 'findings.json'));
-    variable('AUDIT_REVIEW_SCOPE', input.repositories.filter(repo => report.findings.some(finding =>
-      finding.code.some(item => item.repository === repo.id))).map(repo => ({repository: repo.id, project: repo.cbm_project})));
-    variable('AUDIT_REVIEW_SPEC_SEARCHES', [...new Set(report.findings.flatMap(finding => finding.spec_searches || []))]);
+    write(path.join(artifacts, 'review-context.json'), {
+      scope: input.repositories.filter(repo => report.findings.some(finding =>
+        finding.code.some(item => item.repository === repo.id)))
+        .map(repo => ({repository: repo.id, project: repo.cbm_project})),
+      spec_searches: [...new Set(report.findings.flatMap(finding => finding.spec_searches || []))]});
+    variable('AUDIT_REVIEW_CONTEXT', path.join(artifacts, 'review-context.json'));
     signal(report.findings.length ? 'FINDINGS' : 'NO_FINDINGS', `${report.findings.length} proposed finding(s)`);
   } else {
     write(path.join(artifacts, 'review.json'), report);

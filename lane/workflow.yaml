@@ -160,6 +160,7 @@ nodes:
       fi
   cbm_discovery:
     timeout: 900
+    pre: 'node "$TOOLING_ROOT/lane/bin/prompt-context.mjs" scout'
     env:
       LANE_MEMORY_SESSION: 'off'
       LANE_MEMORY_CONFIG: '{{var:LANE_MEMORY_CONFIG}}'
@@ -184,16 +185,8 @@ nodes:
       sets: [TICKET_CHECKS]
       args: [-s, read-only, --dangerously-bypass-hook-trust]
     prompt: |
-      Read {{var:RUN_ARTIFACTS}}/scout-contract.txt and execute its steps.
-      Artifacts: {{var:RUN_ARTIFACTS}}.
-      Task: {{var:ticket_id}}. Source: {{var:TICKET_SOURCE}}. Workspace: {{var:project_name}}.
-      Source checkout: {{var:SCOUT_SOURCE}}.
-      CBM project: {{var:CBM_PROJECT}}.
-      Repository checks: {{var:review_commands}}
-      Test command: {{var:ticket_test_command}}
-      Read the ticket:
-        rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
-      If the ticket has tasks, inspect every Task contract and its writable roots.
+      You are the scout for Task {{var:ticket_id}}.
+      Read and follow {{var:RUN_ARTIFACTS}}/scout-context.json.
 
   create_worktree:
     env:
@@ -410,6 +403,7 @@ nodes:
 
   implement_code:
     timeout: 2400
+    pre: 'node "$TOOLING_ROOT/lane/bin/prompt-context.mjs" coder'
     env:
       LANE_MEMORY_SESSION: 'on'
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
@@ -441,23 +435,8 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      Follow the contract in your session context.
-      Current handoff: {{last.message}}
-      Repository checks: {{var:review_commands}}
-      Test command: {{var:ticket_test_command}}
-      Ticket {{var:ticket_id}} in workspace {{var:project_name}}:
-        rtk proxy node /workspace/lane/bin/ticket-input.mjs --read {{var:ticket_id}} --workspace {{var:project_name}}
-      Read {{var:RUN_ARTIFACTS}}/scout.txt.
-      If the ticket has tasks, execute them in executionOrder in this coder session.
-      Read each Task's acceptanceTests as its required checks.
-      Keep each Task within its contract and writable roots. Record each Task result in coder-report.txt.
-      Artifacts: {{var:RUN_ARTIFACTS}}.
-      Test report: {{var:test_report}}
-      If the ticket or its tasks have testAcceptance, write {{var:RUN_ARTIFACTS}}/test-bindings.json:
-        [{"task": "Task address", "ac": "row ac", "check": "row check", "test": "test name"}]
-      Give each testAcceptance row of each Task at least one row. Copy task, ac and check exactly.
-      Use a test that verifies that check and passes. Use the exact name that the test report identity gives.
-      Add no other rows. Review checks refuse a missing, unknown or failing name.
+      You are the coder for Task {{var:ticket_id}}.
+      Read and follow {{var:RUN_ARTIFACTS}}/coder-context.json.
 
   prepare_review:
     env:
@@ -594,6 +573,7 @@ nodes:
       echo "<signal:SNAPSHOT>snapshot: $tree. Declared checks passed on this tree; commands, exit codes and logs: $receipt</signal:SNAPSHOT>"
   expert_review:
     timeout: 480
+    pre: 'node "$TOOLING_ROOT/lane/bin/prompt-context.mjs" reviewer'
     max_parallel: 3
     # Retry a reviewer that returns no verdict.
     max_attempts: 2
@@ -626,28 +606,8 @@ nodes:
            exit 1 ;;
       esac
     prompt: |
-      Read {{var:RUN_ARTIFACTS}}/reviewer-contract.txt and execute its steps.
-      Return SCOPE_MISMATCH only when a blocking remedy changes an explicit Task/AC restriction or needs a missing prerequisite.
-      A missing plan detail or missing test within the Task/AC remains REJECT. Keep optional improvements as advice.
-      For SCOPE_MISMATCH, include an open HIGH finding and exactly one JSON line in the report:
-      SCOPE_MISMATCH: {"restriction":"Task/AC address and exact quoted restriction","evidence":"Code location and observed behavior","required_change":"Required contract or prerequisite change"}
-      Cite the current Task/AC. An approved plan omission alone does not prove a scope conflict.
-      Finish with one signal: CLEAR, REJECT or SCOPE_MISMATCH.
-      Ticket: {{var:ticket_id}}. Perspective: {{input.slug}}.
-      Workspace: {{var:project_name}}. Verification only: {{var:VERIFY_ONLY}}.
-      Worktree: {{var:LANE_WORKTREE}}.
-      Input: {{var:RUN_ARTIFACTS}}/scout.txt; {{var:RUN_ARTIFACTS}}/gates/current.json;
-      {{var:RUN_ARTIFACTS}}/coder-report.txt if present;
-      {{var:RUN_ARTIFACTS}}/test-bindings.json if present;
-      {{var:RUN_ARTIFACTS}}/ticket-checks.json and repair-baseline.txt if present;
-      {{var:RUN_ARTIFACTS}}/diff.patch.
-      Check that each bound test verifies its criterion check.
-      For a repair verification, check that the recorded test files cover the Task contract.
-      Read {{var:RUN_ARTIFACTS}}/ticket.json. If it has tasks, review every Task contract and its writable roots.
-      Write {{var:RUN_ARTIFACTS}}/{{input.slug}}.md:
-      ## FINDINGS
-      - HIGH|MED|LOW - <claim> - <file:line> - <impact> - FIX: <change or unknown; reason>
-      Or NONE. End with COVERAGE: <checked; not checked>.
+      You are the reviewer for Task {{var:ticket_id}}.
+      Read and follow {{var:RUN_ARTIFACTS}}/reviewer-{{input.slug}}-context.json.
 
   expert_review_synthesis:
     timeout: 60
@@ -1074,6 +1034,7 @@ nodes:
       printf '%s\n' "$msg" > "$MEDULLA_RUN_DIR/artifacts/outcome.txt" || exit 1
       printf '%s\n' "$msg"
   git_fix:
+    pre: 'node "$TOOLING_ROOT/lane/bin/prompt-context.mjs" gitfix'
     timeout: 900
     env:
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
@@ -1104,12 +1065,8 @@ nodes:
       - --strict-mcp-config
       - --setting-sources=
     prompt: |
-      Follow the contract in your session context.
-      Resolve the landing conflict for ticket {{var:ticket_id}}.
-      {{last.message}}
-      Worktree: {{var:LANE_WORKTREE}}.
-      Read the target with bash /workspace/lane/bin/target.sh {{var:project_dir}}.
-      Write {{var:RUN_ARTIFACTS}}/git-fix-report.txt.
+      You are the gitfix for Task {{var:ticket_id}}.
+      Read and follow {{var:RUN_ARTIFACTS}}/gitfix-context.json.
 
   reject_gate:
     env:

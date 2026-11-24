@@ -23,23 +23,9 @@ nodes:
         - -c
         - '{{var:AUDIT_MCP_TOML}}'
     prompt: |
-      Execute the mandatory role contract:
-      {{var:AUDIT_CONTRACT}}
-      Read the audit input: {{var:AUDIT_INPUT}}.
-      Inspect implemented code behavior. Use the read-only service MCP to find its current requirements and context.
-      Return only JSON:
-      {"inspected":[{"repository":"configured ID","path":"tracked source file"}],"limitations":[],
-       "findings":[{"id":"unique ID","kind":"contradiction or uncovered","title":"Short finding",
-         "actual":"Implemented behavior","required":"Required behavior","impact":"Observable effect",
-         "code":[{"repository":"configured ID","path":"tracked source file","line":1,"quote":"Exact source lines"}],
-         "spec":[{"address":"source address","revision":1,"quote":"Exact specification text"}],
-         "spec_searches":["For uncovered only: the exact query argument string from a successful service search"],
-         "why_uncovered":"For uncovered only: why current requirements do not cover this observable behavior",
-         "decision":"For uncovered only: ask the owner whether to specify, change or remove the behavior"}]}
-      For uncovered behavior, use spec: [] and omit required. It needs no invented requirement quotation.
-      In spec_searches, include only literal query argument values from successful whole-workspace service searches without a kind filter.
-      Do not include tool call syntax, other arguments, local searches or explanations in spec_searches.
-      Use an empty findings list when no deviation is supported. State inspection limits.
+      You are the code auditor.
+      Read and follow {{var:AUDIT_INSTRUCTIONS}}.
+
     post: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" capture audit'
     on_signal:
       FINDINGS: review
@@ -63,15 +49,9 @@ nodes:
         - --allowedTools
         - '{{var:AUDIT_READ_TOOLS}}'
     prompt: |
-      Start with CBM search_graph or search_code for {{var:AUDIT_REVIEW_SCOPE}}.
-      Repeat these specification searches through the service MCP: {{var:AUDIT_REVIEW_SPEC_SEARCHES}}.
-      Use each exact query across the whole workspace, without a kind or type filter.
-      Execute the mandatory role contract as an independent verifier:
-      {{var:AUDIT_REVIEW_CONTRACT}}
-      Read the input {{var:AUDIT_INPUT}} and proposed findings {{var:AUDIT_FINDINGS}}.
-      Read the actual cited source and specification. Verify the complete control flow and owner decisions.
-      Return only {"verdicts":[{"id":"proposed finding ID","verdict":"confirmed or dismissed","reason":"Evidence and explanation"}]}.
-      Cover every proposed finding once. Add no findings. Do not change any state.
+      You are the code audit verifier.
+      Read and follow {{var:AUDIT_REVIEW_INSTRUCTIONS}}.
+
     post: 'node "$MEDULLA_WORKFLOW_DIR/stages.mjs" capture review'
     on_signal:
       REVIEWED: finish
