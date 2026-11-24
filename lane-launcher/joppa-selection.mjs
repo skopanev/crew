@@ -129,7 +129,7 @@ export async function nextTask(config) {
     }
     const reserved = new Set(pending.flatMap(run =>
       run.finalizeOnly ? [{address: run.task}] : run.claim ? claimTasks(run) : runTasks(run)).map(task => task.address));
-    const dependencies = dependencyCheck(read);
+    const dependencies = dependencyCheck(read, {beforeClaim: true});
     const publications = publicationReader(config, read);
     const eligible = [], {object, group} = await occupancyReader(config, read);
     const inventory = [], assigned = [];
@@ -172,10 +172,18 @@ export async function nextTask(config) {
               if (current.current_revision !== task.revision || nodeAssignee(current)) continue;
               const run = {config, workspace: config.workspace, joppaWorker: worker};
               const reason = `DEPENDENCY_REPLAN: ${dependency.blocker} is archived without a delivered commit`;
+              if (config.launchLanes === false) {
+                selectionIssues.set(task.address, {task: task.address, revision: task.revision,
+                  code: dependency.code, message: reason});
+                continue;
+              }
               await mutateTasks(run, batchRequest(run, [
                 saveNode(current, {stage: config.FAILED_TASK_STAGE}, reason),
                 {op: 'note', target: task.address, id: `dependency-replan-${current.current_revision}`, text: reason},
-              ]));
+              ])).catch(error => {
+                if (error.rejected && /revision.*changed|revision.*conflict/i.test(error.message)) error.code = 'CANDIDATE_INVALID';
+                throw error;
+              });
               continue;
             }
             if (dependency.code) dependencyIssues.set(`${task.address}\n${dependency.consumer}\n${dependency.blocker}`,

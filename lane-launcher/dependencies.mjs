@@ -41,7 +41,7 @@ export function remoteDependencyBlocker(object, ownWorkspace = object?.workspace
   return null;
 }
 
-export function dependencyCheck(read) {
+export function dependencyCheck(read, {beforeClaim = false} = {}) {
   const objects = new Map();
   let workspaceKey, schema;
   const object = async address => {
@@ -74,7 +74,7 @@ export function dependencyCheck(read) {
         if (link.revision != null && !currentPin(link.revision, Number.MAX_SAFE_INTEGER, 1)) {
           throw invalid(`Invalid linked revision on ${node.address}: ${link.target}`);
         }
-        if (target.document.present === false && types[target.kind]?.role === 'task' && !target.document.data?.commit) {
+        if (beforeClaim && target.document.present === false && types[target.kind]?.role === 'task' && !target.document.data?.commit) {
           replan ||= {ready: false, blocker: target.address, code: 'DEPENDENCY_REPLAN'};
           continue;
         }

@@ -95,7 +95,7 @@ export async function claimTask(run, persist, runId, options = {}) {
       await validateRepairTask(run.config, object, (tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
       selected.push(object);
     }
-    const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
+    const check = dependencyCheck((tool, args) => api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}), {beforeClaim: true});
     for (const task of tasks) {
       const dependency = await check(task.address);
       require(dependency.ready, `DEPENDENCY_NOT_READY: ${dependency.blocker}`);

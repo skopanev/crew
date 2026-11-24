@@ -28,7 +28,6 @@ export function dependencySelection(read) {
       }
       return target;
     });
-    const result = await check(address);
-    return (result.ready || result.code === 'DEPENDENCY_REPLAN') && (!archived || !selected.document.data?.commit);
+    return (await check(address)).ready && (!archived || !selected.document.data?.commit);
   };
 }
