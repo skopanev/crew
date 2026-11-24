@@ -40,6 +40,8 @@ Single-input configs retain their existing behavior.
 
 Set `failure_notes: false` to release failed flow claims without adding business notes.
 Optionally set `failure_escalation: {"after": 3, "data": {"phase": "owner_decision"}}` to limit repeated technical failures.
+Or set `failure_escalation: {"after": 2, "tag": "<vars.STUCK_TAG>"}`: the release save then adds that tag and keeps the other tags.
+The tag form counts only released technical failures. A claim refusal neither counts nor ends the series, and a success ends it.
 Use field names and values from your workspace schema. Permit saves and notes on the selected kind in the publication policy.
 The host counts confirmed failures for the same flow and item from existing run results. Successful publication resets the count.
 At the limit, the host saves the configured data, releases the claim and writes the last error in one batch.

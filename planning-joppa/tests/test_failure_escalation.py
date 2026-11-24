@@ -195,16 +195,73 @@ class FailureEscalationTests(unittest.TestCase):
         write(self.target / "result.json", {"failure_scope": flow.failure_scope(self.config), "retry_failures": {"criterion:a": 100}})
         self.assertEqual(flow.failure_counts(self.config, self.target, ["criterion:a"]), {"criterion:a": 1})
 
+    def test_stuck_tag_form_counts_released_failures_only_and_keeps_other_tags(self):
+        # crew/pm m_cfe4f201: the second consecutive released technical failure adds the configured STUCK_TAG.
+        self.config.setdefault("vars", {})["STUCK_TAG"] = "stuck"
+        self.config["failure_escalation"] = {"after": 2, "tag": "stuck"}
+        self.api.nodes["criterion:a"]["document"]["data"]["tags"] = ["wallet"]
+        first = self.fail()
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual((first["reason_code"], first["retry_failures"]), ("FLOW_FAILED", {"criterion:a": 1}))
+        self.assertEqual(commands[0]["data"], {"assignee": None})
+        # Claim refusals and skips between the two failures neither count nor end the series.
+        for name in ("refused-1", "refused-2"):
+            self.history(name, reason_code="CLAIM_REFUSED", claim_refused="criterion:a", claim_released=False,
+                         retry_failures={"criterion:a": 9})
+        write(self.fixture.folder / "skip/artifacts/result.json", {"status": "blocked", "reason_code": "ACTIVE_TASK"})
+        self.next_run("second")
+        second = self.fail()
+        commands = [row["command"] for row in self.api.batches[-1]["operations"]]
+        self.assertEqual((second["reason_code"], second["retry_failures"]), ("FAILURE_LIMIT", {"criterion:a": 2}))
+        self.assertEqual(second["failure_escalated"], ["criterion:a"])
+        self.assertEqual(commands[0]["data"], {"assignee": None, "tags": ["wallet", "stuck"]})
+        self.assertEqual(commands[1]["text"], "The tool stopped. Fix: restore the tool.")
+        self.assertNotIn("returns", commands[0]["data"])
+        self.assertNotIn("stage", commands[0]["data"])
+        # A human clears the tag: the series starts again, and an existing tag is never repeated.
+        self.next_run("third")
+        self.assertEqual(self.fail()["retry_failures"], {"criterion:a": 1})
+        self.next_run("fourth")
+        self.api.nodes["criterion:a"]["document"]["data"]["tags"] = ["stuck", "wallet"]
+        self.fail()
+        self.assertEqual(self.api.batches[-1]["operations"][0]["command"]["data"]["tags"], ["stuck", "wallet"])
+
+    def test_stuck_tag_form_refusals_never_reach_the_limit(self):
+        self.config.setdefault("vars", {})["STUCK_TAG"] = "stuck"
+        self.config["failure_escalation"] = {"after": 2, "tag": "stuck"}
+        (self.target / "claim.json").unlink()
+        selected = self.api.nodes["criterion:a"]
+        selected["document"]["data"]["assignee"] = "crew-planning:another-run"
+        selected["current_revision"] += 1
+        selected["document"]["revision"] = selected["current_revision"]
+        batches = len(self.api.batches)
+        for index in range(1, 4):
+            code, emit, signal = self.prepare_result("refused-" + str(index))
+            self.assertEqual(code, 1)
+            result = read(self.target / "result.json")
+            self.assertEqual(result["reason_code"], "CLAIM_REFUSED")
+            self.assertNotIn("retry_failures", result)
+            self.assertEqual(len(self.api.batches), batches)
+        selected["document"]["data"].pop("assignee")
+        selected["current_revision"] += 1
+        selected["document"]["revision"] = selected["current_revision"]
+        code, emit, signal = self.prepare_result("free-after-refusals")
+        self.assertTrue(any(call.args[0] == "PREPARED" for call in signal.call_args_list))
+
     def test_escalation_configuration_requires_guarded_save_and_note_permissions(self):
         base = {**self.config, "workflow": str(fixtures.ROOT / "writer/workflow.yaml"), "mcp_command": ["connector"]}
         self.assertEqual(fixtures.flow_launch.configuration("unused", json.dumps(base)), base)
         for policy in [None, {}, {"after": True, "data": {"phase": "owner_decision"}},
                        {"after": 0, "data": {"phase": "owner_decision"}}, {"after": 3, "data": {}},
-                       {"after": 3, "data": {"assignee": "someone"}}, {"after": 3, "data": {"phase": 2}}]:
+                       {"after": 3, "data": {"assignee": "someone"}}, {"after": 3, "data": {"phase": 2}},
+                       {"after": 2, "tag": "other"}, {"after": 2, "tag": ""}, {"after": 2, "tag": "stuck", "data": {"phase": "x"}}]:
             if policy is None:
                 continue
             with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, "failure_escalation"):
                 fixtures.flow_launch.configuration("unused", json.dumps({**base, "failure_escalation": policy}))
+        tagged = {**base, "vars": {**base.get("vars", {}), "STUCK_TAG": "stuck"}, "failure_escalation": {"after": 2, "tag": "stuck"}}
+        self.assertEqual(fixtures.flow_launch.configuration("unused", json.dumps(tagged)), tagged)
+        base = {**base, "vars": {**base.get("vars", {}), "STUCK_TAG": "stuck"}}
         for key, value in [("allowed_operations", ["save_object"]), ("update_kinds", ["work"])]:
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "failure_escalation"):
                 fixtures.flow_launch.configuration("unused", json.dumps({**base, "publication": {**base["publication"], key: value}}))

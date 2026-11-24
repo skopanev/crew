@@ -21,6 +21,8 @@ def failure_policy(config):
 
 
 def failure_counts(config, target, addresses):
+    # The tag form counts only released technical failures. A claim refusal neither counts nor ends the series.
+    tagged = "tag" in (config.get("failure_escalation") or {})
     counts = {address: 1 for address in addresses}
     pending = set(addresses)
     scope = failure_scope(config)
@@ -43,6 +45,8 @@ def failure_counts(config, target, addresses):
             continue
         refused = result.get("claim_refused")
         refusal = isinstance(refused, str) and result.get("reason_code") in ("CLAIM_REFUSED", "FAILURE_LIMIT")
+        if refusal and tagged:
+            continue
         if (result.get("claim_released") is not True and not refusal) or result.get("needs_recovery"):
             continue
         revisions = result.get("item_revisions")
@@ -226,7 +230,12 @@ def fail(api, config, target, reason, refused=None):
             command = claims.save_command(selected, None, "Release the failed configured workflow claim.")
             if policy and counts[address] >= policy["after"]:
                 require(selected["kind"] in config["publication"]["update_kinds"], "failure escalation kind is outside the publication policy")
-                command["data"].update(policy["data"])
+                command["data"].update(policy.get("data", {}))
+                if "tag" in policy:
+                    # Keep every other tag. The configured stuck tag excludes the item from the next selection.
+                    tags = selected["document"]["data"].get("tags") or []
+                    require(isinstance(tags, list), "failure escalation needs a tag list on " + address)
+                    command["data"]["tags"] = tags if policy["tag"] in tags else [*tags, policy["tag"]]
                 command["reason"] = reason[:1000]
                 escalated.append(address)
             batch.append({"command": command})
@@ -255,7 +264,7 @@ def fail(api, config, target, reason, refused=None):
                      reason_code="FAILURE_LIMIT" if escalated else "FLOW_FAILED")
     elif refused:
         value.update(claim_refused=refused, reason_code="CLAIM_REFUSED")
-        if policy:
+        if policy and "tag" not in policy:
             value.update(failure_scope=failure_scope(config), retry_failures=counts, failure_escalated=[],
                          reason_code="FAILURE_LIMIT" if counts[refused] >= policy["after"] else "CLAIM_REFUSED")
     write(target / "result.json", value)
