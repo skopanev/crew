@@ -19,7 +19,7 @@ export function validateHostMaintenance(config) {
 export function startHostMaintenance(initial, onError = console.error) {
   let config = initial, timer, active, controller, stopped = false;
   const schedule = () => {
-    if (stopped || config.hostMaintenance == null) return;
+    if (stopped || config.launchLanes !== true || config.hostMaintenance == null) return;
     timer = setTimeout(tick, (config.hostMaintenance.intervalSeconds ?? 30) * 1000);
     timer.unref();
   };
