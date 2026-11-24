@@ -118,8 +118,32 @@ def operations(config, assignment, claim, value):
                 require(op == "save_object" and set(cmd) <= {"op", "kind", "id", "revision", "data", "relations", "reason"},
                         "related update must be a scoped save")
                 if address == parent:
-                    require(permission.get("parent") == ["stage"] and set(cmd.get("data") or {}) == {"stage"} and
-                            isinstance(cmd["data"]["stage"], str) and cmd["data"]["stage"] and not cmd.get("relations"), "parent update permits stage only")
+                    fields, update = permission.get("parent"), cmd.get("data") or {}
+                    require(fields in (["stage"], ["stage", "returns"], ["stage", "returns", "tags"]) and
+                            isinstance(update, dict) and "stage" in update and set(update) <= set(fields) and
+                            isinstance(update["stage"], str) and update["stage"] and not cmd.get("relations"),
+                            "parent update exceeds the configured fields")
+                    if "returns" in update:
+                        types = assignment["schema"]["types"]
+                        field = types[related[address]["kind"]].get("fields", {}).get("returns", {})
+                        previous = related[address]["document"]["data"].get("returns", 0)
+                        require(types[selected["kind"]].get("role") == "task" and
+                                types[related[address]["kind"]].get("role") == "ac" and
+                                field.get("type") == "number" and field.get("from", "own") == "own" and
+                                type(previous) is int and previous >= 0 and type(update["returns"]) is int and
+                                update["returns"] == previous + 1, "parent returns permits one guarded increment only")
+                    if "tags" in update:
+                        variables = config.get("vars", {})
+                        limit = str(variables.get("TASKER_RETURN_LIMIT", ""))
+                        tag = variables.get("STUCK_TAG")
+                        tags = related[address]["document"]["data"].get("tags", [])
+                        field = assignment["schema"]["types"][related[address]["kind"]].get("fields", {}).get("tags", {})
+                        require("returns" in update and limit.isascii() and limit.isdecimal() and int(limit) > 0 and
+                                update["returns"] >= int(limit) and isinstance(tag, str) and tag.strip() == tag and bool(tag) and
+                                isinstance(tags, list) and all(isinstance(item, str) for item in tags) and
+                                field.get("type") == "list" and field.get("from", "own") == "own" and
+                                update["tags"] == (tags if tag in tags else [*tags, tag]),
+                                "parent tags permits the configured stuck addition at the return limit only")
                 else:
                     require(permission.get("incoming") == "remove_selected_edge" and not cmd.get("data") and any(
                         row["command"].get("op") == "archive_object" and claims.address_of(row["command"]) == selected["address"]

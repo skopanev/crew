@@ -13,6 +13,18 @@ def checked_stage($value): stage_for($selected.kind; $value);
 ((($ac_findings | length) > 0 or ($test_findings | length) > 0)) as $supported |
 ($role == "ac" and $supported) as $business |
 ($role == "task" and $supported) as $parent_return |
+($in.context.parent // {}) as $parent |
+(if $parent_return then
+  ($parent.document.data // {}) as $parent_data |
+  ($ARGS.named.return_limit | if type == "number" and . > 0 and . == floor then . else error("TASKER_RETURN_LIMIT must be positive") end) as $limit |
+  (($parent_data.returns // 0) | if type == "number" and . >= 0 and . == floor then . + 1 else error("Parent AC returns must be a nonnegative integer") end) as $count |
+  {stage: (if ($ac_findings | length) > 0 then $ARGS.named.return_stage else $ARGS.named.test_return_stage end | stage_for($parent.kind; .)), returns: $count} +
+  (if $count >= $limit then
+    ($ARGS.named.stuck_tag | if text and . == (ltrimstr(" ") | rtrimstr(" ")) then . else error("STUCK_TAG is required") end) as $tag |
+    ($parent_data.tags // [] | if type == "array" and all(.[]; type == "string") then . else error("Parent tags must be strings") end) as $tags |
+    {tags: (if ($tags | index($tag)) != null then $tags else $tags + [$tag] end)}
+  else {} end)
+ else null end) as $parent_update |
 ($role == "task" and ($supported | not) and ($ARGS.named.generic_count // 1) >= ($ARGS.named.return_limit // 3)) as $task_stuck |
 (if $business then
   ($ARGS.named.return_limit | if type == "number" and . > 0 and . == floor then . else error("TASKER_RETURN_LIMIT must be positive") end) as $limit |
@@ -33,10 +45,9 @@ if $dry == "true" then
     reason: ("Dry run, nothing published. Would be REJECTED: " + $note | .[0:1000])}}
 else
   {operations: [(if $parent_return then
-    $in.context.parent as $parent |
     {command: {op: "save_object", kind: $parent.kind, id: ($parent.address | sub("^[^:]*:"; "")),
       revision: $parent.current_revision,
-      data: {stage: (if ($ac_findings | length) > 0 then $ARGS.named.return_stage else $ARGS.named.test_return_stage end | stage_for($parent.kind; .))},
+      data: $parent_update,
       reason: ($note | .[0:1000])}} else empty end),
     (if ($update | length) > 0 then
     {command: {op: "save_object", kind: $selected.kind, id: ($selected.address | sub("^[^:]*:"; "")),
