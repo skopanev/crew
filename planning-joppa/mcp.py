@@ -182,7 +182,7 @@ class Reader:
             if type(limit) is not int or limit < 1:
                 raise MCPError("Read limit must be a positive integer")
             args["limit"] = min(limit, 25)
-        if name == "joppa_objects" and not args.get("address"):
+        if name == "joppa_objects" and not args.get("address") and not args.get("relations_of"):
             args.setdefault("fields", ["title", "status"])
         if args.get("item_id"):
             raise MCPError("Use workspace and a full object address instead of item_id")
