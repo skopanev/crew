@@ -227,7 +227,7 @@ test('an active Task keeps its existing release route without creating context o
   assert.equal(fs.existsSync(path.join(f.artifacts, 'tasker-assignment.json')), false);
   assert.equal(fs.existsSync(path.join(f.root, 'trees-called')), false);
   const publication = JSON.parse(fs.readFileSync(path.join(f.artifacts, 'operations.json'), 'utf8'));
-  assert.deepEqual(publication.operations, []); assert.equal(publication.outcome.reason_code, 'ACTIVE_TASK');
+  assert.deepEqual(publication.operations, []); assert.equal(publication.outcome.reason_code, 'LIVE_TASK');
 });
 
 test('a blocked shared prepare keeps its signal without creating an assignment', t => {

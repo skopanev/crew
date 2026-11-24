@@ -88,3 +88,11 @@ test('nextTask reads a newer Joppa release before it excludes a finished held ru
   assert.equal((await nextTask(f.run.config)).candidate.id, 'task:t1');
   assert.equal(fs.readFileSync(file, 'utf8'), raw);
 });
+
+test('confirmed outcomes and current archived Tasks do not hold their former AC',()=>{
+  const held={claim:{},result:{held:true,finishedAt:'2026-11-14T00:00:00Z'},completionRequest:{}};
+  assert.equal(runHoldsTasks(held),true);
+  assert.equal(runHoldsTasks(held,[{document:{present:false}}]),false);
+  assert.equal(runHoldsTasks(held,[{document:{present:true}}]),true);
+  for(const result of [{completed:true},{blockConfirmed:true}])assert.equal(runHoldsTasks({...held,result}),false);
+});

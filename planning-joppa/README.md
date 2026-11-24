@@ -13,7 +13,7 @@ Set these fields in the flow config:
 
 - `workflow`: the absolute path to a Medulla `workflow.yaml`.
 - `selection`: native Joppa filters, including `kind`. Optional `order` lists `{field, direction}` entries with optional `values`.
-- `exclude_children`: an optional native filter for direct children that exclude a selected item.
+- `exclude_children`: an optional native filter, or a list of filters, for direct children that exclude a selected item. Each filter can exclude the item.
 - `references`: selected data reference fields to read. Optional `children` supplies a native direct-child query.
 - `publication`: `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Pass workflow models and stages through `vars`.
 

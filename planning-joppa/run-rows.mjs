@@ -78,6 +78,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const status = active ? 'RUNNING' : ['published', 'unchanged'].includes(result?.status) ? 'READY' :
         recovery ? 'HELD' : result?.reason?.startsWith('Required owner decision:') ? 'HUMAN' :
         result?.status === 'blocked' ? 'BLOCKED' : last?.next === '__exit_fail__' || launch?.result?.code ? 'FAILED' : 'STOPPED';
+      // Historical active-work refusals are selection skips, not work results.
+      if (!active && !recovery && result?.reason_code === 'ACTIVE_TASK') return [];
       let stage = '';
       let reasonCode = result?.reason_code;
       if (active) {

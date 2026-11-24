@@ -121,3 +121,18 @@ setInterval(()=>{if(fs.existsSync(path.join(process.env.TEST_RELEASE,address)))p
     assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
   } finally { if (run.child.exitCode === null) await run.stop(); }
 });
+
+test('either active child stage excludes an AC before a claim while done Tasks allow it', async t => {
+  const f=await plannerFixture(t);f.queue.push('task:t1');
+  f.objects.get('ac:a1').document.data.stage='to_task';
+  const config={...f.config,workflow:'/tmp/workflow.yaml',selection:{kind:'ac',data:{stage:'to_task'}},
+    exclude_children:['to_implement','to_review'].map(stage=>({kind:'task',data:{stage}}))};
+  const task=f.objects.get('task:t1');
+  for(const stage of ['to_implement','to_review','done']){
+    task.document.data.stage=stage;
+    const result=await nextConfiguredItem(config,config.token_file);
+    assert.equal(result.next?.address??null,stage==='done'?'ac:a1':null);
+  }
+  assert.equal(f.calls.some(call=>call.name==='joppa_batch'),false);
+  assert.ok(f.calls.filter(call=>call.args.parent==='ac:a1').every(call=>!Array.isArray(call.args.data?.stage)));
+});

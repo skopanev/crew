@@ -15,7 +15,10 @@ import {reservationReleased} from './reservation-release.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
 
-export function runHoldsTasks(run) {
+export function runHoldsTasks(run, currentTasks) {
+  // Current archived Tasks cannot keep their former AC reserved. Omitted evidence stays conservative.
+  if (Array.isArray(currentTasks) && currentTasks.every(node => node.document?.present === false)) return false;
+  if (run.result?.completed || run.result?.blockConfirmed) return false;
   if (run.finalizeOnly) return !run.result && (!run.worker || alive(run.worker.pid));
   if (run.releaseConfirmed === true) return false;
   if (!run.result || run.result.held || run.claimRequest && !run.claim && !run.claimRejected) return true;
