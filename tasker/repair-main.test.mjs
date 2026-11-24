@@ -208,6 +208,9 @@ test('sample0001 cannot retire private exports or remove its consumer dependency
     const draft={verdict:'STALE',reason:'All Task deliverables exist',needs_code:false,done_commit:done,retirement_proof:proof()};
     const completed=repairPublication(options(draft)).publication;
     assert.equal(completed.outcome.reason_code,'STALE');
+    const released=completed.operations.find(row=>row.command.relations);
+    assert.ok(released,'A complete retirement releases its verified prerequisite');
+    assert.deepEqual(released.command.relations.depends_on.edges,[]);
     assert.equal(completed.operations.at(-1).command.op,'archive_object');
     assert.equal(completed.operations.at(-1).command.target,'task:sample0001');
     const artifacts=path.join(root,'artifacts');fs.mkdirSync(artifacts);

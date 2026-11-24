@@ -34,15 +34,15 @@ test('READY preserves the Task id and title; changed AC requires retirement', ()
   assert.equal(output.operations[0].command.id,'t');
   assert.equal(output.operations[0].command.revision,5);
 });
-test('STALE removes only its edge, preserves group metadata and queues AC only when code remains', () => {
+test('STALE keeps prerequisite edges while work remains and refuses retirement without proof', () => {
   const original=input();const before=structuredClone(original);
   const build=needs_code=>repairPublication({gapTags,input:original,repair:{ac_text_changed:true},draft:{verdict:'STALE',reason:'Old AC',needs_code},run:'run'}).publication;
   const work=build(true);
-  assert.deepEqual(work.operations[1].command.relations,{depends_on:{...group,edges:[{to:'task:other',revision:3}]}});
-  assert.equal(Object.hasOwn(work.operations[1].command,'data'),false);
+  assert.deepEqual(work.operations.map(row=>row.command.op),['save_object','archive_object']);
+  assert.ok(work.operations.every(row=>!row.command.relations&&row.command.id!=='consumer'));
   assert.deepEqual(work.operations[0].command.data,{stage:'to_task'});
-  assert.equal(work.operations[2].command.op,'archive_object');
-  assert.equal(work.operations[2].command.target,'task:t');
+  assert.equal(work.operations[1].command.op,'archive_object');
+  assert.equal(work.operations[1].command.target,'task:t');
   const refused=repairPublication({input:original,repair:{ac_text_changed:true},draft:{verdict:'STALE',reason:'Old AC',needs_code:false},run:'run'});
   assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
   assert.deepEqual(original,before);
@@ -101,7 +101,7 @@ test('dry run emits no business writes and a held dependent refuses the whole re
   const draft={verdict:'STALE',reason:'Old work',needs_code:true};
   const output=repairPublication({gapTags,input:input(),repair:{ac_text_changed:true},draft,run:'run',dry:true});
   assert.deepEqual(output.publication.operations,[]);
-  assert.equal(output.would_publish.operations.length,3);
+  assert.equal(output.would_publish.operations.length,2);
   const held=input();held.context.incoming[0].document.data.assignee='a-lane';
   assert.throws(()=>repairPublication({gapTags,input:held,repair:{ac_text_changed:true},draft,run:'run'}),/held/);
 });
@@ -209,4 +209,18 @@ test('legacy Tasks compare Source references and publish their Test history limi
   assert.match(unchanged.baseline_note, /were not compared/);
   assert.equal(changedText(node('ac:a', {title: 'A', body: 'B', sources: ['source:b', 'source:a']}),
     node('ac:a', {title: 'A', body: 'B', sources: ['source:a', 'source:b']})), false);
+});
+
+test('replanning keeps consumer dependencies and preserves any recorded commit as evidence',()=>{
+  for(const commit of [undefined,'a'.repeat(40)]){
+    const assignment=input();if(commit)assignment.selected.document.data.commit=commit;
+    const frozen=structuredClone(assignment);
+    const output=repairPublication({input:assignment,repair:{ac_text_changed:true},
+      draft:{verdict:'STALE',reason:'The AC contract changed and work remains',needs_code:true},run:'replan'}).publication;
+    assert.deepEqual(output.operations.map(row=>row.command.op),['save_object','archive_object']);
+    assert.deepEqual(output.operations[0].command.data,{stage:'to_task'});
+    assert.equal(output.operations[1].command.target,assignment.selected.address);
+    assert.ok(output.operations.every(row=>!row.command.relations));
+    assert.deepEqual(assignment,frozen);
+  }
 });

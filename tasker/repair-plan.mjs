@@ -106,6 +106,7 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
     if (draft.needs_code) operations.push(save(parent, {stage: 'to_task'}));
     for (const consumer of incoming) {
       if (consumer.document.data.assignee) problem('An incoming dependent Task is held: ' + consumer.address);
+      if (draft.needs_code) continue;
       const group = consumer.relations?.depends_on;
       if (!group || !Array.isArray(group.edges)) problem('Incoming dependency has no native relation group');
       const edges = group.edges.filter(edge => edge.to !== task.address);
