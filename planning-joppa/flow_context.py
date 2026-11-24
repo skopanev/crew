@@ -177,3 +177,32 @@ def verify(api, config, assignment, claim):
         require(objects({**assignment, "context": current}).keys() == objects(assignment).keys(), "related membership changed")
         require({item["address"] for item in current["incoming"]} ==
                 {item["address"] for item in assignment["context"]["incoming"]}, "incoming membership changed")
+
+
+def validate_parent_update(config, assignment, parent, cmd):
+    fields, update = config["publication"].get("related_updates", {}).get("parent"), cmd.get("data") or {}
+    require(fields in (["stage"], ["stage", "returns"], ["stage", "returns", "tags"]) and
+            isinstance(update, dict) and "stage" in update and set(update) <= set(fields) and
+            isinstance(update["stage"], str) and update["stage"] and not cmd.get("relations"),
+            "parent update exceeds the configured fields")
+    if "returns" in update:
+        types = assignment["schema"]["types"]
+        field = types[parent["kind"]].get("fields", {}).get("returns", {})
+        previous = parent["document"]["data"].get("returns", 0)
+        require(types[assignment["selected"]["kind"]].get("role") == "task" and
+                types[parent["kind"]].get("role") == "ac" and
+                field.get("type") == "number" and field.get("from", "own") == "own" and
+                type(previous) is int and previous >= 0 and type(update["returns"]) is int and
+                update["returns"] == previous + 1, "parent returns permits one guarded increment only")
+    if "tags" in update:
+        variables = config.get("vars", {})
+        limit = str(variables.get("TASKER_RETURN_LIMIT", ""))
+        tag = variables.get("STUCK_TAG")
+        tags = parent["document"]["data"].get("tags", [])
+        field = assignment["schema"]["types"][parent["kind"]].get("fields", {}).get("tags", {})
+        require("returns" in update and limit.isascii() and limit.isdecimal() and int(limit) > 0 and
+                update["returns"] >= int(limit) and isinstance(tag, str) and tag.strip() == tag and bool(tag) and
+                isinstance(tags, list) and all(isinstance(item, str) for item in tags) and
+                field.get("type") == "list" and field.get("from", "own") == "own" and
+                update["tags"] == (tags if tag in tags else [*tags, tag]),
+                "parent tags permits the configured stuck addition at the return limit only")

@@ -62,6 +62,7 @@ async function main() {
   const [mode] = process.argv.slice(2), env = process.env;
   const dir = path.join(env.MEDULLA_RUN_DIR, 'artifacts'), load = name => JSON.parse(fs.readFileSync(path.join(dir, name + '.json')));
   const config = JSON.parse(fs.readFileSync(env.PLANNING_JOPPA_CONFIG));
+  const dry = env.DRY_RUN === 'true';
   let input = mode === 'preclaim' ? null : load('input');
   const output = path.join(dir, config.publication.file);
   const block = (reason_code, reason) => {
@@ -146,9 +147,8 @@ async function main() {
         console.log('<signal:DECISION>Release the planning claim without changing the active Task.</signal:DECISION>');
         return;
       }
-      const proofFile = path.join(dir, 'dependency-replan.json');
       if (mode === 'verify') {
-        require(JSON.stringify(JSON.parse(fs.readFileSync(proofFile))) === JSON.stringify(dependency.archived),
+        require(JSON.stringify(load('dependency-replan')) === JSON.stringify(dependency.archived),
           'Dependency replan evidence changed before publication');
         return;
       }
@@ -157,7 +157,6 @@ async function main() {
       require(!data(parent).assignee && input.schema.types[parent.kind]?.role === 'ac' &&
         input.schema.types[parent.kind]?.fields?.stage?.values?.includes(stage), 'Configure the unheld parent replan stage');
       const reason = 'plan obsolete: prerequisite archived without delivery';
-      const dry = env.DRY_RUN === 'true';
       const value = {operations: dry ? [] : [
         {command: {op: 'save_object', kind: parent.kind, id: parent.address.split(':')[1],
           revision: parent.current_revision, data: {stage}, reason}},
@@ -165,7 +164,7 @@ async function main() {
           id: ('tasker-dependency-replan-' + path.basename(env.MEDULLA_RUN_DIR)).slice(-120), text: reason}},
         {command: {op: 'archive_object', target: input.selected.address, revision: input.claim_revision, reason}}],
         outcome: {status: dry ? 'blocked' : 'published', reason_code: dry ? 'DRY_RUN' : 'DEPENDENCY_REPLAN', reason}};
-      fs.writeFileSync(proofFile, JSON.stringify(dependency.archived));
+      fs.writeFileSync(path.join(dir, 'dependency-replan.json'), JSON.stringify(dependency.archived));
       fs.writeFileSync(output + '.tmp', JSON.stringify(value)); fs.renameSync(output + '.tmp', output);
       console.log('<signal:DECISION>Publish the guarded dependency replan before models.</signal:DECISION>');
       return;
@@ -194,7 +193,6 @@ async function main() {
     const update = {stage, returns: previous + 1,
       ...(previous + 1 >= limit ? {tags: tags.includes(tag) ? [...tags] : [...tags, tag]} : {})};
     const reason = 'Return incomplete Test metadata to Writer. ' + findings.map(f => f.target + ': ' + f.problem).join(' ');
-    const dry = env.DRY_RUN === 'true';
     const value = {operations: dry ? [] : [
       {command: {op: 'save_object', kind: parent.kind, id: parent.address.split(':')[1],
         revision: parent.current_revision, data: update, reason: reason.slice(0, 1000)}},
