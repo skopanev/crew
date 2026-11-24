@@ -89,7 +89,12 @@ async function main() {
         status: ['red', 'yellow', 'orange', 'blue', 'green'],
         fields: ['revision', 'parent', 'title', 'body', 'command'], limit: 25, ...(cursor ? {cursor} : {})});
       require(Array.isArray(page.items), 'Task Test inventory is unavailable');
-      children.push(...page.items);
+      for (const row of page.items) {
+        const node = await read('joppa_objects', {address: row.address});
+        require(node.address === row.address && node.historical === false && node.document?.parent === parent.address,
+          'Task Test context changed');
+        children.push(node);
+      }
       cursor = page.next_cursor;
       require(!cursor || !seen.has(cursor), 'Test pagination did not advance'); seen.add(cursor);
     } while (cursor);

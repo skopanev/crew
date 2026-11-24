@@ -44,7 +44,8 @@ test('metadata preclaim only reads, then claimed prepare routes the parent befor
   const save=()=>f.write(nodes,{schema:f.input.schema,task:f.input.selected,parent:f.input.context.parent,tests:f.input.context.children});save();
   fs.writeFileSync(path.join(launcher,'joppa-api.mjs'),`import fs from 'node:fs';export async function readJoppa(u,t,tool,args){
     const n=JSON.parse(fs.readFileSync(${JSON.stringify(nodes)}));if(tool==='joppa_tree')return {schema:n.schema};
-    if(args.address)return [n.task,n.parent,...n.tests].find(x=>x.address===args.address);return {items:n.tests};}`);
+    if(args.address)return [n.task,n.parent,...n.tests].find(x=>x.address===args.address);
+    return {items:n.tests.map(x=>({address:x.address,revision:x.current_revision,parent:x.document.parent,...x.document.data}))};}`);
   for(const [file,source] of Object.entries({'joppa.mjs':'export const runHoldsTasks=()=>false;',
     'joppa-common.mjs':'export const runTasks=()=>[];','runtime.mjs':'export const runDirectories=()=>[];export const readRun=()=>({});',
     'scope.mjs':'export const scopeDirectory=x=>x;','dependencies.mjs':'export const dependencyCheck=()=>async()=>({ready:true});'})) fs.writeFileSync(path.join(launcher,file),source);
