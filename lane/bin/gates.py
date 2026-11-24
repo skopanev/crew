@@ -81,14 +81,24 @@ def existing(root):
             if len(reporters) > 1 or reporters and " > " not in reporters[0]:
                 raise ValueError("existing-code verification needs one unambiguous Reporter name")
             argv = shlex.split(test["command"])
+            command_root = Path.cwd().resolve()
+            if argv[:1] == ["cd"]:
+                if len(argv) < 4 or argv[2] != "&&" or Path(argv[1]).is_absolute():
+                    raise ValueError("existing-code verification supports only cd <directory> && <command>")
+                command_root = (command_root / argv[1]).resolve()
+                if not command_root.is_dir() or not command_root.is_relative_to(Path.cwd().resolve()):
+                    raise ValueError("the Test command directory must stay inside this checkout")
+                argv = argv[3:]
             parts = reporters[0].split(" > ") if reporters else []
-            path = Path(parts[0].strip()) if len(parts) > 1 else Path(argv[-1]) if argv else Path()
+            path = Path(parts[0].strip()) if len(parts) > 1 else command_root / argv[-1] if argv else Path()
+            if not parts:
+                path = path.relative_to(Path.cwd().resolve())
             title = parts[-1].strip() if len(parts) > 1 else test["title"]
             if (path.is_absolute() or not path.is_file()
                     or not path.resolve().is_relative_to(Path.cwd().resolve())):
                 raise ValueError("the Test command must end with a file inside this checkout")
             name = path.as_posix()
-            if parts and not any(Path(arg).as_posix() == name for arg in argv):
+            if parts and not any((command_root / arg).resolve() == path.resolve() for arg in argv):
                 raise ValueError("Reporter file differs from the Test command")
             git("--literal-pathspecs", "ls-files", "--error-unmatch", "--", name)
             if not title or title not in git("show", f"HEAD:{name}"):
