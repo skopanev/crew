@@ -15,10 +15,10 @@ const need = (ok, message) => { if (!ok) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const count = value => [...value].length;
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
-// The agents read their files through read_context and read_file. On a retry the author prompt also names the
-// previous draft and the findings to close. The first prompt has the AC only.
-const feedback = directory => emit('decider_feedback', 'Previous draft and findings to close: ' +
-  ['draft.json', 'critique.json', 'shape-feedback.json'].map(name => path.join(directory, name)).filter(fs.existsSync).join(' '));
+// The agents read their files through read_context and read_file. On a retry the author prompt says so. read_context
+// lists the previous draft and the findings, so the prompt names no path. The first prompt has the AC only.
+const feedback = () => emit('decider_feedback', RETRY);
+export const RETRY = 'Retry: read_context lists your previous draft and the findings. Close each finding.';
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const save = (file, value) => { fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n'); fs.renameSync(file + '.tmp', file); };
 const emit = (key, value) => console.log(`<signal:var key=${key}>${String(value).replaceAll('<', '\\u003c').replaceAll('{{', '\\u007b\\u007b')}</signal:var>`);
@@ -219,7 +219,7 @@ function main() {
     const issues = problems(draft, input, packeted.includes(draft.outcome) ? read(path.join(directory, 'decider-assignment.json')) : undefined);
     if (issues.length) {
       if (Number(env.shape_retries || 0) < 1) {
-        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(directory); signal('REVISE');
+        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(); signal('REVISE');
       } else {
         // A broken output contract is a technical failure: stage and returns stay.
         fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the decision stayed invalid after one correction.\n' + issues.join('\n'));
@@ -236,7 +236,7 @@ function main() {
     if (fs.existsSync(evidence)) {
       const issues = read(evidence);
       if (Number(env.shape_retries || 0) < 1) {
-        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(directory); signal('REVISE');
+        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(); signal('REVISE');
       }
       else { fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the evidence quotes stayed wrong after one correction.\n' + issues.join('\n')); signal('FAILED'); }
       return;
@@ -274,7 +274,7 @@ function main() {
     save(file('would-publish'), value); save(file('operations'), dryOutput(value, env.DRY_RUN === 'true')); signal('APPROVED');
   } else if (Number(env.round || 1) <= Number(env.REWORK_LIMIT)) {
     save(path.join(directory, 'critique.json'), {codex: first, second});
-    emit('critique', JSON.stringify({codex: first, second})); emit('round', String(Number(env.round || 1) + 1)); feedback(directory); signal('REVISE');
+    emit('critique', JSON.stringify({codex: first, second})); emit('round', String(Number(env.round || 1) + 1)); feedback(); signal('REVISE');
   } else {
     fs.writeFileSync(path.join(directory, 'failure.txt'), 'Independent critics did not approve the frozen decision.\n' +
       JSON.stringify({codex: first, second}, null, 2) + '\n');

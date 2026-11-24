@@ -6,7 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
-import {problems, proposal, reviews, policy, rejected, settings} from './control.mjs';
+import {problems, proposal, reviews, policy, rejected, settings, RETRY} from './control.mjs';
 // The digests that freeze gives to the critic step. The host stamps them on each critic output.
 const frozenDigests = directory => Object.fromEntries([['draft_digest', 'draft'], ['context_digest', 'decider-assignment']].map(([key, name]) =>
   [key, fs.existsSync(path.join(directory, name + '.json')) ? createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex') : '']));
@@ -238,18 +238,19 @@ test('a retry names the previous draft and the findings to close in the author p
   fs.writeFileSync(path.join(root, 'draft.json'), JSON.stringify({outcome: 'READY'}));
   const out = spawnSync(process.execPath, [path.join(here, 'control.mjs'), 'check', root], {encoding: 'utf8', env: {...process.env, ...vars, shape_retries: '0'}}).stdout;
   assert.match(out, /<signal:REVISE>/);
-  assert.ok(out.includes(`<signal:var key=decider_feedback>Previous draft and findings to close: ${root}/draft.json ${root}/shape-feedback.json</signal:var>`), out);
+  assert.ok(out.includes(`<signal:var key=decider_feedback>${RETRY}</signal:var>`), out);
   assert.ok(Array.isArray(JSON.parse(fs.readFileSync(path.join(root, 'shape-feedback.json'), 'utf8'))));
 });
 
 test('every assembled Decider prompt has at most 1024 characters in every round', () => {
   const workflow = Bun.YAML.parse(fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8'));
   const a = '/Users/finik/Projects/finik/.medulla/decider-runs/2026-11-24_07-27-40-265d14e6/artifacts';
-  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: 'Previous draft and findings to close: ' + ['draft.json', 'critique.json', 'shape-feedback.json'].map(name => a + '/' + name).join(' ')};
+  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: RETRY};
   const render = prompt => prompt.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
   for (const seat of ['author', 'critics']) {
     const prompt = render(workflow.nodes[seat].prompt);
-    assert.ok(prompt.length <= 1024, seat + ' prompt has ' + prompt.length + ' characters');
+    // Medulla appends SIGNAL_PROTOCOL (586 characters, medulla v2 signals.py) to each agent prompt.
+    assert.ok(prompt.length + 586 <= 1024, seat + ' prompt has ' + prompt.length + ' characters before the signal protocol');
     assert.doesNotMatch(prompt, /\{\{/);
   }
 });

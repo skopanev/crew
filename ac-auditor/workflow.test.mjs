@@ -9,12 +9,11 @@ const dir = new URL('.', import.meta.url).pathname;
 const workflow = Bun.YAML.parse(readFileSync(join(dir, 'workflow.yaml'), 'utf8'));
 const role = name => readFileSync(join(dir, 'prompts', name + '.md'), 'utf8');
 
-test('each prompt is the role prompt, the AC address and for the judge the finder result paths', () => {
+test('each prompt is the role line, the role file path and the AC address', () => {
   // At most 1024 characters: the role file in the run holds the steps and the answer format.
   const read = 'Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.\n';
   assert.equal(workflow.nodes.finders.prompt, 'You are one of three AC audit finders. ' + read + 'Role file: {{var:audit_artifacts}}/finder.md\nAC: {{var:audit_ac}}\n');
-  assert.equal(workflow.nodes.judge.prompt, 'You are the AC audit judge. ' + read + 'Role file: {{var:audit_artifacts}}/judge.md\nAC: {{var:audit_ac}}\n' +
-    'Finder one: {{var:finder_one_path}}\nFinder two: {{var:finder_two_path}}\nFinder three: {{var:finder_three_path}}\n');
+  assert.equal(workflow.nodes.judge.prompt, 'You are the AC audit judge. ' + read + 'Role file: {{var:audit_artifacts}}/judge.md\nAC: {{var:audit_ac}}\n');
   const a = '/Users/finik/Projects/finik/.medulla/auditor-runs/2026-11-24_08-33-04-be678ae6/artifacts';
   const values = {audit_ac: 'ac:eqc8z147', audit_artifacts: a, ...Object.fromEntries(['one', 'two', 'three'].map(n => [`finder_${n}_path`, `${a}/finder-${n}.json`]))};
   const render = prompt => prompt.replace(/\{\{file:prompts\/([a-z]+\.md)\}\}/g, (_, name) => readFileSync(join(dir, 'prompts', name), 'utf8'))
@@ -22,7 +21,8 @@ test('each prompt is the role prompt, the AC address and for the judge the finde
   for (const [node, name] of [['finders', 'finder'], ['judge', 'judge']]) {
     const prompt = render(workflow.nodes[node].prompt);
     assert.ok(prompt.includes(`Role file: ${a}/${name}.md`));
-    assert.ok(prompt.length <= 1024, node + ' prompt has ' + prompt.length + ' characters');
+    // Medulla appends SIGNAL_PROTOCOL (586 characters, medulla v2 signals.py) to each agent prompt.
+    assert.ok(prompt.length + 586 <= 1024, node + ' prompt has ' + prompt.length + ' characters before the signal protocol');
     assert.doesNotMatch(prompt, /\{\{/);
     assert.doesNotMatch(role(name), /Do not read files|All input is in this prompt|role contract below/);
     for (const text of ['mcp__joppa__read_context first', 'offset set to next_offset until next_offset is null']) assert.ok(role(name).includes(text), name + ' lacks ' + text);

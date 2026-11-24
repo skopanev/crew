@@ -175,9 +175,6 @@ nodes:
       You are the AC audit judge. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
       Role file: {{var:audit_artifacts}}/judge.md
       AC: {{var:audit_ac}}
-      Finder one: {{var:finder_one_path}}
-      Finder two: {{var:finder_two_path}}
-      Finder three: {{var:finder_three_path}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture judge'
     on_signal:
       CAPTURED: judge_check
