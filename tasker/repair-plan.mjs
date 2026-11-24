@@ -4,6 +4,9 @@ import {verifiedSplitReplan} from './host-split-replan.mjs';
 // Business rules for the Task input. The shared configured-flow publisher owns claims and all writes.
 const problem = message => { throw new Error(message); };
 const text = value => typeof value === 'string' && Boolean(value.trim());
+const gapQuestion = gap => gap && typeof gap === 'object' && !Array.isArray(gap) &&
+  ['cto', 'ceo'].includes(gap.owner) && ['question', 'a', 'b'].every(key => text(gap[key]) && gap[key].length <= 1000) &&
+  ['A', 'B'].includes(gap.recommended);
 export const acText = contractText;
 export const changedText = (current, pinned) => Boolean(pinned && JSON.stringify(acText(current)) !== JSON.stringify(acText(pinned)));
 
@@ -65,24 +68,23 @@ export function checkRepair({input, repair, draft, trees, maxFiles, maxLines, fo
       problems.push(...retirementProblems({input, repair, draft, trees}));
     }
   } else {
-    if (!text(draft.gap) || draft.gap.length > 1000) fail('DECISION_REQUIRED needs gap: an unanswered decision and advice, at most1000 characters');
+    if (!gapQuestion(draft.gap)) fail('DECISION_REQUIRED needs gap owner cto/ceo, question, A/B options and recommendation');
   }
   problems.push(...checked.problems);
   return {ok: problems.length === 0, problems, tasks: checked.tasks, criterion: criterion.address,
     ac_text_changed: repair.ac_text_changed};
 }
 
-export function repairPublication({input, draft, run, dry = false, repair = {}, trees = {}, reviews, digest}) {
+export function repairPublication({input, draft, run, dry = false, repair = {}, trees = {}, reviews, digest, gapTags}) {
   if (draft.test_bindings != null && (!Array.isArray(draft.test_bindings) || draft.test_bindings.length)) {
-    return repairPublication({input, draft: {verdict: 'DECISION_REQUIRED',
-      reason: 'Task repair cannot update parent Test bindings.', gap: 'Complete the parent Test bindings before this repair.'}, run, dry});
+    return {approved: false, critique: {host: {invalid: 'Task repair cannot update parent Test bindings. Correct the draft without inventing an owner question.'}}};
   }
   const replan = verifiedSplitReplan({input, repair, draft, trees, reviews: reviews ?? [], digest});
   if (retirementRequired(repair, draft) && !replan) {
     const failures = retirementProblems({input, repair, draft, trees, reviews: reviews ?? [], digest});
     if (failures.length) {
       const reason = ('Task deliverables are not verified. ' + failures.join(' ')).slice(0, 900);
-      return repairPublication({input, draft: {verdict: 'DECISION_REQUIRED', reason, gap: reason}, run, dry});
+      return {approved: false, critique: {host: {invalid: reason}}};
     }
   }
   const task = input.selected, parent = input.context.parent, incoming = input.context.incoming;
@@ -90,7 +92,7 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
   const save = (node, data, revision = node.current_revision) => ({command: {op: 'save_object', kind: node.kind,
     id: node.address.split(':')[1], revision, data, reason}});
   const note = text => ({command: {op: 'note', target: task.address,
-    id: ('tasker-repair-' + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-120), text: text.slice(0,1000)}});
+    id: ('tasker-repair-' + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-120), text}});
   let code;
   if (draft.verdict === 'READY') {
     const repository = task.document.data.repository;
@@ -114,7 +116,13 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
     operations.push({command: {op: 'archive_object', target: task.address, revision: input.claim_revision, reason}});
     code = 'STALE';
   } else if (draft.verdict === 'DECISION_REQUIRED') {
-    operations.push(save(task, {stage: 'to_review', ...repositoryData(input, task)}, input.claim_revision), note('Decision required. ' + draft.gap));
+    const gap = draft.gap;
+    if (!gapQuestion(gap)) problem('DECISION_REQUIRED needs gap owner cto/ceo, question, A/B options and recommendation');
+    const tag = gapTags?.[gap.owner], tags = task.document.data.tags ?? [];
+    if (!text(tag) || tag.trim() !== tag) problem('Configure the owner gap tag');
+    if (!Array.isArray(tags)) problem('Task tags must be an array');
+    operations.push(save(task, {stage: 'to_review', ...repositoryData(input, task), tags: [...new Set([...tags, tag])]}, input.claim_revision),
+      note(`OPEN QUESTION\nOwner: ${gap.owner}\nQuestion: ${gap.question}\n${gap.recommended === 'A' ? '★ ' : ''}A: ${gap.a}\n${gap.recommended === 'B' ? '★ ' : ''}B: ${gap.b}\nRecommended: ${gap.recommended}\nReason: ${reason}`));
     code = 'DECISION_REQUIRED';
   } else problem('Unknown Task repair verdict');
   if (repair.baseline_note) {

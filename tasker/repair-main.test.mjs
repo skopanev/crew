@@ -92,17 +92,16 @@ test('the workflow review join gates all repair verdicts on two exact reviews an
     const stale=execute({verdict:'STALE',reason:'Changed AC',needs_code:true});
     assert.deepEqual(stale.publication.operations.map(x=>x.command.op),['save_object','archive_object']);
     assert.equal(stale.publication.operations[0].command.id,'a');
-    const decision=execute({verdict:'DECISION_REQUIRED',reason:'Missing choice',gap:'A or B?'});
+    const decision=execute({verdict:'DECISION_REQUIRED',reason:'Missing choice',gap:{owner:'cto',question:'A or B?',a:'A.',b:'B.',recommended:'A'}});
     assert.deepEqual(decision.publication.operations.map(x=>x.command.op),['save_object','note']);
     assert.equal(decision.publication.operations[0].command.revision,5);
-    assert.deepEqual(decision.publication.operations[0].command.data,{stage:'to_review'});
-    const dryDecision=execute({verdict:'DECISION_REQUIRED',reason:'Missing choice',gap:'A or B?'},{dry:true});
+    assert.deepEqual(decision.publication.operations[0].command.data,{stage:'to_review',tags:[JSON.parse(settings.TASKER_GAP_TAGS).cto]});
+    const dryDecision=execute({verdict:'DECISION_REQUIRED',reason:'Missing choice',gap:{owner:'cto',question:'A or B?',a:'A.',b:'B.',recommended:'A'}},{dry:true});
     assert.deepEqual(dryDecision.publication.operations,[]);
     const dry=execute(ready,{dry:true});assert.deepEqual(dry.publication.operations,[]);
     assert.equal(dry.publication.outcome.reason_code,'DRY_RUN');
     const noProof=execute({verdict:'STALE',reason:'Existing parent behavior',needs_code:false,done_commit:'abc1234'});
-    assert.equal(noProof.publication.outcome.reason_code,'DECISION_REQUIRED');
-    assert.deepEqual(noProof.publication.operations.map(x=>x.command.op),['save_object','note']);
+    assert.equal(noProof.publication,null);assert.match(noProof.log,/<signal:REJECTED>/);
     const refused=execute(ready,{oldDigest:true});assert.equal(refused.publication,null);
     assert.match(refused.log,/<signal:REJECTED>/);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
@@ -164,6 +163,9 @@ test('the configured Tasker inputs admit review Tasks and never select people-ow
   assert.equal(inputs.length, 1);
   assert.deepEqual(inputs[0].selection.data, {stage: 'to_review'});
   assert.equal(inputs[0].selection.assignee, '');
+  assert.equal(Object.hasOwn(inputs[0],'exclude_tags'),false);
+  assert.ok(config.exclude_tags.includes(JSON.parse(config.vars.TASKER_GAP_TAGS).cto));
+  assert.ok(config.exclude_tags.includes(JSON.parse(config.vars.TASKER_GAP_TAGS).ceo));
 });
 
 test('sample0001 cannot retire private exports or remove its consumer dependency', () => {
@@ -195,12 +197,9 @@ test('sample0001 cannot retire private exports or remove its consumer dependency
       const checked=checkRepair({...options(draft),requiredDoneCommit:sha,maxFiles:8,maxLines:300,forecast:()=>null,
         checkPlan:()=>({ok:true,problems:[],tasks:[]})});
       assert.equal(checked.ok,false);assert.match(checked.problems.join(),/Body|strict/);
-      const output=repairPublication(options(draft)).publication;
-      assert.equal(output.outcome.reason_code,'DECISION_REQUIRED');
-      assert.deepEqual(output.operations.map(row=>row.command.op),['save_object','note']);
-      assert.equal(output.operations[0].command.id,'sample0001');
-      assert.equal(output.operations[0].command.data.stage,'to_review');
-      assert.ok(output.operations.every(row=>!row.command.relations));
+      const output=repairPublication(options(draft));
+      assert.equal(output.approved,false);assert.equal(output.publication,undefined);
+      assert.match(output.critique.host.invalid,/deliverables are not verified/);
     }
     assert.deepEqual(input,before);
     fs.writeFileSync(file,'export const Body = {}; export function strict() {} export function registerTravelRulePartyEntryRoute() {}\n');
@@ -224,7 +223,6 @@ test('sample0001 cannot retire private exports or remove its consumer dependency
     current.reviews[1].checks.already_in_develop.task_deliverables_complete=false;
     fs.writeFileSync(path.join(artifacts,'critic-second.json'),JSON.stringify(current.reviews[1]));
     const refused=JSON.parse(execFileSync(process.execPath,command,{encoding:'utf8'}));
-    assert.equal(refused.publication.outcome.reason_code,'DECISION_REQUIRED');
-    assert.ok(refused.publication.operations.every(row=>row.command.op!=='archive_object'&&!row.command.relations));
+    assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

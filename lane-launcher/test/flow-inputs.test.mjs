@@ -6,6 +6,7 @@ import path from 'node:path';
 import {flowSettings, nextConfiguredItem} from '../../planning-joppa/queue.mjs';
 import {plannerFixture} from '../test-support/config-reload.fixture.mjs';
 import {contextAdmission} from '../../planning-joppa/context-admission.mjs';
+import {repairPublication} from '../../tasker/repair-plan.mjs';
 
 test('ordered profiles retain scalar filters, skip excluded parents and select later inputs', async t => {
   const f = await plannerFixture(t);
@@ -136,4 +137,23 @@ test('either active child stage excludes an AC before a claim while done Tasks a
   }
   assert.equal(f.calls.some(call=>call.name==='joppa_batch'),false);
   assert.ok(f.calls.filter(call=>call.args.parent==='ac:a1').every(call=>!Array.isArray(call.args.data?.stage)));
+});
+
+test('a typed owner question excludes its Task on the next selection without another claim',async t=>{
+  const f=await plannerFixture(t);f.queue.push('task:t1');
+  const config=JSON.parse(fs.readFileSync(new URL('../../tasker/config.example.json',import.meta.url)));
+  const profile=config.inputs.find(input=>input.selection.kind==='task');
+  assert.equal(Object.hasOwn(profile,'exclude_tags'),false);
+  const candidate=f.objects.get('task:t1');candidate.document.data.stage='to_review';candidate.document.data.tags=['wallet'];
+  const settings={...f.config,workflow:'/tmp/workflow.yaml',exclude_tags:config.exclude_tags,inputs:[{
+    ...profile,selection:{kind:'task',data:{stage:'to_review'}},related:undefined}]};
+  assert.equal((await nextConfiguredItem(settings,f.config.token_file)).next.address,candidate.address);
+  const gapTags=JSON.parse(config.vars.TASKER_GAP_TAGS);
+  const result=repairPublication({input:{selected:candidate,claim_revision:candidate.current_revision,schema:{types:{}},
+    context:{parent:f.objects.get('ac:a1'),children:[],references:{},incoming:[]}},
+    draft:{verdict:'DECISION_REQUIRED',reason:'An owner decision is missing',gap:{owner:'cto',question:'Which interface?',a:'Use A.',b:'Use B.',recommended:'A'}},run:'no-loop',gapTags});
+  Object.assign(candidate.document.data,result.publication.operations[0].command.data);
+  assert.deepEqual(candidate.document.data.tags,['wallet',gapTags.cto]);
+  for(let pass=0;pass<3;pass++)assert.equal((await nextConfiguredItem(settings,f.config.token_file)).next,null);
+  assert.equal(f.calls.some(call=>call.name==='joppa_batch'),false);
 });

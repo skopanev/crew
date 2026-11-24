@@ -39,9 +39,8 @@ test('actual check and review join CLIs require the same host receipt and fresh 
     x.change('launch.json', run => { run.result.blockConfirmed = false; });
     const refused = check(); assert.equal(refused.status, 1, refused.stderr);
     const stale = publication(); assert.equal(stale.status, 0, stale.stderr);
-    const output = JSON.parse(stale.stdout).publication;
-    assert.equal(output.outcome.reason_code, 'DECISION_REQUIRED');
-    assert.ok(output.operations.every(row => row.command.op !== 'archive_object' && !row.command.relations));
+    const output = JSON.parse(stale.stdout);
+    assert.equal(output.approved,false);assert.equal(output.publication,undefined);
   } finally { x.cleanup(); }
 });
 

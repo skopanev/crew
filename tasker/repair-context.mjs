@@ -48,6 +48,7 @@ async function main() {
     const draft = read('draft.json'), digest = createHash('sha256').update(fs.readFileSync(path.join(dir,'draft.json'))).digest('hex');
     console.log(JSON.stringify(repairPublication({input, draft, repair:read('repair.json'), trees:read('trees.json'),
       reviews:[read('critic-codex.json'), read('critic-second.json')], digest,
+      gapTags:JSON.parse(process.env.TASKER_GAP_TAGS || '{}'),
       run:path.basename(path.dirname(dir)), dry:process.env.DRY_RUN==='true'})));
     return;
   }

@@ -213,10 +213,10 @@ test('repair cannot publish parent Test metadata and missing bindings require a 
   assert.deepEqual(checkRepair(options).problems, []);
   draft.test_bindings = [binding];
   assert.match(checkRepair(options).problems.join(), /only for an AC implementation plan/);
-  const refused = repairPublication({...options, run: 'repair'}).publication;
-  assert.equal(refused.outcome.reason_code, 'DECISION_REQUIRED');
-  assert.ok(refused.operations.every(row => row.command.kind !== 'test'));
-  assert.deepEqual(repairPublication({...options, run: 'repair', dry: true}).publication.operations, []);
+  const refused = repairPublication({...options, run: 'repair'});
+  assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
+  assert.match(refused.critique.host.invalid,/cannot update parent Test bindings/);
+  assert.equal(repairPublication({...options, run: 'repair', dry: true}).approved,false);
 });
 
 test('publication rechecks binding scope even when supplied an approved envelope', t => {

@@ -10,9 +10,9 @@ const checked = x => checkRepair({...x.options(), maxFiles: 8, maxLines: 300,
   forecast: () => { throw new Error('No second forecast'); }, checkPlan: () => { throw new Error('No new plan'); }});
 const noArchive = x => {
   assert.equal(checked(x).ok, false);
-  const result = repairPublication(x.options()).publication;
-  assert.equal(result.outcome.reason_code, 'DECISION_REQUIRED');
-  assert.ok(result.operations.every(row => row.command.op !== 'archive_object' && !row.command.relations));
+  const result = repairPublication(x.options());
+  assert.equal(result.approved,false);assert.equal(result.publication,undefined);
+  assert.match(result.critique.host.invalid,/deliverables are not verified/);
 };
 
 test('confirmed host SPLIT retires for replanning without a completion claim or forecast', () => {
@@ -95,12 +95,12 @@ test('publication rechecks both exact independent approvals after the machine ch
       o => { o.reviews[1].checks.already_in_develop.evidence = ''; }]) {
       const options = x.options(); mutate(options);
       assert.equal(verifiedSplitReplan(options), false);
-      assert.equal(repairPublication(options).publication.outcome.reason_code, 'DECISION_REQUIRED');
+      assert.equal(repairPublication(options).approved,false);
     }
     const options = x.options(); delete options.reviews;
-    assert.equal(repairPublication(options).publication.outcome.reason_code, 'DECISION_REQUIRED');
+    assert.equal(repairPublication(options).approved,false);
     x.input.context.incoming.push({address: 'task:dependent'});
-    assert.equal(repairPublication(x.options()).publication.outcome.reason_code, 'DECISION_REQUIRED');
+    assert.equal(repairPublication(x.options()).approved,false);
   } finally { x.cleanup(); }
 });
 

@@ -10,6 +10,8 @@ const parent = node('ac:a', {title:'Current AC', body:'Current condition', stage
 const task = node('task:t', {title:'Existing Task', body:'Old work', stage:'to_review'});
 const group = {title:'Prerequisites', color:'#123456', facts:{why:'keep'}, edges:[{to:'task:t',revision:2},{to:'task:other',revision:3}]};
 const consumer = node('task:consumer', {body:'Dependent work', stage:'to_implement'}, {relations:{depends_on:group,related:{edges:[{to:'ac:elsewhere'}]}}});
+const gapTags = {cto:'ask-engineering',ceo:'ask-policy'};
+const gap = {owner:'cto',question:'A or B?',a:'A.',b:'B.',recommended:'A'};
 const input = () => ({selected:structuredClone(task),claim_revision:5,schema:{types:{ac:{},task:{},test:{}}},
   context:{parent:structuredClone(parent),children:[],references:{},incoming:[structuredClone(consumer)]}});
 const checked = (draft, repair = {ac_text_changed:false}) => checkRepair({input:input(),repair,draft,trees:{},
@@ -25,7 +27,7 @@ test('READY preserves the Task id and title; changed AC requires retirement', ()
   assert.equal(checked(draft).ok,true);
   assert.equal(checked({...draft,task:{...draft.task,id:'new'}}).ok,false);
   assert.equal(checked(draft,{ac_text_changed:true}).ok,false);
-  const output=repairPublication({input:input(),draft,run:'run'}).publication;
+  const output=repairPublication({gapTags,input:input(),draft,run:'run'}).publication;
   assert.equal(output.operations.length,1);
   assert.deepEqual(output.operations[0].command.data,{body:draft.task.body,repository:'repo',stage:'to_implement',
     ac_contract_hash:contractHash({selected:parent,children:[],schema:input().schema})});
@@ -34,33 +36,33 @@ test('READY preserves the Task id and title; changed AC requires retirement', ()
 });
 test('STALE removes only its edge, preserves group metadata and queues AC only when code remains', () => {
   const original=input();const before=structuredClone(original);
-  const build=needs_code=>repairPublication({input:original,repair:{ac_text_changed:true},draft:{verdict:'STALE',reason:'Old AC',needs_code},run:'run'}).publication;
+  const build=needs_code=>repairPublication({gapTags,input:original,repair:{ac_text_changed:true},draft:{verdict:'STALE',reason:'Old AC',needs_code},run:'run'}).publication;
   const work=build(true);
   assert.deepEqual(work.operations[1].command.relations,{depends_on:{...group,edges:[{to:'task:other',revision:3}]}});
   assert.equal(Object.hasOwn(work.operations[1].command,'data'),false);
   assert.deepEqual(work.operations[0].command.data,{stage:'to_task'});
   assert.equal(work.operations[2].command.op,'archive_object');
   assert.equal(work.operations[2].command.target,'task:t');
-  assert.deepEqual(build(false).operations.map(row=>row.command.op),['save_object','note']);
-  assert.equal(build(false).outcome.reason_code,'DECISION_REQUIRED');
+  const refused=repairPublication({input:original,repair:{ac_text_changed:true},draft:{verdict:'STALE',reason:'Old AC',needs_code:false},run:'run'});
+  assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
   assert.deepEqual(original,before);
 });
-test('DECISION_REQUIRED changes only the claimed Task stage and records the decision', () => {
+test('DECISION_REQUIRED tags only the claimed Task and records the typed owner question', () => {
   const original=input();
   original.schema.types.task.fields={repository:{type:'enum',values:['repo','other']}};
   original.selected.document.data.body='Old work\nRepository: repo';
   const frozen=structuredClone(original);
-  const draft={verdict:'DECISION_REQUIRED',reason:'No decision',gap:'A or B?'};
-  const output=repairPublication({input:original,draft,run:'run'}).publication;
+  const draft={verdict:'DECISION_REQUIRED',reason:'No decision',gap};
+  const output=repairPublication({gapTags,input:original,draft,run:'run'}).publication;
   assert.equal(output.operations.length,2);
   assert.deepEqual(output.operations[0].command,{op:'save_object',kind:'task',id:'t',revision:5,
-    data:{stage:'to_review',repository:'repo'},reason:'No decision'});
+    data:{stage:'to_review',repository:'repo',tags:['ask-engineering']},reason:'No decision'});
   assert.equal(output.operations[1].command.op,'note');
   assert.equal(output.operations[1].command.target,'task:t');
-  assert.equal(output.operations[1].command.text,'Decision required. A or B?');
+  assert.equal(output.operations[1].command.text,'OPEN QUESTION\nOwner: cto\nQuestion: A or B?\n★ A: A.\nB: B.\nRecommended: A\nReason: No decision');
   assert.equal(output.outcome.reason_code,'DECISION_REQUIRED');
   assert.deepEqual(original,frozen);
-  assert.deepEqual(repairPublication({input:original,draft,run:'run',dry:true}).publication.operations,[]);
+  assert.deepEqual(repairPublication({gapTags,input:original,draft,run:'run',dry:true}).publication.operations,[]);
 });
 
 test('repository metadata uses the captured enum and preserves nonempty fields', () => {
@@ -80,28 +82,28 @@ test('unresolved decision metadata keeps the existing refusal and dry behavior',
   const assignment=input();assignment.selected.document.data.repository='conflicting-value';
   assignment.selected.document.data.body='Repository: repo';
   assignment.schema.types.task.fields={repository:{type:'enum',values:['repo']}};
-  const draft={verdict:'DECISION_REQUIRED',reason:'No decision',gap:'A or B?'};
+  const draft={verdict:'DECISION_REQUIRED',reason:'No decision',gap};
   const before=structuredClone(assignment);
-  assert.deepEqual(repairPublication({input:assignment,draft,run:'run'}).publication.operations[0].command.data,{stage:'to_review'});
-  assert.deepEqual(repairPublication({input:assignment,draft,run:'run',dry:true}).publication.operations,[]);
+  assert.deepEqual(repairPublication({gapTags,input:assignment,draft,run:'run'}).publication.operations[0].command.data,{stage:'to_review',tags:['ask-engineering']});
+  assert.deepEqual(repairPublication({gapTags,input:assignment,draft,run:'run',dry:true}).publication.operations,[]);
   assert.deepEqual(assignment,before);
 });
 
 test('READY cannot overwrite a nonempty conflicting repository', () => {
   const assignment=input();assignment.selected.document.data.repository='other';
   const draft={verdict:'READY',reason:'Current work',task:{id:'t',title:'Existing Task',repository:'repo',tests:[],body:'Repository: repo'}};
-  assert.throws(()=>repairPublication({input:assignment,draft,run:'run'}),/cannot replace a nonempty Task repository/);
+  assert.throws(()=>repairPublication({gapTags,input:assignment,draft,run:'run'}),/cannot replace a nonempty Task repository/);
   const result=checkRepair({input:assignment,repair:{ac_text_changed:false},draft,trees:{},maxFiles:8,maxLines:300,
     forecast:()=>null,checkPlan:()=>({ok:true,problems:[],tasks:[]})});
   assert.equal(result.ok,false);assert.match(result.problems.join(),/cannot replace a nonempty Task repository/);
 });
 test('dry run emits no business writes and a held dependent refuses the whole retirement', () => {
   const draft={verdict:'STALE',reason:'Old work',needs_code:true};
-  const output=repairPublication({input:input(),repair:{ac_text_changed:true},draft,run:'run',dry:true});
+  const output=repairPublication({gapTags,input:input(),repair:{ac_text_changed:true},draft,run:'run',dry:true});
   assert.deepEqual(output.publication.operations,[]);
   assert.equal(output.would_publish.operations.length,3);
   const held=input();held.context.incoming[0].document.data.assignee='a-lane';
-  assert.throws(()=>repairPublication({input:held,repair:{ac_text_changed:true},draft,run:'run'}),/held/);
+  assert.throws(()=>repairPublication({gapTags,input:held,repair:{ac_text_changed:true},draft,run:'run'}),/held/);
 });
 
 test('body checks reuse the lane Tests-line and restriction-line checks', () => {
@@ -136,7 +138,26 @@ test('a stale critic commit cannot force a Task to retire unfinished work', () =
     forecast:()=>null,checkPlan:()=>({ok:true,problems:[],tasks:[]}),requiredDoneCommit:'abc1234'};
   const ready={verdict:'READY',reason:'Exports are missing',task:{id:'t',title:'Existing Task',repository:'repo',tests:[],body:'Repository: repo'}};
   assert.equal(checkRepair({...options,draft:ready}).ok,true);
-  assert.equal(checkRepair({...options,draft:{verdict:'DECISION_REQUIRED',reason:'Missing evidence',gap:'Verify the required exports'}}).ok,true);
+  assert.equal(checkRepair({...options,draft:{verdict:'DECISION_REQUIRED',reason:'Missing evidence',gap:{...gap,question:'Verify the required exports'}}}).ok,true);
+});
+
+test('owner questions preserve tags and exact choices, reject unknown owners and never invent a question',()=>{
+  const original=input();original.selected.document.data.tags=['wallet','ask-policy'];
+  original.selected.document.data.returns=2;original.context.parent.document.data.returns=1;
+  const frozen=structuredClone(original),question={...gap,owner:'ceo',question:'Choose the limit? '+ 'я'.repeat(900),recommended:'B'};
+  const draft={verdict:'DECISION_REQUIRED',reason:'Missing approved limit',gap:question};
+  const result=repairPublication({input:original,draft,run:'owner',gapTags});
+  assert.deepEqual(result.publication.operations[0].command.data,{stage:'to_review',tags:['wallet','ask-policy']});
+  assert.ok(result.publication.operations[1].command.text.includes(question.question));
+  assert.match(result.publication.operations[1].command.text,/★ B: B[.]\nRecommended: B/);
+  assert.deepEqual(original,frozen);
+  assert.ok(result.publication.operations.every(row=>(row.command.id??row.command.target)==='t'||row.command.target==='task:t'));
+  assert.deepEqual(repairPublication({input:original,draft,run:'dry',dry:true,gapTags}).publication.operations,[]);
+  for(const invalid of ['old blocker',{}, {...gap,owner:'unknown'}, {...gap,question:''}, {...gap,recommended:'C'}]){
+    assert.equal(checked({...draft,gap:invalid}).ok,false);
+    assert.throws(()=>repairPublication({input:original,draft:{...draft,gap:invalid},run:'invalid',gapTags}),/gap owner/);
+  }
+  for(const invalid of [undefined,{}, {ceo:''}, {ceo:' ask-policy'}])assert.throws(()=>repairPublication({input:original,draft,run:'invalid',gapTags:invalid}),/Configure/);
 });
 
 

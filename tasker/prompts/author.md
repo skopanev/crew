@@ -185,7 +185,9 @@ For repair, use these steps in order:
    Write each repair Do step as an action.
    State only the required change or check in each Do step.
 4. If neither a safe READY update nor verified retirement is possible, return DECISION_REQUIRED.
-   Give the exact blocker and advice.
+   Ask a real unresolved owner decision with gap.owner, question, a, b and recommended.
+   Use cto for technical decisions and ceo for product, policy, money, text or compliance decisions.
+   Do not invent an owner question for a machine-check failure. Correct the draft instead.
 
 For a STALE completion:
 1. Include retirement_proof for every needs_code false verdict and every unchanged-AC retirement.
@@ -208,4 +210,4 @@ Treat changed-AC STALE with needs_code true as retirement for new planning, with
 For a Task input, return only one of these JSON objects:
 {"verdict":"READY","reason":"Why the same bounded Task is needed","task":{"id":"existing-id","title":"Existing title","repository":"repo","files":[],"tests":[],"depends_on":[],"body":"Criterion: ..."}}
 {"verdict":"STALE","reason":"What changed or already exists","needs_code":true,"done_commit":"commit for a completion claim","retirement_proof":{"task":"task:id","revision":4,"repository":"repo","develop":"fixed SHA","obligations":[],"files":[{"path":"src/module.ts","exports":["requiredName"]}]}}
-{"verdict":"DECISION_REQUIRED","reason":"Why no safe update is possible","gap":"Exact blocker and advice"}
+{"verdict":"DECISION_REQUIRED","reason":"Why no safe update is possible","gap":{"owner":"cto","question":"Exact unresolved decision","a":"Option A","b":"Option B","recommended":"A"}}
