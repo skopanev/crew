@@ -77,6 +77,15 @@ export function agentArgs(harness, configFile, home) {
     for (const tool of server.enabled_tools ?? server.includeTools ?? ['*']) allow.push(`mcp(${name}/${tool})`);
     for (const tool of server.disabled_tools ?? server.excludeTools ?? []) deny.push(`mcp(${name}/${tool})`);
   }
+  const grants = [...JSON.parse(joppa.env?.CREW_READER_FILES ?? '[]'),
+    ...JSON.parse(joppa.env?.CREW_READER_ROOTS ?? '[]')];
+  const skills = path.join(home, '.gemini/antigravity-cli/builtin/skills');
+  if (fs.existsSync(skills)) grants.push(skills);
+  for (const file of grants) {
+    const resolved = fs.existsSync(file) ? fs.realpathSync(file)
+      : path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+    allow.push(`read_file(${resolved})`);
+  }
   return ['--add-dir', fs.realpathSync(cache), '--add-dir', fs.realpathSync(brain),
     '--settings', JSON.stringify({permissions: {allow, deny}})];
 }
