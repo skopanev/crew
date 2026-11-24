@@ -154,6 +154,8 @@ class Reader:
         if self.files.paths or self.files.roots:
             from reader_files import CONTEXT_TOOL, TOOL
             tools.extend((CONTEXT_TOOL, TOOL))
+        from reader_files import ATTACHMENT_TOOL
+        tools.append(ATTACHMENT_TOOL)
         return tools
 
     def call(self, name, arguments):
@@ -161,6 +163,9 @@ class Reader:
             return self.files.context(arguments, self.workspace)
         if name == "read_file":
             return self.files.read(arguments)
+        if name == "read_attachment":
+            from reader_files import read_attachment
+            return read_attachment(self.api, self.workspace, arguments)
         if name not in READ_TOOLS:
             raise MCPError("The planning reader does not permit this tool")
         if not isinstance(arguments, dict):

@@ -1,3 +1,9 @@
+Use mcp__joppa__joppa_objects for node addresses such as source:id.
+Use mcp__joppa__read_file for the local files granted by read_context.
+Use mcp__joppa__read_attachment for a Source attachment at source:<id>/<file name>.
+Use the exact attachment name from the Source files metadata.
+Read each attachment page with offset set to next_offset until next_offset is null.
+
 This is your role file. Find violations of the audit rule in the AC of the AC line in your prompt.
 Follow the Finder part of your role contract.
 Call mcp__joppa__read_context first. It lists your contract file, the assignment and your other granted files.

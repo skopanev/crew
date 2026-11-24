@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import documents
 import context
 import reader
+import reader_files
 
 
 def docx():
@@ -122,6 +123,68 @@ class DocumentsTest(unittest.TestCase):
         first, second = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertTrue(first['result']['isError']); self.assertIn('SEARCH_UNAVAILABLE', first['result']['content'][0]['text'])
         self.assertEqual(second['result'], {})
+
+
+class AttachmentTest(unittest.TestCase):
+    def setUp(self):
+        self.raw = 'The fee is 1 percent.\n\nThe minimum is 2 USDT.'.encode()
+        self.row = {'name': 'attachment.txt', 'removed': False, 'hash': hashlib.sha256(self.raw).hexdigest(),
+                    'url': 'https://storage.example/attachment.txt'}
+        self.calls = []
+        test = self
+        class Api:
+            def call(self, tool, args):
+                test.calls.append((tool, args)); return {'files': [test.row]}
+        self.api, self.config = Api(), {'workspace': 'fixture'}
+        self.urlopen = lambda raw: patch.object(documents, 'urlopen', side_effect=lambda url, timeout: type('R', (), {
+            '__enter__': lambda self: SimpleNamespace(read=lambda: raw), '__exit__': lambda self, *a: False})())
+
+    def test_a_source_attachment_is_evidence_with_its_joppa_hash(self):
+        with self.urlopen(self.raw):
+            value = documents.read_attachment(self.api, self.config, 'source:policy/attachment.txt')
+        self.assertEqual(value, {'path': 'source:policy/attachment.txt', 'route': 'attachment',
+                                 'text': self.raw.decode(), 'sha256': self.row['hash']})
+        self.assertEqual(self.calls, [('joppa_attachments', {'workspace': 'fixture', 'target': 'source:policy'})])
+        with self.urlopen(self.raw), self.assertRaisesRegex(LookupError, 'no attachment other.md'):
+            documents.read_attachment(self.api, self.config, 'source:policy/other.md')
+        for path in ('ac:x/attachment.txt', 'source:policy', None):
+            with self.assertRaises(LookupError): documents.read_attachment(self.api, self.config, path)
+        with self.urlopen(b'Changed bytes.'), self.assertRaisesRegex(ValueError, 'SEARCH_UNAVAILABLE: .*differ from the Joppa hash'):
+            documents.read_attachment(self.api, self.config, 'source:policy/attachment.txt')
+        self.row['url'] = 'http://storage.example/attachment.txt'
+        with self.assertRaisesRegex(ValueError, 'no HTTPS download url'):
+            documents.read_attachment(self.api, self.config, 'source:policy/attachment.txt')
+
+    def test_pdf_and_docx_attachments_keep_complete_text_and_original_hash(self):
+        for name, raw, final in [('policy.pdf', pdf(), 'Final policy sentence.'), ('policy.docx', docx(), 'Final rule.')]:
+            with self.subTest(name=name):
+                self.row.update(name=name, hash=hashlib.sha256(raw).hexdigest())
+                with self.urlopen(raw):
+                    value = documents.read_attachment(self.api, self.config, 'source:policy/' + name)
+                self.assertIn('First policy sentence.', value['text'])
+                self.assertIn(final, value['text'])
+                self.assertEqual(value['sha256'], hashlib.sha256(raw).hexdigest())
+
+    def test_the_download_refuses_a_non_https_redirect_and_wraps_transport_errors(self):
+        handler = documents.HttpsRedirects()
+        from urllib.request import Request
+        source = Request('https://storage.example/attachment.txt')
+        with self.assertRaisesRegex(documents.URLError, 'non-HTTPS'):
+            handler.redirect_request(source, None, 302, 'Found', {}, 'http://storage.example/attachment.txt')
+        self.assertEqual(handler.redirect_request(source, None, 302, 'Found', {}, 'https://cdn.example/attachment.txt').full_url,
+                         'https://cdn.example/attachment.txt')
+        for error in (documents.URLError('redirect to a non-HTTPS url'), TimeoutError('timed out'), documents.HTTPException('bad')):
+            with patch.object(documents, 'urlopen', side_effect=error), self.assertRaisesRegex(ValueError, '^SEARCH_UNAVAILABLE: source:policy/attachment.txt: '):
+                documents.read_attachment(self.api, self.config, 'source:policy/attachment.txt')
+
+    def test_the_reader_reads_a_source_attachment_and_names_a_wrong_path(self):
+        with patch.object(reader_files, 'attachment_reader', return_value=documents.read_attachment):
+            adapter = reader.Sources(self.api, 'fixture', None, {})
+            with self.urlopen(self.raw):
+                self.assertEqual(adapter.call('read_attachment', {'path': 'source:policy/attachment.txt'})['route'], 'attachment')
+            with self.assertRaisesRegex(Exception, 'no attachment missing.md'):
+                adapter.call('read_attachment', {'path': 'source:policy/missing.md'})
+            with self.assertRaises(Exception): adapter.call('read_attachment', {'path': 'source:policy/attachment.txt', 'extra': 1})
 
 
 if __name__ == '__main__':

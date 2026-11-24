@@ -1,5 +1,7 @@
-"""Read explicitly granted UTF-8 files through the existing MCP reader."""
+"""Read granted local files and workspace Source attachments through the existing MCP reader."""
+from functools import lru_cache
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,33 @@ CONTEXT_TOOL = {
     "name": "read_context", "description": "Find this role's instructions, contracts, frozen input and feedback files. Read these before evidence.",
     "annotations": {"readOnlyHint": True, "destructiveHint": False},
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
+ATTACHMENT_TOOL = {**TOOL, "name": "read_attachment", "description":
+    "Read Source attachment text at source:<id>/<file name>. Follow next_offset. sha256 covers the original file bytes."}
+
+
+@lru_cache(maxsize=1)
+def attachment_reader():
+    spec = importlib.util.spec_from_file_location("crew_attachment_documents",
+        Path(__file__).resolve().parent.parent / "decider/documents.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.read_attachment
+
+
+def read_attachment(api, workspace, args):
+    if not isinstance(args, dict) or set(args) - {"path", "offset", "length"} or not isinstance(args.get("path"), str):
+        raise ValueError("Use path, offset and length for read_attachment")
+    offset, length = args.get("offset", 0), args.get("length", 20000)
+    if type(offset) is not int or offset < 0 or type(length) is not int or not 1 <= length <= 100000:
+        raise ValueError("Use offset >= 0 and length 1..100000")
+    try:
+        value = attachment_reader()(api, {"workspace": workspace}, args["path"])
+    except LookupError as error:
+        raise ValueError(str(error)) from error
+    text = value["text"]
+    end = min(offset + length, len(text))
+    return {**value, "text": text[offset:end], "offset": offset,
+            "next_offset": end if end < len(text) else None, "total_chars": len(text)}
 
 
 def read_bytes(file):
