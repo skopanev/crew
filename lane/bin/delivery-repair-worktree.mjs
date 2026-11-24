@@ -21,12 +21,12 @@ export function prepareDeliveryRepair(env = process.env) {
   need(directory.isDirectory() && !directory.isSymbolicLink(), 'Repair needs its own Git directory');
   git('check-ref-format', 'refs/heads/' + repair.branch);
   git('check-ref-format', 'refs/heads/' + repair.target);
-  need(!git('status', '--porcelain'), 'The repair checkout is not clean');
   const head = git('rev-parse', '--verify', `refs/remotes/origin/${repair.branch}^{commit}`);
   need(head === repair.head, 'The repair branch changed after the host claim');
   const target = git('rev-parse', '--verify', `refs/remotes/origin/${repair.target}^{commit}`);
   git('merge-base', head, target);
   git('checkout', '-B', 'ticket-' + env.ticket_id, head);
+  need(!git('status', '--porcelain'), 'The repair checkout is not clean');
   const merge = spawnSync('git', ['merge', '--no-commit', '--no-ff', target],
     {cwd, encoding: 'utf8', timeout: 120000});
   fs.writeFileSync(path.join(artifacts, 'integration-repair-merge.log'),

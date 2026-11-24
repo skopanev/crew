@@ -24,7 +24,7 @@ function fixture(t, conflict = false) {
   fs.writeFileSync(path.join(seed, conflict ? 'shared.txt' : 'develop.txt'), 'fresh develop\n');
   git(seed, 'add', '.'); git(seed, 'commit', '-m', 'New target'); const target = git(seed, 'rev-parse', 'HEAD');
   git(seed, 'remote', 'add', 'origin', remote); git(seed, 'push', 'origin', 'develop', 'repair-task');
-  git(root, 'clone', '-b', 'develop', remote, checkout);
+  git(root, 'clone', '--no-local', '--no-checkout', '-b', 'develop', remote, checkout);
   git(checkout, 'config', 'user.name', 'Fixture'); git(checkout, 'config', 'user.email', 'fixture@example.test');
   const repair = {branch: 'repair-task', head, target: 'develop', reason: 'BRANCH_GATE_FAIL', evidence: '/evidence/checks', run: 'lander-run'};
   const env = {MEDULLA_RUN_DIR: run, LANE_WORKTREE: checkout, TARGET_BRANCH: 'develop', ticket_id: 'example'};

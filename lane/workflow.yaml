@@ -428,7 +428,6 @@ nodes:
     shell: |
       set -euo pipefail
       node "$TOOLING_ROOT/lane/bin/delivery-repair-worktree.mjs" context
-      printf '<signal:var key=PLAN_ACTIVE>false</signal:var>\n'
       printf '<signal:var key=VERIFY_ONLY>false</signal:var>\n'
       echo '<signal:READY>Continue the existing Task with integration failure evidence.</signal:READY>'
 
