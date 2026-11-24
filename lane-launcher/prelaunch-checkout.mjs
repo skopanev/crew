@@ -32,6 +32,9 @@ export function clearPreviousCheckout(run, dir, persist, announce) {
   if (prior.discardCheckout) need(prior.discardCheckout.dev === original.dev && prior.discardCheckout.ino === original.ino,
     'The preexisting checkout identity changed');
   need(writerGone(prior, checkout), 'A process or container still uses the preexisting checkout');
+  const dotGit = path.join(checkout, '.git');
+  need(fs.lstatSync(dotGit).isDirectory() && fs.realpathSync(dotGit) === dotGit,
+    'The preexisting checkout has no private Git directory');
   const artifacts = path.join(run.runFolder, 'prelaunch-recovery');
   fs.mkdirSync(artifacts, {recursive: true, mode: 0o700});
   const lock = path.join(checkout, '.git/index.lock');

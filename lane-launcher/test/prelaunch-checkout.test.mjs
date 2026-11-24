@@ -50,6 +50,13 @@ test('keeps active, foreign, replaced and unrecoverable checkouts', async t => {
   fs.writeFileSync(path.join(checkout, '.git/index.lock'), '');
   fs.writeFileSync(path.join(f.f.root, 'bin/lsof'), '#!/bin/sh\necho p123\n', {mode: 0o755});
   assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /lock has no owner/);
+  const originalGit = path.join(checkout, '.git'), heldGit = path.join(f.f.root, 'held-git');
+  fs.renameSync(originalGit, heldGit);
+  fs.symlinkSync(path.join(run.repository.path, '.git'), originalGit);
+  const foreignLock = path.join(run.repository.path, '.git/index.lock');
+  fs.writeFileSync(foreignLock, '');
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /private Git directory/);
+  assert.equal(fs.existsSync(foreignLock), true);
   assert.equal(fs.existsSync(checkout), true);
   assert.equal(JSON.parse(fs.readFileSync(state)).task, run.task);
 });
