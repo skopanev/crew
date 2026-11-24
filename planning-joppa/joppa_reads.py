@@ -1,4 +1,6 @@
 """Translate supported Joppa reads for native contract checks."""
+import sys
+import time
 
 class MCPError(ValueError):
     pass
@@ -6,6 +8,33 @@ class MCPError(ValueError):
 
 class Rejected(MCPError):
     """The server confirmed that the tool operation failed."""
+
+
+class Maintenance(MCPError):
+    """Joppa is in maintenance, for example during a deploy. The same request can be sent again later."""
+
+
+MAINTENANCE_MESSAGE, MAINTENANCE_RETRIES, MAINTENANCE_WAIT = "Maintenance. Try in 30 seconds.", 3, 30
+
+
+def is_maintenance(error):
+    # Only the explicit maintenance answer. Another -32000 error is not repeated, also when it names maintenance.
+    return isinstance(error, dict) and error.get("code") == -32000 and str(error.get("message", "")).strip() == MAINTENANCE_MESSAGE
+
+
+def maintenance_retry(send):
+    """During a deploy Joppa answers maintenance (JSON-RPC -32000 or HTTP 503 with Retry-After). A tool call waits and
+    sends the same payload again, with the same arguments and request_id, at most MAINTENANCE_RETRIES times."""
+    def rpc(self, method, params, notification=False):
+        for attempt in range(MAINTENANCE_RETRIES + 1):
+            try:
+                return send(self, method, params, notification)
+            except Maintenance:
+                if method != "tools/call" or attempt == MAINTENANCE_RETRIES:
+                    raise
+                print(f"Joppa is in maintenance; the same request is sent again in {MAINTENANCE_WAIT} s", file=sys.stderr)
+                time.sleep(MAINTENANCE_WAIT)
+    return rpc
 
 
 SYSTEM_RELATIONS = ("depends_on", "related")

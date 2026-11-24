@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-from joppa_reads import DETAIL_FIELDS, MCPError, Rejected, complete_object, detail_read, normalize_detail
+from joppa_reads import DETAIL_FIELDS, MCPError, Maintenance, Rejected, complete_object, detail_read, is_maintenance, maintenance_retry, normalize_detail
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -47,6 +47,7 @@ class Joppa:
                 print("Joppa MCP connection failed; reconnecting once before any tool call", file=sys.stderr)
                 self.stdio = StdioRPC(mcp_command)
 
+    @maintenance_retry
     def rpc(self, method, params, notification=False):
         if self.stdio:
             return self.stdio.request(method, params, notification)
@@ -78,13 +79,14 @@ class Joppa:
             else:
                 message = json.loads(raw)
         except HTTPError as error:
-            raise MCPError(f"Joppa MCP HTTP {error.code}") from None
+            busy = error.code == 503 and error.headers and error.headers.get("Retry-After")
+            raise (Maintenance if busy else MCPError)(f"Joppa MCP HTTP {error.code}") from None
         except (URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError):
             raise MCPError("Joppa MCP transport failed") from None
         if not isinstance(message, dict) or message.get("id") != self.sequence:
             raise MCPError("Joppa returned a different MCP response")
         if "error" in message or "result" not in message:
-            raise MCPError("Joppa rejected the MCP operation")
+            raise (Maintenance if is_maintenance(message.get("error")) else MCPError)("Joppa rejected the MCP operation")
         return message["result"]
 
     def tools(self):
