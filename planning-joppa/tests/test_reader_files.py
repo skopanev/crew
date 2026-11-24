@@ -23,9 +23,10 @@ class ReaderFilesTest(unittest.TestCase):
     def test_unicode_chunks_hash_and_protocol_keep_the_complete_file(self):
         with tempfile.TemporaryDirectory() as folder:
             file = Path(folder) / 'draft.json'
+            optional = Path(folder) / 'critique.txt'
             content = 'α🙂' * 15000
             file.write_text(content)
-            with patch.dict(os.environ, CREW_READER_FILES=json.dumps([str(file)]), CREW_READER_ROOTS='[]'):
+            with patch.dict(os.environ, CREW_READER_FILES=json.dumps([str(file), str(optional)]), CREW_READER_ROOTS='[]'):
                 reader = Reader(API(), 'example', None)
             first = reader.call('read_file', {'path': str(file), 'length': 17000})
             second = reader.call('read_file', {'path': str(file), 'offset': first['next_offset']})
@@ -40,6 +41,15 @@ class ReaderFilesTest(unittest.TestCase):
             serve(reader, io.StringIO(json.dumps(request) + '\n'), output)
             self.assertEqual(json.loads(output.getvalue())['result']['structuredContent']['text'], 'α🙂')
             self.assertEqual(file.read_text(), content)
+            missing = reader.call('read_file', {'path': str(optional)})
+            self.assertEqual(missing['status'], 'absent')
+            self.assertEqual(missing['text'], '')
+            self.assertNotIn('sha256', missing)
+            optional.write_text('Review feedback')
+            self.assertIn(str(optional.resolve()), reader.call('read_context', {})['files'])
+            file.unlink()
+            self.assertNotIn(str(file.resolve()), reader.call('read_context', {})['files'])
+            self.assertEqual(reader.call('read_file', {'path': str(file)})['status'], 'absent')
 
     def test_roots_allow_source_files_but_not_escaping_symlinks_or_mutations(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -50,7 +60,7 @@ class ReaderFilesTest(unittest.TestCase):
             with patch.dict(os.environ, CREW_READER_FILES='[]', CREW_READER_ROOTS=json.dumps([str(root)])):
                 reader = Reader(API(), 'example', None)
             self.assertEqual(reader.call('read_file', {'path': str(file)})['text'], file.read_text())
-            for denied in (other, root / 'escape'):
+            for denied in (other, root / 'escape', Path(folder) / 'ungranted-missing.txt'):
                 with self.assertRaisesRegex(ValueError, 'outside'):
                     reader.call('read_file', {'path': str(denied)})
             for args in ({'path': str(file), 'length': True}, {'path': str(file), 'offset': -1},

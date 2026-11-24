@@ -86,7 +86,11 @@ class Files:
         offset, length = args.get("offset", 0), args.get("length", 20000)
         if type(offset) is not int or offset < 0 or type(length) is not int or not 1 <= length <= 100000:
             raise ValueError("Use offset >= 0 and length 1..100000")
-        raw = read_bytes(resolved)
+        try:
+            raw = read_bytes(resolved)
+        except FileNotFoundError:
+            return {"path": str(resolved), "status": "absent", "text": "", "offset": offset,
+                    "next_offset": None, "total_chars": 0}
         text = raw.decode("utf-8")
         end = min(offset + length, len(text))
         return {"path": str(file.resolve()), "text": text[offset:end], "offset": offset,
@@ -97,4 +101,5 @@ class Files:
         if not isinstance(args, dict) or args:
             raise ValueError("read_context takes an empty object")
         return {"workspace": workspace, "profile": os.environ.get("CREW_READER_PROFILE", ""),
-                "files": sorted(self.paths), "roots": [str(root) for root in self.roots]}
+                "files": sorted(name for name in self.paths if Path(name).is_file()),
+                "roots": [str(root) for root in self.roots]}
