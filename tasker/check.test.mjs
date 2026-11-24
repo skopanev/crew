@@ -29,7 +29,7 @@ function run(draft, {children = [], gate = {long: false, split: false, detail: '
     git('add', '.');
     git('commit', '-q', '-m', 'base');
     const sha = git('rev-parse', 'HEAD').trim();
-    const input = {selected: {address: ac}, children, schema: {types: {task: {field_max_length: 4096}}}};
+    const input = {selected: {address: ac}, children, schema: {types: {task: {field_max_length: 4096}, test: {role: 'test'}}}};
     const result = check({input, trees: {'example-backend': {path: root, sha}}, draft: typeof draft === 'function' ? draft(sha, root) : draft,
       maxFiles: 8, maxLines: 300, forecast: () => gate});
     return result;
@@ -144,7 +144,16 @@ test('requires exactly one literal Repository line before a Task can reach publi
 });
 
 test('checks DONE against the develop tree and GAP for its question', () => {
-  assert.deepEqual(run(sha => ({verdict: 'DONE', reason: 'b.ts has it', done_commit: sha})).problems, []);
+  const passed = {...reporter('packages/a/src/b.itest.ts > case'), document: {present: true, data: {}},
+    status: {tone: 'green'}, result: {status: 'pass', commit: 'a'.repeat(40)}};
+  const done = sha => ({verdict: 'DONE', reason: 'b.ts has it', done_commit: sha});
+  assert.deepEqual(run(done, {children: [passed]}).problems, []);
+  assert.match(run(done).problems.join(), /recorded PASS/);
+  for (const change of [node => {delete node.result;}, node => {node.result.status = 'fail';},
+    node => {node.result.commit = '';}, node => {node.status.tone = 'blue';}]) {
+    const failed = structuredClone(passed); change(failed);
+    assert.match(run(done, {children: [passed, failed]}).problems.join(), /recorded PASS/);
+  }
   assert.match(run({verdict: 'DONE', reason: 'x', done_commit: 'deadbeef'}).problems.join(), /done_commit/);
   assert.match(run({verdict: 'GAP', reason: 'x'}).problems.join(), /GAP.*needs/);
   const gap = {owner: 'cto', question: 'Which rule?', a: 'Use A.', b: 'Use B.', recommended: 'A'};

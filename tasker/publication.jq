@@ -52,9 +52,9 @@ elif all($reviews[]; clean) then
   elif $verdict == "DONE" then
     ("Develop already has this behavior at " + $d.done_commit + ". Tests: " +
       ([$in.children[] | select($in.schema.types[.kind].role == "test") | .address] | join(", ")) + ". " + $d.reason) as $evidence |
-    {operations: [(stage($ARGS.named.implement_stage) | .command.reason = ($evidence | .[0:1000])),
+    {operations: [(stage($ARGS.named.done_stage) | .command.reason = ($evidence | .[0:1000])),
       {command: {op: "note", target: $ac, id: note_id("done"), text: $evidence}}],
-     outcome: {status: "blocked", reason_code: "ALREADY_IN_DEVELOP", reason: ($d.done_commit + ": " + $d.reason | .[0:1000])}}
+     outcome: {status: "published", reason_code: "AC_DONE", reason: ($d.done_commit + ": " + $d.reason | .[0:1000])}}
   else
     $d.gap as $gap |
     {operations: [{command: {op: "save_object", kind: $in.selected.kind,

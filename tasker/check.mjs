@@ -10,6 +10,7 @@ import {checkRepair} from './repair-plan.mjs';
 import {bodyProblems} from './repair-context.mjs';
 import {restrictionLine, reporterNames} from './reporter-names.mjs';
 import {bindingPlan} from './test-bindings.mjs';
+import {passingTests} from './completion.mjs';
 
 // Same exemption as crew/workflow/scripts/plan-gate.mjs: migration SQL and metadata do not count for size.
 const MIGRATION_SIZE_EXEMPT = /^packages\/db\/migrations\/(?:[^/]+\.sql|meta\/.+)$/;
@@ -47,6 +48,9 @@ export function check({input, trees, draft, maxFiles, maxLines, forecast}) {
   if (!input.repair) problems.push(...bindingPlan({input, trees, draft}).problems);
   if (!text(draft.reason)) problems.push('reason is required');
   if (verdict === 'DONE') {
+    if (!passingTests(input, input.children ?? [])) {
+      problems.push('DONE requires a current recorded PASS for every present AC Test. Plan a verify-only Task for missing evidence.');
+    }
     const sha = draft.done_commit;
     if (typeof sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(sha) ||
         !Object.values(trees).some(tree => commitInTree(tree.path, sha))) {
