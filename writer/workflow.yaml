@@ -1,7 +1,8 @@
 # Crew copy of runtime-d7eeb0d/writer (owner, 21 Nov 2026, process:sample0004 r4). The engine stays unchanged.
 # Changes (scheme crew_team, step Writer): READY moves the AC to READY_STAGE and sets returns to 0.
 # Only an AC defect with a three-part finding moves it to RETURN_STAGE. A GAP adds the question tag and keeps the stage.
-# INVALID and REJECTED keep the stage. A defect or a failure adds 1 to returns.
+# REJECTED keeps the stage. A defect or a REJECTED adds 1 to returns. INVALID breaks the output contract:
+# it is a technical failure, and the shared release keeps the stage and returns.
 # At RETURNS_LIMIT the AC gets STUCK_TAG and a question to the Owner.
 version: '2'
 keep_runs: 1000
@@ -125,14 +126,14 @@ nodes:
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The draft does not match the output contract or the Test schema.</signal:REVISE>'
       else
-        echo 'The revised author draft does not match the Writer output contract or the Test schema.' > "$a/failure.txt"
+        echo 'Writer technical failure: the revised author draft does not match the Writer output contract or the Test schema.' > "$a/failure.txt"
         echo '<signal:INVALID>The revised draft does not match the output contract or the Test schema.</signal:INVALID>'
       fi
     on_signal:
       SOURCE_GAP: publish
       DRAFTED: critics
       REVISE: author
-      INVALID: rejected
+      INVALID: failed
       __failed__: failed
       __default__: failed
   critics:

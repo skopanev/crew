@@ -73,7 +73,14 @@ test('the actual prepare validates dry policy and exposes only the supplied Test
   assert.equal(fs.existsSync(path.join(f.a, 'engine-calls')), false);
 });
 
-test('the actual draft and review routes approve the whole reconcile plan before shared publication', t => {
+test('the actual draft and review routes approve the whole reconcile plan, and an invalid draft is a technical failure', t => {
+  const invalid = fixture(t, {plan: {tests: 'not a list', retire: [], coverage: 'c'}});
+  assert.match(invalid.run('draft_check'), /<signal:INVALID>/);
+  assert.match(workflow.split('  draft_check:\n')[1].split('  critics:\n')[0], /\n      INVALID: failed\n/);
+  assert.match(invalid.run('failed'), /<signal:PREPARED>/);
+  assert.equal(fs.readFileSync(path.join(invalid.a, 'engine-calls'), 'utf8'), ' fail');
+  assert.match(fs.readFileSync(path.join(invalid.a, 'failure.txt'), 'utf8'), /^Writer technical failure:/);
+  assert.equal(fs.existsSync(path.join(invalid.a, 'operations.json')), false);
   const f = fixture(t);
   assert.match(f.run('draft_check'), /<signal:DRAFTED>/);
   f.critics();
@@ -241,7 +248,7 @@ test('a critic rejection without a three-part finding keeps the AC stage, and th
   const commands = f.read('operations.json').operations.map(row => row.command);
   assert.deepEqual(commands[0].data, {returns: 3, tags: ['keep', 'stuck']});
   assert.equal(commands.some(row => row.data?.stage), false);
-  assert.match(commands.at(-1).text, /^Question to the Owner: Writer failed on this AC 3 times/);
+  assert.match(commands.at(-1).text, /^OPEN QUESTION \(Owner, tag stuck\): Writer failed on this AC 3 times in a row/);
   assert.equal(f.read('operations.json').outcome.reason_code, 'REJECTED');
 });
 

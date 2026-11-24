@@ -9,10 +9,11 @@ import {check} from './check.mjs';
 import {checkRepair} from './repair-plan.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const settings = JSON.parse(fs.readFileSync(path.join(here, "config.example.json"), "utf8")).vars;
 const identity = {GIT_AUTHOR_NAME: 'lane', GIT_AUTHOR_EMAIL: 'lane@example.invalid',
   GIT_COMMITTER_NAME: 'lane', GIT_COMMITTER_EMAIL: 'lane@example.invalid', GIT_CONFIG_GLOBAL: '/dev/null'};
-const ac = 'ac:sample0005';
-const reporter = name => ({kind: 'test', address: 'test:177ws50j',
+const ac = 'ac:sample0003';
+const reporter = name => ({kind: 'test', address: 'test:sample0001',
   document: {data: {title: 't', body: `Given: x.\nRepository: example-backend. Reporter name: ${name}`}}});
 
 // A fixed develop tree. The fixture forecast returns the given gate.
@@ -62,7 +63,7 @@ test('refuses a planned gate that splits (Dolber SPLIT returns)', () => {
   assert.match(result.problems.join('\n'), /forecastPlanGate split true\): full suite/);
 });
 
-test('names the dependency reason of a split (task:sample0003: a new workspace dependency with code)', () => {
+test('names the dependency reason of a split (task:sample0002: a new workspace dependency with code)', () => {
   const reason = 'The plan adds a workspace dependency (bun.lock) together with code. A dependency is no unavoidable path.';
   const result = run(draft([task([{path: 'packages/a/src/b.ts', change: 'edit', lines: 4}])]),
     {gate: {long: true, split: true, splitReason: reason, detail: 'backend-test-local: full suite'}});
@@ -145,8 +146,67 @@ test('requires exactly one literal Repository line before a Task can reach publi
 test('checks DONE against the develop tree and GAP for its question', () => {
   assert.deepEqual(run(sha => ({verdict: 'DONE', reason: 'b.ts has it', done_commit: sha})).problems, []);
   assert.match(run({verdict: 'DONE', reason: 'x', done_commit: 'deadbeef'}).problems.join(), /done_commit/);
-  assert.match(run({verdict: 'GAP', reason: 'x'}).problems.join(), /GAP needs gap/);
+  assert.match(run({verdict: 'GAP', reason: 'x'}).problems.join(), /GAP.*needs/);
+  const gap = {owner: 'cto', question: 'Which rule?', a: 'Use A.', b: 'Use B.', recommended: 'A'};
+  assert.deepEqual(run({verdict: 'GAP', reason: 'x', gap}).problems, []);
+  for (const invalid of ['A or B?', {...gap, owner: 'other'}, {...gap, a: ''}, {...gap, recommended: 'C'}]) {
+    assert.match(run({verdict: 'GAP', reason: 'x', gap: invalid}).problems.join(), /GAP.*needs/);
+  }
   assert.match(run({verdict: 'MAYBE', reason: 'x'}).problems.join(), /verdict must be/);
 });
 
 // publication.jq turns two critic reviews into the publication envelope.
+test('an oversized body gives its exact length and the minimum cut', () => {
+  const files=[{path:'packages/a/src/b.ts',change:'edit',lines:4}];
+  const result=run(draft([task(files,{body:'x'.repeat(4169)})]));
+  assert.match(result.problems.join(),/body has 4169 characters, limit 4096\. Remove at least 73 characters/);
+});
+
+test('the 3500-character writing target preserves the existing 4096-character schema limit', () => {
+  const files = [{path: 'packages/a/src/b.ts', change: 'edit', lines: 4}];
+  for (const length of [3500, 3501, 4096, 4097]) {
+    const value = task(files, {body: body(files.map(file => file.path)).padEnd(length, ' ')});
+    const result = run(draft([value]));
+    assert.equal(result.ok, length <= 4096, result.problems.join());
+    if (length > 4096) assert.match(result.problems.join(), /body has 4097 characters, limit 4096/);
+  }
+});
+
+test('Tests body sections contain IDs only and omit copied Test binding metadata', () => {
+  const files = [{path: 'packages/a/src/b.ts', change: 'edit', lines: 4}];
+  const prefix = body(files.map(file => file.path));
+  for (const value of ['Tests: test:a, test:b', 'Tests:\n- test:a\n- test:b', 'Tests: none']) {
+    assert.equal(run(draft([task(files, {body: prefix + '\n' + value})])).ok, true, value);
+  }
+  for (const value of ['Tests: test:a > expected result', 'Tests: test:a. Reporter name: file.test.ts > case',
+    'Tests:\n- test:a command: bun run test', 'Tests: none. Internal helper.']) {
+    assert.match(run(draft([task(files, {body: prefix + '\n' + value})])).problems.join(), /Tests in body must contain only Test IDs/, value);
+  }
+  for (const value of ['Reporter name: file.test.ts > case', 'Expected: the returned value is 5', 'Command: bun run test']) {
+    assert.match(run(draft([task(files, {body: prefix + '\nTests: none\n' + value})])).problems.join(), /keep Reporter names, Expected and command/, value);
+  }
+  assert.equal(run(draft([task(files, {body: prefix + '\nTests: none\nDo:\n- Select the branch when the returned value is 5.'})])).ok, true);
+});
+
+test('new Task and READY APIs share the lane body restriction check without changing valid file lines', () => {
+  run((sha, root) => {
+    const clean = task([{path: 'packages/a/src/b.ts', change: 'edit', lines: 179}]);
+    clean.body += '\nTests: test:sample0001\nDo:\n- Keep the payload unchanged.';
+    const selected = {address: 'task:t1', kind: 'task', document: {data: {title: clean.title, body: clean.body}}};
+    const input = {selected, schema: {types: {task: {field_max_length: 4096}, ac: {}}}, context: {
+      parent: {address: ac, kind: 'ac', document: {data: {title: 'Criterion', body: 'Required behavior'}}},
+      children: [], references: {}, incoming: []}};
+    const trees = {'example-backend': {path: root, sha}}, options = {trees, maxFiles: 8, maxLines: 300, forecast: () => null};
+    const verify = body => [check({...options, input: {selected: input.context.parent, children: []}, draft: draft([{...clean, body}])}),
+      checkRepair({...options, input, repair: {ac_text_changed: false}, checkPlan: check,
+        draft: {verdict: 'READY', reason: 'Required work', task: {...clean, body}}})];
+    assert.ok(verify(clean.body).every(result => result.ok));
+    for (const line of ['Size: three files, about 179 lines', 'Gate: 12 Test files', 'Line count: 179',
+      '- packages/a/src/b.ts (~179 lines)']) {
+      for (const result of verify(clean.body + '\n' + line)) {
+        assert.equal(result.ok, false, line); assert.match(result.problems.join('\n'), /restriction/i);
+      }
+    }
+    return draft([clean]);
+  });
+});

@@ -14,22 +14,65 @@
       "stage": "to_decide"
     }
   },
+  "children": {
+    "kind": [
+      "test"
+    ]
+  },
   "references": [
     "sources",
     "consumer"
   ],
+  "related": {
+    "limit": 1,
+    "parent": {
+      "kind": "requirement"
+    }
+  },
   "publication": {
     "file": "operations.json",
     "allowed_operations": [
       "save_object",
-      "note"
+      "note",
+      "archive_object"
     ],
     "create_kinds": [
-      "source"
+      "source",
+      "ac",
+      "requirement",
+      "test"
     ],
     "update_kinds": [
-      "ac"
-    ]
+      "ac",
+      "test",
+      "task"
+    ],
+    "structure": {
+      "create": {
+        "ac": [
+          "context_parent",
+          "fresh_parent",
+          "created"
+        ],
+        "requirement": [
+          "fresh_parent"
+        ],
+        "test": [
+          "created"
+        ]
+      },
+      "move": {
+        "ac": [
+          "fresh_parent",
+          "created"
+        ],
+        "test": [
+          "created",
+          "fresh_parent"
+        ]
+      },
+      "note_created": true
+    }
   },
   "vars": {
     "AUTHOR_MODEL": "claude-opus-5-5",
@@ -40,14 +83,24 @@
     "MANUALS_ROOT": "/path/to/project/manuals",
     "BRAIN_EXCLUDE": "obsolete",
     "REWORK_LIMIT": "1",
-    "DRY_RUN": "true"
+    "READY_STAGE": "to_audit",
+    "NEW_STAGE": "to_decide",
+    "RETURNS_LIMIT": "3",
+    "STUCK_TAG": "stuck",
+    "CTO_TAG": "source-gap-cto",
+    "CEO_TAG": "source-gap-ceo",
+    "DRY_RUN": "true",
+    "ARCHIVE_HOOK": "bun /path/to/crew/decider/archive-hook.mjs",
+    "ARCHIVE_LANE_CONFIG": "/path/to/project/dolber.json",
+    "ARCHIVE_STOP_SECONDS": "30"
   },
   "concurrency": 6,
   "retry": "always",
   "exclude_tags": [
     "source-gap-cto",
     "source-gap-ceo",
-    "manual-check"
+    "manual-check",
+    "stuck"
   ],
   "context": {
     "url": "https://joppa.example/api/data",

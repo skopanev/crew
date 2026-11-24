@@ -4,6 +4,8 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {dryOutput} from '../writer/control.mjs';
+import {STRUCTURE, actionProblems, structure} from './split-move.mjs';
+import {plan} from './archive.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const keys = ['G', 'A', 'U', 'M', 'V', 'R'];
@@ -15,6 +17,30 @@ const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('
 const save = (file, value) => { fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n'); fs.renameSync(file + '.tmp', file); };
 const emit = (key, value) => console.log(`<signal:var key=${key}>${String(value).replaceAll('<', '\\u003c').replaceAll('{{', '\\u007b\\u007b')}</signal:var>`);
 const signal = value => console.log(`<signal:${value}>Decider ${value}</signal:${value}>`);
+const noteId = (prefix, run) => (prefix + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-100);
+// Scheme crew_team, step Decider. A question (GAP or CONFLICT) keeps the stage and returns.
+// A technical failure (SEARCH_UNAVAILABLE, UNPUBLISHED_EVIDENCE) changes nothing.
+// DUPLICATE and OBSOLETE archive the AC: archive.mjs plans the own subtree, and ARCHIVE_HOOK sends the batches.
+const outcomes = ['READY', 'GAP', 'CONFLICT', 'MANUAL_CHECK', 'DUPLICATE', 'OBSOLETE', 'SEARCH_UNAVAILABLE', 'UNPUBLISHED_EVIDENCE'];
+const archives = ['DUPLICATE', 'OBSOLETE'];
+const packeted = ['MANUAL_CHECK', 'DUPLICATE'];
+const questions = ['GAP', 'CONFLICT'];
+
+// The config names the stage, the question tags, the stuck tag and the returns limit. The code names none of them.
+export function settings(env) {
+  const value = {readyStage: env.READY_STAGE, newStage: env.NEW_STAGE, limit: Number(env.RETURNS_LIMIT), stuckTag: env.STUCK_TAG,
+    tags: {cto: env.CTO_TAG, ceo: env.CEO_TAG}};
+  need([value.readyStage, value.newStage, value.stuckTag, value.tags.cto, value.tags.ceo].every(text) && Number.isSafeInteger(value.limit) && value.limit > 0,
+    'Configure READY_STAGE, NEW_STAGE, RETURNS_LIMIT, STUCK_TAG, CTO_TAG and CEO_TAG');
+  return value;
+}
+
+// The schema of the selected kind must hold the ready stage and the returns and tags fields.
+function schemaFields(input, value) {
+  const fields = input.schema?.types?.[input.selected.kind || 'ac']?.fields || {};
+  for (const stage of [value.readyStage, value.newStage]) need((fields.stage?.values || []).includes(stage), 'The AC schema has no stage ' + stage);
+  need(fields.returns && fields.tags, 'The AC schema needs the returns and tags fields');
+}
 
 export function policy(env, config) {
   need(['AUTHOR_MODEL', 'CRITIC_CODEX_MODEL', 'CRITIC_SECOND_MODEL'].every(key => text(env[key])), 'Configure all three models');
@@ -23,19 +49,29 @@ export function policy(env, config) {
   need(['true', 'false'].includes(env.DRY_RUN) && /^\d+$/.test(env.REWORK_LIMIT), 'Invalid dry run or rework limit');
   need(JSON.stringify(config.publication) === JSON.stringify(JSON.parse(env.FLOW_PUBLICATION)), 'Publication policy differs');
   const p = config.publication;
-  need(p.file === 'operations.json' && p.allowed_operations.join() === 'save_object,note' &&
-    p.create_kinds.join() === 'source' && p.update_kinds.join() === 'ac', 'Only Source creation and selected AC updates are permitted');
+  // archive_object and the task kind serve only the DUPLICATE and OBSOLETE archive of the own subtree (archive.mjs).
+  need(p.file === 'operations.json' && p.allowed_operations.join() === 'save_object,note,archive_object' &&
+    p.create_kinds.join() === 'source,ac,requirement,test' && p.update_kinds.join() === 'ac,test,task' &&
+    JSON.stringify(p.structure) === JSON.stringify(STRUCTURE), 'Only Sources, SPLIT and MOVE creates, AC updates and the own archive are permitted');
+  need(config.related?.parent?.kind, 'SPLIT under the current parent needs related.parent, so the publisher captures its revision');
   need(config.context.roles.decider?.process === 'decider' && config.context.roles.audit?.process === 'ac-auditor', 'Both live contracts are required');
   need(['BRAIN_ROOT', 'MANUALS_ROOT', 'BRAIN_EXCLUDE'].every(key => text(env[key])), 'Research roots and exclusion are required');
+  const value = settings(env);
+  need(config.failure_escalation === undefined, 'The Decider counts returns itself. Remove failure_escalation');
+  need([value.stuckTag, value.tags.cto, value.tags.ceo].every(tag => (config.exclude_tags || []).includes(tag)),
+    'exclude_tags must hold the stuck tag and both question tags');
 }
+
+// The kind with the test role in the schema holds the Tests of a new SPLIT part.
+const testKind = input => Object.entries(input.schema?.types || {}).find(([, type]) => type.role === 'test')?.[0];
 
 export function problems(draft, input, packet) {
   const result = [];
   const check = (ok, message) => { if (!ok) result.push(message); };
   check(draft && typeof draft === 'object' && !Array.isArray(draft), 'Return one decision object');
   if (result.length) return result;
-  check(Object.keys(draft).every(key => ['outcome', 'body', 'sources', 'new_sources', 'scores', 'summary', 'note', 'gap', 'research', 'duplicate_of'].includes(key)), 'Unknown decision field');
-  check(['READY_FOR_AUDIT', 'GAP', 'MANUAL_CHECK', 'SEARCH_UNAVAILABLE', 'UNPUBLISHED_EVIDENCE'].includes(draft.outcome), 'Unknown outcome');
+  check(Object.keys(draft).every(key => ['outcome', 'body', 'sources', 'new_sources', 'scores', 'summary', 'note', 'gap', 'research', 'duplicate_of', 'conflict', 'action', 'obsolete_by'].includes(key)), 'Unknown decision field');
+  check(outcomes.includes(draft.outcome), 'Unknown outcome');
   check(text(draft.summary), 'Give a summary');
   if (['SEARCH_UNAVAILABLE', 'UNPUBLISHED_EVIDENCE'].includes(draft.outcome)) return result;
   check(text(draft.body) && count(draft.body) <= (input.schema.types.ac.field_max_length ?? 1024), 'AC body is empty or exceeds its schema limit');
@@ -44,7 +80,7 @@ export function problems(draft, input, packet) {
   check(draft.scores && Object.keys(draft.scores).sort().join() === [...keys].sort().join(), 'Give exactly six scores');
   for (const key of keys) check([0, 1].includes(draft.scores?.[key]?.score) && text(draft.scores?.[key]?.evidence) &&
     count(draft.scores[key].evidence) <= 1000, `${key} needs a score and evidence`);
-  if (draft.outcome === 'READY_FOR_AUDIT') check(keys.every(key => draft.scores?.[key]?.score === 1), 'READY requires six scores of one');
+  if (draft.outcome === 'READY') check(keys.every(key => draft.scores?.[key]?.score === 1), 'READY requires six scores of one');
   const original = input.selected.document.data.body || '';
   for (const line of original.split('\n').filter(line => /^\s*(?:\*\*)?Baseline\b/.test(line))) check(draft.body?.split('\n').includes(line), 'Keep the existing Baseline');
   for (const line of draft.body?.split('\n').filter(line => /^\s*(?:\*\*)?Baseline\b/.test(line)) || []) check(original.split('\n').includes(line), 'Do not invent a Baseline');
@@ -64,17 +100,35 @@ export function problems(draft, input, packet) {
     check(research.files.every(item => item && text(item.path) && text(item.quote)), 'Checked files need a path and exact quote');
     const known = new Set([...(input.references.sources || []).map(item => item.address), ...research.sources.map(item => item?.address), ...proposed.map(item => item?.id)]);
     check(draft.sources?.every(address => known.has(address)), 'Every linked Source needs captured evidence');
+    result.push(...actionProblems(draft, input, packet, known, testKind(input)));
+    // CONFLICT: two different captured Sources, each with an exact quote. The host checks the quotes in proposal.
+    if (draft.outcome === 'CONFLICT') check(Array.isArray(draft.conflict) && draft.conflict.length === 2 &&
+      draft.conflict.every(item => item && Object.keys(item).sort().join() === 'quote,source' && known.has(item.source) &&
+        /^source:/.test(item.source) && text(item.quote)) && draft.conflict[0]?.source !== draft.conflict[1]?.source,
+      'CONFLICT needs two different captured Sources with exact quotes');
+    // OBSOLETE: one captured Source cancels the rule. archive.mjs checks the exact quote against the current Source.
+    if (draft.outcome === 'OBSOLETE') check(draft.obsolete_by && Object.keys(draft.obsolete_by).sort().join() === 'source,source_quote' &&
+      known.has(draft.obsolete_by.source) && /^source:/.test(draft.obsolete_by.source) && text(draft.obsolete_by.source_quote),
+      'OBSOLETE needs a captured Source and its exact quote that cancels the rule');
   }
-  if (draft.outcome === 'GAP') {
+  check(draft.outcome === 'OBSOLETE' || draft.obsolete_by === undefined, 'Obsolete proof is only for OBSOLETE');
+  if (archives.includes(draft.outcome)) {
+    check(draft.body === (input.selected.document.data.body || '') &&
+      JSON.stringify(draft.sources) === JSON.stringify(input.selected.document.data.sources || []), draft.outcome + ' preserves the selected body and Sources');
+    check(proposed.length === 0 && draft.gap === undefined, draft.outcome + ' cannot create Sources or ask a question');
+  }
+  check(draft.outcome === 'CONFLICT' || draft.conflict === undefined, 'Conflict proof is only for CONFLICT');
+  if (questions.includes(draft.outcome)) {
     check(['cto', 'ceo'].includes(draft.gap?.owner) && ['question', 'a', 'b'].every(key => text(draft.gap?.[key])) &&
-      ['A', 'B'].includes(draft.gap?.recommended), 'GAP needs the owner, question, A/B options and simplest recommendation');
-    check(keys.some(key => draft.scores?.[key]?.score === 0), 'GAP needs a demonstrated failed score');
-  }
-  check(draft.outcome === 'MANUAL_CHECK' || draft.duplicate_of === undefined, 'Duplicate proof is only for MANUAL_CHECK');
-  if (draft.outcome === 'MANUAL_CHECK') {
-    check(draft.scores?.R?.score === 0, 'MANUAL_CHECK requires R=0');
-    check(draft.body === original && JSON.stringify(draft.sources) === JSON.stringify(input.selected.document.data.sources || []), 'MANUAL_CHECK preserves the selected body and Sources');
-    check(proposed.length === 0 && draft.gap === undefined, 'MANUAL_CHECK cannot create Sources or request a Source gap');
+      ['A', 'B'].includes(draft.gap?.recommended), draft.outcome + ' needs the owner, question, A/B options and simplest recommendation');
+    check(keys.some(key => draft.scores?.[key]?.score === 0), draft.outcome + ' needs a demonstrated failed score');
+  } else check(draft.gap === undefined, 'A question is only for GAP or CONFLICT');
+  const duplicate = packeted.includes(draft.outcome);
+  check(duplicate || draft.duplicate_of === undefined, 'Duplicate proof is only for MANUAL_CHECK or DUPLICATE');
+  if (duplicate) {
+    check(draft.scores?.R?.score === 0, draft.outcome + ' requires R=0');
+    check(draft.body === original && JSON.stringify(draft.sources) === JSON.stringify(input.selected.document.data.sources || []), draft.outcome + ' preserves the selected body and Sources');
+    check(proposed.length === 0 && draft.gap === undefined, draft.outcome + ' cannot create Sources or request a Source gap');
     const proof = draft.duplicate_of;
     check(proof && Object.keys(proof).sort().join() === ['address', 'source', 'source_quote', 'sibling_quote'].sort().join() &&
       /^ac:[A-Za-z0-9_-]+$/.test(proof.address) && /^source:[A-Za-z0-9_-]+$/.test(proof.source) &&
@@ -83,14 +137,15 @@ export function problems(draft, input, packet) {
     check(sibling && sibling.address !== input.selected.address && sibling.kind === 'ac' && sibling.historical === false &&
       sibling.document?.present === true && sibling.document.parent === input.selected.document.parent &&
       Number.isSafeInteger(sibling.current_revision) && sibling.current_revision > 0 && text(proof?.sibling_quote) &&
-      sibling.document.data.body?.includes(proof.sibling_quote), 'MANUAL_CHECK needs exact evidence from a captured active sibling');
+      sibling.document.data.body?.includes(proof.sibling_quote), draft.outcome + ' needs exact evidence from a captured active sibling');
   }
   return result;
 }
 
-export function proposal(input, draft, packet, run) {
+export function proposal(input, draft, packet, run, config) {
   need(problems(draft, input, packet).length === 0, 'Invalid decision cannot be published');
-  need(['READY_FOR_AUDIT', 'GAP', 'MANUAL_CHECK'].includes(draft.outcome), 'Technical failure cannot change product state');
+  need(['READY', 'GAP', 'CONFLICT', 'MANUAL_CHECK'].includes(draft.outcome), 'Technical failure cannot change product state');
+  schemaFields(input, config);
   need(!draft.research.unavailable.length && ['joppa', 'brain', 'manuals'].every(key => text(draft.research.searches[key])), 'SEARCH_UNAVAILABLE');
   const files = packet.research_evidence.files, operations = [], refs = new Map();
   const existing = [...input.references.sources || [], ...packet.research_evidence.sources];
@@ -98,6 +153,10 @@ export function proposal(input, draft, packet, run) {
     const proof = draft.duplicate_of, source = existing.find(node => node.address === proof.source);
     need(source?.kind === 'source' && source.historical === false && source.document?.present === true &&
       source.document.data.body?.includes(proof.source_quote), 'The duplicate needs an exact rule from a captured current Source');
+  }
+  for (const item of draft.outcome === 'CONFLICT' ? draft.conflict : []) {
+    const source = existing.find(node => node.address === item.source);
+    need(source?.document?.data?.body?.includes(item.quote), 'The conflict needs an exact quote of each captured Source');
   }
   for (const item of draft.new_sources || []) {
     const file = files.find(file => file.path === fs.realpathSync(item.path));
@@ -113,19 +172,55 @@ export function proposal(input, draft, packet, run) {
     refs.set(item.id, {$ref: item.id + '/address'});
   }
   const sources = draft.sources.map(address => refs.get(address) || address);
-  need(sources.length > 0 || draft.outcome !== 'READY_FOR_AUDIT', 'READY needs linked Sources');
-  const manual = draft.outcome === 'MANUAL_CHECK';
-  const tags = [...new Set([...(input.selected.document.data.tags || []), ...(manual ? ['manual-check'] : draft.outcome === 'GAP' ? ['source-gap-' + draft.gap.owner] : [])])];
-  const data = manual ? {tags, stage: 'to_decide'} : {body: draft.body, sources, tags, stage: draft.outcome === 'GAP' ? 'to_decide' : 'to_audit'};
+  need(sources.length > 0 || draft.outcome !== 'READY', 'READY needs linked Sources');
+  const manual = draft.outcome === 'MANUAL_CHECK', question = questions.includes(draft.outcome);
+  const tag = question ? config.tags[draft.gap.owner] : null;
+  const tags = [...new Set([...(input.selected.document.data.tags || []), ...(manual ? ['manual-check'] : tag ? [tag] : [])])];
+  // READY moves the AC on and sets returns to 0. A question keeps the stage and returns.
+  const data = manual ? {tags, stage: 'to_decide'} : question ? {body: draft.body, sources, tags}
+    : {body: draft.body, sources, tags, stage: config.readyStage, returns: 0};
   const documents = [...new Set([...draft.research.sources.map(item => item.address + '@' + item.revision), ...draft.research.files.map(item => item.path), ...(draft.new_sources || []).map(item => item.path)])];
   let note = `Decider ${draft.outcome}\n${draft.note}\n${keys.map(key => key + '=' + draft.scores[key].score).join(' ')}\nChecked: ${documents.join(', ')}`;
-  if (draft.outcome === 'GAP') note += `\nQuestion: ${draft.gap.question}\n${draft.gap.recommended === 'A' ? '* ' : ''}A: ${draft.gap.a}\n${draft.gap.recommended === 'B' ? '* ' : ''}B: ${draft.gap.b}`;
+  if (draft.outcome === 'CONFLICT') note += draft.conflict.map(item => `\nConflict ${item.source}: ${item.quote}`).join('');
+  if (question) note += `\nOPEN QUESTION (${draft.gap.owner}, tag ${tag}): ${draft.gap.question}` +
+    `\nA${draft.gap.recommended === 'A' ? ' ★' : ''}: ${draft.gap.a}\nB${draft.gap.recommended === 'B' ? ' ★' : ''}: ${draft.gap.b}`;
   if (manual) note += `\nActive duplicate: ${draft.duplicate_of.address}\nSibling text: ${draft.duplicate_of.sibling_quote}\nSource rule ${draft.duplicate_of.source}: ${draft.duplicate_of.source_quote}`;
-  const node = input.selected;
-  operations.push({command: {op: 'save_object', kind: 'ac', id: node.address.split(':')[1], revision: input.claim_revision,
-    data, reason: 'Publish the decision that both independent critics approved.'}},
-  {command: {op: 'note', target: node.address, id: ('decider-' + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-100), text: note}});
-  return {operations, outcome: {status: draft.outcome === 'READY_FOR_AUDIT' ? 'published' : 'blocked', reason_code: draft.outcome, reason: draft.summary.slice(0, 1000)}};
+  const node = input.selected, shape = structure(input, draft, packet, run, {...config, testKind: testKind(input)}, address => refs.get(address) || address);
+  if (shape.note) note += '\n' + shape.note;
+  // Creates come first: the save of the selected AC can name a created Requirement as its parent.
+  operations.push(...shape.before, {command: {op: 'save_object', kind: 'ac', id: node.address.split(':')[1], revision: input.claim_revision,
+    ...(shape.parent ? {parent: shape.parent} : {}), data, reason: 'Publish the decision that both independent critics approved.'}},
+  {command: {op: 'note', target: node.address, id: noteId('decider-', run), text: note}}, ...shape.after);
+  return {operations, outcome: {status: draft.outcome === 'READY' ? 'published' : 'blocked', reason_code: draft.outcome, reason: draft.summary.slice(0, 1000)}};
+}
+
+// A failed step (a well-formed critic rejection) keeps the stage, adds 1 to returns and writes the full reason.
+// At the limit the AC gets the stuck tag and a question to the Owner.
+export function rejected(input, reason, run, config) {
+  schemaFields(input, config);
+  const node = input.selected, data = node.document.data || {};
+  const returns = (Number.isInteger(data.returns) ? data.returns : 0) + 1, stuck = returns >= config.limit;
+  const tags = stuck ? [...new Set([...(data.tags || []), config.stuckTag])] : undefined;
+  const line = 'Decider did not get an approved decision. The AC keeps its stage. Returns: ' + returns + '.' +
+    (stuck ? ' The returns limit adds the tag ' + config.stuckTag + '.' : '');
+  const operations = [{command: {op: 'save_object', kind: node.kind || 'ac', id: node.address.split(':')[1], revision: input.claim_revision,
+    data: {returns, ...(tags ? {tags} : {})}, reason: line}},
+  {command: {op: 'note', target: node.address, id: noteId('decider-rejected-', run), text: line + '\n' + reason}}];
+  if (stuck) operations.push({command: {op: 'note', target: node.address, id: noteId('decider-stuck-', run),
+    text: 'OPEN QUESTION (Owner, tag ' + config.stuckTag + '): the Decider failed on this AC ' + returns + ' times, and the limit is ' + config.limit +
+      '. The reasons are in the Decider notes.\nA ★: change the AC or its Sources by the reasons, then remove the tag ' + config.stuckTag +
+      ' and set returns to 0.\nB: archive the AC. Run: ' + run}});
+  return {operations, outcome: {status: 'blocked', reason_code: 'REJECTED', reason: line}};
+}
+
+// A review counts only when it is well formed for this exact draft and context. Anything else is a technical failure.
+export function wellFormed(review, digest, contextDigest) {
+  return Boolean(review) && typeof review === 'object' && review.draft_digest === digest && review.context_digest === contextDigest &&
+    ['APPROVE', 'REWORK'].includes(review.verdict) && Object.keys(review.scores || {}).sort().join() === [...keys].sort().join() &&
+    keys.every(key => typeof review.scores[key]?.agree === 'boolean' && text(review.scores[key]?.evidence)) &&
+    Array.isArray(review.findings) && review.findings.every(row => row && text(row.problem) && text(row.advice)) && text(review.summary) &&
+    // The critic contract: REWORK gives at least one concrete problem, APPROVE agrees with every score.
+    (review.verdict === 'REWORK' ? review.findings.length > 0 : keys.every(key => review.scores[key].agree === true));
 }
 
 export function reviews(draft, first, second, digest, contextDigest) {
@@ -138,17 +233,27 @@ export function reviews(draft, first, second, digest, contextDigest) {
 function main() {
   const [command, directory] = process.argv.slice(2), env = process.env;
   if (command === 'policy') { policy(env, read(env.PLANNING_JOPPA_CONFIG)); return; }
-  const file = name => path.join(directory, name + '.json'), input = read(file('input')), draft = read(file('draft'));
+  const file = name => path.join(directory, name + '.json'), input = read(file('input'));
+  const run = path.basename(path.dirname(directory));
+  if (command === 'rejected') {
+    const value = rejected(input, fs.readFileSync(path.join(directory, 'failure.txt'), 'utf8'), run, settings(env));
+    save(file('would-publish'), value); save(file('operations'), dryOutput(value, env.DRY_RUN === 'true')); signal('RETURN'); return;
+  }
+  const draft = read(file('draft'));
   if (command === 'check') {
     if (Array.isArray(draft.research?.unavailable) && draft.research.unavailable.length) {
       fs.writeFileSync(path.join(directory, 'failure.txt'), 'SEARCH_UNAVAILABLE: ' + JSON.stringify(draft.research.unavailable));
       signal('FAILED'); return;
     }
-    const issues = problems(draft, input, draft.outcome === 'MANUAL_CHECK' ? read(path.join(directory, 'decider-assignment.json')) : undefined);
+    const issues = problems(draft, input, packeted.includes(draft.outcome) ? read(path.join(directory, 'decider-assignment.json')) : undefined);
     if (issues.length) {
       if (Number(env.shape_retries || 0) < 1) {
         emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); signal('REVISE');
-      } else { fs.writeFileSync(path.join(directory, 'failure.txt'), issues.join('\n')); signal('FAILED'); }
+      } else {
+        // A broken output contract is a technical failure: stage and returns stay.
+        fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the decision stayed invalid after one correction.\n' + issues.join('\n'));
+        signal('FAILED');
+      }
     } else if (['SEARCH_UNAVAILABLE', 'UNPUBLISHED_EVIDENCE'].includes(draft.outcome)) {
       fs.writeFileSync(path.join(directory, 'failure.txt'), draft.outcome + ': ' + draft.summary); signal('FAILED');
     } else signal('CHECKED');
@@ -158,17 +263,35 @@ function main() {
     emit('draft_digest', hash(file('draft'))); emit('context_digest', hash(path.join(directory, 'decider-assignment.json')));
     emit('shape_feedback', ''); emit('shape_retries', '0'); signal('FROZEN'); return;
   }
-  need(command === 'review', 'Use policy, check, digest or review');
+  need(command === 'review', 'Use policy, check, digest, review or rejected');
   const first = read(file('critic-codex')), second = read(file('critic-second'));
-  if (reviews(draft, first, second, hash(file('draft')), hash(path.join(directory, 'decider-assignment.json')))) {
-    const value = proposal(input, draft, read(path.join(directory, 'decider-assignment.json')), path.basename(path.dirname(directory)));
+  const digests = [hash(file('draft')), hash(path.join(directory, 'decider-assignment.json'))];
+  if (![first, second].every(review => wellFormed(review, ...digests))) {
+    fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID_REVIEW: a critic output is malformed or names another digest.\n' +
+      JSON.stringify({codex: first, second}, null, 2) + '\n');
+    signal('FAILED'); return;
+  }
+  // Only a well-formed rejection by the critics counts as a failed step.
+  if (reviews(draft, first, second, hash(file('draft')), hash(path.join(directory, 'decider-assignment.json'))) && archives.includes(draft.outcome)) {
+    // A preview from the claim snapshot checks the proof. The hook freezes the real plan after a fresh read.
+    // A dry run publishes nothing and keeps the preview as the proposal.
+    const packet = read(path.join(directory, 'decider-assignment.json'));
+    need(problems(draft, input, packet).length === 0, 'Invalid decision cannot be archived');
+    const value = plan(input, draft, packet, input.children || []);
+    save(file('would-publish'), {archive: value});
+    if (env.DRY_RUN === 'true') {
+      save(file('operations'), dryOutput({operations: [], outcome: {status: 'blocked', reason_code: draft.outcome, reason: value.reason.slice(0, 1000)}}, true));
+      signal('APPROVED');
+    } else signal('ARCHIVE');
+  } else if (reviews(draft, first, second, hash(file('draft')), hash(path.join(directory, 'decider-assignment.json')))) {
+    const value = proposal(input, draft, read(path.join(directory, 'decider-assignment.json')), run, settings(env));
     save(file('would-publish'), value); save(file('operations'), dryOutput(value, env.DRY_RUN === 'true')); signal('APPROVED');
   } else if (Number(env.round || 1) <= Number(env.REWORK_LIMIT)) {
     emit('critique', JSON.stringify({codex: first, second})); emit('round', String(Number(env.round || 1) + 1)); signal('REVISE');
   } else {
     fs.writeFileSync(path.join(directory, 'failure.txt'), 'Independent critics did not approve the frozen decision.\n' +
       JSON.stringify({codex: first, second}, null, 2) + '\n');
-    signal('FAILED');
+    signal('REJECTED');
   }
 }
 

@@ -57,7 +57,8 @@
   },
   "exclude_tags": [
     "source-gap-cto",
-    "source-gap-ceo"
+    "source-gap-ceo",
+    "stuck"
   ],
   "children": {
     "kind": [
@@ -105,7 +106,14 @@
     "TASKER_READY_STAGE": "to_task",
     "TASKER_IMPLEMENT_STAGE": "to_implement",
     "TASKER_DONE_STAGE": "done",
-    "TASKER_LANE_CONFIG": "/path/to/crew/dolber.json"
+    "TASKER_LANE_CONFIG": "/path/to/crew/dolber.json",
+    "TASKER_RETURN_LIMIT": "3",
+    "TASKER_RETURN_STAGE": "to_decide",
+    "TASKER_TEST_RETURN_STAGE": "to_prepare",
+    "TASKER_TASK_REVIEW_STAGE": "to_review",
+    "STUCK_TAG": "stuck",
+    "FINDING_CRITERIA": "G A U M V R",
+    "TASKER_GAP_TAGS": "{\"cto\":\"source-gap-cto\",\"ceo\":\"source-gap-ceo\"}"
   },
   "concurrency": 3,
   "execution": "detached",
@@ -133,19 +141,31 @@
     {
       "selection": {
         "kind": "ac",
-        "data": {"stage": "to_implement"},
+        "data": {
+          "stage": "to_implement"
+        },
         "depth": 4
       },
-      "exclude_children": {"kind": "task"}
+      "exclude_children": {
+        "kind": "task"
+      }
     },
     {
       "selection": {
         "kind": "ac",
-        "data": {"stage": "done"},
-        "status": ["blue", "yellow", "orange"],
+        "data": {
+          "stage": "done"
+        },
+        "status": [
+          "blue",
+          "yellow",
+          "orange"
+        ],
         "depth": 4
       },
-      "exclude_children": {"kind": "task"}
+      "exclude_children": {
+        "kind": "task"
+      }
     },
     {
       "selection": {

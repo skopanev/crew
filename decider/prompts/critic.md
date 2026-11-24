@@ -15,16 +15,21 @@ The host supplies the file hash and the root Source command. The model cannot su
 All final rules must link an existing Source or a verified new Source proposal.
 No Test, Task, title, owner, consumer or foreign AC change is permitted.
 
-For READY_FOR_AUDIT, all six scores must equal one.
+For READY, all six scores must equal one.
 For GAP, verify a real missing decision after joppa, brain and manuals searches succeeded.
 Check the CTO/CEO routing, plain question, A/B choices and simplest recommendation.
+For CONFLICT, check both exact conflict quotes against the two full Sources.
+For action, check that a MOVE target fits better and that each SPLIT part is one other behavior with its own Sources and Tests.
 The note must list checked documents. Unavailable routes are not checked documents.
 A missing route or file error is a technical failure, not evidence of a missing policy.
 
-For MANUAL_CHECK, confirm R=0 and a real duplicate against a captured active sibling of this Requirement.
+For DUPLICATE, confirm R=0 and a real duplicate against a captured active sibling of this Requirement.
 Check both exact duplicate_of quotes against the full sibling and Source. Check the duplicate by meaning.
-The selected body and Sources must stay unchanged. Reject a gap, new Source, archive, move or foreign edit.
-This temporary route only adds manual-check, stage to_decide and an evidence note on the selected AC.
+The selected body and Sources must stay unchanged. Reject a gap or a new Source.
+The host moves the selected Tests to that sibling and archives the selected AC and its own Tasks.
+For OBSOLETE, check that the exact obsolete_by quote of a captured Source cancels the rule of the selected AC.
+The selected body and Sources must stay unchanged. Reject a gap or a new Source.
+The host archives the selected AC with its Tests and own Tasks. Reject any change of another AC or Task.
 
 Set agree true only when a score is correct. Give exact evidence.
 If a correct score has a wrong fix, keep agree true and give the exact text fix as a finding.

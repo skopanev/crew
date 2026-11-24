@@ -9,6 +9,8 @@ import path from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
+const settings = JSON.parse(fs.readFileSync(new URL("config.example.json", import.meta.url), "utf8")).vars;
+
 test('the machine-check CLI refuses body estimates for new Tasks and READY, and rejects changed AC repairs', () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'tasker-repair-main-'));
   try {
@@ -67,7 +69,7 @@ test('the workflow review join gates all repair verdicts on two exact reviews an
     const workflow=fs.readFileSync(path.join(here,'workflow.yaml'),'utf8');
     const shell=workflow.split('  review_join:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
     const node=(address,data)=>({address,kind:address.split(':')[0],current_revision:4,document:{data,present:true}});
-    const input={selected:node('task:t',{title:'Existing',body:'Old'}),claim_revision:5,schema:{types:{task:{role:'task'}}},
+    const input={selected:node('task:t',{title:'Existing',body:'Old'}),claim_revision:5,schema:{types:{task:{role:"task",fields:{stage:{values:[settings.TASKER_TASK_REVIEW_STAGE]}}}}},
       context:{parent:node('ac:a',{title:'Current',body:'Outcome'}),children:[],references:{},incoming:[]}};
     const write=(name,value)=>fs.writeFileSync(path.join(artifacts,name),JSON.stringify(value));
     write('input.json',input);write('repair.json',{ac_text_changed:true});write('trees.json',{});
@@ -78,9 +80,9 @@ test('the workflow review join gates all repair verdicts on two exact reviews an
       const review={draft_digest:digest,verdict:'APPROVE',checks:Object.fromEntries(keys.map(k=>[k,{ok:true,evidence:'Verified'}])),findings:[]};
       write('critic-codex.json',review);write('critic-second.json',{...review,draft_digest:oldDigest?'old':digest});
       const file=path.join(artifacts,'operations.json');if(fs.existsSync(file))fs.unlinkSync(file);
-      const log=execFileSync('sh',['-c',shell],{encoding:'utf8',env:{...process.env,MEDULLA_RUN_DIR:root,
+      const log=execFileSync('sh',['-c',shell],{encoding:'utf8',env:{...process.env,...settings,MEDULLA_RUN_DIR:root,
         MEDULLA_WORKFLOW_DIR:here,FLOW_PUBLICATION:JSON.stringify({file:'operations.json'}),DRY_RUN:String(dry),
-        TASK_STAGE:'to_implement',REWORK_LIMIT:'3',round:'4'}});
+        TASK_STAGE:'to_implement',TASKER_RETURN_LIMIT:'3',REWORK_LIMIT:'3',round:'4'}});
       return {log,publication:fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):null};
     };
     const ready={verdict:'READY',reason:'Still needed',task:{id:'t',title:'Existing',body:'Updated'}};
@@ -115,28 +117,31 @@ test('a live Task rejection publishes to_review and exact critic reasons, while 
     const workflow = fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8');
     const shell = workflow.split('  rejected:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
     const input = {selected: {address: 'task:t', kind: 'task', document: {data: {body: 'Work\nRepository: repo'}}}, claim_revision: 8,
-      schema: {types: {task: {role: 'task', fields: {repository: {type: 'enum', values: ['repo','other']}}}}}};
+      schema: {types: {task: {role: 'task', fields: {stage: {values: [settings.TASKER_TASK_REVIEW_STAGE]}, repository: {type: 'enum', values: ['repo','other']}}}}}};
     fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify(input));
-    const reason = 'codex: the prerequisite is missing. second: the caller is missing.\n';
+    const reason = 'codex: the prerequisite is missing. second: the caller is missing.\n' + 'я'.repeat(2000) + 'END';
     fs.writeFileSync(path.join(artifacts, 'failure.txt'), reason);
-    const execute = dry => {
-      const log = execFileSync('sh', ['-c', shell], {encoding: 'utf8', env: {...process.env,
-        MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: here, DRY_RUN: String(dry),
+    const execute = (dry, config = settings) => {
+      const log = execFileSync('sh', ['-c', shell], {encoding: 'utf8', env: {...process.env, ...config,
+        MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: here, DRY_RUN: String(dry), TASKER_RETURN_LIMIT: '3',
         FLOW_PUBLICATION: JSON.stringify({file: 'operations.json'})}});
       assert.match(log, /<signal:DECISION>/);
       return JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json'), 'utf8'));
     };
     const live = execute(false);
     assert.deepEqual(live.operations[0].command, {op: 'save_object', kind: 'task', id: 't', revision: 8,
-      data: {stage: 'to_review', repository: 'repo'}, reason});
+      data: {stage: 'to_review', repository: 'repo'}, reason: reason.slice(0, 1000)});
     assert.equal(live.operations[1].command.op, 'note');
     assert.equal(live.operations[1].command.target, 'task:t');
     assert.equal(live.operations[1].command.text, reason);
     assert.equal(live.outcome.reason_code, 'REJECTED');
-    const legacy = JSON.parse(execFileSync('jq', ['-n', '--arg', 'dry', 'false', '--arg', 'run', 'old-snapshot',
+    const legacy = JSON.parse(execFileSync('jq', ['-n', '--arg', 'dry', 'false', '--arg', 'run', 'old-snapshot', "--arg", "task_review_stage", settings.TASKER_TASK_REVIEW_STAGE,
       '--slurpfile', 'input', path.join(artifacts, 'input.json'), '--rawfile', 'reason', path.join(artifacts, 'failure.txt'),
       '-f', path.join(here, 'rejected.jq')], {encoding: 'utf8'}));
     assert.deepEqual(legacy.operations[0].command.data, {stage: 'to_review'});
+    input.schema.types.task.fields.stage.values.push("review-again");
+    fs.writeFileSync(path.join(artifacts, "input.json"), JSON.stringify(input));
+    assert.equal(execute(false, {...settings, TASKER_TASK_REVIEW_STAGE: "review-again"}).operations[0].command.data.stage, "review-again");
     const dry = execute(true);
     assert.deepEqual(dry.operations, []);
     assert.equal(dry.outcome.reason_code, 'DRY_RUN');

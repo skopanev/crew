@@ -54,8 +54,9 @@ The schema of the selected kind must hold both stages and the `returns` and `tag
   The auditor checks siblings and R, so the Writer config omits R.
   Without such a finding, the AC does not go to `RETURN_STAGE`.
 - A GAP adds `SOURCE_GAP_TAG` and keeps the stage and `returns`.
-- INVALID and REJECTED keep the stage, add 1 to `returns` and write a note with every critic finding in full.
-- At `RETURNS_LIMIT` the AC gets `STUCK_TAG` and a note with a question to the Owner.
+- REJECTED keeps the stage, adds 1 to `returns` and writes a note with every critic finding in full.
+- INVALID breaks the output contract. It is a technical failure: the shared release keeps the stage and `returns`.
+- At `RETURNS_LIMIT` the AC gets `STUCK_TAG` and an `OPEN QUESTION (Owner, tag ...)` note with the options A ★ and B.
 - `exclude_tags` holds `STUCK_TAG` and `SOURCE_GAP_TAG`. The shared queue compares whole tags.
 - The config has no `failure_escalation`. A technical failure releases the claim and keeps the stage.
 

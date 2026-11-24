@@ -51,7 +51,7 @@ test('the configured stages must exist in the schema with the returns and tags f
   assert.throws(() => acOutcome(value, 'failure', {...options, reason: 'r'}), /returns and tags fields/);
 });
 
-test('a failure keeps the stage and adds 1 to returns, and the limit adds stuck and a question to the Owner', () => {
+test('a failure keeps the stage and adds 1 to returns, and the limit adds stuck and an OPEN QUESTION with A and B', () => {
   const value = state();
   const reason = 'codex:\n' + Array.from({length: 40}, (_, index) => '- Test t' + index + ' score 01111: reason ' + index + ' ' + 'x'.repeat(80)).join('\n');
   const first = acOutcome(value, 'failure', {...options, reason});
@@ -63,8 +63,8 @@ test('a failure keeps the stage and adds 1 to returns, and the limit adds stuck 
   const third = acOutcome(value, 'failure', {...options, reason: 'r'});
   assert.deepEqual(third[0].command.data, {returns: 3, tags: ['keep', 'stuck']});
   assert.equal(third[2].command.id, 'writer-stuck-run-1');
-  assert.match(third[2].command.text, /^Question to the Owner: Writer failed on this AC 3 times, and the limit is 3\. What must change/);
-  assert.match(third[2].command.text, /remove the tag stuck and set returns to 0/);
+  assert.match(third[2].command.text, /^OPEN QUESTION \(Owner, tag stuck\): Writer failed on this AC 3 times in a row, and the limit is 3\./);
+  assert.match(third[2].command.text, /\nA ★: fix the AC by the findings and run Writer again\.\nB: archive the AC\.\n/);
 });
 
 test('a defect goes to the return stage with returns + 1 and a note with every three-part finding in full', () => {
@@ -73,7 +73,7 @@ test('a defect goes to the return stage with returns + 1 and a note with every t
   assert.deepEqual(operations[0].command.data, {stage: 'to_decide', returns: 3, tags: ['keep', 'stuck']});
   assert.equal(operations[1].command.id, 'writer-ac-defect-run-1');
   assert.match(operations[1].command.text, /- U: "then the payout goes to pending_submit\." breaks "An approved payout waits for the Travel Rule\." \(source:s1\)/);
-  assert.match(operations[2].command.text, /^Question to the Owner:/);
+  assert.match(operations[2].command.text, /^OPEN QUESTION \(Owner, tag stuck\):/);
   const long = Array.from({length: 12}, (_, index) => finding({criterion: 'GAUMVR'[index % 6], source_quote: 'An approved payout waits ' + 'y'.repeat(700) + index}));
   const text = acOutcome(state(), 'defect', {...options, findings: long})[1].command.text;
   for (const row of long) assert.ok(text.includes('"' + row.source_quote + '"'), row.source_quote.slice(-3));

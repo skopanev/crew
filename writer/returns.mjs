@@ -2,7 +2,7 @@
 // the returns limit and the stuck tag. The schema of the selected kind must define the stages and the returns and tags fields.
 // READY resets returns. An AC defect goes to the return stage only with a three-part finding. A GAP adds the question tag
 // and keeps the stage. A failed step keeps the stage. A defect or a failure adds 1 to returns. The limit adds the stuck tag
-// and an explicit question to the Owner.
+// and an OPEN QUESTION note with the options A and B.
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const need = (value, message) => { if (!value) throw new Error(message); };
 const flat = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
@@ -61,9 +61,8 @@ export function acOutcome(input, route, {readyStage, returnStage, limit, stuckTa
   }
   if (stuck) {
     operations.push({command: {op: 'note', target: selected.address, id: noteId('writer-stuck-', run),
-      text: 'Question to the Owner: Writer failed on this AC ' + returns + ' times, and the limit is ' + limit + '. ' +
-        'What must change in the AC or its Sources before Writer tries again? ' +
-        'After your answer, remove the tag ' + stuckTag + ' and set returns to 0. Run: ' + run}});
+      text: 'OPEN QUESTION (Owner, tag ' + stuckTag + '): Writer failed on this AC ' + returns + ' times in a row, and the limit is ' + limit + '. ' +
+        'The findings are in the Writer notes above.\nA ★: fix the AC by the findings and run Writer again.\nB: archive the AC.\nRun: ' + run}});
   }
   return operations;
 }

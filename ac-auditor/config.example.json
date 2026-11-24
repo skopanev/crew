@@ -12,8 +12,8 @@
     "workspace": "example",
     "token_file": "/path/to/example-read-key",
     "roles": {
-      "auditor": "ac-auditor",
-      "critic": "ac-auditor"
+      "finder": "ac-auditor",
+      "judge": "ac-auditor"
     },
     "filter_env": {
       "role": "LANE_MEMORY_ROLE",
@@ -63,15 +63,16 @@
     ]
   },
   "vars": {
-    "AUDITOR_MODEL": "claude-opus-5-5",
-    "CRITIC_CODEX_MODEL": "gpt-6.2-sol",
-    "CRITIC_SECOND_HARNESS": "claude-code",
-    "CRITIC_SECOND_MODEL": "claude-sonnet-5-5",
-    "REWORK_LIMIT": "2",
     "DRY_RUN": "true",
     "STAGE_WRITES": "true",
-    "AUDIT_FAIL_LIMIT": "3",
-    "AUDIT_FAIL_TAG": "manual-check"
+    "FINDER_ONE_MODEL": "gpt-6.2-sol",
+    "FINDER_TWO_MODEL": "gpt-6.1-sol",
+    "FINDER_THREE_MODEL": "gemini-4-carbon-high",
+    "JUDGE_MODEL": "claude-opus-5-5",
+    "RETURNS_LIMIT": "3",
+    "STUCK_TAG": "stuck",
+    "PASS_STAGE": "to_prepare",
+    "FAIL_STAGE": "to_decide"
   },
   "concurrency": 6,
   "execution": "detached",
@@ -98,7 +99,10 @@
     "default": "yellow"
   },
   "exclude_tags": [
-    "manual-check"
+    "manual-check",
+    "stuck",
+    "source-gap-cto",
+    "source-gap-ceo"
   ],
   "retry": "always"
 }

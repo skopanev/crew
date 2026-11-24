@@ -9,6 +9,7 @@ import {repairView} from './repair-plan.mjs';
 import {retirementBinding} from './retirement-proof.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const settings = JSON.parse(fs.readFileSync(path.join(here, "config.example.json"), "utf8")).vars;
 const workflow = fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8');
 const prepare = workflow.split('  prepare:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
 const updates = output => Object.fromEntries([...output.matchAll(/^<signal:var key=([A-Za-z_]+)>(.*?)<\/signal:var>$/gm)]
@@ -61,10 +62,10 @@ export async function readJoppa() {
   const config = path.join(root, 'config.json'); fs.writeFileSync(config, '{"url":"fixture","token_file":"unused"}');
   const trees = {repo: {path: path.join(root, 'develop'), sha: 'a'.repeat(40), unused: 'not in the view'}};
   write('input.json', input); write('trees.json', trees);
-  const env = {...process.env, PLANNING_PYTHON: 'sh', TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, PLANNING_JOPPA_CONFIG: config,
+  const env = {...process.env, ...settings, PLANNING_PYTHON: 'sh', TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, PLANNING_JOPPA_CONFIG: config,
     MEDULLA_RUN_DIR: root, MEDULLA_WORKFLOW_DIR: definition, TASKER_REPOS: '{}', TASKER_TREE_ROOT: root,
     CREW_WORKFLOW_DIR: path.join(here, '../workflow'), CBM_BIN: 'unused', CBM_CACHE_DIR: root, CBM_ALLOWED_ROOT: root,
-    REWORK_LIMIT: '3', PLAN_MAX_FILES: '8', PLAN_MAX_LINES: '300', DRY_RUN: 'false',
+    REWORK_LIMIT: '3', TASKER_RETURN_LIMIT: '3', PLAN_MAX_FILES: '8', PLAN_MAX_LINES: '300', DRY_RUN: 'false',
     CRITIC_SECOND_HARNESS: 'claude-code', AUTHOR_MODEL: 'author', CRITIC_CODEX_MODEL: 'first', CRITIC_SECOND_MODEL: 'second',
     FLOW_PUBLICATION: JSON.stringify({file: 'operations.json', allowed_operations: ['save_object', 'note'],
       create_kinds: role === 'task' ? [] : ['task'], update_kinds: role === 'task' ? ['ac', 'task'] : ['ac', 'test']})};

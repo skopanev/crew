@@ -30,23 +30,28 @@ Use a local ID such as new_1 in sources. The host creates and links it atomicall
 Keep local Source IDs out of the AC body and all notes. Name the document in prose.
 Do not create Sources for a missing rule.
 
-READY_FOR_AUDIT requires G, A, U, M, V and R all equal to one, with evidence.
+READY requires G, A, U, M, V and R all equal to one, with evidence.
 GAP requires a real missing decision after all three routes succeeded.
 Use owner cto for technical questions and ceo for product, policy, money, screen text or compliance.
 Give a plain question, options A and B, and recommend the simplest option.
 Keep the AC in to_decide for GAP. The host chooses the tag and stage.
 If a required file cannot be read as full evidence, return SEARCH_UNAVAILABLE.
 
-For a demonstrated active sibling duplicate, use the temporary MANUAL_CHECK route in the Decider contract.
+For a demonstrated active sibling duplicate, return DUPLICATE.
 Set R=0. Copy the selected body and Sources unchanged. Supply no gap and no new Sources.
 Give duplicate_of with the active sibling address, Source address, exact source_quote and exact sibling_quote.
-Use only an active sibling in this full assignment. Do not archive, move or edit any other node.
-The host adds manual-check and a note with both addresses and quotes. It keeps stage to_decide.
+Use only an active sibling in this full assignment.
+The host moves the Tests of the selected AC to that sibling and archives the selected AC and its own Tasks.
+
+When a captured Source cancels the rule of the selected AC, return OBSOLETE.
+Copy the selected body and Sources unchanged. Supply no gap and no new Sources.
+Give obsolete_by with the Source address and the exact source_quote that cancels the rule.
+The host archives the selected AC, its Tests and its own Tasks. It changes no other AC or Task.
 
 Return only JSON. Do not supply operations, commands, stage, tags, IDs or owners for tracker objects.
 Use this schema for a decision:
 
-{"outcome":"READY_FOR_AUDIT|GAP|MANUAL_CHECK","body":"Complete revised AC body","sources":["source:existing","new_1"],
+{"outcome":"READY|GAP|CONFLICT|DUPLICATE|OBSOLETE","body":"Complete revised AC body","sources":["source:existing","new_1"],
  "new_sources":[{"id":"new_1","title":"Source title","document_title":"Exact document title","section":"Exact section","path":"/approved/file","quote":"Exact original quote"}],
  "scores":{"G":{"score":1,"evidence":"Exact evidence"},"A":{"score":1,"evidence":"Exact evidence"},"U":{"score":1,"evidence":"Exact evidence"},"M":{"score":1,"evidence":"Exact evidence"},"V":{"score":1,"evidence":"Exact evidence"},"R":{"score":1,"evidence":"Exact evidence"}},
  "summary":"Decision and reason","note":"Changes and reasons for removed qualifiers",
@@ -56,7 +61,11 @@ Use this schema for a decision:
  "gap":{"owner":"cto|ceo","question":"Plain question","a":"Option A","b":"Option B","recommended":"A|B"}}
 
 Omit gap for READY. Use an empty new_sources list when none is needed.
-For MANUAL_CHECK, omit gap and include "duplicate_of":{"address":"ac:sibling","source":"source:existing","source_quote":"Exact Source rule","sibling_quote":"Exact sibling text"}.
-Omit duplicate_of for other outcomes. Record the Source read in research when it is not already in the assignment.
+With READY, GAP or CONFLICT, add "action" only for MOVE or SPLIT: {"move":{"to":"requirement:x","reason":"Why"}} or {"move":{"new":{"parent":"capability:y","title":"Title","body":"Behavior and scope"},"reason":"Why"}},
+and "split":[{"title":"Title","body":"Complete AC body of a new part","sources":["source:existing"],"tests":[{"title":"Test title","case":"nominal"}]}] with 1 or 2 new parts. body stays part 1.
+For CONFLICT, include gap and "conflict":[{"source":"source:a","quote":"Exact quote"},{"source":"source:b","quote":"Exact quote"}].
+For DUPLICATE, omit gap and include "duplicate_of":{"address":"ac:sibling","source":"source:existing","source_quote":"Exact Source rule","sibling_quote":"Exact sibling text"}.
+For OBSOLETE, omit gap and include "obsolete_by":{"source":"source:existing","source_quote":"Exact Source text that cancels the rule"}.
+Omit duplicate_of and obsolete_by for other outcomes. Record the Source read in research when it is not already in the assignment.
 For a technical failure return {"outcome":"SEARCH_UNAVAILABLE","summary":"Route and actual error"}.
 Correct all critic findings in the next draft. Do not replace a demonstrated gap with invented policy.

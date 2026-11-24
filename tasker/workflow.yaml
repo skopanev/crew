@@ -30,6 +30,14 @@ vars:
   CRITIC_SECOND_HARNESS: claude-code
   CRITIC_SECOND_MODEL: claude-sonnet-5-5
   REWORK_LIMIT: '3'
+  TASKER_RETURN_LIMIT: '3'
+  FINDING_CRITERIA: ''
+  STUCK_TAG: ''
+  TASKER_RETURN_STAGE: ''
+  TASKER_TEST_RETURN_STAGE: ''
+  TASKER_TASK_REVIEW_STAGE: ''
+  TASKER_IMPLEMENT_STAGE: ''
+  TASKER_GAP_TAGS: ''
   # true: run the whole flow, publish nothing and release the claim with outcome DRY_RUN.
   DRY_RUN: 'false'
   round: '1'
@@ -42,13 +50,14 @@ nodes:
   prepare:
     shell: |
       set -eu
-      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TASKER_REPOS TASKER_TREE_ROOT CREW_WORKFLOW_DIR CBM_BIN CBM_CACHE_DIR CBM_ALLOWED_ROOT; do
+      for name in CREW_FLOW_STAGES FLOW_PUBLICATION TASKER_REPOS TASKER_TREE_ROOT CREW_WORKFLOW_DIR CBM_BIN CBM_CACHE_DIR CBM_ALLOWED_ROOT FINDING_CRITERIA STUCK_TAG TASKER_RETURN_STAGE TASKER_TEST_RETURN_STAGE TASKER_TASK_REVIEW_STAGE TASKER_IMPLEMENT_STAGE TASKER_GAP_TAGS; do
         eval "value=\${$name:-}"
         [ -n "$value" ] || { echo "tasker: $name is required" >&2; exit 2; }
       done
-      case "$REWORK_LIMIT$PLAN_MAX_FILES$PLAN_MAX_LINES" in
-        *[!0-9]*) echo 'tasker: REWORK_LIMIT, PLAN_MAX_FILES and PLAN_MAX_LINES must be nonnegative integers' >&2; exit 2 ;;
+      case "$REWORK_LIMIT$PLAN_MAX_FILES$PLAN_MAX_LINES$TASKER_RETURN_LIMIT" in
+        *[!0-9]*) echo 'tasker: REWORK_LIMIT, PLAN_MAX_FILES, PLAN_MAX_LINES and TASKER_RETURN_LIMIT must be integers' >&2; exit 2 ;;
       esac
+      [ "${TASKER_RETURN_LIMIT:-0}" -gt 0 ] || { echo 'tasker: TASKER_RETURN_LIMIT must be positive' >&2; exit 2; }
       case "$DRY_RUN" in true|false) ;; *) echo 'tasker: DRY_RUN must be true or false' >&2; exit 2 ;; esac
       case "$CRITIC_SECOND_HARNESS" in claude-code|codex) ;; *) echo 'tasker: CRITIC_SECOND_HARNESS must be claude-code or codex' >&2; exit 2 ;; esac
       [ "$CRITIC_CODEX_MODEL" != "$CRITIC_SECOND_MODEL" ] && [ "$AUTHOR_MODEL" != "$CRITIC_SECOND_MODEL" ] || {
@@ -154,7 +163,7 @@ nodes:
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
-      rm -f "$a"/critic-*.json
+      rm -f "$a"/critic-*.json "$a/rejected-review.json"
       rc=0
       node "$MEDULLA_WORKFLOW_DIR/check.mjs" "$a" || rc=$?
       [ "$rc" -le 1 ] || exit "$rc"
@@ -168,7 +177,7 @@ nodes:
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The draft failed the machine checks. The author corrects it.</signal:REVISE>'
       else
-        jq -r '"Tasker stopped: the draft still fails the machine checks. " + (.problems | join(" ")) | .[0:1000]' "$a/check.json" > "$a/failure.txt"
+        jq -r '"Tasker stopped: the draft still fails the machine checks. " + (.problems | join("\n"))' "$a/check.json" > "$a/failure.txt"
         echo '<signal:REJECTED>The revised draft still fails the machine checks.</signal:REJECTED>'
       fi
     on_signal:
@@ -245,6 +254,7 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg run "$(basename "$MEDULLA_RUN_DIR")" --arg stage "$TASK_STAGE" --arg dry "$DRY_RUN" \
+        --arg implement_stage "$TASKER_IMPLEMENT_STAGE" --argjson gap_tags "$TASKER_GAP_TAGS" \
         --slurpfile draft "$a/draft.json" --slurpfile input "$a/input.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
         -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"
@@ -265,10 +275,8 @@ nodes:
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
         echo '<signal:REVISE>The critics did not approve the draft. The author revises it within the configured limit.</signal:REVISE>'
       else
-        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Tasker stopped after " + $limit + " reworks. " +
-          (.critique | to_entries | map(.key + ": " + ((.value.failing[0] | select(.) | .check + ": " + .evidence) //
-            .value.findings[0].problem // .value.invalid // .value.summary // "no approval" | .[0:400])) | join(" "))' |
-          cut -c1-1000 > "$a/failure.txt"
+        printf '%s' "$verdict" > "$a/rejected-review.json"
+        printf '%s' "$verdict" | jq -r --arg limit "$REWORK_LIMIT" '"Tasker stopped after " + $limit + " reworks.\n" + (.critique | tojson)' > "$a/failure.txt"
         echo '<signal:REJECTED>The critics did not approve the revised draft.</signal:REJECTED>'
       fi
     on_signal:
@@ -278,12 +286,18 @@ nodes:
       __failed__: failed
       __default__: failed
   rejected:
-    # A reviewed refusal sends the claimed AC or Task to to_decide. A dry run changes no business data.
+    # Only supported findings return an AC. A Task repair never changes AC returns.
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
+      review_file="$a/rejected-review.json"
+      [ -s "$review_file" ] || review_file=/dev/null
       jq -n --arg dry "$DRY_RUN" --arg run "$(basename "$MEDULLA_RUN_DIR")" \
+        --arg finding_criteria "$FINDING_CRITERIA" --arg stuck_tag "$STUCK_TAG" \
+        --arg return_stage "$TASKER_RETURN_STAGE" --arg test_return_stage "$TASKER_TEST_RETURN_STAGE" \
+        --arg task_review_stage "$TASKER_TASK_REVIEW_STAGE" \
+        --slurpfile review "$review_file" --argjson return_limit "${TASKER_RETURN_LIMIT:?TASKER_RETURN_LIMIT is required}" \
         --argjson repository "$(node "$MEDULLA_WORKFLOW_DIR/repair-context.mjs" repository "$a")" \
         --slurpfile input "$a/input.json" --rawfile reason "$a/failure.txt" \
         -f "$MEDULLA_WORKFLOW_DIR/rejected.jq" > "$a/$file"

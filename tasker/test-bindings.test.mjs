@@ -11,18 +11,19 @@ import {check} from './check.mjs';
 import {checkRepair, repairPublication} from './repair-plan.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const settings = JSON.parse(fs.readFileSync(path.join(here, "config.example.json"), "utf8")).vars;
 const binding = {test: 'test:t', repository: 'example-fixture', reporter_name: 'src/new.test.ts > suite > preserves the result', command: 'bun test src/new.test.ts'};
 const acceptance = 'Given: an existing decision.\nWhen: its evidence changes.\nThen: retain the previous decision.\n';
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tasker-bindings-')), artifacts = path.join(root, 'artifacts'), repo = path.join(root, 'repo');
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   fs.mkdirSync(artifacts); fs.mkdirSync(repo);
-  const env = {...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+  const env = {...process.env, ...settings, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
     GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid'};
   const git = (...args) => execFileSync('git', ['-C', repo, ...args], {encoding: 'utf8', env}).trim();
   fs.writeFileSync(path.join(repo, 'base.ts'), 'export {};\n'); git('init', '-q'); git('add', '.'); git('commit', '-q', '-m', 'Base');
   const input = {selected: {kind: 'ac', address: 'ac:a', current_revision: 4, document: {data: {title: 'A', body: 'Outcome', owner: 'binding-owner'}}},
-    claim_revision: 5, schema: {types: {ac: {role: 'ac'}, task: {role: 'task', field_max_length: 4096}, test: {role: 'test', field_max_length: 4096}}},
+    claim_revision: 5, schema: {types: {ac: {role: 'ac', fields: {stage: {values: [settings.TASKER_IMPLEMENT_STAGE]}}}, task: {role: 'task', fields: {stage: {values: [settings.TASK_STAGE]}} , field_max_length: 4096}, test: {role: 'test', field_max_length: 4096}}},
     children: [{address: 'test:t', kind: 'test', current_revision: 9, document: {data: {title: 'Retain the decision', body: acceptance}}}], references: {}};
   const draft = {verdict: 'OK', reason: 'Implement the missing behavior', test_bindings: [structuredClone(binding)],
     tasks: [{id: 't1', title: 'Implement the case', repository: binding.repository,
@@ -225,8 +226,8 @@ test('the actual prepare admits AC Test updates before author and preserves the 
   f.write('input.json', f.input); f.write('trees.json', f.trees);
   const stages = path.join(f.root, 'stages.mjs');
   fs.writeFileSync(stages, "console.log('<signal:PREPARED>Ready</signal:PREPARED>');");
-  fs.writeFileSync(path.join(f.root, 'completion.mjs'), "console.log('<signal:CONTINUE>Normal Tasker path.</signal:CONTINUE>');");
   fs.writeFileSync(path.join(f.root, 'trees.sh'), 'exit 0\n');
+  fs.writeFileSync(path.join(f.root, "completion.mjs"), "console.log(\"<signal:CONTINUE>Context fixture.</signal:CONTINUE>\");");
   const run = update_kinds => spawnSync('bash', ['-c', shell], {encoding: 'utf8', env: {...f.env,
     PLANNING_PYTHON: process.execPath, TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: f.root,
     FLOW_PUBLICATION: JSON.stringify({file: 'operations.json', allowed_operations: ['save_object', 'note'], create_kinds: ['task'], update_kinds}),

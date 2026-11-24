@@ -1,3 +1,8 @@
+# Scheme crew_team, step Decider. READY moves the AC to READY_STAGE and sets returns to 0. GAP and CONFLICT add
+# the question tag and keep the stage and returns. A decision that the critics reject keeps the stage and adds 1
+# to returns. At RETURNS_LIMIT the AC gets STUCK_TAG and a question to the Owner. A technical failure (an invalid
+# draft or critic output, a search error) changes nothing.
+# MOVE and SPLIT (split-move.mjs) add host-built creates and a parent change. New parts start in NEW_STAGE.
 version: '2'
 keep_runs: 1000
 start: prepare
@@ -16,7 +21,15 @@ vars:
   BRAIN_ROOT: ''
   MANUALS_ROOT: ''
   BRAIN_EXCLUDE: ''
+  # The host command that sends the frozen archive plan of DUPLICATE or OBSOLETE. It gets the artifacts folder.
+  ARCHIVE_HOOK: ''
   REWORK_LIMIT: '1'
+  READY_STAGE: ''
+  NEW_STAGE: ''
+  RETURNS_LIMIT: ''
+  STUCK_TAG: ''
+  CTO_TAG: ''
+  CEO_TAG: ''
   # Business dry runs still claim and release. Root trials replace prepare and publication locally.
   DRY_RUN: 'false'
   round: '1'
@@ -155,7 +168,39 @@ nodes:
       node "$MEDULLA_WORKFLOW_DIR/control.mjs" review "$MEDULLA_RUN_DIR/artifacts"
     on_signal:
       APPROVED: publish
+      ARCHIVE: archive
       REVISE: author
+      REJECTED: rejected
+      FAILED: failed
+      __failed__: failed
+      __default__: failed
+  rejected:
+    # Release the claim with the AC in its stage, returns + 1 and the full reason as a note.
+    shell: |
+      set -eu
+      node "$MEDULLA_WORKFLOW_DIR/control.mjs" rejected "$MEDULLA_RUN_DIR/artifacts"
+    on_signal:
+      RETURN: publish
+      __failed__: failed
+      __default__: failed
+  archive:
+    # DUPLICATE or OBSOLETE. The hook stops the own lanes of the AC and waits until they finish. It writes a fresh read of
+    # the own children to archive-children.json. archive.mjs plan freezes the plan: Tests, Tasks, then the AC.
+    # The hook sends each batch with its receipt (archive.mjs next) and records result.json.
+    # Without a configured hook this is a technical failure, and nothing changes.
+    shell: |
+      set -eu
+      a="$MEDULLA_RUN_DIR/artifacts"
+      "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" verify
+      if [ -z "$ARCHIVE_HOOK" ]; then
+        echo 'Decider technical failure: ARCHIVE_HOOK is not configured, so the approved archive is not sent.' > "$a/failure.txt"
+        echo '<signal:FAILED>ARCHIVE_HOOK is not configured.</signal:FAILED>'
+        exit 0
+      fi
+      $ARCHIVE_HOOK "$a"
+    on_signal:
+      READY: __exit_ok__
+      BLOCKED: __exit_fail__
       FAILED: failed
       __failed__: failed
       __default__: failed

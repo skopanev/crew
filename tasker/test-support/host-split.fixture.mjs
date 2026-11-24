@@ -5,11 +5,14 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {hostSplitReceipt} from '../host-split-replan.mjs';
 
+const settings = JSON.parse(fs.readFileSync(new URL('../config.example.json', import.meta.url))).vars;
+
 export function fixture() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tasker-host-split-')));
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
-  const env = {...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'fixture',
+  const env = {...process.env, ...Object.fromEntries(Object.entries(settings).map(([key, value]) =>
+    [key, typeof value === 'string' ? value : JSON.stringify(value)])), DRY_RUN: 'false', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'fixture',
     GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid'};
   const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'core.hooksPath=/dev/null', ...args], {env, encoding: 'utf8'}).trim();
   git('init', '-q');

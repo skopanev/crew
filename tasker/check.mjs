@@ -43,7 +43,7 @@ export function check({input, trees, draft, maxFiles, maxLines, forecast}) {
   const testAddresses = new Set(tests.map(item => item.address));
   const bodyLimit = input.schema?.types?.task?.field_max_length ?? Infinity;
   const verdict = draft?.verdict === 'SPLIT' ? 'OK' : draft?.verdict;
-  if (!['OK', 'DONE', 'GAP'].includes(verdict)) return {ok: false, problems: ['verdict must be OK, SPLIT, DONE or GAP'], tasks: []};
+  if (!['OK', 'DONE', 'GAP', 'CONFLICT'].includes(verdict)) return {ok: false, problems: ['verdict must be OK, SPLIT, DONE, GAP or CONFLICT'], tasks: []};
   if (!input.repair) problems.push(...bindingPlan({input, trees, draft}).problems);
   if (!text(draft.reason)) problems.push('reason is required');
   if (verdict === 'DONE') {
@@ -54,8 +54,11 @@ export function check({input, trees, draft, maxFiles, maxLines, forecast}) {
     }
     return {ok: problems.length === 0, problems, tasks: []};
   }
-  if (verdict === 'GAP') {
-    if (!text(draft.gap) || draft.gap.length > 1000) problems.push('GAP needs gap: the A/B question and advice, at most 1000 characters');
+  if (verdict === 'GAP' || verdict === 'CONFLICT') {
+    const gap = draft.gap;
+    const validGap = gap && typeof gap === 'object' && ['cto', 'ceo'].includes(gap.owner) && ['question', 'a', 'b'].every(key => text(gap[key])) &&
+      ['A', 'B'].includes(gap.recommended);
+    if (!validGap) problems.push('GAP or CONFLICT needs an owner, question, A/B options and recommendation');
     return {ok: problems.length === 0, problems, tasks: []};
   }
   const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
@@ -178,9 +181,13 @@ async function main() {
   const forecastRepositories = JSON.parse(process.env.TASKER_GATE_REPOSITORIES || '[]');
   if (!Array.isArray(forecastRepositories) || forecastRepositories.some(item => typeof item !== 'string')) throw new Error('TASKER_GATE_REPOSITORIES must be a string array');
   const forecastPlanGate = forecastRepositories.length ? (await import(pathToFileURL(path.join(process.env.CREW_WORKFLOW_DIR, 'scripts/plan-gate.mjs')).href)).forecastPlanGate : null;
-  const forecast = (repository, tree, paths, size) => forecastRepositories.includes(repository)
-    ? forecastPlanGate({...env, LANE_WORKTREE: tree}, paths, size)
-    : null;
+  const warned = new Set();
+  const forecast = (repository, tree, paths, size) => {
+    if (forecastRepositories.includes(repository)) return forecastPlanGate({...env, LANE_WORKTREE: tree}, paths, size);
+    if (!warned.has(repository)) console.error(`tasker-check: no gate forecast configured for ${repository}; configure TASKER_GATE_REPOSITORIES and its adapter`);
+    warned.add(repository);
+    return null;
+  };
   const input = read('input.json'), draft = read('draft.json');
   const options = {input, trees: read('trees.json'), draft,
     maxFiles: Number(process.env.PLAN_MAX_FILES), maxLines: Number(process.env.PLAN_MAX_LINES), forecast};
