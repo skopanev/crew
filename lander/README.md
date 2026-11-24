@@ -120,6 +120,8 @@ Archived landed Tasks remain archived. Lander preserves Test results and human a
 An atomic batch checks live child revisions with empty saves before the criterion stage save.
 Lander reads the children again after publication. A new unfinished Task or changed result restores the prior stage.
 A concurrent owner edit prevents that restoration. The existing `lander.json` retains requests and unresolved outcomes.
+After a lost response, Lander repeats the saved request ID before it checks completion or restores the prior stage.
+The completion step preserves the original Task publication signal, including when its files or service are unavailable.
 The native 100-operation batch limit applies. An oversized completion remains deferred without a partial write.
 
 ## Hourly report

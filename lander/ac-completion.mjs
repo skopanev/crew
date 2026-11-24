@@ -8,7 +8,7 @@ import {api, batchRequest, mutateTasks, contractDigest} from '../lane-launcher/j
 import {readDetails} from '../lane-launcher/joppa-api.mjs';
 
 const need = (ok, message) => { if (!ok) throw new Error(message); };
-const data = node => node.document?.data ?? {};
+const data = node => node?.document?.data ?? {};
 const present = node => node.historical === false && node.document?.present === true;
 const tone = node => node.status?.tone ?? node.status;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -45,11 +45,12 @@ async function inspect(config, policy, address, landed, read, many) {
     : {relations_of: address, direction: 'incoming', relation: policy.relation};
   const rows = [];
   for await (const page of nodePages(read, {...query, kind: [...policy.task_kinds, ...policy.test_kinds],
-    status: ['red', 'yellow', 'orange', 'blue', 'green'], fields: ['revision', 'parent']})) rows.push(...page.items);
-  const children = await many(rows.map(row => row.address));
-  need(children.length === rows.length && children.every(node => present(node) &&
+    fields: ['revision', 'parent']})) rows.push(...page.items);
+  const listed = await many(rows.map(row => row.address));
+  need(listed.length === rows.length && listed.every(node =>
     rows.some(row => row.address === node.address && row.revision === node.current_revision) &&
     parents(node, policy.relation).includes(address)), 'AC children changed while reading');
+  const children = listed.filter(present);
   const tasks = children.filter(node => policy.task_kinds.includes(node.kind));
   const current = await many(landed.map(node => node.address));
   const taskDone = node => policy.task_kinds.includes(node.kind) && !nodeAssignee(node) &&
@@ -82,10 +83,16 @@ export async function completeACs(config, input, state, result, {read, many, wri
       groups.get(address).push(item);
     }
   }
+  const priorOutcomes = new Map((state.ac_completion ?? []).flatMap(attempt => attempt.outcomes ?? [])
+    .filter(item => item.address).map(item => [item.address, item]));
+  for (const [address, previous] of priorOutcomes) if (previous.request &&
+    ['unresolved', 'deferred'].includes(previous.status)) groups.set(address, previous.landed ?? groups.get(address) ?? []);
   const outcomes = [];
   for (const [address, landed] of groups) {
-    const outcome = {address, status: 'deferred'};
-    let before, revision;
+    const latest = priorOutcomes.get(address);
+    const prior = latest?.request && ['unresolved', 'deferred'].includes(latest.status) ? latest : null;
+    const outcome = prior ? structuredClone(prior) : {address, status: 'deferred'};
+    let revision = outcome.revision;
     const reopen = async ac => {
       need(ac.current_revision === revision && data(ac).stage === policy.done_stage,
         'AC changed after completion; preserve the current owner update');
@@ -94,22 +101,34 @@ export async function completeACs(config, input, state, result, {read, many, wri
       outcome.rollback = rollback; persist(outcomes);
       await write(rollback);
       outcome.status = 'reopened';
+      outcome.needs_recovery = false;
     };
     outcomes.push(outcome);
     try {
-      before = await inspect(config, policy, address, landed, read, many);
-      if (!before.ready || data(before.ac).stage === policy.done_stage) {
+      if (outcome.rollback) {
+        await write(outcome.rollback);
+        Object.assign(outcome, {status: 'reopened', needs_recovery: false}); continue;
+      }
+      const before = outcome.request ? null : await inspect(config, policy, address, landed, read, many);
+      if (before && (!before.ready || data(before.ac).stage === policy.done_stage)) {
         Object.assign(outcome, {status: before.ready ? 'already_done' : 'waiting', reason: before.reason}); continue;
       }
       const reason = 'Lander confirmed landing. Every current Task is done and every current Test passes.';
-      const guards = before.children.map(node => ({op: 'save_object', kind: node.kind,
+      const guards = before?.children.map(node => ({op: 'save_object', kind: node.kind,
         id: node.address.slice(node.address.indexOf(':') + 1), revision: node.current_revision, reason}));
-      const request = batchRequest({workspace: config.workspace}, [...guards, saveNode(before.ac, {stage: policy.done_stage}, reason)]);
-      Object.assign(outcome, {request, previous_stage: data(before.ac).stage}); persist(outcomes);
-      const reply = await write(request);
+      if (!outcome.request) outcome.request = batchRequest({workspace: config.workspace},
+        [...guards, saveNode(before.ac, {stage: policy.done_stage}, reason)]);
+      Object.assign(outcome, {landed, previous_stage: outcome.previous_stage ?? data(before?.ac).stage,
+        status: 'unresolved', needs_recovery: true}); persist(outcomes);
+      const reply = await write(outcome.request);
       revision = reply.results.at(-1).object.revision;
+      outcome.revision = revision; persist(outcomes);
       const after = await inspect(config, policy, address, landed, read, many);
-      if (after.ready) { Object.assign(outcome, {status: 'done', revision}); continue; }
+      if (after.ac.current_revision !== revision || data(after.ac).stage !== policy.done_stage) {
+        Object.assign(outcome, {status: 'owner_changed', needs_recovery: false,
+          reason: 'AC changed after completion; preserve the current owner update'}); continue;
+      }
+      if (after.ready) { Object.assign(outcome, {status: 'done', needs_recovery: false}); continue; }
       await reopen(after.ac);
       outcome.reason = after.reason;
     } catch (error) {
@@ -125,6 +144,10 @@ export async function completeACs(config, input, state, result, {read, many, wri
 }
 
 async function main() {
+  const code = process.env.MEDULLA_LAST_SIGNAL;
+  need(['READY', 'BLOCKED'].includes(code), 'AC completion requires the original publication signal');
+  let persist = () => {};
+  try {
   const root = path.join(process.env.MEDULLA_RUN_DIR, 'artifacts');
   const load = name => JSON.parse(fs.readFileSync(path.join(root, name + '.json'), 'utf8'));
   const config = JSON.parse(fs.readFileSync(process.env.PLANNING_JOPPA_CONFIG, 'utf8'));
@@ -141,7 +164,7 @@ async function main() {
     return rows;
   };
   let attempt;
-  const persist = outcomes => {
+  persist = outcomes => {
     if (!attempt) {
       attempt = {started_at: new Date().toISOString(), outcomes: []};
       state.ac_completion ??= [];
@@ -150,13 +173,14 @@ async function main() {
     attempt.outcomes = outcomes;
     fs.writeFileSync(path.join(root, 'lander.json'), JSON.stringify(state));
   };
-  try {
     const outcomes = await completeACs(config, load('input'), state, result, {read, many,
       write: request => mutateTasks({config: service, joppaWorker: worker}, request), persist});
     for (const outcome of outcomes) console.log('AC completion: ' + outcome.address + ' ' + outcome.status + (outcome.reason ? ': ' + outcome.reason : ''));
-  } catch (error) { persist([{status: 'deferred', reason: error.message}]); console.error('AC completion deferred: ' + error.message); }
-  const code = result.reason_code === 'LANDED' ? 'READY' : 'BLOCKED';
-  console.log(`<signal:${code}>Preserve the confirmed Task publication result.</signal:${code}>`);
+  } catch (error) {
+    console.error('AC completion deferred: ' + error.message);
+    try { persist([{status: 'deferred', reason: error.message}]); }
+    catch (persistError) { console.error('AC completion state unavailable: ' + persistError.message); }
+  } finally { console.log(`<signal:${code}>Preserve the confirmed Task publication result.</signal:${code}>`); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch(error => { console.error(error.message); process.exitCode = 2; });

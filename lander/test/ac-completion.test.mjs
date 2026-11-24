@@ -19,18 +19,20 @@ function fixture() {
     publication: {allowed_operations: ['save_object'], update_kinds: ['work', 'criterion']}, ac_completion: {
     kind: 'criterion', task_kinds: ['work'], test_kinds: ['check'], relation: 'parent', done_stage: 'complete'}};
   const input = {items: [clone(task)]}, state = {landed: commit, checked: {commit}, accepted: [{address: task.address}]};
-  const result = {claim_released: true}, writes = [];
+  const result = {claim_released: true}, writes = [], receipts = new Map();
   let onWrite = () => {}, onMany = () => {};
   const read = async (tool, args) => {
     if (tool === 'joppa_tree') return {schema};
     if (args.address) return clone(objects.get(args.address));
     return {items: [...objects.values()].filter(row => row.document.present && args.kind.includes(row.kind) &&
+      (!args.status || args.status.includes(row.status?.tone ?? row.status)) &&
       (args.relations_of ? row.relations?.[args.relation]?.edges?.some(edge => edge.to === args.relations_of)
         : row.document.parent === args.parent)).map(row =>
       ({address: row.address, revision: row.current_revision, parent: row.document.parent})), next_cursor: null};
   };
   const many = async addresses => { onMany(addresses); return addresses.map(address => clone(objects.get(address))); };
   const write = async request => {
+    if (receipts.has(request.request_id)) return clone(receipts.get(request.request_id));
     for (const {command} of request.operations) assert.equal(objects.get(command.kind + ':' + command.id).current_revision,
       command.revision, 'stale object revision');
     writes.push(clone(request));
@@ -39,11 +41,17 @@ function fixture() {
       if (command.data) { Object.assign(row.document.data, command.data); row.current_revision++; }
       return {command, object: {address: row.address, revision: row.current_revision}};
     });
+    receipts.set(request.request_id, clone({results}));
     if (writes.length === 1) onWrite();
     return {results};
   };
   return {schema, config, input, state, result, ac, task, check, objects, writes, node,
-    run: () => completeACs(config, input, state, result, {read, many, write}),
+    run: () => {
+      const attempt = {outcomes: []};
+      state.ac_completion ??= []; state.ac_completion.push(attempt);
+      return completeACs(config, input, state, result, {read, many, write,
+        persist: outcomes => { attempt.outcomes = clone(outcomes); }});
+    },
     onWrite: callback => { onWrite = callback; }, onMany: callback => { onMany = callback; }};
 }
 
@@ -99,9 +107,41 @@ test('an owner edit after publication is preserved', async () => {
   f.onWrite(() => { f.ac.current_revision++; f.ac.document.data.stage = 'review'; f.ac.document.data.body = 'Owner update';
     f.objects.set('work:new', f.node('work:new', 'queued')); });
   const [outcome] = await f.run();
-  assert.equal(outcome.status, 'deferred');
+  assert.equal(outcome.status, 'owner_changed');
   assert.equal(f.ac.document.data.body, 'Owner update');
   assert.equal(f.writes.length, 1);
+});
+
+for (const kind of ['work', 'check']) for (const status of [undefined, 'gray']) {
+  test(`${kind} with ${status} status remains an AC completion input`, async () => {
+    const f = fixture(), child = f.node(kind + ':unknown', 'queued');
+    child.status = status; f.objects.set(child.address, child);
+    assert.equal((await f.run())[0].status, 'waiting');
+    assert.equal(f.writes.length, 0);
+  });
+}
+
+test('a lost response replays the saved request before restoring an incomplete AC', async () => {
+  const f = fixture();
+  f.onWrite(() => {
+    f.objects.set('work:new', f.node('work:new', 'queued'));
+    throw new Error('Response lost after commit');
+  });
+  const [first] = await f.run();
+  assert.equal(first.status, 'unresolved'); assert.equal(first.needs_recovery, true);
+  assert.equal(f.ac.document.data.stage, 'complete');
+  const [second] = await f.run();
+  assert.equal(second.status, 'reopened'); assert.equal(second.needs_recovery, false);
+  assert.equal(second.request.request_id, first.request.request_id);
+  assert.equal(f.ac.document.data.stage, 'review'); assert.equal(f.writes.length, 2);
+  assert.equal((await f.run())[0].status, 'waiting');
+});
+
+test('an owner stage edit cannot produce a done report even when all inputs pass', async () => {
+  const f = fixture();
+  f.onWrite(() => { f.ac.document.data.stage = 'review'; f.ac.current_revision++; });
+  assert.equal((await f.run())[0].status, 'owner_changed');
+  assert.equal(f.writes.length, 1); assert.equal(f.ac.document.data.stage, 'review');
 });
 
 test('no confirmed publication or disabled policy produces no AC writes', async () => {
