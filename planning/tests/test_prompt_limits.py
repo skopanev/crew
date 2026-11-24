@@ -1,5 +1,6 @@
 """Render each workflow prompt with large bodies through the real Medulla renderer."""
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -24,7 +25,10 @@ class PromptLimits(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory) / "large.json"
             fixture.write_text(json.dumps({"body": huge}))
+            selected = os.environ.get("CREW_PROMPT_WORKFLOWS", "").split()
             for workflow in sorted(root.glob("*/workflow.yaml")):
+                if selected and workflow.parent.name not in selected:
+                    continue
                 flow = yaml.safe_load(workflow.read_text())
                 for name, node in flow.get("nodes", {}).items():
                     if "agent" not in node or "prompt" not in node:
@@ -47,7 +51,9 @@ class PromptLimits(unittest.TestCase):
                                 self.assertNotIn("{{", prompt)
                             count += 1
                             maximum = max(maximum, len(prompt))
-        print(json.dumps({"renderer": "medulla.v2.render.render", "cases": count, "max_chars": maximum}))
+        self.assertGreater(count, 0)
+        print(json.dumps({"renderer": "medulla.v2.render.render", "cases": count,
+                          "max_chars": maximum, "includes_signal_protocol": True}))
 
 
 if __name__ == "__main__":
