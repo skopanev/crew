@@ -80,7 +80,7 @@ export async function occupancyReader(config, read) {
       seen.add(parent);
       const context = await object(parent, {allowArchived: true});
       if (context.document.present !== true) return null;
-      if (!allowArchived && excludedNodeTag(context, config.joppa.excludeTags)) return null;
+      if (excludedNodeTag(context, config.joppa.excludeTags)) return null;
       if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
       parent = context.document.parent;
     }

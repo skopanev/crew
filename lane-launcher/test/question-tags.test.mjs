@@ -5,8 +5,10 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {nextTask, claimTask, guardTaskClaims, finishTask} from '../joppa.mjs';
+import {nextTask, claimTask, guardTaskClaims, finishTask, api} from '../joppa.mjs';
 import {writeLaunchClaim} from '../joppa-claims.mjs';
+import {occupancyReader} from '../joppa-selection.mjs';
+import {requirementPlan} from '../requirement-delivery.mjs';
 import {validateTaskFilter} from '../task-filter.mjs';
 import {packageFixture, packageLanding} from '../test-support/launcher-joppa.fixture.mjs';
 
@@ -52,4 +54,34 @@ for (const tag of tags) test(`a configured tag stops startup and push but preser
   assert.equal(result.completed, true);
   assert.equal(parent.document.data.stage, originalStage);
   assert.deepEqual(parent.document.data.tags, ['unrelated', tag]);
+});
+
+test('finalize-only checks live ancestor tags during selection, startup and before push', async t => {
+  const f = await packageFixture(t);
+  f.run.config.joppa.excludeTags = tags;
+  f.schema.types.ac.parents = ['req'];
+  f.schema.types.req.parents = [];
+  Object.assign(f.run, {finalizeOnly: true, tasks: [], repository: f.run.config.repositories[0], runFolder: f.root});
+  for (const node of [f.objects.get('task:t1'), f.objects.get('task:t2')]) {
+    node.document.present = false;
+    node.document.data.commit = 'a'.repeat(40);
+  }
+  const read = (tool, args) => api(f.run.config, f.run.joppaWorker, tool, {workspace: f.run.workspace, ...args});
+  const plan = await requirementPlan(f.run, read);
+  assert.equal(plan.final, true);
+  f.run.requirementDelivery = {...plan, head: 'a'.repeat(40)};
+  const artifacts = path.join(f.root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  const captured = writeLaunchClaim(f.run, f.root, {id: 'finalize'});
+  fs.copyFileSync(captured, path.join(artifacts, 'claim.json'));
+  const env = {...process.env, MEDULLA_RUN_DIR: f.root, REQUIREMENT_READER_FILE: f.run.joppaWorker.tokenFile};
+  assert.match((await exec(process.execPath, [checker], {env})).stdout, /Requirement composition is current/);
+  for (const address of ['ac:a1', 'req:r']) {
+    const node = f.objects.get(address);
+    node.document.data.tags = [tags[0]];
+    assert.equal(await (await occupancyReader(f.run.config, read)).group('task:t1', true), null);
+    await assert.rejects(requirementPlan(f.run, read), /QUESTION_TAG/);
+    await assert.rejects(exec(process.execPath, [checker], {env}), error => /QUESTION_TAG/.test(error.stderr));
+    delete node.document.data.tags;
+  }
 });

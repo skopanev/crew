@@ -31,6 +31,7 @@ try {
     (mcpCommand || process.env.REQUIREMENT_READER_FILE) &&
     (tasksMode ? claim.source === 'joppa' : plan?.fingerprint && (publishMode || plan.final)),
     'Publication needs the captured Joppa claim and a live reader');
+  input.config.joppa.excludeTags = claim.excluded_tags ?? [];
   const finalizeOnly = input.finalizeOnly === true || claim.source === 'joppa-finalization';
   require(!(publishMode && finalizeOnly), 'Finalize-only lane cannot run in --publish mode');
 
