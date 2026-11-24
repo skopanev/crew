@@ -1,4 +1,4 @@
-"""Expose the existing read-only Joppa reader for Sources in one workspace."""
+"""Expose the existing read-only Joppa reader for Sources, and for the MOVE kinds of the selected domain, in one workspace."""
 import json
 import os
 from pathlib import Path
@@ -20,6 +20,23 @@ class Sources(Reader):
             'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False},
             'annotations': {'readOnlyHint': True, 'destructiveHint': False}}]
 
+    def kinds(self):
+        # READER_KINDS: source and the kinds that MOVE needs (requirement, capability). The default stays source.
+        return str((self.config.get('vars') or {}).get('READER_KINDS', 'source')).split()
+
+    def scope(self, address):
+        # A node of a structural kind is readable only inside config.selection.parent, the domain of the Decider.
+        root = (self.config.get('selection') or {}).get('parent')
+        if not root:
+            raise MCPError('Configure selection.parent for structural reads')
+        seen = set()
+        while address != root:
+            if not isinstance(address, str) or not address or address in seen:
+                raise MCPError('Read only nodes inside the selected domain ' + root)
+            seen.add(address)
+            node = super().call('joppa_objects', {'workspace': self.workspace, 'address': address, 'fields': ['parent']})
+            address = node.get('parent', node.get('document', {}).get('parent'))
+
     def call(self, name, arguments):
         if name == 'read_document':
             if not isinstance(arguments, dict) or set(arguments) != {'path'} or not isinstance(arguments['path'], str):
@@ -27,14 +44,26 @@ class Sources(Reader):
             return read_document(arguments['path'], self.config)
         if (not isinstance(arguments, dict) or name not in ('joppa_search', 'joppa_objects') or
                 arguments.get('workspace', self.workspace) != self.workspace or arguments.get('all_workspaces')):
-            raise MCPError('Only Source reads in the configured workspace are permitted')
-        args = {**arguments, 'workspace': self.workspace}
+            raise MCPError('Only Source and domain reads in the configured workspace are permitted')
+        args, kinds = {**arguments, 'workspace': self.workspace}, self.kinds()
         address = args.get('address')
         if address:
-            if not all(part.strip().startswith('source:') for part in address.split(',')):
-                raise MCPError('Use source:id addresses')
+            parts = [part.strip() for part in address.split(',')]
+            if not all(part.split(':')[0] in kinds for part in parts):
+                raise MCPError('Use ' + ', '.join(kind + ':id' for kind in kinds) + ' addresses')
+            for part in parts:
+                if not part.startswith('source:'):
+                    self.scope(part)
         else:
-            args['kind'] = 'source'
+            kind = args.get('kind')
+            args['kind'] = kind if isinstance(kind, str) and kind in kinds else 'source'
+            if args['kind'] != 'source':
+                selection = self.config.get('selection') or {}
+                if not args.get('parent'):
+                    args['parent'], args['depth'] = selection.get('parent'), args.get('depth', selection.get('depth', 4))
+                if args['parent'] == '*':
+                    raise MCPError('Read domain nodes under one parent inside the selected domain')
+                self.scope(args['parent'])
         return super().call(name, args)
 
 

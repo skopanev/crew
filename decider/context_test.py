@@ -155,5 +155,32 @@ class ContextTest(unittest.TestCase):
             with self.assertRaises(ValueError): value.call(tool, args)
 
 
+    def test_reader_permits_requirement_and_capability_reads_only_inside_the_selected_domain(self):
+        parents = {'capability:c': 'domain:d', 'requirement:r': 'capability:c', 'capability:far': 'domain:other', 'domain:other': None}
+        class Backend:
+            def tools(self):
+                return [{'name': name, 'inputSchema': {'properties': {}}} for name in ('joppa_search', 'joppa_objects')]
+            def call(self, tool, args):
+                if args.get('fields') == ['parent']:
+                    return {'address': args['address'], 'parent': parents[args['address']]}
+                return {'tool': tool, 'args': args}
+        config = {'vars': {'READER_KINDS': 'source requirement capability'}, 'selection': {'parent': 'domain:d', 'depth': 4}}
+        value = reader.Sources(Backend(), 'fixture', None, config)
+        self.assertEqual(value.call('joppa_objects', {'address': 'requirement:r'})['args']['address'], 'requirement:r')
+        both = value.call('joppa_objects', {'address': 'source:s, capability:c'})['items']
+        self.assertEqual([row['args']['address'] for row in both], ['source:s', 'capability:c'])
+        listed = value.call('joppa_objects', {'kind': 'requirement'})['args']
+        self.assertEqual((listed['kind'], listed['parent'], listed['depth']), ('requirement', 'domain:d', 4))
+        self.assertEqual(value.call('joppa_objects', {'kind': 'requirement', 'parent': 'capability:c'})['args']['parent'], 'capability:c')
+        self.assertEqual(value.call('joppa_search', {'query': 'fee', 'kind': 'capability'})['args']['parent'], 'domain:d')
+        self.assertEqual(value.call('joppa_search', {'query': 'rule', 'kind': 'ac'})['args']['kind'], 'source')
+        for args in [{'address': 'capability:far'}, {'address': 'ac:a'}, {'kind': 'requirement', 'parent': 'capability:far'},
+                     {'kind': 'requirement', 'parent': '*'}]:
+            with self.assertRaises(ValueError, msg=str(args)): value.call('joppa_objects', args)
+        plain = reader.Sources(Backend(), 'fixture', None, {})
+        with self.assertRaisesRegex(ValueError, 'source:id'): plain.call('joppa_objects', {'address': 'capability:c'})
+        self.assertEqual(plain.call('joppa_objects', {'kind': 'requirement'})['args']['kind'], 'source')
+
+
 if __name__ == '__main__':
     unittest.main()

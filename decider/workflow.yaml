@@ -26,6 +26,7 @@ vars:
   REWORK_LIMIT: '1'
   READY_STAGE: ''
   NEW_STAGE: ''
+  READER_KINDS: source
   RETURNS_LIMIT: ''
   STUCK_TAG: ''
   CTO_TAG: ''

@@ -3,6 +3,11 @@
 `BRAIN_ROOT` names a local evidence directory. Set it to the document directory of the configured project.
 `BRAIN_EXCLUDE` excludes an obsolete document directory. `MANUALS_ROOT` names the second evidence directory.
 
+`READER_KINDS` lists the readable node types, separated by spaces. It defaults to `source`.
+To read structural nodes, add their schema type names, such as `requirement capability`.
+Set `selection.parent` to their permitted root. Set `selection.depth` for list queries.
+The reader checks each structural node against that root and rejects cycles or nodes outside it.
+
 Set `ARCHIVE_HOOK` to `bun /path/to/crew/decider/archive-hook.mjs`.
 Set `ARCHIVE_LANE_CONFIG` to the Dolber config for the same workspace and tracker.
 Set `ARCHIVE_STOP_SECONDS` to the maximum wait for an owned lane to stop.
