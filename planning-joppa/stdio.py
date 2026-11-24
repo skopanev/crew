@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 
+from joppa_reads import Maintenance, is_maintenance
+
 
 def validate_command(command):
     if not isinstance(command, list) or not command or any(
@@ -74,6 +76,8 @@ class StdioRPC:
                     raise ValueError("Joppa returned a different MCP response "
                                      f"(expected {self.sequence}, received {response_id!r})")
                 if message.get("id") == self.sequence and "method" not in message:
+                    if is_maintenance(message.get("error")):
+                        raise Maintenance("Joppa is in maintenance")
                     if "error" in message or "result" not in message:
                         raise ValueError("Joppa rejected the MCP operation")
                     return message["result"]

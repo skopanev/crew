@@ -8,6 +8,15 @@ class Rejected(MCPError):
     """The server confirmed that the tool operation failed."""
 
 
+class Maintenance(MCPError):
+    """Joppa is in maintenance, for example during a deploy. The same request can be sent again later."""
+
+
+def is_maintenance(error):
+    # The explicit maintenance answer: JSON-RPC -32000 "Maintenance. Try in 30 seconds." Other errors are not repeated.
+    return isinstance(error, dict) and error.get("code") == -32000 and "maintenance" in str(error.get("message", "")).lower()
+
+
 SYSTEM_RELATIONS = ("depends_on", "related")
 
 
