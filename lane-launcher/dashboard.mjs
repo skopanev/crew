@@ -203,7 +203,7 @@ export function createDashboard(config, paint) {
       return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
-    output.push(...renderRunTable(rows, paint, 6 + footer.length + Number(Boolean(state.progress)), {finished: true}));
+    output.push(...renderRunTable(rows, paint, 7 + footer.length + Number(Boolean(state.progress)), {finished: true}));
     output.push(...footer);
     output.push('', stopped ? 'Stopped' : 'Ctrl+C to stop');
     return output.join('\n');
