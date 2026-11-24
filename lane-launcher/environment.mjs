@@ -106,7 +106,8 @@ export function installEnvironment(spec, base = process.cwd()) {
           'Parent path segments need a binding or exact external field: ' + field);
         const resolved = path.resolve(originDirectory, value);
         const real = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
-        const isPath = path.isAbsolute(value) || value.startsWith('./') || value.startsWith('../') || fs.existsSync(resolved);
+        const isPath = path.isAbsolute(value) || value.startsWith('./') || value.startsWith('../') ||
+          /[\\/]/.test(value) && fs.existsSync(resolved);
         need(!Object.values(sources).some(source => (path.isAbsolute(value) && inside(source.repository, resolved)) ||
           value.includes(source.repository + path.sep)) &&
           !(!path.isAbsolute(value) && isPath && Object.values(roots).some(root => inside(root, resolved) || inside(root, real))),

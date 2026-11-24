@@ -16,8 +16,11 @@ function fixture() {
   git(repository, 'config', 'user.name', 'Test');
   fs.writeFileSync(path.join(repository, 'workflow.yaml'), 'version: old\n');
   fs.writeFileSync(path.join(repository, 'panel.mjs'), 'console.log("panel")\n');
+  fs.mkdirSync(path.join(repository, 'role'));
+  fs.writeFileSync(path.join(repository, 'role/contract.txt'), 'Role contract\n');
   fs.writeFileSync(path.join(repository, 'panel.json'), JSON.stringify({
     workflow: path.join(repository, 'workflow.yaml'), vars: {HELPER: path.join(repository, 'panel.mjs')},
+    context: {roles: {author: {role: 'role'}}},
     token_file: path.join(repository, 'secrets/read-key'), runs_folder: path.join(root, 'runs')
   }));
   git(repository, 'add', '.'); git(repository, 'commit', '-m', 'Initial code');
@@ -41,6 +44,7 @@ test('pins each code version, preserves old environments, and verifies reuse', (
     const old = JSON.parse(fs.readFileSync(first.config, 'utf8'));
     assert.equal(fs.readFileSync(old.workflow, 'utf8'), 'version: old\n');
     assert.equal(old.token_file, path.join(value.repository, 'secrets/read-key'));
+    assert.equal(old.context.roles.author.role, 'role');
     assert.deepEqual(installEnvironment(value.spec), first);
     const specFile = path.join(value.root, 'environment-spec.json');
     fs.writeFileSync(specFile, JSON.stringify(value.spec));

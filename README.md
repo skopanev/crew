@@ -64,6 +64,7 @@ The environment specification declares the code sources and path bindings:
 
 The installer resolves each Git ref to a commit and creates detached worktrees.
 It binds only the declared fields. External fields remain live, including credential paths.
+Plain labels stay unchanged when a source directory has the same name.
 Managed paths cannot contain a `..` segment. Name another source explicitly instead.
 The native filesystem resolver checks the complete symbolic link chain before a code path can run.
 Use absolute paths for external resources and run artifacts.
