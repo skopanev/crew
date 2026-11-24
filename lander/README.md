@@ -46,6 +46,10 @@ The configured gate timeout also bounds each command, including repository hooks
 
 ## Failures
 
+With retained branches, `repair_budget` can name `{ "field": "repair_attempt", "max_attempts": 2, "exhausted_tag": "stuck" }`.
+Match this policy to Dolber. Include its tag in `exclude_tags`.
+A red branch at that budget receives the tag and an owner review note. A passing branch can still land.
+
 A red combined check first requires a target baseline check.
 A red baseline leaves all branches pending. It does not identify a faulty Task.
 

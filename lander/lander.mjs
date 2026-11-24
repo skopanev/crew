@@ -36,6 +36,15 @@ function settings() {
     Array.isArray(failedData.tags) && failedData.tags.length > 0 && failedData.tags.every(tag =>
       typeof tag === 'string' && tag && value.exclude_tags?.includes(tag)),
   'Retained failed delivery needs excluded failure tags and must preserve the Task stage');
+  const budget = value.repair_budget;
+  if (budget != null) {
+    require(value.retain_failed_delivery && typeof budget.field === 'string' && budget.field.trim() &&
+      Number.isSafeInteger(budget.max_attempts) && budget.max_attempts > 0 &&
+      typeof budget.exhausted_tag === 'string' && value.exclude_tags?.includes(budget.exhausted_tag), 'Invalid repair_budget');
+    for (const item of items) if (item.document.data[budget.field] != null) require(
+      Number.isSafeInteger(item.document.data[budget.field].count) && item.document.data[budget.field].count >= 0,
+      'Invalid repair attempt count');
+  }
   for (const item of items) require(doneTaskStage(value, assignment.schema, item) !== failedData.stage,
     'DONE_TASK_STAGE must differ from FAILED_DATA.stage');
   return {value, assignment, items, repo, failedData};
@@ -45,6 +54,7 @@ function output(state, landed = []) {
   const done = new Set(landed.map(item => item.address));
   for (const item of items) {
     const address = item.address, reason = state.failed[address] || state.pending || 'NOT_LANDED';
+    const budget = value.repair_budget, exhausted = budget && item.document.data[budget.field]?.count >= budget.max_attempts;
     if (done.has(address)) {
       operations.push({command: {op: 'save_object', kind: item.kind, id: address.slice(address.indexOf(':') + 1),
         revision: assignment.claim_revisions[address], data: {stage: doneTaskStage(value, assignment.schema, item)},
@@ -57,13 +67,14 @@ function output(state, landed = []) {
     if (state.failed[address] && !['BRANCH_MOVED', 'BRANCH_UNAVAILABLE'].includes(state.failed[address])) operations.push({command: {op: 'save_object', kind: item.kind,
       id: address.slice(address.indexOf(':') + 1), revision: assignment.claim_revisions[address],
       data: {...failedData, ...(Array.isArray(failedData.tags) ?
-        {tags: [...new Set([...(item.document.data.tags || []), ...failedData.tags])]} : {}),
+        {tags: [...new Set([...(item.document.data.tags || []), ...failedData.tags, ...(exhausted ? [budget.exhausted_tag] : [])])]} : {}),
         ...(value.retain_failed_delivery ? {} : {delivery: null})},
       reason: (reason.startsWith('INTERACTION_') ? 'Lander excluded an incompatible combination member: ' :
         'Lander excluded this branch: ') + reason}});
     operations.push({command: {op: 'note', target: address,
       id: 'lander-' + process.env.MEDULLA_RUN_ID + '-' + createHash('sha256').update(address).digest('hex').slice(0, 12),
-      text: reason + '. Original branch retained. Run: ' + process.env.MEDULLA_RUN_ID +
+      text: reason + '. Original branch retained.' + (state.failed[address] && exhausted ?
+        ` Repair budget exhausted. Owner review required. Field: ${budget.field}; count: ${item.document.data[budget.field].count}.` : '') + ' Run: ' + process.env.MEDULLA_RUN_ID +
         '. Evidence: ' + path.join(root, 'checks')}});
   }
   const complete = done.size === items.length;

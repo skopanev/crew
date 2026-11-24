@@ -88,17 +88,19 @@ test('a landed branch emits the configured completion stage before archive', t =
   assert.equal(value.operations[1].command.revision, 3, 'The host replaces this with the guarded save reference');
 });
 
-test('a red branch can stay pending with preserved tags, stage and exact branch evidence', t => {
+for (const count of [0, 2]) test(`a red branch preserves its pending evidence and marks exhausted repair budget (${count})`, t => {
   const f = fixture(t), folder = path.join(f.root, 'red-flow'), artifacts = path.join(folder, 'artifacts');
   fs.mkdirSync(artifacts, {recursive: true});
   const item = {...f.row('bad'), kind: 'task', current_revision: 2};
   Object.assign(item.document, {present: true});
   Object.assign(item.document.data, {repository: f.repo.id, stage: 'pending', tags: ['keep-this-tag']});
+  item.document.data.repair_attempt = {count};
   fs.writeFileSync(path.join(artifacts, 'input.json'), JSON.stringify({selected: item, items: [item],
     claim_revisions: {[item.address]: 3}, schema: {types: {task: {role: 'task', fields: {stage: {values: ['pending', 'done']}}}}}}));
   const configFile = path.join(f.root, 'red-config.json');
   fs.writeFileSync(configFile, JSON.stringify({repositories: [f.repo], retain_failed_delivery: true,
-    exclude_tags: ['integration-red'], publication: {file: 'operations.json'}}));
+    repair_budget: {field: 'repair_attempt', max_attempts: 2, exhausted_tag: 'stuck'},
+    exclude_tags: ['integration-red', 'stuck'], publication: {file: 'operations.json'}}));
   const result = spawnSync(process.execPath, [path.resolve('lander/lander.mjs'), 'build'], {encoding: 'utf8', env: {
     ...process.env, MEDULLA_RUN_DIR: folder, MEDULLA_RUN_ID: 'red-proof', PLANNING_JOPPA_CONFIG: configFile,
     WORKTREE_ROOT: path.join(f.root, 'candidates'), FAILED_DATA: JSON.stringify({hold: 'RED', tags: ['integration-red']})}});
@@ -108,7 +110,8 @@ test('a red branch can stay pending with preserved tags, stage and exact branch 
   assert.equal(save.data.stage, undefined);
   assert.equal(Object.hasOwn(save.data, 'delivery'), false);
   assert.equal(Object.hasOwn(save.data, 'commit'), false);
-  assert.deepEqual(save.data.tags, ['keep-this-tag', 'integration-red']);
+  assert.deepEqual(save.data.tags, ['keep-this-tag', 'integration-red', ...(count >= 2 ? ['stuck'] : [])]);
+  assert.equal(value.operations.some(row => row.command.text?.includes('Owner review required')), count >= 2);
   assert.equal(item.document.data.delivery.head, f.heads.bad);
   assert.match(save.reason, /BRANCH_GATE_FAIL/);
 });

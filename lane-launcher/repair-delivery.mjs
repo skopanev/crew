@@ -45,7 +45,7 @@ export function repairEvidence(config, node) {
   const policy = repairSettings(config);
   need(repairCandidate(config, node), 'the Task no longer has its configured red pending marker');
   const delivery = data(node).delivery, repo = taskRepositoryChoice(config, data(node), {required: true});
-  need(repairAttempts(config, node) < policy.maxAttempts, 'the repair attempt limit is reached for this branch head');
+  need(repairAttempts(config, node) < policy.maxAttempts, 'the repair attempt limit is reached for this Task');
   need(repo && delivery.target === repo.targetBranch && delivery.head === data(node).commit &&
     /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(delivery.head), 'the saved branch head, commit and target must match');
   const source = fs.realpathSync(config.sourceRoot), root = fs.realpathSync(policy.runsFolder);
