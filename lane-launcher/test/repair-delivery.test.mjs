@@ -142,5 +142,6 @@ test('new checked head reuses the saved branch and clears only configured red ma
   assert.equal(f.task.document.data.delivery.head, sha);
   assert.equal(f.task.document.data.hold, undefined);
   assert.deepEqual(f.task.document.data.tags, ['keep']);
+  assert.equal(f.task.document.data.repair_attempt.count, 1);
   assert.equal(f.task.document.present, true);
 });

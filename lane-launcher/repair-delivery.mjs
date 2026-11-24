@@ -99,18 +99,19 @@ export async function validateRepairTask(config, object, read, expected) {
 export function clearRepairMarkers(config, node) {
   const policy = repairSettings(config);
   if (!policy) return {};
-  const changes = {[policy.attemptField]: null};
+  const delivery = data(node).delivery;
+  const changes = {[policy.attemptField]: {branch: delivery.branch, head: delivery.head, count: repairAttempts(config, node) + 1}};
   if (Array.isArray(data(node).tags)) changes.tags = data(node).tags.filter(tag => tag !== policy.redTag);
   for (const [key, expected] of Object.entries(policy.redData)) if (data(node)[key] === expected) changes[key] = null;
   return changes;
 }
 
 export function repairAttempts(config, node) {
-  const policy = repairSettings(config), previous = data(node)[policy.attemptField], delivery = data(node).delivery;
+  const policy = repairSettings(config), previous = data(node)[policy.attemptField];
   if (previous == null) return 0;
   need(previous && typeof previous === 'object' && Number.isSafeInteger(previous.count) && previous.count >= 0 &&
     text(previous.branch) && text(previous.head), 'the saved repair attempt count is invalid');
-  return previous.branch === delivery.branch && previous.head === delivery.head ? previous.count : 0;
+  return previous.count;
 }
 
 export function failedRepairChanges(config, node) {

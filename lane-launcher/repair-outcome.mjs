@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {api, batchRequest, mutateTasks, claimTasks, sameContract} from './joppa-common.mjs';
 import {save} from './runtime.mjs';
 import {nodeAssignee, saveNode} from './joppa-nodes.mjs';
@@ -49,7 +50,7 @@ export async function finishRepairFailure(run, stateFile, result, objects, artif
   const confirmed = await read('joppa_objects', {address: task.address});
   need(confirmed?.address === task.address && confirmed.historical === false && confirmed.document?.present === true &&
     !nodeAssignee(confirmed) && repairCandidate(run.config, confirmed) &&
-    JSON.stringify(confirmed.document.data[policy.attemptField]) === JSON.stringify(run.repairFailureRequest.operations[0].command.data[policy.attemptField]) &&
+    isDeepStrictEqual(confirmed.document.data[policy.attemptField], run.repairFailureRequest.operations[0].command.data[policy.attemptField]) &&
     confirmed.document.data.delivery.head === source.head && confirmed.document.data.delivery.branch === source.branch,
   'the release did not confirm the original red pending branch');
   const parentSave = run.repairFailureRequest.operations.map(row => row.command).find(command =>

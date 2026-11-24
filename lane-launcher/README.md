@@ -183,6 +183,8 @@ The host verifies the same Task contract, saved branch, head and Lander failure 
 The workflow merges the fresh target into that branch and sends its evidence directly to implementation.
 Every new head needs current checks and review. Successful repair preserves the branch and removes only its configured red markers.
 Failed repair keeps the original pending branch. Only `AC_DEFECT` returns the AC and Task to their configured stages with a finding.
+The attempt budget covers this Task across branch heads. A successful pending handoff preserves the count.
+An exhausted repair stays pending. A failed final attempt adds the configured excluded tag.
 Exclude the configured red tag from the Tasker repair profile before enabling this mode.
 Without this config, the ordinary Dolber continues to skip every pending delivery.
 Task title prefixes such as `[01]` and `[02]` break selection ties within one Requirement and repository.
