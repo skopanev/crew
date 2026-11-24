@@ -19,6 +19,7 @@ test('an archived prerequisite without a commit returns the consumer before repo
   dependency.address = 'task:old';
   dependency.document.present = false;
   dependency.document.data.stage = 'review';
+  const before = structuredClone(dependency);
   f.objects.set(dependency.address, dependency);
   task.document.links = [{relation: 'depends_on', blocking: true, target: dependency.address}];
   const selected = await nextTask(f.run.config);
@@ -43,7 +44,7 @@ test('an archived prerequisite without a commit returns the consumer before repo
   assert.equal(task.document.data.assignee, undefined);
   assert.equal(task.document.data.returns, 2);
   assert.equal(parent.document.data.returns, 1);
-  assert.deepEqual(f.objects.get(dependency.address), dependency);
+  assert.deepEqual(f.objects.get(dependency.address), before);
 });
 
 test('an archived prerequisite still needs its recorded commit on the delivery branch', async () => {
