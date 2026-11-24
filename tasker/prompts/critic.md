@@ -138,6 +138,8 @@ For STALE:
 For DECISION_REQUIRED:
 1. Verify that neither a bounded READY update nor verified retirement is possible.
 2. Require the exact blocker and advice.
+3. Require draft.gap as an object: owner cto or ceo, question, a, b and recommended A or B.
+   Refuse a gap that is a string. The owner comes from the author, never from an error text.
 
 For each check:
 1. Set ok true or false.
