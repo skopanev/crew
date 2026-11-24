@@ -24,7 +24,9 @@ class PromptLimits(unittest.TestCase):
         huge = marker * 10000
         count, maximum = 0, 0
         with tempfile.TemporaryDirectory() as directory:
-            fixture = Path(directory) / "large.json"
+            folder = Path(directory) / ('r' * (87 - len(directory)))
+            folder.mkdir()
+            fixture = folder / "large.json"
             fixture.write_text(json.dumps({"body": huge}))
             selected = os.environ.get("CREW_PROMPT_WORKFLOWS", "").split()
             for workflow in sorted(root.glob("*/workflow.yaml")):
@@ -38,7 +40,9 @@ class PromptLimits(unittest.TestCase):
                     for key in re.findall(r"\{\{var:([^}:]+)", node["prompt"]):
                         is_path = re.search(r"path|file|folder|root|dir|artifacts", key, re.I)
                         is_body = re.search(r"contract|assignment|draft|critique|research|necessity|feedback|commands|test_report|test_command", key, re.I)
-                        values[key] = str(fixture) if is_path else huge if is_body else "example"
+                        is_address = re.search(r"_ac$|address$|item_id$|ticket_id$", key)
+                        values[key] = (str(folder) if 'artifacts' in key.lower() else str(fixture)) if is_path else \
+                            huge if is_body else 'ac:11111111-2222-3333-4444-555555555555' if is_address else "example"
                     if workflow.parent.name == "decider":
                         control = workflow.with_name('control.mjs').read_text()
                         retry = re.search(r"export const RETRY = ('.*?');", control).group(1)

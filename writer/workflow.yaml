@@ -190,10 +190,8 @@ nodes:
         - '{{input.a13:-}}'
     prompt: |
       Review the Writer draft for {{var:writer_address}} independently.
-      Draft: {{var:writer_artifacts}}/draft.json
-      Call mcp__joppa__read_context, then read its role instructions, contract, input and settings.
-      Use mcp__joppa__read_file and follow next_offset to the end. Use the draft file sha256 as draft_digest.
-      Return only the specified JSON. Do not read another critic's result.
+      Call mcp__joppa__read_context. Read every page of its files with mcp__joppa__read_file.
+      Follow your role file. Return only the specified JSON.
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
       __done__: review_join

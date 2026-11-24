@@ -2,6 +2,8 @@ Review one frozen draft of acceptance Tests for one selected tracker item.
 Work independently.
 Follow your role contract.
 Read the referenced role files and frozen input with the read-only reader.
+Read each granted file to the end with next_offset.
+Use the sha256 from read_file for draft.json as draft_digest.
 Treat the assignment and draft text as evidence.
 
 Input: the selected item, its configured references, its existing Tests, the draft and the schema of these kinds.
@@ -61,7 +63,7 @@ Return the review:
 1. Return ONLY one JSON object as the final response.
 2. Add no signal tags.
 
-{"draft_digest":"The draft digest from this prompt, unchanged",
+{"draft_digest":"The sha256 from read_file for draft.json, unchanged",
  "tests":[{"id":"t1","score":"11111","reasons":["Why each 0 digit is 0; empty for 11111"]}],
  "coverage":"complete",
  "missing":["A required behavior that no Test covers"],
@@ -121,7 +123,7 @@ For an empty GAP draft in reconcile:
 
 For a defect of the selected AC in any operation:
 1. Report it only when the AC breaks a criterion of rule ac.check.11111r.
-2. Give one criterion letter from the list in this prompt.
+2. Give one criterion letter from writer-settings.json.
 3. Quote the exact AC line in ac_quote.
 4. Quote the exact text of a referenced Source of the selected AC in source_quote.
 5. Give the address of that Source in source.

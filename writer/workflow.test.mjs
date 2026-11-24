@@ -200,7 +200,7 @@ test('both prompts link the file and the default producer guard still refuses un
   for (const name of ['author', 'critics']) {
     assert.match(nodes[name].prompt, /read_context/);
     assert.doesNotMatch(nodes[name].prompt, /\{\{file:|\{\{var:(?:assignment|draft|critique|.*_contract)\}\}/);
-    assert.ok(nodes[name].prompt.length < 15000);
+    assert.ok(nodes[name].prompt.length + 586 <= 1024);
   }
   assert.doesNotMatch(workflow, /\{\{var:writer_assignment\}\}|key=writer_assignment>/);
   const f = fixture(t), env = {...f.env, FLOW_ASSIGNMENT_INLINE: 'true'}, source = input();
