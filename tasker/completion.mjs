@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {metadataFindings} from './test-bindings.mjs';
 const require = (ok, message) => { if (!ok) throw new Error(message); };
 const data = node => node.document?.data || node.data || {};
 const present = node => node.document?.present ?? node.present;
@@ -62,7 +63,6 @@ async function main() {
   const dir = path.join(env.MEDULLA_RUN_DIR, 'artifacts'), load = name => JSON.parse(fs.readFileSync(path.join(dir, name + '.json')));
   const config = JSON.parse(fs.readFileSync(env.PLANNING_JOPPA_CONFIG));
   let input = mode === 'preclaim' ? null : load('input');
-  if (input && input.schema.types[input.selected.kind]?.role !== 'ac') { if (mode === 'prepare') console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
   const output = path.join(dir, config.publication.file);
   const block = (reason_code, reason) => {
     fs.mkdirSync(dir, {recursive: true});
@@ -70,7 +70,8 @@ async function main() {
       reason, claim_released: false, acceptance_verified: false}));
     console.log(`<signal:BLOCKED>${reason}</signal:BLOCKED>`);
   };
-  if (mode === 'verify' && (!fs.existsSync(output) || JSON.parse(fs.readFileSync(output)).outcome?.reason_code !== 'AC_DONE')) return;
+  const code = fs.existsSync(output) ? JSON.parse(fs.readFileSync(output)).outcome?.reason_code : null;
+  if (mode === 'verify' && !['AC_DONE', 'TASK_TEST_METADATA'].includes(code)) return;
   const runtime = path.dirname(path.dirname(env.CREW_FLOW_STAGES));
   const api = await import(pathToFileURL(path.join(runtime, 'lane-launcher/joppa-api.mjs')).href);
   const {runHoldsTasks} = await import(pathToFileURL(path.join(runtime, 'lane-launcher/joppa.mjs')).href);
@@ -78,6 +79,48 @@ async function main() {
   const {runDirectories, readRun} = await import(pathToFileURL(path.join(runtime, 'lane-launcher/runtime.mjs')).href);
   const {scopeDirectory} = await import(pathToFileURL(path.join(runtime, 'lane-launcher/scope.mjs')).href);
   const read = (tool, args) => api.readJoppa(config.url, config.token_file, tool, {workspace: config.workspace, ...args}, {mcpCommand: config.mcp_command});
+  const metadata = async selected => {
+    const parent = await read('joppa_objects', {address: selected.document.parent});
+    require(parent.historical === false && present(parent), 'Current Task parent is required');
+    const children = [], seen = new Set(); let cursor;
+    const kinds = Object.keys(input.schema.types).filter(kind => input.schema.types[kind].role === 'test');
+    do {
+      const page = await read('joppa_objects', {parent: parent.address, depth: 1, kind: kinds,
+        status: ['red', 'yellow', 'orange', 'blue', 'green'],
+        fields: ['revision', 'parent', 'title', 'body', 'command'], limit: 25, ...(cursor ? {cursor} : {})});
+      require(Array.isArray(page.items), 'Task Test inventory is unavailable');
+      children.push(...page.items);
+      cursor = page.next_cursor;
+      require(!cursor || !seen.has(cursor), 'Test pagination did not advance'); seen.add(cursor);
+    } while (cursor);
+    return {parent, children};
+  };
+  if (input && input.schema.types[input.selected.kind]?.role === 'task') {
+    const findings = metadataFindings(input);
+    if (mode === 'verify') {
+      const current = await metadata(input.selected);
+      require(current.parent.current_revision === input.context.parent.current_revision &&
+        metadataFindings({...input, context: current}).length > 0, 'Task metadata evidence changed before publication');
+      return;
+    }
+    require(mode === 'prepare', 'Use prepare or verify for the claimed Task');
+    if (!findings.length) { console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
+    const parent = input.context.parent, stage = config.vars.TASKER_TEST_RETURN_STAGE;
+    require(!data(parent).assignee, 'Task parent is held');
+    require(typeof stage === 'string' && input.schema.types[parent.kind]?.fields?.stage?.values?.includes(stage),
+      'The configured Test return stage is absent from the parent schema');
+    const reason = 'Return incomplete Test metadata to Writer. ' + findings.map(f => f.target + ': ' + f.problem).join(' ');
+    const dry = env.DRY_RUN === 'true';
+    const value = {operations: dry ? [] : [
+      {command: {op: 'save_object', kind: parent.kind, id: parent.address.split(':')[1],
+        revision: parent.current_revision, data: {stage}, reason: reason.slice(0, 1000)}},
+      {command: {op: 'note', target: input.selected.address,
+        id: ('tasker-metadata-' + path.basename(env.MEDULLA_RUN_DIR)).slice(-120), text: reason + '\n' + JSON.stringify(findings)}}],
+      outcome: {status: 'blocked', reason_code: dry ? 'DRY_RUN' : 'TASK_TEST_METADATA', reason: reason.slice(0, 1000)}};
+    fs.writeFileSync(output + '.tmp', JSON.stringify(value)); fs.renameSync(output + '.tmp', output);
+    console.log('<signal:DECISION>Return Test metadata through the guarded shared publication.</signal:DECISION>');
+    return;
+  }
   if (mode === 'preclaim') {
     const schema = (await read('joppa_tree', {})).schema;
     const selected = await read('joppa_objects', {address: env.PLANNING_JOPPA_ITEM});
@@ -100,7 +143,13 @@ async function main() {
         if (error.code !== 'TASK_PREREQUISITE_ARCHIVED') throw error;
         block(error.code, error.message); return;
       }
-      console.log('<signal:CONTINUE>Task prerequisites are ready.</signal:CONTINUE>'); return;
+      const context = await metadata(selected);
+      if ([config.vars.TASKER_RETURN_STAGE, config.vars.TASKER_TEST_RETURN_STAGE].filter(Boolean).includes(data(context.parent).stage)) {
+        block('AC_STAGE', 'Task parent awaits its configured correction stage: ' + data(context.parent).stage); return;
+      }
+      fs.mkdirSync(dir, {recursive: true});
+      fs.writeFileSync(path.join(dir, 'metadata-preclaim.json'), JSON.stringify({findings: metadataFindings({...input, context})}));
+      console.log('<signal:CONTINUE>Task prerequisites and metadata were read before claim.</signal:CONTINUE>'); return;
     }
     if (schema.types[selected.kind]?.role !== 'ac') { console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
   }

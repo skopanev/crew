@@ -150,7 +150,7 @@ test('a typed owner question excludes its Task on the next selection without ano
     ...profile,selection:{kind:'task',data:{stage:'to_review'}},related:undefined}]};
   assert.equal((await nextConfiguredItem(settings,f.config.token_file)).next.address,candidate.address);
   const gapTags=JSON.parse(config.vars.TASKER_GAP_TAGS);
-  const result=repairPublication({input:{selected:candidate,claim_revision:candidate.current_revision,schema:{types:{}},
+  const result=repairPublication({stages:{review:config.vars.TASKER_TASK_REVIEW_STAGE},input:{selected:candidate,claim_revision:candidate.current_revision,schema:{types:{}},
     context:{parent:f.objects.get('ac:a1'),children:[],references:{},incoming:[]}},
     draft:{verdict:'DECISION_REQUIRED',reason:'An owner decision is missing',gap:{owner:'cto',question:'Which interface?',a:'Use A.',b:'Use B.',recommended:'A'}},run:'no-loop',gapTags});
   Object.assign(candidate.document.data,result.publication.operations[0].command.data);

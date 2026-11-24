@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {reporterNames, reporterFile} from './reporter-names.mjs';
+import {reporterNames, reporterFile, namedTests} from './reporter-names.mjs';
 
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const role = (input, kind) => input.schema?.types?.[kind]?.role ?? kind;
@@ -25,6 +25,19 @@ export function contractHash(input) {
   return createHash('sha256').update(JSON.stringify({...contractText(input.selected), tests})).digest('hex');
 }
 
+// Read only the captured acceptance text. Writer owns every metadata correction.
+export function metadataFindings(input) {
+  const tests = (input.context?.children ?? input.children ?? []).filter(node =>
+    role(input, node.kind) === 'test' && node.historical !== true && node.document?.present !== false);
+  const named = namedTests(input.selected.document?.data?.body);
+  return tests.filter(node => !named || named.has(node.address)).flatMap(node => {
+    const data = node.document?.data ?? {}, bindings = reporterNames(data.body);
+    if (bindings.length && bindings.every(binding => reporterFile(binding.name)) && text(data.command)) return [];
+    return [{target: node.address, quote: data.body || data.title || '', reason_code: 'INCOMPLETE_TEST_METADATA',
+      problem: 'The Test needs an existing Reporter binding and a nonempty command.'}];
+  });
+}
+
 export function bindingPlan({input, draft, trees = {}}) {
   draft ??= {};
   const problems = [], operations = [], bindings = draft.test_bindings ?? [];
@@ -38,7 +51,7 @@ export function bindingPlan({input, draft, trees = {}}) {
         const data = tests.get(address)?.document?.data ?? {};
         const existing = reporterNames(data.body);
         if (!existing.length || !existing.every(binding => matchesOwners(binding, [draft.task], trees)) || !text(data.command)) {
-          problems.push(`${address}: READY needs an existing complete binding; use DECISION_REQUIRED without changing parent Tests`);
+          problems.push(`${address}: READY needs an existing complete binding; return a supported Test finding to Writer without changing parent Tests`);
         }
       }
     }

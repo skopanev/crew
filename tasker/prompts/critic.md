@@ -112,7 +112,9 @@ For READY:
 4. Apply the OK checks to the Tests this Task names.
    Do not apply AC-only Task creation rules to a repair.
    Reject new test_bindings and parent Test metadata writes for a repair.
-   Require DECISION_REQUIRED when required Test metadata is incomplete and a repair cannot safely proceed.
+   Return node_findings with the exact Test quote and reason_code for incomplete metadata or out-of-scope behavior.
+   Return ac_findings for an AC defect with the exact AC and current linked Source quotes.
+   Missing implementation requires READY. It is not an owner decision.
 
 For STALE:
 1. Check needs_code against the entire current AC.
@@ -137,7 +139,8 @@ For STALE:
 
 For DECISION_REQUIRED:
 1. Verify that neither a bounded READY update nor verified retirement is possible.
-2. Require the exact blocker and advice.
+2. Require a real unresolved owner choice, the exact blocker and advice.
+   Reject questions that only ask to implement missing code or correct Test metadata.
 3. Require draft.gap as an object: owner cto or ceo, question, a, b and recommended A or B.
    Refuse a gap that is a string. The owner comes from the author, never from an error text.
 

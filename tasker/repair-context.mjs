@@ -45,6 +45,46 @@ export async function captureRepair(input, read) {
     ...(hash == null ? {baseline_note: 'Legacy Task: ' + (pinned ? 'compared the historical AC title, body and Source references.' : 'no historical AC pin is available.') + ' Historical Test texts are unavailable and were not compared.'} : {})};
 }
 
+// Count confirmed generic rejections. Technical failures and refused claims do not count.
+export function genericRejectedCount(config, input, target) {
+  if (input.schema.types[input.selected.kind]?.role !== 'task' || !config?.runs_folder) return 1;
+  const limit = Number(config.vars.TASKER_RETURN_LIMIT);
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('TASKER_RETURN_LIMIT must be positive');
+  const seen = new Set(), rows = [];
+  for (const name of fs.readdirSync(config.runs_folder)) {
+    const folder = path.join(config.runs_folder, name, 'artifacts');
+    try {
+      if (fs.realpathSync(folder) === fs.realpathSync(target)) continue;
+      const load = file => JSON.parse(fs.readFileSync(path.join(folder, file)));
+      const result = load('result.json'), receipt = load('publication.json'), old = load('input.json');
+      if (receipt.status !== 'confirmed' || receipt.server !== config.url || receipt.arguments?.workspace !== input.workspace ||
+          old.workspace !== input.workspace || old.selected?.address !== input.selected.address ||
+          result.claim_released !== true || result.needs_recovery || !result.item_revisions?.[input.selected.address] ||
+          ['DRY_RUN', 'FLOW_FAILED', 'FAILURE_LIMIT', 'CLAIM_REFUSED'].includes(result.reason_code)) continue;
+      const key = receipt.arguments?.request_id || fs.realpathSync(folder);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let generic = result.reason_code === 'REJECTED';
+      if (generic && fs.existsSync(path.join(folder, 'rejected-review.json'))) {
+        const hasFindings = execFileSync('jq', ['-n', '-L', path.dirname(new URL(import.meta.url).pathname),
+          '--slurpfile', 'input', path.join(folder, 'input.json'), '--slurpfile', 'review', path.join(folder, 'rejected-review.json'),
+          '--arg', 'criteria', config.vars.FINDING_CRITERIA,
+          'include "findings"; $input[0] as $in | any(($review[0].critique // {})[]; .verdict == "REWORK" and ((ac_findings($in; $criteria) | length) > 0 or (test_findings($in) | length) > 0))'], {encoding: 'utf8'}).trim();
+        generic = hasFindings === 'false';
+      }
+      rows.push({time: fs.statSync(path.join(folder, 'result.json')).mtimeMs, generic});
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+  }
+  let count = 1;
+  for (const row of rows.sort((a, b) => b.time - a.time)) {
+    if (!row.generic) break;
+    if (++count >= limit) break;
+  }
+  return count;
+}
+
 async function main() {
   const [mode, dir] = process.argv.slice(2), read = name => JSON.parse(fs.readFileSync(path.join(dir,name),'utf8'));
   const input = read('input.json');
@@ -55,6 +95,10 @@ async function main() {
     return readJoppa(config.url,config.token_file,'joppa_objects',
       {workspace:input.workspace,address,...(revision ? {revision} : {})},{mcpCommand:config.mcp_command});
   };
+  if (mode === 'rejected-count') {
+    const config = process.env.PLANNING_JOPPA_CONFIG ? JSON.parse(fs.readFileSync(process.env.PLANNING_JOPPA_CONFIG)) : null;
+    console.log(genericRejectedCount(config, input, dir)); return;
+  }
   if (mode === 'repository') {
     const task = input.schema?.types?.[input.selected.kind]?.role === 'task';
     console.log(JSON.stringify(task && process.env.DRY_RUN !== 'true' ? repositoryData(input, input.selected) : {}));
@@ -73,6 +117,7 @@ async function main() {
     console.log(JSON.stringify(repairPublication({input, draft, repair, trees:read('trees.json'),
       reviews:[read('critic-codex.json'), read('critic-second.json')], digest,
       gapTags:JSON.parse(process.env.TASKER_GAP_TAGS || '{}'),
+      stages:{task:process.env.TASK_STAGE,ready:process.env.TASKER_READY_STAGE,review:process.env.TASKER_TASK_REVIEW_STAGE},
       run:path.basename(path.dirname(dir)), dry:process.env.DRY_RUN==='true'})));
     return;
   }

@@ -179,15 +179,16 @@ For repair, use these steps in order:
    Keep the same Task id and title.
    Bound files to this prompt's limits.
    Use exact Repository and Tests lines.
-   Use DECISION_REQUIRED if required Test metadata is incomplete and a repair cannot safely proceed.
+   Report incomplete Test metadata as node_findings for Writer. Do not invent an owner question.
    Preserve behavior requirements, dependencies and Reporter names.
    Check repair.dependencies before READY. An archived prerequisite without a delivered commit cannot satisfy READY.
-   Do not remove that dependency in the draft. Ask a real owner decision if its replacement is unresolved.
+   Do not remove that dependency in the draft. Report the missing prerequisite as implementation work.
    Remove code-scope restriction lines.
    Write each repair Do step as an action.
    State only the required change or check in each Do step.
 4. If neither a safe READY update nor verified retirement is possible, return DECISION_REQUIRED.
    Ask a real unresolved owner decision with gap.owner, question, a, b and recommended.
+   Missing implementation, incomplete Test metadata and a missing command are not owner decisions.
    Use cto for technical decisions and ceo for product, policy, money, text or compliance decisions.
    Do not invent an owner question for a machine-check failure. Correct the draft instead.
 

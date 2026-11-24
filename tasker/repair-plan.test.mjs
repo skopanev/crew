@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {contractHash} from './test-bindings.mjs';
-import {changedText, repairView, checkRepair, repairPublication, repositoryData} from './repair-plan.mjs';
+import {changedText, repairView, checkRepair, repairPublication as publishRepair, repositoryData} from './repair-plan.mjs';
+const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
 import {bodyProblems, captureRepair} from './repair-context.mjs';
 import {fileURLToPath} from 'node:url';
 const node = (address, data, extra = {}) => ({address, kind: address.split(':')[0], current_revision: 4,

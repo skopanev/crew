@@ -89,7 +89,7 @@ export function checkRepair({input, repair, draft, trees, maxFiles, maxLines, fo
     ac_text_changed: repair.ac_text_changed};
 }
 
-export function repairPublication({input, draft, run, dry = false, repair = {}, trees = {}, reviews, digest, gapTags}) {
+export function repairPublication({input, draft, run, dry = false, repair = {}, trees = {}, reviews, digest, gapTags, stages = {}}) {
   const dependencyProblem = draft.verdict === 'READY' && readyDependencyProblem(input, repair);
   if (dependencyProblem) return {approved: false, critique: {host: {invalid: dependencyProblem}}};
   if (draft.test_bindings != null && (!Array.isArray(draft.test_bindings) || draft.test_bindings.length)) {
@@ -109,17 +109,18 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
     id: node.address.split(':')[1], revision, data, reason}});
   const note = text => ({command: {op: 'note', target: task.address,
     id: ('tasker-repair-' + run).replace(/[^A-Za-z0-9_.-]/g, '_').slice(-120), text}});
+  const stage = key => { if (!text(stages[key])) problem('Configure the Task repair stage: ' + key); return stages[key]; };
   let code;
   if (draft.verdict === 'READY') {
     const repository = task.document.data.repository;
     if (repository != null && repository !== '' && repository !== draft.task.repository) problem('READY cannot replace a nonempty Task repository');
-    operations.push(save(task, {body: draft.task.body, repository: draft.task.repository, stage: 'to_implement',
+    operations.push(save(task, {body: draft.task.body, repository: draft.task.repository, stage: stage('task'),
       ac_contract_hash: contractHash({selected: parent, children: input.context.children, schema: input.schema})}, input.claim_revision));
     code = 'READY';
   } else if (draft.verdict === 'STALE') {
     if (typeof draft.needs_code !== 'boolean') problem('STALE requires needs_code');
     // Child edits advance the parent revision. Save the frozen parent first.
-    if (draft.needs_code) operations.push(save(parent, {stage: 'to_task'}));
+    if (draft.needs_code) operations.push(save(parent, {stage: stage('ready')}));
     for (const consumer of incoming) {
       if (consumer.document.data.assignee) problem('An incoming dependent Task is held: ' + consumer.address);
       if (draft.needs_code) continue;
@@ -138,7 +139,7 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
     const tag = gapTags?.[gap.owner], tags = task.document.data.tags ?? [];
     if (!text(tag) || tag.trim() !== tag) problem('Configure the owner gap tag');
     if (!Array.isArray(tags)) problem('Task tags must be an array');
-    operations.push(save(task, {stage: 'to_review', ...repositoryData(input, task), tags: [...new Set([...tags, tag])]}, input.claim_revision),
+    operations.push(save(task, {stage: stage('review'), ...repositoryData(input, task), tags: [...new Set([...tags, tag])]}, input.claim_revision),
       note(`OPEN QUESTION\nOwner: ${gap.owner}\nQuestion: ${gap.question}\n${gap.recommended === 'A' ? '★ ' : ''}A: ${gap.a}\n${gap.recommended === 'B' ? '★ ' : ''}B: ${gap.b}\nRecommended: ${gap.recommended}\nReason: ${reason}`));
     code = 'DECISION_REQUIRED';
   } else problem('Unknown Task repair verdict');

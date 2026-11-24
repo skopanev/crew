@@ -219,3 +219,12 @@ test('new Task and READY APIs share the lane body restriction check without chan
     return draft([clean]);
   });
 });
+
+
+test('the native title limit accepts 128 characters and refuses 129 before publication', () => {
+  const files = [{path: 'packages/a/src/b.ts', change: 'edit', lines: 4}];
+  for (const letter of ['x', 'я', '😀']) {
+    assert.deepEqual(run(draft([task(files, {title: letter.repeat(128)})])).problems, []);
+    assert.match(run(draft([task(files, {title: letter.repeat(129)})])).problems.join(), /128 characters/);
+  }
+});
