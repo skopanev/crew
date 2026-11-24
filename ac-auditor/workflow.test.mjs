@@ -43,15 +43,16 @@ test('each finder and the judge get their own read-only reader', () => {
 test('the finder seats take the reader args of the shared helper and refuse a seat without its AGY profile', () => {
   const runtime = mkdtempSync(join(tmpdir(), 'auditor-seats-'));
   // A stand-in for the shared agent-reader.mjs: agentArgs names the config file.
-  writeFileSync(join(runtime, 'agent-reader.mjs'), "export const agentArgs = (harness, file) => ['--ignore-user-config', '-c', 'mcp_servers=' + file];\n");
+  writeFileSync(join(runtime, 'agent-reader.mjs'), "export const agentArgs = (harness, file, home) => harness === 'agy' ? ['--add-dir', home, '--settings', file] : ['--ignore-user-config', '-c', 'mcp_servers=' + file];\n");
   const run = home => spawnSync('node', [join(dir, 'seats.mjs')], {encoding: 'utf8', env: {...process.env, CREW_FLOW_STAGES: join(runtime, 'flow_stages.py'),
     FINDER_ONE_MODEL: 'm1', FINDER_TWO_MODEL: 'm2', FINDER_THREE_MODEL: 'm3', auditor_finder_one_reader_config: '/r/one.json',
-    auditor_finder_two_reader_config: '/r/two.json', auditor_finder_three_reader_home: home}});
+    auditor_finder_two_reader_config: '/r/two.json', auditor_finder_three_reader_config: '/r/three.json', auditor_finder_three_reader_home: home}});
   const ok = run('/agy/auditor_finder_three');
   assert.equal(ok.status, 0, ok.stderr);
   assert.deepEqual(JSON.parse(ok.stdout), [
     {slug: 'one', harness: 'codex', model: 'm1', a1: '--ignore-user-config', a2: '-c', a3: 'mcp_servers=/r/one.json'},
     {slug: 'two', harness: 'codex', model: 'm2', a1: '--ignore-user-config', a2: '-c', a3: 'mcp_servers=/r/two.json'},
-    {slug: 'three', harness: 'agy', model: 'm3', env: {BROKER_AGY_HOME: '/agy/auditor_finder_three', BROKER_ISOLATE_MCP: '1'}}]);
+    {slug: 'three', harness: 'agy', model: 'm3', a1: '--add-dir', a2: '/agy/auditor_finder_three', a3: '--settings', a4: '/r/three.json',
+      env: {BROKER_AGY_HOME: '/agy/auditor_finder_three', BROKER_ISOLATE_MCP: '1'}}]);
   assert.notEqual(run('').status, 0);
 });
