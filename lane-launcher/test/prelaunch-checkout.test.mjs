@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {save} from '../runtime.mjs';
+import {clearPreviousCheckout} from '../prelaunch-checkout.mjs';
+import {prepareDiscardCheckout} from '../failed-checkout.mjs';
+import {reuseFixture, git} from '../test-support/retained-checkout.fixture.mjs';
+
+test('saves committed, dirty and untracked work before a fresh checkout can start', async t => {
+  const f = await reuseFixture(t), {run, prior, dir, checkout} = f;
+  run.config.discardFailedWorktree = true;
+  const {dev, ino} = fs.statSync(checkout);
+  prior.discardCheckout = {path: checkout, dev, ino}; f.savePrior();
+  run.recoveryBase = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
+  fs.writeFileSync(path.join(checkout, 'a.txt'), 'unfinished change\n');
+  fs.writeFileSync(path.join(checkout, 'new.txt'), 'untracked work\n');
+  fs.writeFileSync(path.join(checkout, '.git/index.lock'), '');
+  fs.writeFileSync(path.join(f.f.root, 'bin/lsof'), '#!/bin/sh\nexit 1\n', {mode: 0o755});
+  const head = git(checkout, 'rev-parse', 'HEAD');
+  let saved = 0;
+  clearPreviousCheckout(run, dir, () => { saved++; }, () => {});
+  assert.ok(saved >= 2);
+  assert.equal(fs.existsSync(checkout), false);
+  assert.equal(git(run.repository.path, 'rev-parse', run.prelaunchRecovery.ref), head);
+  const patch = fs.readFileSync(run.prelaunchRecovery.patch, 'utf8');
+  assert.match(patch, /unfinished change/); assert.match(patch, /untracked work/);
+  assert.equal(fs.readFileSync(path.join(path.dirname(run.prelaunchRecovery.patch), 'stale-index.lock'), 'utf8'), '');
+  assert.equal(run.prelaunchRecovery.removed, true);
+  assert.ok(prepareDiscardCheckout(run, () => {}));
+  assert.deepEqual(fs.readdirSync(checkout), []);
+});
+
+test('keeps active, foreign, replaced and unrecoverable checkouts', async t => {
+  const f = await reuseFixture(t), {run, prior, dir, checkout} = f;
+  run.config.discardFailedWorktree = true;
+  run.recoveryBase = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
+  const state = path.join(path.dirname(prior.runFolder), 'launch.json');
+  prior.result = null; f.savePrior();
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /still holds/);
+  prior.result = {status: 'failed', code: 2, blockConfirmed: true};
+  prior.repository = {...prior.repository, path: path.join(f.f.root, 'other')}; f.savePrior();
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /No matching/);
+  prior.repository = run.repository;
+  prior.discardCheckout = {path: checkout, dev: 0, ino: 0}; f.savePrior();
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /identity changed/);
+  const {dev, ino} = fs.statSync(checkout); prior.discardCheckout = {path: checkout, dev, ino}; f.savePrior();
+  fs.writeFileSync(path.join(checkout, '.git/index.lock'), 'not empty');
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /lock needs inspection/);
+  fs.writeFileSync(path.join(checkout, '.git/index.lock'), '');
+  fs.writeFileSync(path.join(f.f.root, 'bin/lsof'), '#!/bin/sh\necho p123\n', {mode: 0o755});
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /lock has no owner/);
+  assert.equal(fs.existsSync(checkout), true);
+  assert.equal(JSON.parse(fs.readFileSync(state)).task, run.task);
+});
