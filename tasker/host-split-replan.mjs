@@ -9,7 +9,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const sha = value => /^[0-9a-f]{40}$/.test(value || '');
-const checks = ['gate', 'size', 'reporter_names', 'outside_files', 'already_in_develop', 'ac_test_consistency', 'ac_scope'];
+// publication.jq decides the AC and Test checks with the supported findings (crew m_49e4475b). The host rechecks the Task checks.
+const checks = ['gate', 'size', 'reporter_names', 'outside_files', 'already_in_develop'];
 const plainDirectory = file => {
   require(fs.lstatSync(file).isDirectory() && fs.realpathSync(file) === file, 'not a plain directory');
   return file;
@@ -125,8 +126,8 @@ export function verifiedSplitReplan({input, repair, draft, trees, reviews, diges
   const current = hostSplitReceipt({input, repair, trees});
   if (!current || !same(current, repair.split_replan)) return false;
   if (reviews !== undefined && (!/^[0-9a-f]{64}$/.test(digest || '') || !Array.isArray(reviews) || reviews.length !== 2 ||
-    !reviews.every(review => review.draft_digest === digest && review.verdict === 'APPROVE' &&
+    !reviews.every(review => review.draft_digest === digest &&
       checks.every(key => review.checks?.[key]?.ok === true && typeof review.checks[key].evidence === 'string' &&
-        review.checks[key].evidence.trim()) && Array.isArray(review.findings) && review.findings.length === 0))) return false;
+        review.checks[key].evidence.trim())))) return false;
   return true;
 }

@@ -109,10 +109,12 @@ test('reviewed publication requires both exact digest-bound completeness attesta
   const f = fixture(t), digest = 'a'.repeat(64);
   const review = {draft_digest: digest, verdict: 'APPROVE', checks: {already_in_develop: {ok: true, task_deliverables_complete: true}}};
   assert.deepEqual(f.check({digest, reviews: [review, structuredClone(review)]}), []);
-  for (const changed of [{draft_digest: 'b'.repeat(64)}, {verdict: 'REWORK'},
+  for (const changed of [{draft_digest: 'b'.repeat(64)},
     {checks: {already_in_develop: {ok: true}}}, {checks: {already_in_develop: {ok: false, task_deliverables_complete: true}}}]) {
     assert.ok(f.check({digest, reviews: [review, {...review, ...changed}]}).length);
   }
+  // crew m_49e4475b: publication.jq already approved a REWORK with advice only, so the proof needs no APPROVE verdict.
+  assert.deepEqual(f.check({digest, reviews: [review, {...review, verdict: 'REWORK', findings: [{problem: 'p', advice: 'a'}]}]}), []);
   assert.ok(f.check({digest, reviews: []}).length);
 });
 

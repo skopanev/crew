@@ -91,12 +91,18 @@ test('publication rechecks both exact independent approvals after the machine ch
   try {
     assert.equal(checked(x).ok, true);
     for (const mutate of [o => { o.reviews.pop(); }, o => { o.reviews[1].draft_digest = 'old'; },
-      o => { o.reviews[1].checks.gate.ok = false; }, o => { o.reviews[1].verdict = 'REWORK'; },
+      ...['gate', 'size', 'reporter_names', 'outside_files', 'already_in_develop'].map(key => o => { o.reviews[1].checks[key].ok = false; }),
       o => { o.reviews[1].checks.already_in_develop.evidence = ''; }]) {
       const options = x.options(); mutate(options);
       assert.equal(verifiedSplitReplan(options), false);
       assert.equal(repairPublication(options).approved,false);
     }
+    // crew m_49e4475b: advice and an unsupported AC or Test check passed publication.jq. The host rechecks the Task checks only.
+    const advised = x.options();
+    advised.reviews[1] = {...advised.reviews[1], verdict: 'REWORK', findings: [{problem: 'p', advice: 'a'}],
+      checks: {...advised.reviews[1].checks, ac_scope: {ok: false, evidence: 'e'}}};
+    assert.equal(verifiedSplitReplan(advised), true);
+    assert.notEqual(repairPublication(advised).publication.outcome.reason_code, 'DECISION_REQUIRED');
     const options = x.options(); delete options.reviews;
     assert.equal(repairPublication(options).approved,false);
     x.input.context.incoming.push({address: 'task:dependent'});

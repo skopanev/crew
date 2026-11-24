@@ -70,8 +70,10 @@ export function retirementProblems({input, repair, draft, trees, reviews, digest
     if (!/^[0-9a-f]{64}$/.test(digest || '') || !Array.isArray(reviews) || reviews.length !== 2) {
       fail('two digest-bound completeness reviews are required');
     } else for (const [index, review] of reviews.entries()) {
+      // publication.jq approved the reviews before this point: a REWORK verdict with only advice or an unsupported
+      // AC or Test check is an approval (crew m_49e4475b). The proof needs the digest and the completeness check.
       const checked = review?.checks?.already_in_develop;
-      if (review?.draft_digest !== digest || review?.verdict !== 'APPROVE' || checked?.ok !== true ||
+      if (review?.draft_digest !== digest || checked?.ok !== true ||
           checked.task_deliverables_complete !== true) fail('review ' + (index + 1) + ' does not confirm all Task deliverables');
     }
   }

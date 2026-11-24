@@ -31,8 +31,20 @@ test('actual check and review join CLIs require the same host receipt and fresh 
     const join = () => spawnSync('sh', ['-c', shell], {encoding: 'utf8', env});
     const accepted = join(); assert.equal(accepted.status, 0, accepted.stderr); assert.match(accepted.stdout, /<signal:APPROVED>/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json'))).outcome.reason_code, 'STALE');
-    options.reviews[1].draft_digest = 'old'; write('critic-second', options.reviews[1]);
+    // crew m_49e4475b, verify2 m_100367a1: review_join and the repair publication agree. Advice and an unsupported
+    // AC or Test check publish the host replan. A false Task check stops it.
+    const second = structuredClone(options.reviews[1]);
+    write('critic-second', {...second, verdict: 'REWORK', findings: [{problem: 'p', advice: 'a'}],
+      checks: {...second.checks, ac_scope: {ok: false, evidence: 'e'}}});
     fs.unlinkSync(path.join(artifacts, 'operations.json'));
+    const advised = join(); assert.equal(advised.status, 0, advised.stderr); assert.match(advised.stdout, /<signal:APPROVED>/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(artifacts, 'operations.json'))).outcome.reason_code, 'STALE');
+    write('critic-second', {...second, verdict: 'REWORK', findings: [{problem: 'p', advice: 'a'}],
+      checks: {...second.checks, outside_files: {ok: false, evidence: 'e'}}});
+    fs.unlinkSync(path.join(artifacts, 'operations.json'));
+    const task = join(); assert.equal(task.status, 0, task.stderr); assert.match(task.stdout, /<signal:REJECTED>/);
+    assert.equal(fs.existsSync(path.join(artifacts, 'operations.json')), false);
+    options.reviews[1].draft_digest = 'old'; write('critic-second', options.reviews[1]);
     const old = join(); assert.equal(old.status, 0, old.stderr); assert.match(old.stdout, /<signal:REJECTED>/);
     assert.equal(fs.existsSync(path.join(artifacts, 'operations.json')), false);
     write('critic-second', options.reviews[0]);
