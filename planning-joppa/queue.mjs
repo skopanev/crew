@@ -161,9 +161,9 @@ export function flowSettings(config) {
     throw new Error('exclude_tags must be a list of nonempty tags');
   }
   const exclude = config.exclude_children;
-  if (exclude != null) {
-    const {kind: childKind, ...filters} = object(exclude) ? exclude : {};
-    if (!object(exclude) || !kindList(childKind) || 'parent' in filters || 'depth' in filters) {
+  for (const childFilter of exclude == null ? [] : [exclude].flat()) {
+    const {kind: childKind, ...filters} = object(childFilter) ? childFilter : {};
+    if (!object(childFilter) || !kindList(childKind) || 'parent' in filters || 'depth' in filters) {
       throw new Error('exclude_children needs native child filters without parent or depth');
     }
     validateNodeFilter(filters, 'exclude_children');
@@ -240,10 +240,11 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
     }
     if (config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) { filtered++; continue; }
     let excluded = false;
-    if (flow.exclude) {
-      for await (const page of nodePages(read, {...flow.exclude, parent: row.address, depth: 1, fields: ['parent']})) {
+    for (const childFilter of flow.exclude == null ? [] : [flow.exclude].flat()) {
+      for await (const page of nodePages(read, {...childFilter, parent: row.address, depth: 1, fields: ['parent']})) {
         if ((excluded = page.items.some(item => item.parent === row.address))) break;
       }
+      if (excluded) break;
     }
     if (!excluded) {
       if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row, filtered};

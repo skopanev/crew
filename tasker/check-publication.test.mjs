@@ -141,7 +141,7 @@ test('DONE moves the AC with develop and Test evidence, while dry run writes not
 });
 
 // Only supported business findings change the claimed AC stage and returns.
-test('ACTIVE_TASK and unsupported refusals preserve the AC, while valid findings count returns', () => {
+test('LIVE_TASK and unsupported refusals preserve the AC, while valid findings count returns', () => {
   const workflow = fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8');
   const active = workflow.slice(workflow.indexOf('      active="$('), workflow.indexOf('      bash "$MEDULLA_WORKFLOW_DIR/trees.sh" add'));
   const rejected = workflow.split('  rejected:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
@@ -156,7 +156,7 @@ test('ACTIVE_TASK and unsupported refusals preserve the AC, while valid findings
       assert.match(message, /<signal:ACTIVE>/);
       const publication = JSON.parse(fs.readFileSync(output, 'utf8'));
       assert.deepEqual(publication.operations, []);
-      assert.equal(publication.outcome.reason_code, 'ACTIVE_TASK');
+      assert.equal(publication.outcome.reason_code, 'LIVE_TASK');
       fs.unlinkSync(output);
     }
     const input = {selected: {kind: 'ac', address: 'ac:a', document: {data: {body: 'Required outcome', stage: 'to_task', returns: 1, tags: ['keep']}}},

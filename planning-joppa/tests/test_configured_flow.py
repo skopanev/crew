@@ -82,6 +82,19 @@ class ConfiguredFlowTests(unittest.TestCase):
         self.enterContext(patch.object(flow_stages, "client", return_value=self.api))
         flow_stages.prepare()
 
+    def test_child_filter_list_uses_native_queries_and_deduplicates(self):
+        import flow_context
+        calls = []
+        original = self.api.call
+        def call(tool, args):
+            calls.append(args)
+            return original(tool, args)
+        self.api.call = call
+        rows = flow_context.children(self.api, self.config, self.api.nodes["criterion:a"],
+                                     [{"kind": "check"}, {"kind": "work"}, {"kind": "work"}])
+        self.assertEqual([row["address"] for row in rows], ["work:t"])
+        self.assertEqual(len([args for args in calls if "parent" in args]), 3)
+
     def output(self):
         return {"operations": [{"command": {"op": "save_object", "kind": "check", "revision": 0,
             "parent": "criterion:a", "data": {"title": "Unsafe input causes no change"}, "reason": "Publish reviewed test text."}},

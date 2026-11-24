@@ -83,12 +83,12 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       completion="$("$TASKER_BUN" "$MEDULLA_WORKFLOW_DIR/completion.mjs" prepare)"
       case "$completion" in *'<signal:DECISION>'*) printf '%s\n' "$completion"; exit 0 ;; esac
-      # The native filter excludes an AC with a Task in to_implement. A Task in in_progress or to_review,
+      # The native filter excludes an AC with a Task in to_implement or to_review. A Task in in_progress,
       # or a Task that a lane holds, also keeps the AC out: release the claim and write nothing else.
       active="$(jq -r '[.children[] | select(.kind == "task") | select(.document.data.stage == "in_progress" or
         .document.data.stage == "to_review" or ((.document.data.assignee // "") | startswith("crew-lane:"))) | .address] | join(", ")' "$a/input.json")"
       if [ -n "$active" ]; then
-        jq -n --arg active "$active" '{operations: [], outcome: {status: "blocked", reason_code: "ACTIVE_TASK",
+        jq -n --arg active "$active" '{operations: [], outcome: {status: "blocked", reason_code: "LIVE_TASK",
           reason: ("The AC has an active Task: " + $active)}}' > "$a/$file"
         echo '<signal:ACTIVE>The AC has an active Task. Release the claim.</signal:ACTIVE>'
         exit 0

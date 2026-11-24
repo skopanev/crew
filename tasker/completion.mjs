@@ -8,7 +8,7 @@ const present = node => node.document?.present ?? node.present;
 const tone = node => node.status?.tone || node.status;
 export function decision(input, ac, children, held, stages) {
   if (input.schema.types[ac.kind]?.role !== 'ac') return 'CONTINUE';
-  if (held || children.some(node => input.schema.types[node.kind]?.role === 'task' && present(node))) return 'WAIT';
+  if (held || children.some(node => input.schema.types[node.kind]?.role === 'task' && present(node) && stages.active.includes(data(node).stage))) return 'WAIT';
   if (data(ac).stage === stages.done) return ['blue', 'yellow', 'orange'].includes(tone(ac)) ? 'CONTINUE' : 'WAIT';
   if (![stages.ready, stages.implement].includes(data(ac).stage)) return 'WAIT';
   if (data(ac).stage !== stages.implement) return 'CONTINUE';
@@ -16,14 +16,14 @@ export function decision(input, ac, children, held, stages) {
   return tests.length && tests.every(node => tone(node) === 'green' && node.result?.status === 'pass' &&
     /^[a-f0-9]{40}$/.test(node.result.commit || '')) ? 'DONE' : 'CONTINUE';
 }
-export async function inspect(input, read, runs, stages, holds, tasks) {
+export async function inspect(input, read, runs, stages, holds, tasks, detail = {}) {
   const ac = await read('joppa_objects', {address: input.selected.address});
   require(ac.address === input.selected.address && ac.historical === false && present(ac), 'Current AC evidence is required');
   const kinds = Object.keys(input.schema.types).filter(kind => ['test', 'task'].includes(input.schema.types[kind].role));
   const children = [], seen = new Set(); let cursor;
   do {
     const page = await read('joppa_objects', {parent: ac.address, depth: 1, kind: kinds,
-      status: ['red', 'purple', 'yellow', 'orange', 'blue', 'green'], fields: ['revision', 'parent'], limit: 25, ...(cursor ? {cursor} : {})});
+      status: ['red', 'yellow', 'orange', 'blue', 'green'], fields: ['revision', 'parent'], limit: 25, ...(cursor ? {cursor} : {})});
     require(Array.isArray(page.items), 'Child inventory is unavailable');
     for (const row of page.items) {
       const node = await read('joppa_objects', {address: row.address});
@@ -36,12 +36,23 @@ export async function inspect(input, read, runs, stages, holds, tasks) {
   let held = false;
   for (const run of runs.filter(holds)) {
     if (run.workspace && run.workspace !== input.workspace) continue;
+    const currentTasks = [];
     for (const task of tasks(run)) {
       require(task.address, 'Held lane lacks a Task address');
       const current = await read('joppa_objects', {address: task.address});
-      if ((current.document?.parent ?? current.parent) === ac.address) held = true;
+      require(current.address === task.address && current.historical === false, 'Current lane Task evidence is required');
+      currentTasks.push(current);
+    }
+    if (!holds(run, currentTasks)) continue;
+    if (currentTasks.some(current => present(current) && (current.document?.parent ?? current.parent) === ac.address)) {
+      held = true;
+      detail.reason_code = 'HELD_RUN';
+      detail.reason = `held by run ${run.runId || run.executionId || run.task}: ${currentTasks.map(node => node.address).join(', ')}`;
     }
   }
+  const live = children.find(node => input.schema.types[node.kind]?.role === 'task' && present(node) && stages.active.includes(data(node).stage));
+  if (live && !held) { detail.reason_code = 'LIVE_TASK'; detail.reason = `live task ${live.address}`; }
+  if (!held && !live) { detail.reason_code = 'AC_STAGE'; detail.reason = `AC stage ${data(ac).stage}, status ${tone(ac)}`; }
   return decision(input, ac, children, held, stages);
 }
 async function main() {
@@ -67,17 +78,19 @@ async function main() {
   }
   const lane = JSON.parse(fs.readFileSync(config.vars.TASKER_LANE_CONFIG));
   require(lane.workspace === config.workspace && lane.joppa?.url === config.url, 'Lane inventory belongs to another tracker workspace');
-  const runs = runDirectories(scopeDirectory(lane.stateDir, lane.id)).map(folder => readRun(path.join(folder, 'launch.json')));
-  const stages = {ready: config.vars.TASKER_READY_STAGE, implement: config.vars.TASKER_IMPLEMENT_STAGE, done: config.vars.TASKER_DONE_STAGE};
-  require(Object.values(stages).every(value => typeof value === 'string' && value), 'Configure Tasker stages');
-  const result = await inspect(input, read, runs, stages, runHoldsTasks, runTasks);
+  const runs = runDirectories(scopeDirectory(lane.stateDir, lane.id)).map(folder => ({...readRun(path.join(folder, 'launch.json')), runId: path.basename(folder)}));
+  const stages = {ready: config.vars.TASKER_READY_STAGE, implement: config.vars.TASKER_IMPLEMENT_STAGE, done: config.vars.TASKER_DONE_STAGE,
+    active: [config.vars.TASK_STAGE, config.vars.TASKER_TASK_REVIEW_STAGE]};
+  require(Object.values(stages).flat().every(value => typeof value === 'string' && value), 'Configure Tasker stages');
+  const detail = {};
+  const result = await inspect(input, read, runs, stages, runHoldsTasks, runTasks, detail);
   if (mode === 'verify') { require(result === 'DONE', 'AC completion evidence changed before publication'); return; }
   if (mode === 'preclaim') {
     if (result === 'WAIT') {
       fs.mkdirSync(dir, {recursive: true});
-      fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({status: 'blocked', reason_code: 'ACTIVE_TASK',
-        reason: 'The AC has active work or does not match the completion input.', claim_released: false, acceptance_verified: false}));
-      console.log('<signal:BLOCKED>The AC remains unclaimed while work is active.</signal:BLOCKED>');
+      fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({status: 'blocked', reason_code: detail.reason_code,
+        reason: detail.reason, claim_released: false, acceptance_verified: false}));
+      console.log(`<signal:BLOCKED>${detail.reason}</signal:BLOCKED>`);
     } else console.log('<signal:CONTINUE>The AC can be claimed.</signal:CONTINUE>');
     return;
   }
@@ -87,7 +100,7 @@ async function main() {
   const done = result === 'DONE' && env.DRY_RUN !== 'true';
   const value = {operations: done ? [{command: {op: 'save_object', kind: input.selected.kind, id: input.selected.address.split(':')[1],
     revision: input.claim_revision, data: {stage: stages.done, returns: 0}, reason: 'Every current Test has a recorded passing result and no Task or lane remains.'}}] : [],
-    outcome: {status: done ? 'published' : 'blocked', reason_code: done ? 'AC_DONE' : 'AC_WAIT', reason: done ? 'The AC is verified.' : 'The AC cannot complete now.'}};
+    outcome: {status: done ? 'published' : 'blocked', reason_code: done ? 'AC_DONE' : result === 'WAIT' ? detail.reason_code : 'AC_WAIT', reason: done ? 'The AC is verified.' : detail.reason}};
   fs.writeFileSync(output + '.tmp', JSON.stringify(value)); fs.renameSync(output + '.tmp', output);
   console.log('<signal:DECISION>Publish the guarded host decision.</signal:DECISION>');
 }

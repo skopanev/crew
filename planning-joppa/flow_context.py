@@ -21,6 +21,9 @@ def pages(api, workspace, query):
 
 
 def children(api, config, selected, query):
+    if isinstance(query, list):
+        return sorted({item["address"]: item for child_filter in query
+                       for item in children(api, config, selected, child_filter)}.values(), key=lambda item: item["address"])
     rows = pages(api, config["workspace"], {**query, "parent": selected["address"], "depth": 1,
                                          "fields": ["parent", "revision"]})
     result = []

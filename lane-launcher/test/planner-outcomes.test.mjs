@@ -138,3 +138,11 @@ test('planner config rejects unknown result colors', t => {
   fs.writeFileSync(file, JSON.stringify({workspace: 'sample', runs_folder: f.root, result_colors: {FAIL: 'invalid'}}));
   assert.throws(() => plannerConfig(file), /result_colors/);
 });
+
+test('old active-work skips leave the panel but uncertain claims remain visible',t=>{
+  const f=fixture(t,{code:'ACTIVE_TASK'});
+  f.write('result.json',{status:'blocked',reason_code:'ACTIVE_TASK',claim_released:false});
+  assert.equal(f.row(),undefined);
+  f.write('result.json',{status:'blocked',reason_code:'ACTIVE_TASK',needs_recovery:true});
+  assert.equal(f.row().status,'HELD');
+});
