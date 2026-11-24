@@ -112,7 +112,9 @@ async function main() {
       }
       return target;
     })(selected.address);
-    return {...dependency, archived: archived.sort((a, b) => a.address.localeCompare(b.address))};
+    // Tasker can repair this plan through its guarded host path before any model runs.
+    return {...dependency, ready: dependency.ready || dependency.code === 'DEPENDENCY_REPLAN',
+      archived: archived.sort((a, b) => a.address.localeCompare(b.address))};
   };
   const metadata = async selected => {
     const parent = await read('joppa_objects', {address: selected.document.parent});

@@ -62,6 +62,7 @@ export function dependencyCheck(read) {
     if (!types || typeof types !== 'object') throw invalid('Dependency schema types are missing');
     const start = await object(address);
     const seen = new Set();
+    let replan;
     let node = start;
     while (node) {
       if (node.document.present !== true || seen.has(node.address)) return {ready: false, blocker: node.address};
@@ -73,6 +74,10 @@ export function dependencyCheck(read) {
         if (link.revision != null && !currentPin(link.revision, Number.MAX_SAFE_INTEGER, 1)) {
           throw invalid(`Invalid linked revision on ${node.address}: ${link.target}`);
         }
+        if (target.document.present === false && types[target.kind]?.role === 'task' && !target.document.data?.commit) {
+          replan ||= {ready: false, blocker: target.address, code: 'DEPENDENCY_REPLAN'};
+          continue;
+        }
         if (!(target.document.present === false || (types[target.kind]?.role === 'task'
           ? nodeStageDone(target) : target.status?.tone === 'green'))) {
           return {ready: false, blocker: target.address};
@@ -82,7 +87,7 @@ export function dependencyCheck(read) {
       if (blocker) return {ready: false, blocker};
       node = node.document.parent ? await object(node.document.parent) : null;
     }
-    return {ready: true, blocker: null};
+    return replan || {ready: true, blocker: null};
   };
 }
 
