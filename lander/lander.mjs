@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {doneTaskStage} from '../lane-launcher/joppa-nodes.mjs';
+import {completionPolicy} from './ac-completion.mjs';
 import {read, write, require, git, ancestor, remoteHead, targetHead, create, pin, candidate,
   environment, cleanup, tooling} from './git.mjs';
 
@@ -24,6 +25,7 @@ function repairBudget(value) {
 }
 function settings() {
   const value = config(), assignment = read(path.join(root, 'input.json'));
+  completionPolicy(value, assignment.schema);
   const items = assignment.items || [assignment.selected], ids = new Set(items.map(item => item.document.data.repository));
   require(ids.size === 1, 'The claimed batch must use one configured repository');
   const repo = value.repositories?.find(item => item.id === [...ids][0]);

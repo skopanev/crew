@@ -94,6 +94,36 @@ A partial landing reports `PARTIAL_LANDING`. Landed Tasks are archived, and excl
 An uncertain native write requires receipt recovery before another claim.
 A landed Task does not prove criterion acceptance. The workflow never writes a passing acceptance result.
 
+## Complete a criterion after landing
+
+Set `ac_completion` to enable the Lander completion step. Omit it to keep completion disabled.
+Configure the native type names, the Task relation and the terminal stages:
+
+```json
+{
+  "DONE_TASK_STAGE": "done",
+  "ac_completion": {
+    "kind": "ac",
+    "task_kinds": ["task"],
+    "test_kinds": ["test"],
+    "relation": "parent",
+    "done_stage": "done"
+  }
+}
+```
+
+Include the criterion kind in `publication.update_kinds` and permit `save_object`.
+Use `parent` for containment, or a configured native relation from each Task and Test to its criterion.
+Lander checks the current children after confirmed Task publication. Every live Task must be done and unassigned.
+Every current Test must have a passing result and a full tested commit. The server criterion tone must be green.
+Archived landed Tasks remain archived. Lander preserves Test results and human acceptance.
+An atomic batch checks live child revisions with empty saves before the criterion stage save.
+Lander reads the children again after publication. A new unfinished Task or changed result restores the prior stage.
+A concurrent owner edit prevents that restoration. The existing `lander.json` retains requests and unresolved outcomes.
+After a lost response, Lander repeats the saved request ID before it checks completion or restores the prior stage.
+The completion step preserves the original Task publication signal, including when its files or service are unavailable.
+The native 100-operation batch limit applies. An oversized completion remains deferred without a partial write.
+
 ## Hourly report
 
 Run `node lander/report.mjs /absolute/lander.json` from an existing timer.
