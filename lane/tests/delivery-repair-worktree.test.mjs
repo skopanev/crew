@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {prepareDeliveryRepair, deliveryRepairContext} from '../bin/delivery-repair-worktree.mjs';
 
 function fixture(t, conflict = false) {
@@ -72,6 +72,15 @@ test('rejects a changed branch and preserves merge conflicts for the coder', t =
   const conflict = fs.readFileSync(path.join(f.checkout, 'shared.txt'));
   const prepared = fs.readFileSync(path.join(f.run, 'artifacts/integration-repair-prepared.json'));
   assert.throws(() => prepareDeliveryRepair(f.env), /unfinished repair merge/);
+  const workflow = fs.readFileSync(new URL('../workflow.yaml', import.meta.url), 'utf8');
+  const shell = workflow.split('  notify_failure:\n')[1].split('    shell: |\n')[1]
+    .split('\n  notify_success:')[0].replace(/^ {6}/gm, '');
+  fs.writeFileSync(path.join(f.run, 'artifacts/claim.json'), JSON.stringify({claimed: true,
+    status: 'in_progress', id: 'example', workspace: 'example', run_dir: f.run}));
+  const notification = spawnSync('bash', ['-euo', 'pipefail', '-c', shell], {encoding: 'utf8',
+    env: {...process.env, ...f.env, project_name: 'example', FINALIZE_ONLY: 'false', MEDULLA_LAST_SIGNAL: 'GATE_FAIL'}});
+  assert.equal(notification.status, 1, notification.stderr);
+  assert.match(fs.readFileSync(path.join(f.run, 'artifacts/failure.txt'), 'utf8'), /no Git writes/);
   assert.deepEqual(fs.readFileSync(path.join(f.checkout, '.git/index')), index);
   assert.deepEqual(fs.readFileSync(path.join(f.checkout, 'shared.txt')), conflict);
   assert.deepEqual(fs.readFileSync(path.join(f.run, 'artifacts/integration-repair-prepared.json')), prepared);

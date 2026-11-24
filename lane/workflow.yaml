@@ -1003,6 +1003,15 @@ nodes:
         cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
         exit 1
       fi
+      if jq -e '.integrationRepair != null' "$MEDULLA_RUN_DIR/artifacts/ticket.json" >/dev/null 2>&1; then
+        for operation in MERGE_HEAD rebase-merge rebase-apply CHERRY_PICK_HEAD REVERT_HEAD index.lock; do
+          if [ -e "$LANE_WORKTREE/.git/$operation" ]; then
+            printf '%s\nRepair checkout preserved with .git/%s; no Git writes.\n' "$msg" "$operation" > "$MEDULLA_RUN_DIR/artifacts/failure.txt"
+            cat "$MEDULLA_RUN_DIR/artifacts/failure.txt" >&2
+            exit 1
+          fi
+        done
+      fi
       # The host retains failed checkouts with commits or changes.
       export PATH="/home/medulla/.bun/bin:${PATH}"
       saved=""
