@@ -54,10 +54,15 @@ export function dryOutput(value, dry) {
     reason: ('Would publish: ' + (value.outcome?.reason || value.outcome?.reason_code || 'approved Writer operations')).slice(0, 1000)}} : value;
 }
 
-function main() {
+async function main() {
   const [mode, dir] = process.argv.slice(2), env = process.env;
   if (mode === 'policy') { policy(env); return; }
   if (mode === 'seats') {
+    if (process.argv[3]) {
+      const shared = await import(pathToFileURL(path.join(path.dirname(env.CREW_FLOW_STAGES), 'agent-reader.mjs')).href);
+      console.log(JSON.stringify(shared.criticSeats(process.argv[3], process.argv[4], env)));
+      return;
+    }
     const codex = ['--ignore-user-config', ...['shell_tool', 'view_image', 'apps', 'browser_use', 'multi_agent']
       .flatMap(name => ['-c', 'features.' + name + '=false'])];
     const claude = ['--strict-mcp-config', '--setting-sources=', '--mcp-config', '{"mcpServers":{}}', '--tools='];
@@ -110,5 +115,5 @@ function main() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  try { main(); } catch (error) { console.error('writer: ' + error.message); process.exitCode = 1; }
+  main().catch(error => { console.error('writer: ' + error.message); process.exitCode = 1; });
 }
