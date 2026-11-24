@@ -41,7 +41,9 @@ test('a profile grants artifacts and source roots without enabling legacy snapsh
 
 test('the CLI accepts a manifest and preserves a custom reader with its environment', t => {
   const f = fixture(t), existing = path.join(f.root, 'reader.json'), manifest = path.join(f.root, 'manifest.json');
-  fs.writeFileSync(existing, JSON.stringify({mcpServers: {sources: {command: 'python3', args: ['/role/reader.py'], env: {ROLE: 'value'}}}}));
+  const cbm = {command: '/host/cbm', args: ['read-only']};
+  fs.writeFileSync(existing, JSON.stringify({mcpServers: {'codebase-memory': cbm,
+    sources: {command: 'python3', args: ['/role/reader.py'], env: {ROLE: 'value'}}}}));
   fs.writeFileSync(manifest, JSON.stringify({files: [path.join(f.root, 'draft.json')], roots: []}));
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('./agent-reader.mjs', import.meta.url)),
     'prepare', 'critic', '@' + manifest, existing], {env: f.env, encoding: 'utf8'});
@@ -51,6 +53,15 @@ test('the CLI accepts a manifest and preserves a custom reader with its environm
   const config = JSON.parse(fs.readFileSync(path.join(f.run, 'artifacts/critic-reader.json')));
   assert.equal(config.mcpServers.joppa.env.ROLE, 'value');
   assert.deepEqual(config.mcpServers.joppa.args, ['/role/reader.py']);
+  assert.deepEqual(config.mcpServers['codebase-memory'], cbm);
+  assert.equal(config.mcpServers.sources, undefined);
+  assert.deepEqual(Bun.TOML.parse(agentArgs('codex', path.join(f.run, 'artifacts/critic-reader.json')).at(-1))
+    .mcp_servers['codebase-memory'], cbm);
+  fs.writeFileSync(existing, JSON.stringify({mcpServers: {'codebase-memory': cbm}}));
+  const defaultProfile = prepare('default', [], existing, f.env);
+  const defaultServers = JSON.parse(fs.readFileSync(defaultProfile.file)).mcpServers;
+  assert.deepEqual(defaultServers['codebase-memory'], cbm);
+  assert.ok(defaultServers.joppa.args.includes('--mcp-command'));
   assert.throws(() => prepare('bad', ['relative'], undefined, f.env), /absolute file/);
 });
 

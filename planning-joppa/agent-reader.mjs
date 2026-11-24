@@ -24,27 +24,28 @@ export function prepare(name, files, existing, env = process.env) {
   need(Array.isArray(grant.roots ?? []) && (grant.roots ?? []).every(root => typeof root === 'string' && path.isAbsolute(root)),
     'Grant explicit absolute directory paths');
   const config = read(env.PLANNING_JOPPA_CONFIG), artifacts = path.join(env.MEDULLA_RUN_DIR, 'artifacts');
-  const source = existing ? Object.values(read(existing).mcpServers ?? {}) : [{
+  const servers = existing ? {...read(existing).mcpServers} : {};
+  const source = servers.joppa ?? servers.sources ?? {
     command: env.PLANNING_PYTHON ?? 'python3', args: [path.join(here, 'mcp.py'),
       '--url', config.url, '--workspace', config.workspace,
       ...(config.mcp_command ? ['--mcp-command', JSON.stringify(config.mcp_command)]
-        : ['--token-file', config.reader_token_file ?? config.token_file])]}];
-  need(source.length === 1 && typeof source[0].command === 'string' && Array.isArray(source[0].args),
-    'Use one configured read-only reader');
-  const server = {...source[0], env: {...source[0].env, CREW_READER_FILES: JSON.stringify(grant.files),
+        : ['--token-file', config.reader_token_file ?? config.token_file])]};
+  need(typeof source.command === 'string' && Array.isArray(source.args), 'Use a configured read-only reader');
+  const server = {...source, env: {...source.env, CREW_READER_FILES: JSON.stringify(grant.files),
     CREW_READER_ROOTS: JSON.stringify(grant.roots ?? [])}};
   const file = path.join(artifacts, `${name}-reader.json`);
   fs.mkdirSync(artifacts, {recursive: true});
-  save(file, {mcpServers: {joppa: server}});
+  if (servers.sources === source) delete servers.sources;
+  save(file, {mcpServers: {...servers, joppa: server}});
   const home = env.AGY_PROFILE_HOME ? path.join(env.AGY_PROFILE_HOME, name) : '';
   return {file, home};
 }
 export function agentArgs(harness, configFile) {
-  const {joppa} = read(configFile).mcpServers ?? {};
+  const servers = read(configFile).mcpServers ?? {}, {joppa} = servers;
   need(joppa?.command && Array.isArray(joppa.args), 'Reader config needs the read-only joppa adapter');
   if (harness === 'codex') return ['--ignore-user-config',
     ...['shell_tool', 'view_image', 'apps', 'browser_use', 'multi_agent'].flatMap(key => ['-c', `features.${key}=false`]),
-    '-c', 'mcp_servers.joppa=' + toml({...joppa, required: true})];
+    '-c', 'mcp_servers=' + toml({...servers, joppa: {...joppa, required: true}})];
   if (harness === 'claude-code') return ['--strict-mcp-config', '--setting-sources=', '--mcp-config', configFile, '--tools='];
   need(harness === 'agy', 'Unsupported reader harness');
   return [];
@@ -66,7 +67,8 @@ export function prepareAgy(configFile, home, env = process.env) {
   } else need(JSON.stringify(read(config)) === JSON.stringify(next), 'AGY reader profile changed');
   need(fs.realpathSync(path.dirname(config)).startsWith(fs.realpathSync(home) + path.sep), 'AGY config escaped its profile');
   save(config, next);
-  need(query().includes('joppa'), 'AGY did not load its read-only reader');
+  const loaded = query();
+  need(Object.keys(next.mcpServers).every(name => loaded.includes(name)), 'AGY did not load its configured readers');
 }
 export function criticSeats(configFile, home, env = process.env) {
   const pack = values => Object.fromEntries(values.map((value, i) => ['a' + (i + 1), value]));

@@ -37,7 +37,7 @@ class Files:
         offset, length = args.get("offset", 0), args.get("length", 20000)
         if type(offset) is not int or offset < 0 or type(length) is not int or not 1 <= length <= 100000:
             raise ValueError("Use offset >= 0 and length 1..100000")
-        raw = file.read_bytes()
+        raw = resolved.read_bytes()
         text = raw.decode("utf-8")
         end = min(offset + length, len(text))
         return {"path": str(file.resolve()), "text": text[offset:end], "offset": offset,
