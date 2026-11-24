@@ -19,6 +19,7 @@ export function prepareDeliveryRepair(env = process.env) {
   const git = (...args) => execFileSync('git', args, {cwd, encoding: 'utf8', timeout: 120000}).trim();
   const directory = fs.lstatSync(path.join(cwd, '.git'));
   need(directory.isDirectory() && !directory.isSymbolicLink(), 'Repair needs its own Git directory');
+  need(!fs.existsSync(path.join(cwd, '.git/MERGE_HEAD')), 'An unfinished repair merge needs its existing checkout');
   git('check-ref-format', 'refs/heads/' + repair.branch);
   git('check-ref-format', 'refs/heads/' + repair.target);
   const head = git('rev-parse', '--verify', `refs/remotes/origin/${repair.branch}^{commit}`);
@@ -34,6 +35,9 @@ export function prepareDeliveryRepair(env = process.env) {
   const conflicts = git('diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
   need(!merge.error && !merge.signal && (merge.status === 0 || merge.status === 1 && conflicts.length),
     'The repair merge failed without a resolvable conflict');
+  if (!conflicts.length && fs.existsSync(path.join(cwd, '.git/MERGE_HEAD'))) {
+    git('commit', '-m', 'Merge current target for delivery repair');
+  }
   fs.writeFileSync(path.join(cwd, '.git/lane-base'), target + '\n');
   const prepared = {...repair, targetHead: target, conflicts};
   fs.writeFileSync(path.join(artifacts, 'integration-repair-prepared.json'),
