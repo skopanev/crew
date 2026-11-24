@@ -119,7 +119,7 @@ export function installEnvironment(spec, base = process.cwd()) {
     check(command);
     for (const value of command) {
       const candidate = /^--?[A-Za-z0-9_-]+=(.*)$/.exec(value)?.[1] ?? value;
-      const isPath = path.isAbsolute(candidate) || candidate.includes('/');
+      const isPath = path.isAbsolute(candidate) || /[\\/]/.test(candidate);
       need(!isPath || noParent(candidate), 'Parent path segments are not supported in environment commands');
       const normalized = path.resolve(folder, candidate);
       if (isPath && Object.values(roots).some(root => inside(root, normalized))) pinned(normalized);
