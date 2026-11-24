@@ -29,8 +29,11 @@ class ArtifactPathTests(unittest.TestCase):
             writer = root / 'writer.sh'
             writer.write_text("""python3 - "$1" <<'WRITE'
 from pathlib import Path
-import re, sys
+import json, re, sys
 prompt = Path(sys.argv[1]).read_text()
+context_file = Path(re.search(r'Read and follow (.+-context.json)\\.', prompt).group(1))
+context = json.loads(context_file.read_text())
+prompt = Path(context['instructions_file']).read_text()
 target = Path(re.search(r'^Write (.+):$', prompt, re.M).group(1))
 assert target.is_absolute() and '$' not in str(target), target
 target.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +52,7 @@ WRITE
                 "      - slug: architecture\n      - slug: codereview\n      - slug: security\n"
                 "    max_parallel: 3\n    on_signal:\n"
                 "      __done__: __exit_ok__\n      __failed__: __exit_fail__\n"
+                "    pre: " + json.dumps('node ' + str(WORKFLOW.parent / 'bin/prompt-context.mjs') + ' reviewer') + '\n'
                 f"    agent:\n      harness: fake\n      model: {json.dumps(str(writer))}\n"
                 "    prompt: |\n" + textwrap.indent(prompt, '      ') + '\n')
             result = subprocess.run(
@@ -56,7 +60,8 @@ WRITE
                 cwd=checkout, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             run = next((root / 'runs').iterdir())
-            self.assertEqual(sorted(p.name for p in (run / 'artifacts').iterdir()),
+            self.assertEqual(sorted(p.name for p in (run / 'artifacts').glob('*.md')
+                                    if not p.name.endswith('-instructions.md')),
                              ['architecture.md', 'codereview.md', 'security.md'])
             self.assertEqual(list(checkout.iterdir()), [])
             self.assertIn(str(run / 'artifacts'), (run / 'vars.yaml').read_text())
