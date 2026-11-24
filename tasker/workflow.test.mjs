@@ -43,7 +43,7 @@ echo '<signal:PREPARED>Ready</signal:PREPARED>'
   fs.writeFileSync(path.join(definition, 'trees.sh'), 'touch "$MEDULLA_RUN_DIR/trees-called"\n');
   fs.writeFileSync(path.join(definition, 'completion.mjs'), 'console.log(process.argv[2]==="preclaim"&&process.env.COMPLETION_BLOCKED==="true"?"<signal:BLOCKED>Active lane.</signal:BLOCKED>":"<signal:CONTINUE>Context fixture.</signal:CONTINUE>");');
   fs.copyFileSync(path.join(here, 'repair-context.mjs'), path.join(definition, 'repair-context.mjs'));
-  for (const name of ['repair-plan.mjs', 'retirement-proof.mjs', 'host-split-replan.mjs']) {
+  for (const name of ['repair-plan.mjs', 'retirement-proof.mjs', 'host-split-replan.mjs', 'test-bindings.mjs']) {
     fs.symlinkSync(path.join(here, name), path.join(definition, name));
   }
   fs.writeFileSync(path.join(engine, 'lane-launcher', 'joppa-api.mjs'), `import fs from 'node:fs';

@@ -6,7 +6,7 @@ import path from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {bindingPlan, bindingPublication} from './test-bindings.mjs';
+import {contractHash, bindingPlan, bindingPublication} from './test-bindings.mjs';
 import {check} from './check.mjs';
 import {checkRepair, repairPublication} from './repair-plan.mjs';
 
@@ -171,6 +171,15 @@ test('the actual review join publishes Test metadata and Tasks only for the curr
   assert.equal(value.operations[1].command.data.body.startsWith(acceptance), true);
   assert.equal(Object.hasOwn(value.operations[1].command.data, 'owner'), false);
   assert.equal(value.operations[2].command.data.owner, 'binding-owner');
+  const frozen = structuredClone(f.input.children[0]);
+  f.input.children[0].document.data = {...frozen.document.data, ...value.operations[1].command.data};
+  const hash = contractHash(f.input);
+  assert.equal(value.operations[2].command.data.ac_contract_hash, hash);
+  assert.match(f.runReview(), /<signal:APPROVED>/);
+  const noBindingUpdate = f.read('operations.json');
+  assert.deepEqual(noBindingUpdate.operations.map(row => row.command.kind), ['ac', 'task']);
+  assert.equal(noBindingUpdate.operations[1].command.data.ac_contract_hash, hash);
+  f.input.children[0] = frozen;
   assert.match(f.runReview({dry: true}), /<signal:APPROVED>/);
   assert.deepEqual(f.read('operations.json').operations, []);
   assert.equal(f.read('operations.json').outcome.reason_code, 'DRY_RUN');

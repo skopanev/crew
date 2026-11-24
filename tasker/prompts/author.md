@@ -155,7 +155,8 @@ Read the captured incoming dependent Tasks.
 Use the selected Task's Do steps as its deliverables.
 Use legacy read-only file lists labelled Context as evidence.
 Do not treat Context as change restrictions.
-Use the host's comparison of the pinned and current AC title/body.
+Use the host's contract comparison of AC title, body, Source references and Test texts.
+For a legacy Task, read repair.baseline_note for the missing Test text history.
 Treat a revision-only change as unchanged text.
 
 Do not:

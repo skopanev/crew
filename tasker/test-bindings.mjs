@@ -1,5 +1,6 @@
 // Bind planned Test cases after the same draft receives both critic approvals.
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {reporterNames, reporterFile} from './reporter-names.mjs';
@@ -11,6 +12,18 @@ const matchesOwners = ({repo, name}, owners, trees) => {
   return Boolean(file && Object.hasOwn(trees, repo) && owners.length && owners.every(task => task.repository === repo &&
     Array.isArray(task.files) && task.files.some(entry => entry?.path === file && entry.change !== 'delete')));
 };
+
+export const contractText = node => {
+  const data = node.document?.data ?? {};
+  return {title: data.title ?? '', body: data.body ?? '', sources: [...(data.sources ?? [])].sort()};
+};
+
+export function contractHash(input) {
+  const tests = (input.children ?? []).filter(node => role(input, node.kind) === 'test' && node.document?.present !== false)
+    .map(node => ({address: node.address, title: node.document?.data?.title ?? '', body: node.document?.data?.body ?? ''}))
+    .sort((a, b) => a.address.localeCompare(b.address));
+  return createHash('sha256').update(JSON.stringify({...contractText(input.selected), tests})).digest('hex');
+}
 
 export function bindingPlan({input, draft, trees = {}}) {
   draft ??= {};
@@ -103,9 +116,16 @@ export function bindingPublication({input, draft, trees, review, dry = false}) {
   const {problems, operations} = bindingPlan({input, draft, trees});
   if (problems.length) return {approved: false, critique: {bindings: {verdict: 'REWORK',
     findings: problems.map(problem => ({problem, advice: 'Correct test_bindings without changing the acceptance text.'})), summary: problems.join('; ')}}};
-  if (!operations.length) return review;
   const [stage, ...tasks] = review.would_publish.operations;
-  const proposed = {...review.would_publish, operations: [stage, ...operations, ...tasks]};
+  const proposed = {...review.would_publish, operations: operations.length ? [stage, ...operations, ...tasks] : [...review.would_publish.operations]};
+  if (role(input, input.selected.kind) === 'ac' && ['OK', 'SPLIT'].includes(draft.verdict)) {
+    const updated = new Map(operations.map(({command}) => [command.kind + ':' + command.id, command.data]));
+    const hash = contractHash({...input, children: (input.children ?? []).map(node => updated.has(node.address)
+      ? {...node, document: {...node.document, data: {...node.document.data, ...updated.get(node.address)}}} : node)});
+    proposed.operations = proposed.operations.map(row => row.command.op === 'save_object' && row.command.revision === 0 &&
+      row.command.parent === input.selected.address && role(input, row.command.kind) === 'task'
+      ? {...row, command: {...row.command, data: {...row.command.data, ac_contract_hash: hash}}} : row);
+  }
   return {...review, would_publish: proposed, publication: dry ? review.publication : proposed};
 }
 

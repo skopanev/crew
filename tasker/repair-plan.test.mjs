@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {contractHash} from './test-bindings.mjs';
 import {changedText, repairView, checkRepair, repairPublication, repositoryData} from './repair-plan.mjs';
 import {bodyProblems, captureRepair} from './repair-context.mjs';
 import {fileURLToPath} from 'node:url';
@@ -26,7 +27,8 @@ test('READY preserves the Task id and title; changed AC requires retirement', ()
   assert.equal(checked(draft,{ac_text_changed:true}).ok,false);
   const output=repairPublication({input:input(),draft,run:'run'}).publication;
   assert.equal(output.operations.length,1);
-  assert.deepEqual(output.operations[0].command.data,{body:draft.task.body,repository:'repo',stage:'to_implement'});
+  assert.deepEqual(output.operations[0].command.data,{body:draft.task.body,repository:'repo',stage:'to_implement',
+    ac_contract_hash:contractHash({selected:parent,children:[],schema:input().schema})});
   assert.equal(output.operations[0].command.id,'t');
   assert.equal(output.operations[0].command.revision,5);
 });
@@ -135,4 +137,55 @@ test('a stale critic commit cannot force a Task to retire unfinished work', () =
   const ready={verdict:'READY',reason:'Exports are missing',task:{id:'t',title:'Existing Task',repository:'repo',tests:[],body:'Repository: repo'}};
   assert.equal(checkRepair({...options,draft:ready}).ok,true);
   assert.equal(checkRepair({...options,draft:{verdict:'DECISION_REQUIRED',reason:'Missing evidence',gap:'Verify the required exports'}}).ok,true);
+});
+
+
+test('new Task hashes detect Source and Test text changes but ignore lifecycle metadata and order', async () => {
+  const original = input();
+  original.selected.document.data.body = 'Criterion: ac:a@4. Work';
+  original.context.parent.document.data.sources = ['source:b', 'source:a'];
+  original.context.children = [node('test:a', {title: 'A', body: 'Expected A'}), node('test:b', {title: 'B', body: 'Expected B'})];
+  original.selected.document.data.ac_contract_hash = contractHash({selected: original.context.parent,
+    children: original.context.children, schema: original.schema});
+  const capture = value => captureRepair(value, async () => { throw new Error('A new Task needs no historical pin read'); });
+  assert.equal((await capture(original)).ac_text_changed, false);
+  for (const change of [
+    x => { x.context.parent.document.data.title += ' changed'; },
+    x => { x.context.parent.document.data.body += ' changed'; },
+    x => { x.context.parent.document.data.sources.push('source:c'); },
+    x => { x.context.children[0].document.data.body += ' changed'; },
+    x => { x.context.children[0].document.data.title += ' changed'; },
+    x => { x.context.children.pop(); },
+    x => { x.context.children.push(node('test:c', {body: 'New Expected'})); },
+  ]) {
+    const changed = structuredClone(original); change(changed);
+    assert.equal((await capture(changed)).ac_text_changed, true);
+  }
+  const metadata = structuredClone(original);
+  metadata.context.parent.current_revision++; metadata.context.parent.document.data.stage = 'done';
+  metadata.context.parent.document.data.sources.reverse(); metadata.context.children.reverse();
+  metadata.context.children[0].result = {status: 'pass'};
+  metadata.context.children[0].current_revision++; metadata.context.children[0].at = 'later';
+  assert.equal((await capture(metadata)).ac_text_changed, false);
+  original.selected.document.data.ac_contract_hash = 'invalid';
+  await assert.rejects(() => capture(original), /contract hash is invalid/);
+});
+
+test('legacy Tasks compare Source references and publish their Test history limitation without returns', async () => {
+  const original = input(); original.selected.document.data.body = 'Criterion: ac:a@2. Work';
+  original.context.parent.document.data.sources = ['source:new'];
+  const repair = await captureRepair(original, async () => ({...parent,
+    document: {...parent.document, data: {...parent.document.data, sources: ['source:old']}}}));
+  assert.equal(repair.ac_text_changed, true);
+  assert.match(repair.baseline_note, /Historical Test texts are unavailable/);
+  const result = repairPublication({input: original, repair, draft: {verdict: 'STALE', reason: 'Source changed', needs_code: true}, run: 'legacy'}).publication;
+  assert.deepEqual(result.operations[0].command.data, {stage: 'to_task'});
+  assert.ok(result.operations.some(row => row.command.op === 'note' && row.command.target === 'task:t' && row.command.text.includes(repair.baseline_note)));
+  assert.ok(result.operations.every(row => row.command.data?.returns === undefined));
+  const same = structuredClone(original); same.context.children.push(node('test:a', {body: 'Changed Test'}));
+  const unchanged = await captureRepair(same, async () => original.context.parent);
+  assert.equal(unchanged.ac_text_changed, false);
+  assert.match(unchanged.baseline_note, /were not compared/);
+  assert.equal(changedText(node('ac:a', {title: 'A', body: 'B', sources: ['source:b', 'source:a']}),
+    node('ac:a', {title: 'A', body: 'B', sources: ['source:a', 'source:b']})), false);
 });
