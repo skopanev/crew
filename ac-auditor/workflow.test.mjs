@@ -10,27 +10,30 @@ const workflow = Bun.YAML.parse(readFileSync(join(dir, 'workflow.yaml'), 'utf8')
 const role = name => readFileSync(join(dir, 'prompts', name + '.md'), 'utf8');
 
 test('each prompt is the role prompt, the AC address and for the judge the finder result paths', () => {
-  assert.equal(workflow.nodes.finders.prompt, '{{file:prompts/finder.md}}\nAC: {{var:audit_ac}}\n');
-  assert.equal(workflow.nodes.judge.prompt, '{{file:prompts/judge.md}}\nAC: {{var:audit_ac}}\n' +
+  // At most 1024 characters: the role file in the run holds the steps and the answer format.
+  const read = 'Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.\n';
+  assert.equal(workflow.nodes.finders.prompt, 'You are one of three AC audit finders. ' + read + 'Role file: {{var:audit_artifacts}}/finder.md\nAC: {{var:audit_ac}}\n');
+  assert.equal(workflow.nodes.judge.prompt, 'You are the AC audit judge. ' + read + 'Role file: {{var:audit_artifacts}}/judge.md\nAC: {{var:audit_ac}}\n' +
     'Finder one: {{var:finder_one_path}}\nFinder two: {{var:finder_two_path}}\nFinder three: {{var:finder_three_path}}\n');
-  const a = '/runs/2026-11-24_08-33-04-be678ae6/artifacts';
-  const values = {audit_ac: 'ac:eqc8z147', ...Object.fromEntries(['one', 'two', 'three'].map(n => [`finder_${n}_path`, `${a}/finder-${n}.json`]))};
+  const a = '/Users/finik/Projects/finik/.medulla/auditor-runs/2026-11-24_08-33-04-be678ae6/artifacts';
+  const values = {audit_ac: 'ac:eqc8z147', audit_artifacts: a, ...Object.fromEntries(['one', 'two', 'three'].map(n => [`finder_${n}_path`, `${a}/finder-${n}.json`]))};
   const render = prompt => prompt.replace(/\{\{file:prompts\/([a-z]+\.md)\}\}/g, (_, name) => readFileSync(join(dir, 'prompts', name), 'utf8'))
     .replace(/\{\{var:([a-z_]+)\}\}/g, (_, name) => values[name] ?? '');
   for (const [node, name] of [['finders', 'finder'], ['judge', 'judge']]) {
     const prompt = render(workflow.nodes[node].prompt);
-    assert.ok(prompt.startsWith(role(name) + '\nAC: ac:eqc8z147\n'));
-    assert.ok(prompt.length < 15000, node + ' prompt has ' + prompt.length + ' characters');
-    assert.doesNotMatch(prompt, /\{\{|Do not read files|All input is in this prompt|role contract below/);
-    for (const text of ['mcp__joppa__read_context first', 'offset set to next_offset until next_offset is null']) assert.ok(prompt.includes(text), node + ' lacks ' + text);
+    assert.ok(prompt.includes(`Role file: ${a}/${name}.md`));
+    assert.ok(prompt.length <= 1024, node + ' prompt has ' + prompt.length + ' characters');
+    assert.doesNotMatch(prompt, /\{\{/);
+    assert.doesNotMatch(role(name), /Do not read files|All input is in this prompt|role contract below/);
+    for (const text of ['mcp__joppa__read_context first', 'offset set to next_offset until next_offset is null']) assert.ok(role(name).includes(text), name + ' lacks ' + text);
   }
 });
 
 test('each finder and the judge get their own read-only reader', () => {
   const shell = workflow.nodes.prepare.shell;
-  const finder = '"$(files contract-finder.md audit-assignment.json)"';
+  const finder = '"$(files finder.md contract-finder.md audit-assignment.json)"';
   for (const line of [`prepare auditor_finder_one ${finder}`, `prepare auditor_finder_two ${finder}`, `prepare auditor_finder_three ${finder} --agy`,
-    'prepare auditor_judge "$(files contract-judge.md audit-assignment.json finder-one.json finder-two.json finder-three.json)"'])
+    'prepare auditor_judge "$(files judge.md contract-judge.md audit-assignment.json finder-one.json finder-two.json finder-three.json)"'])
     assert.ok(shell.includes('node "$reader" ' + line), 'prepare lacks ' + line);
   assert.match(shell, /for role in finder judge; do .*contracts\.json.*contract-\$role\.md/);
   assert.deepEqual(workflow.nodes.judge.agent.args, ['--strict-mcp-config', '--setting-sources=', '--mcp-config', '{{var:auditor_judge_reader_config}}', '--tools=']);

@@ -1,4 +1,4 @@
-Decide PASS or FAIL for the AC of the AC line at the end from the three finder result files below.
+This is your role file. Decide PASS or FAIL for the AC of the AC line in your prompt from the three finder result files of your prompt.
 Follow the Judge part of your role contract.
 Call mcp__joppa__read_context first. It lists your contract file, the assignment and your other granted files.
 Read each listed file with mcp__joppa__read_file. Call it again with offset set to next_offset until next_offset is null.

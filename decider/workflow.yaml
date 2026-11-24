@@ -59,9 +59,11 @@ nodes:
       "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" prepare
       # The shared reader reads only these files. The author also gets the settings and the retry files.
       a="$MEDULLA_RUN_DIR/artifacts" reader="$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs"
+      # A prompt has at most 1024 characters: the role file holds the steps and the answer format.
+      for role in author critic; do cp "$MEDULLA_WORKFLOW_DIR/prompts/$role.md" "$a/$role.md"; done
       files() { jq -nc --arg a "$a" '$ARGS.positional | map($a + "/" + .)' --args "$@"; }
-      node "$reader" prepare decider_author "$(files contract-decider.md contract-audit.md decider-settings.json decider-assignment.json draft.json critique.json shape-feedback.json)" "$a/reader-mcp.json"
-      node "$reader" prepare decider_critic "$(files contract-decider.md contract-audit.md decider-assignment.json draft.json)" "$a/reader-mcp.json"
+      node "$reader" prepare decider_author "$(files author.md contract-decider.md contract-audit.md decider-settings.json decider-assignment.json draft.json critique.json shape-feedback.json)" "$a/reader-mcp.json"
+      node "$reader" prepare decider_critic "$(files critic.md contract-decider.md contract-audit.md decider-assignment.json draft.json)" "$a/reader-mcp.json"
       echo '<signal:PREPARED>The decision context and the live contracts are ready.</signal:PREPARED>'
     on_signal:
       PREPARED: author
@@ -92,7 +94,8 @@ nodes:
         - --add-dir
         - '{{var:MANUALS_ROOT}}'
     prompt: |
-      {{file:prompts/author.md}}
+      You are the Decider author for one AC. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Role file: {{var:decider_artifacts}}/author.md
       AC: {{var:decider_ac}}
       {{var:decider_feedback}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
@@ -160,7 +163,8 @@ nodes:
         - '{{input.a12:-}}'
         - '{{input.a13:-}}'
     prompt: |
-      {{file:prompts/critic.md}}
+      You are a Decider critic for one AC. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Role file: {{var:decider_artifacts}}/critic.md
       AC: {{var:decider_ac}}
       Draft: {{var:decider_artifacts}}/draft.json
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'

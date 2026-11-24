@@ -131,8 +131,11 @@ test('the private config, both contracts, frozen prompts and readonly author rou
   assert.equal(workflow.nodes.draft_check.on_signal.REJECTED, undefined); assert.equal(workflow.nodes.draft_check.on_signal.FAILED, 'failed');
   // The prompt is the role prompt and the AC address. The critic also gets the draft path. On a retry the author gets
   // one more line with the previous draft and the findings. The agents find all other files through read_context.
-  assert.equal(workflow.nodes.author.prompt, '{{file:prompts/author.md}}\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
-  assert.equal(workflow.nodes.critics.prompt, '{{file:prompts/critic.md}}\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  // At most 1024 characters: the role file in the run holds the steps and the answer format.
+  const read = 'Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.\n';
+  assert.equal(workflow.nodes.author.prompt, 'You are the Decider author for one AC. ' + read + 'Role file: {{var:decider_artifacts}}/author.md\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
+  assert.equal(workflow.nodes.critics.prompt, 'You are a Decider critic for one AC. ' + read + 'Role file: {{var:decider_artifacts}}/critic.md\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  assert.ok(workflow.nodes.prepare.shell.includes('for role in author critic; do cp "$MEDULLA_WORKFLOW_DIR/prompts/$role.md" "$a/$role.md"; done'));
   for (const role of ['author', 'critic']) {
     const prompt = fs.readFileSync(path.join(here, 'prompts', role + '.md'), 'utf8');
     for (const text of ['mcp__joppa__read_context first', 'mcp__joppa__read_file', 'offset set to next_offset until next_offset is null'])
@@ -141,8 +144,8 @@ test('the private config, both contracts, frozen prompts and readonly author rou
   }
   assert.ok(workflow.nodes.author.agent.args.includes('--tools=Read,Glob,Grep'));
   assert.ok(workflow.nodes.author.agent.args.includes('{{var:decider_author_reader_config}}'));
-  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_author "\$\(files contract-decider\.md contract-audit\.md decider-settings\.json decider-assignment\.json draft\.json critique\.json shape-feedback\.json\)"/);
-  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_critic "\$\(files contract-decider\.md contract-audit\.md decider-assignment\.json draft\.json\)"/);
+  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_author "\$\(files author\.md contract-decider\.md contract-audit\.md decider-settings\.json decider-assignment\.json draft\.json critique\.json shape-feedback\.json\)"/);
+  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_critic "\$\(files critic\.md contract-decider\.md contract-audit\.md decider-assignment\.json draft\.json\)"/);
   assert.ok(workflow.nodes.critics.agent.args.includes('{{input.a13:-}}'));
   // Both critic seats come from the shared agent-reader.mjs. A seat without the reader fails the node.
   const seats = [{slug: 'codex', harness: 'codex', a1: '-c', a2: 'mcp_servers={"joppa"={"command"="python3"}}'},
@@ -239,15 +242,14 @@ test('a retry names the previous draft and the findings to close in the author p
   assert.ok(Array.isArray(JSON.parse(fs.readFileSync(path.join(root, 'shape-feedback.json'), 'utf8'))));
 });
 
-test('every assembled Decider prompt is short and carries no data', () => {
+test('every assembled Decider prompt has at most 1024 characters in every round', () => {
   const workflow = Bun.YAML.parse(fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8'));
-  const a = '/runs/2026-11-24_07-27-40-265d14e6/artifacts';
-  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: 'Previous draft and findings to close: ' + a + '/draft.json ' + a + '/critique.json'};
-  const render = prompt => prompt.replace(/\{\{file:prompts\/([a-z]+\.md)\}\}/g, (_, name) => fs.readFileSync(path.join(here, 'prompts', name), 'utf8'))
-    .replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
+  const a = '/Users/finik/Projects/finik/.medulla/decider-runs/2026-11-24_07-27-40-265d14e6/artifacts';
+  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: 'Previous draft and findings to close: ' + ['draft.json', 'critique.json', 'shape-feedback.json'].map(name => a + '/' + name).join(' ')};
+  const render = prompt => prompt.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
   for (const seat of ['author', 'critics']) {
     const prompt = render(workflow.nodes[seat].prompt);
-    assert.ok(prompt.length < 15000, seat + ' prompt has ' + prompt.length + ' characters');
+    assert.ok(prompt.length <= 1024, seat + ' prompt has ' + prompt.length + ' characters');
     assert.doesNotMatch(prompt, /\{\{/);
   }
 });

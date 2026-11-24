@@ -29,6 +29,7 @@ vars:
   # true: run the whole flow, publish nothing and release the claim with outcome DRY_RUN.
   DRY_RUN: 'false'
   audit_ac: ''
+  audit_artifacts: ''
   auditor_finder_one_reader_config: ''
   auditor_finder_one_reader_home: ''
   auditor_finder_two_reader_config: ''
@@ -72,12 +73,15 @@ nodes:
       # A prompt holds the role prompt and the AC address. Each model finds its contract, the assignment and for the
       # judge the finder results through read_context of its own read-only reader.
       for role in finder judge; do jq -r --arg role "$role" '.[$role].content' "$a/contracts.json" > "$a/contract-$role.md"; done
+      # A prompt has at most 1024 characters: the role file holds the steps and the answer format.
       reader="$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs"
+      for role in finder judge; do cp "$MEDULLA_WORKFLOW_DIR/prompts/$role.md" "$a/$role.md"; done
       files() { jq -nc --arg a "$a" '$ARGS.positional | map($a + "/" + .)' --args "$@"; }
-      node "$reader" prepare auditor_finder_one "$(files contract-finder.md audit-assignment.json)"
-      node "$reader" prepare auditor_finder_two "$(files contract-finder.md audit-assignment.json)"
-      node "$reader" prepare auditor_finder_three "$(files contract-finder.md audit-assignment.json)" --agy
-      node "$reader" prepare auditor_judge "$(files contract-judge.md audit-assignment.json finder-one.json finder-two.json finder-three.json)"
+      node "$reader" prepare auditor_finder_one "$(files finder.md contract-finder.md audit-assignment.json)"
+      node "$reader" prepare auditor_finder_two "$(files finder.md contract-finder.md audit-assignment.json)"
+      node "$reader" prepare auditor_finder_three "$(files finder.md contract-finder.md audit-assignment.json)" --agy
+      node "$reader" prepare auditor_judge "$(files judge.md contract-judge.md audit-assignment.json finder-one.json finder-two.json finder-three.json)"
+      printf '<signal:var key=audit_artifacts>%s</signal:var>\n' "$a"
       printf '<signal:var key=audit_ac>%s</signal:var>\n' "$(jq -er .selected.address "$a/input.json")"
       for n in one two three; do printf '<signal:var key=finder_%s_path>%s</signal:var>\n' "$n" "$a/finder-$n.json"; done
       echo '<signal:READY_TO_AUDIT>The claim and the specification context are ready.</signal:READY_TO_AUDIT>'
@@ -121,7 +125,8 @@ nodes:
         - '{{input.a12:-}}'
         - '{{input.a13:-}}'
     prompt: |
-      {{file:prompts/finder.md}}
+      You are one of three AC audit finders. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Role file: {{var:audit_artifacts}}/finder.md
       AC: {{var:audit_ac}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "finder-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
@@ -167,7 +172,8 @@ nodes:
         - '{{var:auditor_judge_reader_config}}'
         - --tools=
     prompt: |
-      {{file:prompts/judge.md}}
+      You are the AC audit judge. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Role file: {{var:audit_artifacts}}/judge.md
       AC: {{var:audit_ac}}
       Finder one: {{var:finder_one_path}}
       Finder two: {{var:finder_two_path}}
