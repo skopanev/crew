@@ -20,12 +20,14 @@ def pages(api, workspace, query):
         seen.add(cursor)
 
 
-def children(api, config, selected, query):
+def children(api, config, selected, query, *, excluding=False):
     if isinstance(query, list):
         return sorted({item["address"]: item for child_filter in query
-                       for item in children(api, config, selected, child_filter)}.values(), key=lambda item: item["address"])
+                       for item in children(api, config, selected, child_filter, excluding=excluding)}.values(), key=lambda item: item["address"])
+    query = dict(query)
+    except_tag = query.pop("except_pending_tag", None) if excluding else None
     rows = pages(api, config["workspace"], {**query, "parent": selected["address"], "depth": 1,
-                                         "fields": ["parent", "revision"]})
+                                         "fields": ["parent", "revision", *(["data.tags", "data.delivery"] if except_tag else [])]})
     result = []
     for row in rows:
         if row.get("parent") != selected["address"]:
@@ -33,6 +35,10 @@ def children(api, config, selected, query):
         item = object_read(api, config["workspace"], row["address"])
         require(item["document"].get("parent") == selected["address"], "child moved during its read")
         require(item["current_revision"] == row["revision"], "child changed during selection")
+        data = item["document"]["data"]
+        if except_tag and not data.get("assignee") and isinstance(data.get("tags"), list) and except_tag in data["tags"] and \
+                isinstance(data.get("delivery"), dict) and data["delivery"].get("state") == "pending":
+            continue
         result.append(item)
     return sorted(result, key=lambda item: item["address"])
 
@@ -96,7 +102,7 @@ def load(api, config, address):
           next((item for item in rows if item.get("address") == address), None)
     require(row and row.get("revision") == selected["current_revision"], "selected object no longer matches the configured filter")
     if config.get("exclude_children") is not None:
-        require(not children(api, config, selected, config["exclude_children"]), "selected object has excluded children")
+        require(not children(api, config, selected, config["exclude_children"], excluding=True), "selected object has excluded children")
     refs = {}
     for field in config.get("references", []):
         spec = schema["types"][selected["kind"]].get("references", {}).get(field)
@@ -124,7 +130,7 @@ def load(api, config, address):
             excluded = set()
             if config.get("exclude_children") is not None:
                 for candidate in packed:
-                    if candidate["address"] not in checked and children(api, config, candidate, config["exclude_children"]):
+                    if candidate["address"] not in checked and children(api, config, candidate, config["exclude_children"], excluding=True):
                         excluded.add(candidate["address"])
                     checked.add(candidate["address"])
             if not excluded:
@@ -166,7 +172,7 @@ def verify(api, config, assignment, claim):
     selected = assignment["selected"]
     if config.get("exclude_children") is not None:
         for item in flow_batch.members(assignment):
-            require(not children(api, config, item, config["exclude_children"]), "excluded children appeared during the flow")
+            require(not children(api, config, item, config["exclude_children"], excluding=True), "excluded children appeared during the flow")
     if config.get("children"):
         current = children(api, config, selected, config["children"])
         require([(item["address"], item["current_revision"]) for item in current] ==

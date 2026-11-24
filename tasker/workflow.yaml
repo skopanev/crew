@@ -87,8 +87,12 @@ nodes:
       case "$completion" in *'<signal:DECISION>'*) printf '%s\n' "$completion"; exit 0 ;; esac
       # The native filter excludes an AC with a Task in to_implement or to_review. A Task in in_progress,
       # or a Task that a lane holds, also keeps the AC out: release the claim and write nothing else.
-      active="$(jq -r '[.children[] | select(.kind == "task") | select(.document.data.stage == "in_progress" or
-        .document.data.stage == "to_review" or ((.document.data.assignee // "") | startswith("crew-lane:"))) | .address] | join(", ")' "$a/input.json")"
+      if jq -e '[.exclude_children // [] | if type == "array" then .[] else . end | .except_pending_tag // empty] | length > 0' "$PLANNING_JOPPA_CONFIG" >/dev/null; then
+        active="$("$TASKER_BUN" "$(dirname "$CREW_FLOW_STAGES")/child-filter.mjs" active "$a/input.json" "$PLANNING_JOPPA_CONFIG")"
+      else
+        active="$(jq -r '[.children[] | select(.kind == "task") | select(.document.data.stage == "in_progress" or
+          .document.data.stage == "to_review" or ((.document.data.assignee // "") | startswith("crew-lane:"))) | .address] | join(", ")' "$a/input.json")"
+      fi
       if [ -n "$active" ]; then
         jq -n --arg active "$active" '{operations: [], outcome: {status: "blocked", reason_code: "LIVE_TASK",
           reason: ("The AC has an active Task: " + $active)}}' > "$a/$file"

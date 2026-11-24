@@ -6,6 +6,7 @@ import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
 import {retryPolicy} from './retry.mjs';
 import {dependencySelection} from './dependency-selection.mjs';
+import {nativeChildFilter, excludesChild} from './child-filter.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -165,11 +166,7 @@ export function flowSettings(config) {
   }
   const exclude = config.exclude_children;
   for (const childFilter of exclude == null ? [] : [exclude].flat()) {
-    const {kind: childKind, ...filters} = object(childFilter) ? childFilter : {};
-    if (!object(childFilter) || !kindList(childKind) || 'parent' in filters || 'depth' in filters) {
-      throw new Error('exclude_children needs native child filters without parent or depth');
-    }
-    validateNodeFilter(filters, 'exclude_children');
+    nativeChildFilter(childFilter);
   }
   const order = config.order ?? [];
   if (!Array.isArray(order) || order.some(item => !object(item) ||
@@ -246,8 +243,9 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
     if (dependencies && !await dependencies(row.address)) { filtered++; continue; }
     let excluded = false;
     for (const childFilter of flow.exclude == null ? [] : [flow.exclude].flat()) {
-      for await (const page of nodePages(read, {...childFilter, parent: row.address, depth: 1, fields: ['parent']})) {
-        if ((excluded = page.items.some(item => item.parent === row.address))) break;
+      const {nativeFilter, fields, exceptTag} = nativeChildFilter(childFilter);
+      for await (const page of nodePages(read, {...nativeFilter, parent: row.address, depth: 1, fields})) {
+        if ((excluded = page.items.some(item => excludesChild(item, row.address, exceptTag)))) break;
       }
       if (excluded) break;
     }

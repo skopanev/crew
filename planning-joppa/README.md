@@ -14,6 +14,7 @@ Set these fields in the flow config:
 - `workflow`: the absolute path to a Medulla `workflow.yaml`.
 - `selection`: native Joppa filters, including `kind`. Optional `order` lists `{field, direction}` entries with optional `values`.
 - `exclude_children`: an optional native filter, or a list of filters, for direct children that exclude a selected item. Each filter can exclude the item.
+- An `exclude_children` filter can set `except_pending_tag`. A child with that tag and `delivery.state=pending` does not block selection. Other filters still apply. Context reads keep the child.
 - `references`: selected data reference fields to read. Optional `children` supplies a native direct-child query.
 - `publication`: `file`, `allowed_operations`, `create_kinds` and `update_kinds`. Pass workflow models and stages through `vars`.
 

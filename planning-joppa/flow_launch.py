@@ -37,6 +37,14 @@ def configuration(path, raw=None, input_index=None):
     require(isinstance(config.get("exclude_tags", []), list) and
             all(isinstance(tag, str) and tag.strip() for tag in config.get("exclude_tags", [])),
             "exclude_tags must be a list of nonempty tags")
+    excluded = config.get("exclude_children")
+    for child_filter in excluded if isinstance(excluded, list) else [excluded] if excluded is not None else []:
+        require(isinstance(child_filter, dict), "exclude_children needs native child filters")
+        if "except_pending_tag" in child_filter:
+            tag = child_filter["except_pending_tag"]
+            require(set(child_filter) <= {"kind", "data", "except_pending_tag"}, "A child exception supports kind and data filters")
+            require(isinstance(tag, str) and tag and tag.strip() == tag,
+                    "exclude_children.except_pending_tag needs a nonempty tag without surrounding spaces")
     for name in config.get("vars", {}):
         require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) and
                 name != "AGY_PROFILE_HOME" and not name.startswith(("PLANNING_", "CREW_FLOW_", "MEDULLA_")), "reserved workflow variable: " + name)

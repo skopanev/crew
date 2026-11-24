@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {metadataFindings} from './test-bindings.mjs';
+import {completionPolicy, blockingTask} from './completion-policy.mjs';
 const require = (ok, message) => { if (!ok) throw new Error(message); };
 const data = node => node.document?.data || node.data || {};
 const present = node => node.document?.present ?? node.present;
@@ -14,7 +15,7 @@ export function passingTests(input, children) {
 }
 export function decision(input, ac, children, held, stages) {
   if (input.schema.types[ac.kind]?.role !== 'ac') return 'CONTINUE';
-  if (held || children.some(node => input.schema.types[node.kind]?.role === 'task' && present(node) && stages.active.includes(data(node).stage))) return 'WAIT';
+  if (held || children.some(node => blockingTask(input, node, stages))) return 'WAIT';
   if (data(ac).stage === stages.done) return ['blue', 'yellow', 'orange'].includes(tone(ac)) ? 'CONTINUE' : 'WAIT';
   if (![stages.ready, stages.implement].includes(data(ac).stage)) return 'WAIT';
   return passingTests(input, children) ? "DONE" : "CONTINUE";
@@ -53,7 +54,7 @@ export async function inspect(input, read, runs, stages, holds, tasks, detail = 
       detail.reason = `held by run ${run.runId || run.executionId || run.task}: ${currentTasks.map(node => node.address).join(', ')}`;
     }
   }
-  const live = children.find(node => input.schema.types[node.kind]?.role === 'task' && present(node) && stages.active.includes(data(node).stage));
+  const live = children.find(node => blockingTask(input, node, stages));
   if (live && !held) { detail.reason_code = 'LIVE_TASK'; detail.reason = `live task ${live.address}`; }
   if (!held && !live) { detail.reason_code = 'AC_STAGE'; detail.reason = `AC stage ${data(ac).stage}, status ${tone(ac)}`; }
   return decision(input, ac, children, held, stages);
@@ -227,9 +228,7 @@ async function main() {
     if (schema.types[selected.kind]?.role !== 'ac') { console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
   }
   const runs = currentRuns();
-  const stages = {ready: config.vars.TASKER_READY_STAGE, implement: config.vars.TASKER_IMPLEMENT_STAGE, done: config.vars.TASKER_DONE_STAGE,
-    active: [config.vars.TASK_STAGE, config.vars.TASKER_TASK_REVIEW_STAGE]};
-  require(Object.values(stages).flat().every(value => typeof value === 'string' && value), 'Configure Tasker stages');
+  const stages = await completionPolicy(config, runtime);
   const detail = {};
   const result = await inspect(input, read, runs, stages, runHoldsTasks, runTasks, detail);
   if (mode === 'verify') { require(result === 'DONE', 'AC completion evidence changed before publication'); return; }
