@@ -189,7 +189,7 @@ export function createDashboard(config, paint) {
       counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tasks: not checked',
       ...(state.progress ? [clip(state.progress, width)] : []), '─'.repeat(width)];
-    const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : wrap(state.message, width);
+    const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : [];
     footer.unshift(...issues.slice(0, 1).flatMap(issue => wrap(formatDependencyIssue(issue), width)
       .map(line => paint('yellow', line))));
     footer.unshift(...(counts?.selectionIssues || []).slice(0, 1)
@@ -205,8 +205,7 @@ export function createDashboard(config, paint) {
     });
     output.push(...renderRunTable(rows, paint, 6 + footer.length + Number(Boolean(state.progress)), {finished: true}));
     output.push(...footer);
-    output.push(stopped ? 'Stopped' : config.monitorOnly ? 'Dispatch paused · Ctrl+C to close' : left == null ? 'Checking tickets · Ctrl+C to stop' :
-      `Next check in ${paint('accent', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`);
+    output.push(stopped ? 'Stopped' : 'Ctrl+C to stop');
     return output.join('\n');
   }
   refresh();

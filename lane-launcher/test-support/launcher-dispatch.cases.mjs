@@ -110,16 +110,17 @@ test('preview loop repeats after its interval and Ctrl+C releases the dispatcher
   assert.ok(!fs.existsSync(f.events));
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));
 });
-test('terminal dashboard refreshes the countdown and Ctrl+C releases the lock', async t => {
+test('terminal dashboard shows its stop control and Ctrl+C releases the lock', async t => {
   const f = await setup(t, {launchLanes: false});
   save(f.configFile, {...f.config, intervalSeconds: 10});
   const tty = path.join(f.root, 'tty.cjs');
   fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
   const child = spawn(process.execPath, ['--require', tty, launcher, '--config', f.configFile],
     {env: {...f.env, FORCE_COLOR: '0'}});
-  const {code, output, errors} = await interrupted(t, child, output => /Next check in 00:0[4-6]/.test(output), 10000);
+  const {code, output, errors} = await interrupted(t, child, output => /Tasks: 2 available · 0 held Tasks[^]*Ctrl\+C to stop/.test(output), 10000);
   assert.equal(code, 0, errors);
-  assert.match(output, /Next check in 00:10/);
+  assert.match(output, /Ctrl\+C to stop/);
+  assert.doesNotMatch(output, /Next check in|Checking tickets|No ready tickets/);
   assert.match(output, /repositories: app/);
   assert.match(output, /Tasks: 2 available · 0 held Tasks/);
   assert.match(output, /Stopped/);

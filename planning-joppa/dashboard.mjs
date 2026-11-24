@@ -87,14 +87,11 @@ export async function main(argv) {
     const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
     const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60), ticket: row.ac})),
       paint, 6, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
-    const left = nextCheck == null ? null : Math.max(0, Math.ceil((nextCheck - performance.now()) / 1000));
-    const footer = left == null ? 'Ctrl+C to stop' :
-      `Next check in ${paint('blue', `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`)} · Ctrl+C to stop`;
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
       '─'.repeat(width), ...table,
-      String(state.error || state.message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width),
-      closed ? (stopped ? 'Stopped' : 'Completed') : footer].join('\n');
+      ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
+      closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
   };
   const draw = () => {
     try { if (screen) screen.draw(); else process.stdout.write(render() + '\n'); }

@@ -88,11 +88,16 @@ test('the CLI and dashboard leave unfinished dependencies unchanged', async t =>
   try {
     Object.assign(dashboard.state, state);
     dashboard.draw(60);
+    dashboard.state.error = 'RECOVERY_REQUIRED: inspect the held run';
+    dashboard.draw(59);
   } finally {
     dashboard.close();
     write.mock.restore();
   }
   assert.doesNotMatch(output, /DEPENDENCY_STALE_PIN/);
+  assert.doesNotMatch(output, /No ready tickets|Next check in|Checking tickets/);
+  assert.match(output, /RECOVERY_REQUIRED: inspect the held run/);
+  assert.match(output, /Ctrl\+C to stop/);
   assert.deepEqual(f.joppa.objects, before);
   assert.equal(f.calls.some(call => ['joppa_batch', 'joppa_command'].includes(call.name)), false);
 });
