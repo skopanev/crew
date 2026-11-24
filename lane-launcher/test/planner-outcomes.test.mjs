@@ -141,8 +141,10 @@ test('planner config rejects unknown result colors', t => {
 
 test('old active-work skips leave the panel but uncertain claims remain visible',t=>{
   const f=fixture(t,{code:'ACTIVE_TASK'});
-  f.write('result.json',{status:'blocked',reason_code:'ACTIVE_TASK',claim_released:false});
-  assert.equal(f.row(),undefined);
-  f.write('result.json',{status:'blocked',reason_code:'ACTIVE_TASK',needs_recovery:true});
-  assert.equal(f.row().status,'HELD');
+  for (const code of ['ACTIVE_TASK', 'HELD_RUN', 'LIVE_TASK', 'AC_STAGE']) {
+    f.write('result.json',{status:'blocked',reason_code:code,claim_released:false});
+    assert.equal(f.row(),undefined);
+    f.write('result.json',{status:'blocked',reason_code:code,needs_recovery:true});
+    assert.equal(f.row().status,'HELD');
+  }
 });
