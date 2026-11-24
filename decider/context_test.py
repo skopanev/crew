@@ -173,7 +173,7 @@ class ContextTest(unittest.TestCase):
             def call(self, tool, args):
                 return {'tool': tool, 'args': args}
         value = reader.Sources(Backend(), 'fixture', None)
-        self.assertEqual([tool['name'] for tool in value.tools()], ['joppa_search', 'joppa_objects', 'read_document'])
+        self.assertEqual([tool['name'] for tool in value.tools()], ['joppa_search', 'joppa_objects', 'read_attachment', 'read_document'])
         self.assertEqual(value.call('joppa_search', {'query': 'rule'})['args']['kind'], 'source')
         for tool, args in [('joppa_batch', {}), ('joppa_objects', {'address': 'ac:other'}),
                            ('joppa_search', {'workspace': 'foreign'}), ('joppa_search', {'all_workspaces': True})]:

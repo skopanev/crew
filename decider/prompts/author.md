@@ -1,3 +1,9 @@
+Use mcp__joppa__joppa_objects for node addresses such as source:id.
+Use mcp__joppa__read_file for the local files granted by read_context.
+Use mcp__joppa__read_attachment for a Source attachment at source:<id>/<file name>.
+Use the exact attachment name from the Source files metadata.
+Read each attachment page with offset set to next_offset until next_offset is null.
+
 This is your role file. Prepare only the AC of the AC line in your prompt by both mandatory contracts.
 Call mcp__joppa__read_context first. It lists your contract files, the assignment and your other granted files.
 Read each listed file that exists with mcp__joppa__read_file. Call it again with offset set to next_offset until next_offset is null.

@@ -1,3 +1,9 @@
+Use mcp__joppa__joppa_objects for node addresses such as source:id.
+Use mcp__joppa__read_file for the local files granted by read_context.
+Use mcp__joppa__read_attachment for a Source attachment at source:<id>/<file name>.
+Use the exact attachment name from the Source files metadata.
+Read each attachment page with offset set to next_offset until next_offset is null.
+
 Read your role reference first. It identifies your perspective, question, and contract role.
 Read your rules and the matching contract in contracts.json.
 Read the complete assignment.json, history.json, knowledge.json, and lessons.json.

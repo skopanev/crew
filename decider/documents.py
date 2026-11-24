@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from http.client import HTTPException
+from urllib.error import URLError
+from urllib.request import HTTPRedirectHandler, build_opener
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
@@ -55,17 +58,58 @@ def read_document(path, config):
     if file.is_relative_to(excluded):
         raise ValueError('The obsolete Brain folder is excluded')
     raw = file.read_bytes()
+    return {'path': str(file), 'route': route, 'text': document_text(raw, file.suffix.lower(), str(file)),
+            'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def document_text(raw, suffix, label):
     try:
-        if file.suffix.lower() == '.pdf':
+        if suffix == '.pdf':
             text = subprocess.run(['pdftotext', '-layout', '-enc', 'UTF-8', '-', '-'], input=raw,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode('utf-8')
-        elif file.suffix.lower() == '.docx':
+        elif suffix == '.docx':
             text = docx_text(raw)
         else:
             text = raw.decode('utf-8')
     except (subprocess.CalledProcessError, BadZipFile, ElementTree.ParseError) as error:
         detail = (getattr(error, 'stderr', b'') or b'').decode('utf-8', errors='replace')
-        raise ValueError('SEARCH_UNAVAILABLE: ' + str(file) + ': ' + (detail or str(error))) from error
+        raise ValueError('SEARCH_UNAVAILABLE: ' + label + ': ' + (detail or str(error))) from error
     if not text.strip():
         raise ValueError('SEARCH_UNAVAILABLE: the document has no extractable text')
-    return {'path': str(file), 'route': route, 'text': text, 'sha256': hashlib.sha256(raw).hexdigest()}
+    return text
+
+
+class HttpsRedirects(HTTPRedirectHandler):
+    # An attachment download follows a redirect only to another HTTPS url.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith('https://'):
+            raise URLError('redirect to a non-HTTPS url')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def urlopen(url, timeout):
+    return build_opener(HttpsRedirects).open(url, timeout=timeout)
+
+
+def read_attachment(api, config, path):
+    # A file attached to a Source: path source:<id>/<file name>. The Joppa hash is the SHA256 of the stored bytes.
+    # A wrong path or file name is an author mistake (LookupError). A failed download is technical (ValueError).
+    match = re.fullmatch(r'(source:[A-Za-z0-9_-]+)/(.+)', path) if isinstance(path, str) else None
+    if not match:
+        raise LookupError('use source:<id>/<file name> for a Source attachment')
+    address, name = match.groups()
+    listed = api.call('joppa_attachments', {'workspace': config['workspace'], 'target': address})
+    file = next((row for row in listed.get('files', []) if row.get('name') == name and not row.get('removed')), None)
+    if not file:
+        raise LookupError('the Source ' + address + ' has no attachment ' + name)
+    if not str(file.get('url', '')).startswith('https://'):
+        raise ValueError('SEARCH_UNAVAILABLE: ' + path + ': no HTTPS download url')
+    try:
+        with urlopen(file['url'], timeout=60) as response:
+            raw = response.read()
+    except (OSError, HTTPException) as error:
+        raise ValueError('SEARCH_UNAVAILABLE: ' + path + ': ' + type(error).__name__) from error
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != file.get('hash'):
+        raise ValueError('SEARCH_UNAVAILABLE: ' + path + ': the downloaded bytes differ from the Joppa hash')
+    return {'path': path, 'route': 'attachment', 'text': document_text(raw, Path(name).suffix.lower(), path), 'sha256': digest}
