@@ -7,6 +7,7 @@ import {flowSettings, nextConfiguredItem} from '../../planning-joppa/queue.mjs';
 import {plannerFixture} from '../test-support/config-reload.fixture.mjs';
 import {contextAdmission} from '../../planning-joppa/context-admission.mjs';
 import {repairPublication} from '../../tasker/repair-plan.mjs';
+import {retryFilter} from '../../planning-joppa/retry.mjs';
 
 test('ordered profiles retain scalar filters, skip excluded parents and select later inputs', async t => {
   const f = await plannerFixture(t);
@@ -155,5 +156,55 @@ test('a typed owner question excludes its Task on the next selection without ano
   Object.assign(candidate.document.data,result.publication.operations[0].command.data);
   assert.deepEqual(candidate.document.data.tags,['wallet',gapTags.cto]);
   for(let pass=0;pass<3;pass++)assert.equal((await nextConfiguredItem(settings,f.config.token_file)).next,null);
+  assert.equal(f.calls.some(call=>call.name==='joppa_batch'),false);
+});
+
+test('Tasker retries check current prerequisites before any claim, trees or models',async t=>{
+  const f=await plannerFixture(t);f.queue.push('task:t1');
+  const task=f.objects.get('task:t1'),prerequisite=f.objects.get('task:t2'),parent=f.objects.get('ac:a1');
+  Object.assign(task.document.data,{stage:'to_review',tags:['wallet'],assignee:null});task.current_revision=5;
+  prerequisite.document.present=false;delete prerequisite.document.data.commit;
+  const link={relation:'depends_on',blocking:true,target:prerequisite.address};task.document.links=[link];
+  const base=JSON.parse(fs.readFileSync(new URL('../../tasker/config.example.json',import.meta.url)));
+  const profile=base.inputs.find(input=>input.selection.kind==='task');
+  const config={...base,...f.config,mcp_command:f.config.mcp_command,workflow:base.workflow,retry:'always',inputs:[profile]};f.write(config);
+  const definition=new URL('../../tasker/',import.meta.url).pathname;
+  const workflow=fs.readFileSync(path.join(definition,'workflow.yaml'),'utf8');
+  const prepare=workflow.split('  prepare:\n')[1].split('    shell: |\n')[1].split('    on_signal:')[0];
+  const filter=retryFilter(config,[{attemptKey:JSON.stringify([task.address,task.current_revision])}],new Set(),new Map());
+  const vars=Object.fromEntries(Object.entries(config.vars).map(([key,value])=>[key,typeof value==='string'?value:JSON.stringify(value)]));
+  const invoke=async(index,command)=>{
+    const run=path.join(f.root,'preclaim-'+index);
+    const env={...process.env,...vars,MEDULLA_RUN_DIR:run,MEDULLA_WORKFLOW_DIR:definition,
+      CREW_FLOW_STAGES:new URL('../../planning-joppa/flow_stages.py',import.meta.url).pathname,
+      PLANNING_JOPPA_CONFIG:f.configFile,PLANNING_JOPPA_ITEM:task.address,TASKER_BUN:process.execPath,
+      FLOW_PUBLICATION:JSON.stringify(profile.publication)};
+    const child=Bun.spawn(command??['bash','-c',prepare],{env,stdout:'pipe',stderr:'pipe'});
+    const [code,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
+    return {code,stdout,stderr,run};
+  };
+  for(const inherited of [false,true]){
+    task.document.links=inherited?[]:[link];parent.document.links=inherited?[link]:[];
+    const frozen=structuredClone(f.objects);
+    for(let pass=0;pass<3;pass++){
+      assert.equal((await nextConfiguredItem(config,config.token_file,undefined,filter)).next.address,task.address);
+      const result=await invoke(`${inherited}-${pass}`);
+      assert.equal(result.code,0,result.stderr);assert.match(result.stdout,/<signal:BLOCKED>/);
+      assert.doesNotMatch(result.stdout,/<signal:READY_TO_WRITE>|<signal:var key=tasker_assignment_path>/);
+      const artifacts=path.join(result.run,'artifacts');
+      const outcome=JSON.parse(fs.readFileSync(path.join(artifacts,'result.json')));
+      assert.equal(outcome.reason_code,'TASK_PREREQUISITE');assert.equal(outcome.claim_released,false);
+      assert.equal(fs.existsSync(path.join(artifacts,'input.json')),false);
+      assert.equal(fs.existsSync(path.join(artifacts,'tasker-assignment.json')),false);
+      assert.equal(fs.existsSync(path.join(artifacts,'trees.json')),false);
+    }
+    assert.deepEqual(f.objects,frozen);
+  }
+  prerequisite.document.present=true;prerequisite.document.data.stage='ready';
+  const command=[process.execPath,path.join(definition,'completion.mjs'),'preclaim'];
+  const pending=await invoke('live',command);assert.equal(pending.code,0,pending.stderr);assert.match(pending.stdout,/<signal:BLOCKED>/);
+  prerequisite.document.present=false;prerequisite.document.data.commit='a'.repeat(40);prerequisite.current_revision++;
+  const delivered=await invoke('delivered',command);assert.equal(delivered.code,0,delivered.stderr);assert.match(delivered.stdout,/<signal:CONTINUE>/);
+  assert.equal((await nextConfiguredItem(config,config.token_file,undefined,filter)).next.address,task.address);
   assert.equal(f.calls.some(call=>call.name==='joppa_batch'),false);
 });

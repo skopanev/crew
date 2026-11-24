@@ -64,6 +64,12 @@ async function main() {
   let input = mode === 'preclaim' ? null : load('input');
   if (input && input.schema.types[input.selected.kind]?.role !== 'ac') { if (mode === 'prepare') console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
   const output = path.join(dir, config.publication.file);
+  const block = (reason_code, reason) => {
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({status: 'blocked', reason_code,
+      reason, claim_released: false, acceptance_verified: false}));
+    console.log(`<signal:BLOCKED>${reason}</signal:BLOCKED>`);
+  };
   if (mode === 'verify' && (!fs.existsSync(output) || JSON.parse(fs.readFileSync(output)).outcome?.reason_code !== 'AC_DONE')) return;
   const runtime = path.dirname(path.dirname(env.CREW_FLOW_STAGES));
   const api = await import(pathToFileURL(path.join(runtime, 'lane-launcher/joppa-api.mjs')).href);
@@ -76,6 +82,26 @@ async function main() {
     const schema = (await read('joppa_tree', {})).schema;
     const selected = await read('joppa_objects', {address: env.PLANNING_JOPPA_ITEM});
     input = {workspace: config.workspace, schema, selected};
+    if (schema.types[selected.kind]?.role === 'task') {
+      const {dependencyCheck} = await import(pathToFileURL(path.join(runtime, 'lane-launcher/dependencies.mjs')).href);
+      try {
+        const dependencies = dependencyCheck(async (tool, args) => {
+          const target = tool === 'joppa_tree' ? {schema} : args.address === selected.address ? selected : await read(tool, args);
+          if (tool === 'joppa_objects' && target?.address === args.address && target.historical === false &&
+              Number.isSafeInteger(target.current_revision) && schema.types[target.kind]?.role === 'task' &&
+              present(target) === false && !data(target).commit) {
+            throw Object.assign(new Error('Archived prerequisite has no delivered commit: ' + target.address), {code:'TASK_PREREQUISITE'});
+          }
+          return target;
+        });
+        const dependency = await dependencies(selected.address);
+        if (!dependency.ready) { block('TASK_PREREQUISITE', 'Prerequisite is not ready: ' + dependency.blocker); return; }
+      } catch (error) {
+        if (error.code !== 'TASK_PREREQUISITE') throw error;
+        block(error.code, error.message); return;
+      }
+      console.log('<signal:CONTINUE>Task prerequisites are ready.</signal:CONTINUE>'); return;
+    }
     if (schema.types[selected.kind]?.role !== 'ac') { console.log('<signal:CONTINUE>Task repair.</signal:CONTINUE>'); return; }
   }
   const lane = JSON.parse(fs.readFileSync(config.vars.TASKER_LANE_CONFIG));
@@ -89,10 +115,7 @@ async function main() {
   if (mode === 'verify') { require(result === 'DONE', 'AC completion evidence changed before publication'); return; }
   if (mode === 'preclaim') {
     if (result === 'WAIT') {
-      fs.mkdirSync(dir, {recursive: true});
-      fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({status: 'blocked', reason_code: detail.reason_code,
-        reason: detail.reason, claim_released: false, acceptance_verified: false}));
-      console.log(`<signal:BLOCKED>${detail.reason}</signal:BLOCKED>`);
+      block(detail.reason_code, detail.reason);
     } else console.log('<signal:CONTINUE>The AC can be claimed.</signal:CONTINUE>');
     return;
   }
