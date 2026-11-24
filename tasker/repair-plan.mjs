@@ -1,12 +1,11 @@
 import {retirementRequired, retirementProblems} from './retirement-proof.mjs';
-import {bindingPlan} from './test-bindings.mjs';
+import {bindingPlan, contractText, contractHash} from './test-bindings.mjs';
 import {verifiedSplitReplan} from './host-split-replan.mjs';
 // Business rules for the Task input. The shared configured-flow publisher owns claims and all writes.
 const problem = message => { throw new Error(message); };
 const text = value => typeof value === 'string' && Boolean(value.trim());
-export const acText = object => ({title: object.document.data.title, body: object.document.data.body});
-export const changedText = (current, pinned) => Boolean(pinned &&
-  (acText(current).title !== acText(pinned).title || acText(current).body !== acText(pinned).body));
+export const acText = contractText;
+export const changedText = (current, pinned) => Boolean(pinned && JSON.stringify(acText(current)) !== JSON.stringify(acText(pinned)));
 
 // Keep refusal routing when metadata is absent or conflicts with the captured schema.
 export function repositoryData(input, node) {
@@ -34,6 +33,7 @@ export function repairView(input, repair) {
     schema: {...input.schema, types: Object.fromEntries(Object.entries(input.schema.types).filter(([kind]) => kinds.has(kind)))},
     help: undefined, claim_revision: undefined, claim_revisions: undefined, context: undefined,
     repair: {task, dependents: context.incoming ?? [], ac_text_changed: repair.ac_text_changed, pinned_revision: repair.pinned_revision,
+      ...(repair.baseline_note ? {baseline_note: repair.baseline_note} : {}),
       ...(repair.split_replan ? {split_replan: repair.split_replan} : {})}};
 }
 
@@ -45,7 +45,7 @@ export function checkRepair({input, repair, draft, trees, maxFiles, maxLines, fo
     return {ok: false, problems: ['A Task input needs READY, STALE or DECISION_REQUIRED'], tasks: []};
   }
   if (!text(draft.reason)) fail('reason is required');
-  if (repair.ac_text_changed && draft.verdict !== 'STALE') fail('The pinned AC title or body changed: retire the stale Task');
+  if (repair.ac_text_changed && draft.verdict !== 'STALE') fail('The pinned AC contract changed: retire the stale Task');
   const view = repairView(input, repair);
   let checked = {ok: true, problems: [], tasks: []};
   if (draft.verdict === 'READY') {
@@ -95,7 +95,8 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
   if (draft.verdict === 'READY') {
     const repository = task.document.data.repository;
     if (repository != null && repository !== '' && repository !== draft.task.repository) problem('READY cannot replace a nonempty Task repository');
-    operations.push(save(task, {body: draft.task.body, repository: draft.task.repository, stage: 'to_implement'}, input.claim_revision));
+    operations.push(save(task, {body: draft.task.body, repository: draft.task.repository, stage: 'to_implement',
+      ac_contract_hash: contractHash({selected: parent, children: input.context.children, schema: input.schema})}, input.claim_revision));
     code = 'READY';
   } else if (draft.verdict === 'STALE') {
     if (typeof draft.needs_code !== 'boolean') problem('STALE requires needs_code');
@@ -116,6 +117,14 @@ export function repairPublication({input, draft, run, dry = false, repair = {}, 
     operations.push(save(task, {stage: 'to_review', ...repositoryData(input, task)}, input.claim_revision), note('Decision required. ' + draft.gap));
     code = 'DECISION_REQUIRED';
   } else problem('Unknown Task repair verdict');
+  if (repair.baseline_note) {
+    const existing = operations.find(row => row.command.op === 'note' && row.command.target === task.address);
+    if (existing) existing.command.text += '\n' + repair.baseline_note;
+    else {
+      const archive = operations.findIndex(row => row.command.op === 'archive_object' && row.command.target === task.address);
+      operations.splice(archive < 0 ? operations.length : archive, 0, note(repair.baseline_note));
+    }
+  }
   const proposed = {operations, outcome: {status: draft.verdict === 'DECISION_REQUIRED' ? 'blocked' : 'published',
     reason_code: code, reason}};
   return {approved: true, would_publish: proposed, publication: dry

@@ -120,7 +120,9 @@ For STALE:
    With repair.split_replan and needs_code true, verify retirement for replanning against the host receipt.
    Require no incoming dependent Task. Require no done_commit or retirement_proof.
    This route makes no completion claim. Set already_in_develop.ok true with evidence "not applicable: host split_replan".
-2. Accept changed AC title/body with needs_code true as retirement for new planning, without a completed-code claim.
+2. Accept a changed AC contract with needs_code true as retirement for new planning, without a completed-code claim.
+   Use the host comparison of title, body, Source references and Test texts.
+   For legacy Tasks, use repair.baseline_note to identify the unavailable Test text history.
    Do not reject this changed-contract retirement for old READY path, size or Reporter checks.
    Explain why each such check is not applicable.
 3. For every other STALE verdict without a host split_replan receipt, require retirement_proof for the selected Task's own Do deliverables.

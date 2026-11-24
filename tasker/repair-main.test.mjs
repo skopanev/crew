@@ -57,7 +57,7 @@ test('the machine-check CLI refuses body estimates for new Tasks and READY, and 
     }
     draft.task.body=cleanBody;write('input.json',input);write('draft.json',draft);
     const stale=execute(true);assert.equal(stale.status,1,stale.stderr);
-    assert.match(JSON.parse(fs.readFileSync(path.join(artifacts,'check.json'),'utf8')).problems.join(),/pinned AC title or body changed/);
+    assert.match(JSON.parse(fs.readFileSync(path.join(artifacts,'check.json'),'utf8')).problems.join(),/pinned AC contract changed/);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 

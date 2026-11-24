@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {contractHash} from './test-bindings.mjs';
 import {retirementBinding} from './retirement-proof.mjs';
 import {hostSplitReceipt} from './host-split-replan.mjs';
 import {pathToFileURL} from 'node:url';
@@ -26,9 +27,13 @@ export async function captureRepair(input, read) {
   const pin = /^Criterion: ([^\s@]+)@([1-9]\d*)[.\s]/m.exec(task.document.data.body || '');
   if (pin && pin[1] !== parent.address) throw new Error('The Task Criterion names another parent');
   const revision = pin ? Number(pin[2]) : null;
-  const pinned = pin ? await read(parent.address, revision) : null;
+  const hash = task.document.data.ac_contract_hash;
+  if (hash != null && (typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))) throw new Error('The Task contract hash is invalid');
+  const pinned = pin && hash == null ? await read(parent.address, revision) : null;
   if (pinned && pinned.address !== parent.address) throw new Error('The pinned AC read returned another address');
-  return {pinned_revision:revision, pinned, ac_text_changed:changedText(parent,pinned)};
+  const current = contractHash({selected: parent, children: input.context.children, schema: input.schema});
+  return {pinned_revision:revision, pinned, ac_text_changed: hash == null ? changedText(parent,pinned) : current !== hash,
+    ...(hash == null ? {baseline_note: 'Legacy Task: ' + (pinned ? 'compared the historical AC title, body and Source references.' : 'no historical AC pin is available.') + ' Historical Test texts are unavailable and were not compared.'} : {})};
 }
 
 async function main() {
