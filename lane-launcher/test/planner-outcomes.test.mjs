@@ -147,4 +147,9 @@ test('old active-work skips leave the panel but uncertain claims remain visible'
     f.write('result.json',{status:'blocked',reason_code:code,needs_recovery:true});
     assert.equal(f.row().status,'HELD');
   }
+  f.write('result.json',{status:'blocked',reason_code:'TASK_PREREQUISITE_ARCHIVED',claim_released:false});
+  assert.equal(f.row().status,'BLOCKED');
+  assert.equal(f.row().displayStatus,'TASK_PREREQUISITE_ARCHIVED');
+  f.write('result.json',{status:'blocked',reason_code:'TASK_PREREQUISITE_ARCHIVED',needs_recovery:true});
+  assert.equal(f.row().status,'HELD');
 });

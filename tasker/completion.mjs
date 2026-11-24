@@ -90,14 +90,14 @@ async function main() {
           if (tool === 'joppa_objects' && target?.address === args.address && target.historical === false &&
               Number.isSafeInteger(target.current_revision) && schema.types[target.kind]?.role === 'task' &&
               present(target) === false && !data(target).commit) {
-            throw Object.assign(new Error('Archived prerequisite has no delivered commit: ' + target.address), {code:'TASK_PREREQUISITE'});
+            throw Object.assign(new Error('Archived prerequisite has no delivered commit: ' + target.address), {code:'TASK_PREREQUISITE_ARCHIVED'});
           }
           return target;
         });
         const dependency = await dependencies(selected.address);
         if (!dependency.ready) { block('TASK_PREREQUISITE', 'Prerequisite is not ready: ' + dependency.blocker); return; }
       } catch (error) {
-        if (error.code !== 'TASK_PREREQUISITE') throw error;
+        if (error.code !== 'TASK_PREREQUISITE_ARCHIVED') throw error;
         block(error.code, error.message); return;
       }
       console.log('<signal:CONTINUE>Task prerequisites are ready.</signal:CONTINUE>'); return;

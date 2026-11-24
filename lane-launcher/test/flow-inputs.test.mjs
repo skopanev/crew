@@ -193,7 +193,7 @@ test('Tasker retries check current prerequisites before any claim, trees or mode
       assert.doesNotMatch(result.stdout,/<signal:READY_TO_WRITE>|<signal:var key=tasker_assignment_path>/);
       const artifacts=path.join(result.run,'artifacts');
       const outcome=JSON.parse(fs.readFileSync(path.join(artifacts,'result.json')));
-      assert.equal(outcome.reason_code,'TASK_PREREQUISITE');assert.equal(outcome.claim_released,false);
+      assert.equal(outcome.reason_code,'TASK_PREREQUISITE_ARCHIVED');assert.equal(outcome.claim_released,false);
       assert.equal(fs.existsSync(path.join(artifacts,'input.json')),false);
       assert.equal(fs.existsSync(path.join(artifacts,'tasker-assignment.json')),false);
       assert.equal(fs.existsSync(path.join(artifacts,'trees.json')),false);
@@ -203,6 +203,7 @@ test('Tasker retries check current prerequisites before any claim, trees or mode
   prerequisite.document.present=true;prerequisite.document.data.stage='ready';
   const command=[process.execPath,path.join(definition,'completion.mjs'),'preclaim'];
   const pending=await invoke('live',command);assert.equal(pending.code,0,pending.stderr);assert.match(pending.stdout,/<signal:BLOCKED>/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(pending.run,'artifacts/result.json'))).reason_code,'TASK_PREREQUISITE');
   prerequisite.document.present=false;prerequisite.document.data.commit='a'.repeat(40);prerequisite.current_revision++;
   const delivered=await invoke('delivered',command);assert.equal(delivered.code,0,delivered.stderr);assert.match(delivered.stdout,/<signal:CONTINUE>/);
   assert.equal((await nextConfiguredItem(config,config.token_file,undefined,filter)).next.address,task.address);
