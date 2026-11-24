@@ -20,8 +20,11 @@ function fixture(t, {mode = 'reconcile', dry = false, plan = draft()} = {}) {
   const write = (name, value) => fs.writeFileSync(path.join(a, name), JSON.stringify(value));
   const read = name => JSON.parse(fs.readFileSync(path.join(a, name), 'utf8'));
   write('input.json', input()); write('draft.json', plan);
+  const reader = process.env.CREW_FLOW_STAGES ? path.join(path.dirname(process.env.CREW_FLOW_STAGES), 'agent-reader.mjs')
+    : fileURLToPath(new URL('../planning-joppa/agent-reader.mjs', import.meta.url));
+  fs.copyFileSync(reader, path.join(root, 'agent-reader.mjs'));
   const config = path.join(root, 'config.json');
-  fs.writeFileSync(config, JSON.stringify({selection: {kind: 'ac'}, failure_notes: false, exclude_tags: ['source-gap-cto', 'stuck']}));
+  fs.writeFileSync(config, JSON.stringify({workspace: 'example', url: 'https://service.invalid/mcp', mcp_command: ['node', '/host/reader'], selection: {kind: 'ac'}, failure_notes: false, exclude_tags: ['source-gap-cto', 'stuck']}));
   const engine = path.join(root, 'stages.mjs');
   fs.writeFileSync(engine, `import fs from 'node:fs';import path from 'node:path';
 const a=path.join(process.env.MEDULLA_RUN_DIR,'artifacts');
@@ -36,6 +39,7 @@ if(process.argv[2]==='prepare') {
     if(assignment.includes('</signal:var>')){console.error('reserved signal delimiter in context');process.exit(2);}
     console.log('<signal:var key=assignment>'+assignment+'</signal:var>');
   }
+  fs.writeFileSync(path.join(a,'contracts.json'),JSON.stringify({author:{content:'Author contract'},critic:{content:'Critic contract'}}));
   console.log('<signal:var key=author_contract>Author contract</signal:var>');
   console.log('<signal:var key=critic_contract>Critic contract</signal:var>');
 }
@@ -179,7 +183,7 @@ for (const mode of ['create', 'update', 'reconcile']) test(`${mode} keeps the co
   assert.equal(path.isAbsolute(file), true);
   assert.equal(vars.author_contract, 'Author contract'); assert.equal(vars.critic_contract, 'Critic contract');
   assert.equal(Object.hasOwn(vars, 'assignment'), false); assert.equal(Object.hasOwn(vars, 'writer_assignment'), false);
-  assert.ok(Buffer.byteLength(output) < 2000); assert.ok(Object.values(vars).every(value => Buffer.byteLength(value) < 2000));
+  assert.ok(Buffer.byteLength(output) < 6000); assert.ok(Object.values(vars).every(value => Buffer.byteLength(value) < 2000));
   const serialized = fs.readFileSync(file, 'utf8');
   assert.ok(Buffer.byteLength(serialized) > 100000);
   assert.equal(serialized.includes('{{'), false); assert.equal(serialized.includes('HOST_FILE_MUST_NOT_APPEAR'), false);
@@ -191,8 +195,13 @@ for (const mode of ['create', 'update', 'reconcile']) test(`${mode} keeps the co
   assert.equal(fs.existsSync(file + '.tmp'), false); assert.equal(fs.existsSync(path.join(f.a, 'operations.json')), false);
 });
 
-test('both prompts include the file and the default producer guard still refuses unsafe inline data', t => {
-  assert.equal((workflow.match(/Assignment: \{\{file:\{\{var:writer_assignment_path\}\}\}\}/g) || []).length, 2);
+test('both prompts link the file and the default producer guard still refuses unsafe inline data', t => {
+  const nodes = Bun.YAML.parse(workflow).nodes;
+  for (const name of ['author', 'critics']) {
+    assert.match(nodes[name].prompt, /read_context/);
+    assert.doesNotMatch(nodes[name].prompt, /\{\{file:|\{\{var:(?:assignment|draft|critique|.*_contract)\}\}/);
+    assert.ok(nodes[name].prompt.length < 15000);
+  }
   assert.doesNotMatch(workflow, /\{\{var:writer_assignment\}\}|key=writer_assignment>/);
   const f = fixture(t), env = {...f.env, FLOW_ASSIGNMENT_INLINE: 'true'}, source = input();
   source.selected.document.data.body = 'я'.repeat(51000); f.write('input.json', source);

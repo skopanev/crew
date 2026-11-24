@@ -47,4 +47,3 @@ def serve(reader, input_stream=sys.stdin, output_stream=sys.stdout):
                 response["error"] = {"code": -32601, "message": str(error)}
         output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
         output_stream.flush()
-

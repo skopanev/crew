@@ -37,6 +37,14 @@ vars:
   STUCK_TAG: ''
   round: '1'
   writer_assignment_path: ''
+  writer_artifacts: ''
+  writer_rules_dir: ''
+  writer_links: ''
+  writer_address: ''
+  writer_author_reader_config: ''
+  writer_author_reader_home: ''
+  writer_critic_reader_config: ''
+  writer_critic_reader_home: ''
   draft: ''
   draft_digest: ''
   critique: ''
@@ -60,6 +68,22 @@ nodes:
       printf '%s' "$view" | jq -r 'tojson | gsub("\\{\\{"; "\\u007b\\u007b")' > "$a/writer-assignment.json.tmp"
       mv "$a/writer-assignment.json.tmp" "$a/writer-assignment.json"
       printf '<signal:var key=writer_assignment_path>%s</signal:var>\n' "$a/writer-assignment.json"
+      jq -r '.author.content' "$a/contracts.json" > "$a/contract-author.md"
+      jq -r '.critic.content' "$a/contracts.json" > "$a/contract-critic.md"
+      jq -n --arg kind "$TEST_KIND" --arg operation "$TEST_OPERATION" --arg criteria "$FINDING_CRITERIA" \
+        '{test_kind:$kind,operation:$operation,criteria:$criteria}' > "$a/writer-settings.json"
+      for name in draft critique; do [ -f "$a/$name.json" ] || printf '{}\n' > "$a/$name.json"; done
+      printf '<signal:var key=writer_artifacts>%s</signal:var>\n' "$a"
+      printf '<signal:var key=writer_rules_dir>%s</signal:var>\n' "$MEDULLA_WORKFLOW_DIR/prompts"
+      printf '<signal:var key=writer_links>%s</signal:var>\n' "$(jq -c '{selected:.selected.address,parent:.selected.document.parent}' "$a/input.json")"
+      printf '<signal:var key=writer_address>%s</signal:var>\n' "$(jq -r .selected.address "$a/input.json")"
+      common="$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs"
+      files="$(jq -nc --arg a "$a" --arg rules "$MEDULLA_WORKFLOW_DIR/prompts" \
+        '[$rules+"/author.md",$a+"/contract-author.md",$a+"/contract-critic.md",$a+"/writer-assignment.json",$a+"/writer-settings.json",$a+"/draft.json",$a+"/critique.json"]')"
+      node "$common" prepare writer_author "$files"
+      files="$(jq -nc --arg a "$a" --arg rules "$MEDULLA_WORKFLOW_DIR/prompts" \
+        '[$rules+"/critic.md",$a+"/contract-critic.md",$a+"/writer-assignment.json",$a+"/writer-settings.json",$a+"/draft.json"]')"
+      node "$common" prepare writer_critic "$files"
       echo '<signal:PREPARED>The claim and the complete Writer view are ready.</signal:PREPARED>'
     on_signal:
       PREPARED: author
@@ -69,7 +93,7 @@ nodes:
       __default__: failed
   author:
     max_attempts: 2
-    # Agents get no tracker credentials, no MCP servers and no tools. The prompt holds everything they need.
+    # Agents read contracts, input and feedback through the read-only reader. The host publishes.
     env: &agent_environment
       LANE_MEMORY_CONFIG: ''
       JOPPA_TOKEN: ''
@@ -85,19 +109,12 @@ nodes:
         - --strict-mcp-config
         - --setting-sources=
         - --mcp-config
-        - '{"mcpServers":{}}'
+        - '{{var:writer_author_reader_config}}'
         - --tools=
     prompt: |
-      {{file:prompts/author.md}}
-      Mandatory role contract:
-      {{var:author_contract}}
-      The critics score each Test with the questions of this contract:
-      {{var:critic_contract}}
-      Native Test kind: {{var:TEST_KIND}}
-      Test operation: {{var:TEST_OPERATION}}
-      Assignment: {{file:{{var:writer_assignment_path}}}}
-      Your previous draft (empty in the first round): {{var:draft}}
-      Critic findings on your previous draft (empty in the first round): {{var:critique}}
+      Execute the Writer role for {{var:writer_address}}.
+      Call mcp__joppa__read_context, then read its role instructions, contracts, input, settings and feedback.
+      Use mcp__joppa__read_file and follow next_offset to the end. Return only the specified JSON.
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
     on_signal:
       CAPTURED: draft_check
@@ -151,7 +168,7 @@ nodes:
     # Two independent seats use different models. Neither seat sees the other seat or the author.
     inputs:
       shell: |
-        node "$MEDULLA_WORKFLOW_DIR/control.mjs" seats
+        node "$MEDULLA_WORKFLOW_DIR/control.mjs" seats "$writer_critic_reader_config" "$writer_critic_reader_home"
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -169,16 +186,14 @@ nodes:
         - '{{input.a9:-}}'
         - '{{input.a10:-}}'
         - '{{input.a11:-}}'
+        - '{{input.a12:-}}'
+        - '{{input.a13:-}}'
     prompt: |
-      {{file:prompts/critic.md}}
-      Mandatory role contract:
-      {{var:critic_contract}}
-      Native Test kind: {{var:TEST_KIND}}
-      Test operation: {{var:TEST_OPERATION}}
-      Assignment: {{file:{{var:writer_assignment_path}}}}
-      Criterion letters of rule ac.check.11111r: {{var:FINDING_CRITERIA}}
-      Draft digest: {{var:draft_digest}}
-      Frozen draft: {{var:draft}}
+      Review the Writer draft for {{var:writer_address}} independently.
+      Draft: {{var:writer_artifacts}}/draft.json
+      Call mcp__joppa__read_context, then read its role instructions, contract, input and settings.
+      Use mcp__joppa__read_file and follow next_offset to the end. Use the draft file sha256 as draft_digest.
+      Return only the specified JSON. Do not read another critic's result.
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
       __done__: review_join
@@ -200,6 +215,7 @@ nodes:
         printf '%s' "$verdict" | jq '{operations, outcome}' > "$a/$file"
         echo '<signal:MISSING>The acceptance contract needs an owner decision. No Tests are published.</signal:MISSING>'
       elif [ "${round:-1}" -le "$REWORK_LIMIT" ]; then
+        printf '%s' "$verdict" | jq '.critique' > "$a/critique.json"
         critique="$(printf '%s' "$verdict" | jq -c '.critique | tojson | gsub("</signal:var>"; "") | fromjson? // {}')"
         printf '<signal:var key=critique>%s</signal:var>\n' "$critique"
         printf '<signal:var key=round>%s</signal:var>\n' "$(( ${round:-1} + 1 ))"
