@@ -103,7 +103,7 @@ export function installEnvironment(spec, base = process.cwd()) {
         const resolved = path.resolve(originDirectory, value);
         const real = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
         const isPath = path.isAbsolute(value) || value.startsWith('./') || value.startsWith('../') || fs.existsSync(resolved);
-        need(!Object.values(sources).some(source => (path.isAbsolute(value) && inside(source.repository, value)) ||
+        need(!Object.values(sources).some(source => (path.isAbsolute(value) && inside(source.repository, resolved)) ||
           value.includes(source.repository + path.sep)) &&
           !(!path.isAbsolute(value) && isPath && Object.values(roots).some(root => inside(root, resolved) || inside(root, real))),
           'Declare a binding or exact external field for live source path: ' + field);
@@ -115,12 +115,13 @@ export function installEnvironment(spec, base = process.cwd()) {
     const bytes = JSON.stringify(config, null, 2) + '\n', file = values.config;
     const command = spec.command.map(expand);
     check(command);
-    for (const value of command) for (const root of Object.values(roots)) {
-      const offset = value.indexOf(root);
-      if (offset < 0) continue;
-      need(offset === 0 || /^--?[A-Za-z0-9_-]+=$/.test(value.slice(0, offset)),
+    for (const value of command) {
+      const candidate = /^--?[A-Za-z0-9_-]+=(.*)$/.exec(value)?.[1] ?? value;
+      const normalized = path.resolve(folder, candidate);
+      const isPath = candidate && (path.isAbsolute(candidate) || candidate.includes('/') || fs.existsSync(normalized));
+      if (isPath && inside(folder, normalized) && normalized !== file) pinned(normalized);
+      else need(!Object.values(roots).some(root => value.includes(root)),
         'A snapshot command path must be an argument or an option value');
-      pinned(value.slice(offset));
     }
     const manifest = {id, ...identity, folder, config: file, configDigest: digest(bytes), command};
     const ready = path.join(folder, 'environment.json');

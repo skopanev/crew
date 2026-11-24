@@ -84,6 +84,12 @@ test('refuses unbound live code and paths that escape snapshots', () => {
     const optionEscape = structuredClone(value.spec);
     optionEscape.command = ['node', '--import={engine}/escaped.mjs', '{engine}/panel.mjs'];
     assert.throws(() => installEnvironment(optionEscape), /escapes its snapshot/);
+    for (const spelling of ['{environment}/./engine/escaped.mjs', '{environment}//engine/escaped.mjs',
+      '--import={environment}/./engine/escaped.mjs']) {
+      const normalizedEscape = structuredClone(value.spec);
+      normalizedEscape.command = ['node', spelling, '{engine}/panel.mjs'];
+      assert.throws(() => installEnvironment(normalizedEscape), /escapes its snapshot/);
+    }
     fs.mkdirSync(path.join(value.repository, 'tools'));
     fs.writeFileSync(path.join(value.repository, 'tools/runner.mjs'), 'console.log("runner")\n');
     git(value.repository, 'add', '.'); git(value.repository, 'commit', '-m', 'Tracked runner');
