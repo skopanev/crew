@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {api, claimTasks, runTasks, hasRecoveryCheckpoint} from './joppa-common.mjs';
+import {api, claimTasks, runTasks, hasRecoveryCheckpoint, batchRequest, mutateTasks} from './joppa-common.mjs';
 import {readDetails} from './joppa-api.mjs';
 import {alive, readRun, runDirectories} from './runtime.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -10,7 +10,7 @@ import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
-import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage, excludedNodeTag} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage, excludedNodeTag, saveNode} from './joppa-nodes.mjs';
 import {reservationReleased} from './reservation-release.mjs';
 import {repairCandidate, repairEvidence, repairParentReady} from './repair-delivery.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
@@ -129,7 +129,7 @@ export async function nextTask(config) {
     }
     const reserved = new Set(pending.flatMap(run =>
       run.finalizeOnly ? [{address: run.task}] : run.claim ? claimTasks(run) : runTasks(run)).map(task => task.address));
-    const dependencies = dependencyCheck(read);
+    const dependencies = dependencyCheck(read, {beforeClaim: true});
     const publications = publicationReader(config, read);
     const eligible = [], {object, group} = await occupancyReader(config, read);
     const inventory = [], assigned = [];
@@ -167,6 +167,25 @@ export async function nextTask(config) {
           if (!context) continue;
           const dependency = await dependencies(task.address);
           if (!dependency.ready) {
+            if (dependency.code === 'DEPENDENCY_REPLAN') {
+              const current = await object(task.address);
+              if (current.current_revision !== task.revision || nodeAssignee(current)) continue;
+              const run = {config, workspace: config.workspace, joppaWorker: worker};
+              const reason = `DEPENDENCY_REPLAN: ${dependency.blocker} is archived without a delivered commit`;
+              if (config.launchLanes === false) {
+                selectionIssues.set(task.address, {task: task.address, revision: task.revision,
+                  code: dependency.code, message: reason});
+                continue;
+              }
+              await mutateTasks(run, batchRequest(run, [
+                saveNode(current, {stage: config.FAILED_TASK_STAGE}, reason),
+                {op: 'note', target: task.address, id: `dependency-replan-${current.current_revision}`, text: reason},
+              ])).catch(error => {
+                if (error.rejected && /revision.*changed|revision.*conflict/i.test(error.message)) error.code = 'CANDIDATE_INVALID';
+                throw error;
+              });
+              continue;
+            }
             if (dependency.code) dependencyIssues.set(`${task.address}\n${dependency.consumer}\n${dependency.blocker}`,
               {task: task.address, ...dependency});
             continue;
@@ -181,10 +200,7 @@ export async function nextTask(config) {
           catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }
           await publications({config, tasks: [{address: task.address}], requirement: context.requirement,
             repository: config.repositories.find(repo => repo.id === context.repository),
-            requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}}).catch(error => {
-            // The host worker returns this Task through FAILED_TASK_STAGE before Docker or a model starts.
-            if (error.code !== 'DEPENDENCY_REPLAN') throw error;
-          });
+            requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}});
           eligible.push({...task, ...context});
         } catch (error) {
           if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
