@@ -43,19 +43,21 @@ For body:
 
 For an AC input without assignment.repair, use these steps in order:
 1. Check whether develop already has the AC behavior and its exact Test cases.
-   Return DONE only when the behavior exists and every AC Test is green or has its exact Reporter case in develop.
+   Return DONE only when the behavior exists and every AC Test is green with a recorded result.
    Verify the case assertions and command against the Test's Given and Expected.
    Set done_commit to a verified develop commit that contains the behavior.
    Put the behavior and Test evidence in reason.
    Write no Task for DONE.
-   If a Test case is missing, return OK with bounded Tasks for the missing cases.
+   If a Test has no recorded result or is not green, return OK with one verify-only Task for those Tests.
+   Include bounded additions or corrections when a required Test case is missing or incorrect.
+   Use the verify-only Task also when its exact Reporter case already exists in develop.
+   Run a matching existing case unchanged when it already proves the Expected result.
    Name the develop module::symbol that already gives each Expected result.
    Reuse an existing case when it proves the same Expected result.
-   Rename or extend that case to match the Test instead of creating a duplicate.
+   When a case needs a change, rename or extend it to match the Test instead of creating a duplicate.
    Preserve the Test's acceptance text and complete binding.
    Do not plan another implementation of existing product behavior.
-   Do not create a Task only to run existing cases or upload results.
-   The develop monitor records results for existing cases.
+   Keep result publication with the develop monitor.
 2. Check whether the AC, Tests and Sources leave a product, compliance or policy question open.
    If they do, return GAP.
    Put the A/B question and your advice in gap.
@@ -63,7 +65,7 @@ For an AC input without assignment.repair, use these steps in order:
    Decide technical details yourself.
 3. Check whether the AC needs work of the size of a Requirement under rule ac.check.11111r (A=0).
    If it does, return GAP.
-   Start gap with "A=0:".
+   Start gap.question with "A=0:".
    Name the independent behaviors for P1 to P4 to split into ACs.
    Write no Task for this GAP.
 4. Otherwise, return OK with the Tasks.
@@ -122,8 +124,15 @@ For an AC input, return this JSON contract:
 {"verdict":"OK","reason":"Why these Tasks are the minimal sufficient change",
  "tasks":[{"id":"t1","title":"One line","repository":"example-backend",
    "files":[{"path":"packages/a/src/b.ts","change":"edit","lines":40}],
-   "tests":["test:abc12345"],"depends_on":[],"body":"Criterion: ac:...@12. ..."}],
- "done_commit":"only for DONE","gap":"only for GAP"}
+   "tests":["test:abc12345"],"depends_on":[],"body":"Criterion: ac:...@12. ..."}]}
+
+For DONE, return:
+{"verdict":"DONE","reason":"Verified behavior and recorded passing results for every AC Test","tasks":[],"done_commit":"verified develop SHA"}
+
+For GAP, return:
+{"verdict":"GAP","reason":"The exact open decision","tasks":[],"gap":{"owner":"cto","question":"The open question","a":"Option A","b":"Option B","recommended":"A"}}
+Use owner cto or ceo and recommended A or B.
+For A=0, start gap.question with "A=0:".
 
 For an OK AC draft that needs new Test bindings:
 1. Add the top-level test_bindings array below.
@@ -172,6 +181,8 @@ For repair, use these steps in order:
    Use DECISION_REQUIRED if required Test metadata is incomplete and a repair cannot safely proceed.
    Preserve behavior requirements, dependencies and Reporter names.
    Remove code-scope restriction lines.
+   Write each repair Do step as an action.
+   State only the required change or check in each Do step.
 4. If neither a safe READY update nor verified retirement is possible, return DECISION_REQUIRED.
    Give the exact blocker and advice.
 

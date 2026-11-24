@@ -39,19 +39,20 @@ For body:
 
 For an AC draft:
 1. Check already_in_develop first.
-   For OK, require missing product behavior or a missing exact AC Test case.
+   For OK, require missing product behavior or a Test without a recorded passing result.
    Reject an OK plan that implements existing product behavior again.
    Accept a bounded Task that adds or corrects the missing Test cases.
+   Accept a verify-only Task that runs existing cases and leaves result publication to the develop monitor.
    For a Task that only changes Tests, verify its develop module::symbol already gives each Expected result.
    Require reuse of an existing case when it proves the same Expected result.
-   Require its rename or extension instead of a duplicate case.
+   When a case needs a change, require its rename or extension instead of a duplicate case.
    Preserve the Test's acceptance text and complete binding.
    For DONE, verify done_commit is in develop and the fixed tree has the behavior.
-   For each AC Test, require a green result or its exact Reporter case in develop.
+   For each AC Test, require a green result with a recorded pass.
    Verify the case assertions and command against the Test's Given and Expected.
-   Reject DONE when a case, assertion or complete binding is missing.
-   Missing results alone do not require a Task when the cases already exist.
-   Reject a Task that only runs existing cases or uploads results.
+   Reject DONE when a recorded passing result, case, assertion or complete binding is missing.
+   Require a verify-only Task when the behavior exists but a Test has no recorded pass.
+   Apply this rule also when the exact Reporter case already exists in develop.
 2. Check gate for each example-backend Task.
    Require forecastPlanGate split false.
    Accept a gate over 200 Test files only with an unavoidablePath.
@@ -107,6 +108,7 @@ For READY:
 1. Verify the Task keeps its id and title.
 2. Check its bounded scope and exact Repository and Tests lines.
 3. Verify its existing dependency relations remain.
+   Require repair Do steps to state actions without code-scope restriction lines.
 4. Apply the OK checks to the Tests this Task names.
    Do not apply AC-only Task creation rules to a repair.
    Reject new test_bindings and parent Test metadata writes for a repair.
