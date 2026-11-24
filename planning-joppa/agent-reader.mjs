@@ -70,18 +70,21 @@ export function agentArgs(harness, configFile, home) {
   need(home && path.isAbsolute(home), 'AGY needs a private reader profile');
   const cache = path.join(home, '.gemini/antigravity-cli/mcp');
   need(!fs.lstatSync(cache).isSymbolicLink(), 'AGY MCP descriptors need a fresh private profile');
+  const brain = path.join(home, '.gemini/antigravity-cli/brain');
+  need(!fs.lstatSync(brain).isSymbolicLink(), 'AGY generated output needs a fresh private profile');
   const allow = [], deny = [];
   for (const [name, server] of Object.entries(servers)) {
     for (const tool of server.enabled_tools ?? server.includeTools ?? ['*']) allow.push(`mcp(${name}/${tool})`);
     for (const tool of server.disabled_tools ?? server.excludeTools ?? []) deny.push(`mcp(${name}/${tool})`);
   }
-  return ['--add-dir', fs.realpathSync(cache), '--settings', JSON.stringify({permissions: {allow, deny}})];
+  return ['--add-dir', fs.realpathSync(cache), '--add-dir', fs.realpathSync(brain),
+    '--settings', JSON.stringify({permissions: {allow, deny}})];
 }
 export function prepareAgy(configFile, home, env = process.env) {
   need(home && path.isAbsolute(home), 'AGY needs a private reader profile');
   fs.mkdirSync(home, {recursive: true, mode: 0o700});
-  // Keep MCP descriptors in this profile before Broker mirrors the shared home.
-  for (const relative of ['.gemini', '.gemini/antigravity-cli', '.gemini/antigravity-cli/mcp']) {
+  // Keep descriptors and generated output private before Broker mirrors the shared home.
+  for (const relative of ['.gemini', '.gemini/antigravity-cli', '.gemini/antigravity-cli/mcp', '.gemini/antigravity-cli/brain']) {
     const directory = path.join(home, relative);
     if (!fs.existsSync(directory)) fs.mkdirSync(directory, {mode: 0o700});
     need(!fs.lstatSync(directory).isSymbolicLink() && fs.statSync(directory).isDirectory(),

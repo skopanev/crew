@@ -84,8 +84,10 @@ test('AGY uses the broker private profile and refuses an unrelated MCP inventory
   assert.equal(fs.lstatSync(cache).isSymbolicLink(), false);
   assert.ok(fs.realpathSync(cache).startsWith(fs.realpathSync(profile.home) + path.sep));
   const args = agentArgs('agy', profile.file, profile.home);
-  assert.deepEqual(args.slice(0, 3), ['--add-dir', fs.realpathSync(cache), '--settings']);
-  assert.deepEqual(JSON.parse(args[3]), {permissions: {allow: ['mcp(joppa/*)'], deny: []}});
+  const brain = path.join(profile.home, '.gemini/antigravity-cli/brain');
+  assert.equal(fs.lstatSync(brain).isSymbolicLink(), false);
+  assert.deepEqual(args.slice(0, 5), ['--add-dir', fs.realpathSync(cache), '--add-dir', fs.realpathSync(brain), '--settings']);
+  assert.deepEqual(JSON.parse(args[5]), {permissions: {allow: ['mcp(joppa/*)'], deny: []}});
   const target = path.join(profile.home, '.gemini/config/mcp_config.json');
   assert.deepEqual(JSON.parse(fs.readFileSync(target)), JSON.parse(fs.readFileSync(profile.file)));
   fs.writeFileSync(target, JSON.stringify({mcpServers: {other: {}}}));
