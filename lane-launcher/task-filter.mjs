@@ -1,5 +1,5 @@
 // Joppa evaluates the filter. Crew keeps the workspace, node kinds and pagination under its control.
-import {taskPages} from './joppa-nodes.mjs';
+import {taskPages, excludedNodeTag} from './joppa-nodes.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const keys = new Set(['data', 'parent', 'depth', 'status', 'owner', 'assignee']);
 
@@ -13,6 +13,7 @@ export function validateNodeFilter(filter, label = 'joppa.filter') {
 
 export function validateTaskFilter(config) {
   validateNodeFilter(config.joppa?.filter);
+  excludedNodeTag({}, config.joppa?.excludeTags);
   const stage = config.joppa?.filter?.data?.stage;
   const values = Array.isArray(stage) ? stage : [stage];
   if (!values.length || values.some(value => typeof value !== 'string' || !value.trim()) ||

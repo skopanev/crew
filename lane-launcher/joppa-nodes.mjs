@@ -5,6 +5,14 @@ export const NODE_TONES = ['red', 'yellow', 'orange', 'blue', 'grey', 'green', '
 
 export const nodeAssignee = node => node.document?.data?.assignee ?? node.data?.assignee ?? node['data.assignee'] ?? null;
 export const nodeStage = node => node.computed?.stage ?? node.stage ?? node.document?.data?.stage ?? node.data?.stage ?? node['data.stage'] ?? null;
+export function excludedNodeTag(node, tags = []) {
+  require(Array.isArray(tags) && tags.every(tag => typeof tag === 'string' && tag.trim() === tag && tag.length > 0),
+    'joppa.excludeTags must contain nonempty tag names');
+  if (!tags.length) return undefined;
+  const current = node.document?.data?.tags ?? node.data?.tags ?? node['data.tags'] ?? [];
+  require(Array.isArray(current), 'Node tags must be an array');
+  return tags.find(tag => current.includes(tag));
+}
 export const nodeFailed = (node, stage) => typeof stage === 'string' && stage.length > 0 && nodeStage(node) === stage;
 export function validateFailedTaskStage(config, types) {
   const stage = config.FAILED_TASK_STAGE;

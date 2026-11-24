@@ -10,7 +10,7 @@ import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {requirementBranch, requirementPlan, assertRequirementHead} from './requirement-delivery.mjs';
 import {finalizationCandidate} from './requirement-finalizer.mjs';
 import {filteredTasks} from './task-filter.mjs';
-import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, taskPages, coversFields, validateFailedTaskStage, excludedNodeTag} from './joppa-nodes.mjs';
 import {reservationReleased} from './reservation-release.mjs';
 const require = (condition, message) => { if (!condition) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim();
@@ -68,6 +68,7 @@ export async function occupancyReader(config, read) {
   const group = async (address, allowArchived = false) => {
     const current = await object(address, {allowArchived: true});
     if (!allowArchived && current.document.present !== true) return null;
+    if (!allowArchived && excludedNodeTag(current, config.joppa.excludeTags)) return null;
     let choice;
     try { choice = taskRepositoryChoice(config, current.document.data); }
     catch (error) { check(false, error.message); }
@@ -79,6 +80,7 @@ export async function occupancyReader(config, read) {
       seen.add(parent);
       const context = await object(parent, {allowArchived: true});
       if (context.document.present !== true) return null;
+      if (!allowArchived && excludedNodeTag(context, config.joppa.excludeTags)) return null;
       if (schema.schema.types[context.kind]?.role === 'requirement') return {requirement: context.address, repository};
       parent = context.document.parent;
     }

@@ -13,6 +13,12 @@ Set the workspace, repositories, writable paths, checks, mounts, image and lane 
 One authenticated worker can serve all lane slots. Set their number with `limit`.
 Keep credentials outside every mounted directory.
 
+Set `joppa.excludeTags` to the tags that stop work, for example `["needs-owner", "needs-policy"]`.
+Dolber skips matching Tasks and their tagged ancestors during selection.
+A claimed lane checks those tags at startup and before push.
+Its claim captures the configured tag list. Existing workers keep their captured list.
+A tag added after publication does not prevent the lane from recording the actual result.
+
 ## Execution
 
 Dolber and the planner queue use the same Node.js MCP client. Their queue calls do not start a Python process.

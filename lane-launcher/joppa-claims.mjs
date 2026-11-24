@@ -2,7 +2,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {api, batchRequest, mutateTasks, runTasks, claimTasks, contractDigest, sameContract, sameContext, verifyRemoteDependencies} from './joppa-common.mjs';
-import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage, doneTaskStage} from './joppa-nodes.mjs';
+import {nodeAssignee, nodeStageDone, nodePendingDelivery, saveNode, validateFailedTaskStage, doneTaskStage, excludedNodeTag} from './joppa-nodes.mjs';
 import {packageInput, taskInput, testAcceptance} from './joppa-input.mjs';
 import {packageBudget, estimatedNodes, coveredBy, FAILURE_OPERATIONS} from './test-bindings.mjs';
 import {dependencyCheck} from './dependencies.mjs';
@@ -23,7 +23,7 @@ export function writeLaunchClaim(run, dir, finalizationTicket) {
         joppa: {url: run.config.joppa.url}}, workspace: run.workspace}};
   const claim = run.finalizeOnly ? {id: run.executionId, workspace: run.workspace,
     source: 'joppa-finalization', anchor: run.task, ticket: finalizationTicket} : run.claim;
-  fs.writeFileSync(file, JSON.stringify({...claim, joppa_url: run.config.joppa.url,
+  fs.writeFileSync(file, JSON.stringify({...claim, joppa_url: run.config.joppa.url, excluded_tags: run.config.joppa.excludeTags ?? [],
     ...(delivery ? {delivery} : {})}) + '\n', {mode: 0o600});
   return file;
 }
@@ -87,6 +87,7 @@ export async function claimTask(run, persist, runId, options = {}) {
       require(object?.address === task.address && current(object) &&
         (task.revision === undefined || object.current_revision === task.revision), 'Task changed after selection; no Tasks claimed');
       doneTaskStage(run.config, {types}, object);
+      require(!excludedNodeTag(object, run.config.joppa.excludeTags), `QUESTION_TAG: ${task.address}; no Tasks claimed`);
       require(!nodeAssignee(object), `TASK_ASSIGNED: ${task.address} already has an assignee; no Tasks claimed`);
       require(!nodeStageDone(object), `TASK_COMPLETED: ${task.address} is done; no Tasks claimed`);
       require(!nodePendingDelivery(object), `TASK_PENDING_DELIVERY: ${task.address} awaits target integration; no Tasks claimed`);
@@ -149,6 +150,7 @@ export async function claimTask(run, persist, runId, options = {}) {
       seen.add(address);
       if (!parents.has(address)) parents.set(address, await read(run, address));
       const parent = parents.get(address);
+      require(!excludedNodeTag(parent, run.config.joppa.excludeTags), `QUESTION_TAG: ${address}; lane did not start`);
       require(parent.address === address && contextLive(parent),
         'Task parent context is absent, historical, waiting or held for planning');
       const context = {use: 'Acceptance reference. Execute only this Task contract.',
@@ -227,6 +229,7 @@ export async function guardTaskClaims(run, persist) {
     api(run.config, run.joppaWorker, tool, {workspace: run.workspace, ...args}));
   for (const claim of claims) {
     const object = await read(run, claim.address);
+    require(!excludedNodeTag(object, run.config.joppa.excludeTags), `QUESTION_TAG: ${claim.address}; lane did not start`);
     require(object?.address === claim.address && heldBy(run, object),
       'Task holder changed before lane startup; claims remain held for inspection');
     verifyRemoteDependencies(object);
@@ -236,6 +239,7 @@ export async function guardTaskClaims(run, persist) {
   }
   for (const context of run.claim.contexts || []) {
     const object = await read(run, context.address);
+    require(!excludedNodeTag(object, run.config.joppa.excludeTags), `QUESTION_TAG: ${context.address}; lane did not start`);
     verifyRemoteDependencies(object);
     const dependency = await dependencies(context.address);
     require(object?.address === context.address && contextLive(object) &&

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {readJoppa} from '../../lane-launcher/joppa-api.mjs';
 import {sameContract, sameContext} from '../../lane-launcher/joppa-common.mjs';
-import {nodeAssignee} from '../../lane-launcher/joppa-nodes.mjs';
+import {nodeAssignee, excludedNodeTag} from '../../lane-launcher/joppa-nodes.mjs';
 import {dependencyCheck, remoteDependencyBlocker} from '../../lane-launcher/dependencies.mjs';
 import {assertRequirementHead, requirementPlan} from '../../lane-launcher/requirement-delivery.mjs';
 
@@ -61,6 +61,7 @@ try {
     for (const task of tasks) {
       require(task && text(task.address) && text(task.digest), 'Captured Task claim entry is invalid');
       const current = await read('joppa_objects', {address: task.address});
+      require(!excludedNodeTag(current, claim.excluded_tags), `QUESTION_TAG: ${task.address}; publication refused`);
       require(!remoteDependencyBlocker(current), `Claimed Task has an unmet remote dependency: ${task.address}`);
       require(current && current.address === task.address && current.historical === false &&
         current.document?.present === true,
@@ -72,6 +73,7 @@ try {
       if (task.parent) {
         require(text(task.parent.address) && text(task.parent.digest), `Captured Task parent context is invalid: ${task.address}`);
         const parent = await read('joppa_objects', {address: task.parent.address});
+        require(!excludedNodeTag(parent, claim.excluded_tags), `QUESTION_TAG: ${task.parent.address}; publication refused`);
         require(!remoteDependencyBlocker(parent), `Task parent has an unmet remote dependency: ${task.parent.address}`);
         require(parent && parent.address === task.parent.address && parent.historical === false &&
           parent.document?.present === true &&
@@ -85,6 +87,7 @@ try {
     for (const context of claim.contexts) {
       require(context && text(context.address) && text(context.digest), 'Captured claim context entry is invalid');
       const parent = await read('joppa_objects', {address: context.address});
+      require(!excludedNodeTag(parent, claim.excluded_tags), `QUESTION_TAG: ${context.address}; publication refused`);
       require(!remoteDependencyBlocker(parent), `Acceptance context has an unmet remote dependency: ${context.address}`);
       require(parent && parent.address === context.address && parent.historical === false &&
         parent.document?.present === true &&
