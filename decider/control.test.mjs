@@ -6,7 +6,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
-import {problems, proposal, reviews, policy, rejected, settings, RETRY} from './control.mjs';
+import {problems, proposal, reviews, policy, rejected, settings} from './control.mjs';
+import {RETRY} from './agent-files.mjs';
 // The digests that freeze gives to the critic step. The host stamps them on each critic output.
 const frozenDigests = directory => Object.fromEntries([['draft_digest', 'draft'], ['context_digest', 'decider-assignment']].map(([key, name]) =>
   [key, fs.existsSync(path.join(directory, name + '.json')) ? createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex') : '']));
@@ -132,9 +133,10 @@ test('the private config, both contracts, frozen prompts and readonly author rou
   // The prompt is the role prompt and the AC address. The critic also gets the draft path. On a retry the author gets
   // one more line with the previous draft and the findings. The agents find all other files through read_context.
   // At most 1024 characters: the role file in the run holds the steps and the answer format.
-  const read = 'Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.\n';
-  assert.equal(workflow.nodes.author.prompt, 'You are the Decider author for one AC. ' + read + 'Role file: {{var:decider_artifacts}}/author.md\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
-  assert.equal(workflow.nodes.critics.prompt, 'You are a Decider critic for one AC. ' + read + 'Role file: {{var:decider_artifacts}}/critic.md\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  const read = 'Read your role file with mcp__joppa__read_file and follow it.\n';
+  assert.equal(workflow.nodes.author.prompt, 'Decider author. ' + read + 'Role file: {{var:decider_artifacts}}/author.md\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
+  assert.equal(workflow.nodes.critics.prompt, 'Decider critic. ' + read + 'Role file: {{var:decider_artifacts}}/critic.md\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  assert.match(workflow.nodes.freeze.shell, /rm -f .*shape-feedback\.json/);
   assert.ok(workflow.nodes.prepare.shell.includes('for role in author critic; do cp "$MEDULLA_WORKFLOW_DIR/prompts/$role.md" "$a/$role.md"; done'));
   for (const role of ['author', 'critic']) {
     const prompt = fs.readFileSync(path.join(here, 'prompts', role + '.md'), 'utf8');

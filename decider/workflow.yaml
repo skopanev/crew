@@ -94,7 +94,7 @@ nodes:
         - --add-dir
         - '{{var:MANUALS_ROOT}}'
     prompt: |
-      You are the Decider author for one AC. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Decider author. Read your role file with mcp__joppa__read_file and follow it.
       Role file: {{var:decider_artifacts}}/author.md
       AC: {{var:decider_ac}}
       {{var:decider_feedback}}
@@ -116,7 +116,7 @@ nodes:
   freeze:
     shell: |
       set -eu
-      rm -f "$MEDULLA_RUN_DIR/artifacts/critic-codex.json" "$MEDULLA_RUN_DIR/artifacts/critic-second.json" "$MEDULLA_RUN_DIR/artifacts/freeze-issues.json"
+      rm -f "$MEDULLA_RUN_DIR/artifacts/critic-codex.json" "$MEDULLA_RUN_DIR/artifacts/critic-second.json" "$MEDULLA_RUN_DIR/artifacts/freeze-issues.json" "$MEDULLA_RUN_DIR/artifacts/shape-feedback.json"
       "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" freeze
       node "$MEDULLA_WORKFLOW_DIR/control.mjs" digest "$MEDULLA_RUN_DIR/artifacts"
     on_signal:
@@ -163,7 +163,7 @@ nodes:
         - '{{input.a12:-}}'
         - '{{input.a13:-}}'
     prompt: |
-      You are a Decider critic for one AC. Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.
+      Decider critic. Read your role file with mcp__joppa__read_file and follow it.
       Role file: {{var:decider_artifacts}}/critic.md
       AC: {{var:decider_ac}}
       Draft: {{var:decider_artifacts}}/draft.json

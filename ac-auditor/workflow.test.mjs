@@ -11,9 +11,9 @@ const role = name => readFileSync(join(dir, 'prompts', name + '.md'), 'utf8');
 
 test('each prompt is the role line, the role file path and the AC address', () => {
   // At most 1024 characters: the role file in the run holds the steps and the answer format.
-  const read = 'Call mcp__joppa__read_context. Read your role file and each other listed file with mcp__joppa__read_file. Follow the role file.\n';
-  assert.equal(workflow.nodes.finders.prompt, 'You are one of three AC audit finders. ' + read + 'Role file: {{var:audit_artifacts}}/finder.md\nAC: {{var:audit_ac}}\n');
-  assert.equal(workflow.nodes.judge.prompt, 'You are the AC audit judge. ' + read + 'Role file: {{var:audit_artifacts}}/judge.md\nAC: {{var:audit_ac}}\n');
+  const read = 'Read your role file with mcp__joppa__read_file and follow it.\n';
+  assert.equal(workflow.nodes.finders.prompt, 'AC audit finder. ' + read + 'Role file: {{var:audit_artifacts}}/finder.md\nAC: {{var:audit_ac}}\n');
+  assert.equal(workflow.nodes.judge.prompt, 'AC audit judge. ' + read + 'Role file: {{var:audit_artifacts}}/judge.md\nAC: {{var:audit_ac}}\n');
   const a = '/Users/finik/Projects/finik/.medulla/auditor-runs/2026-11-24_08-33-04-be678ae6/artifacts';
   const values = {audit_ac: 'ac:eqc8z147', audit_artifacts: a, ...Object.fromEntries(['one', 'two', 'three'].map(n => [`finder_${n}_path`, `${a}/finder-${n}.json`]))};
   const render = prompt => prompt.replace(/\{\{file:prompts\/([a-z]+\.md)\}\}/g, (_, name) => readFileSync(join(dir, 'prompts', name), 'utf8'))
