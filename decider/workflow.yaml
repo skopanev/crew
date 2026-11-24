@@ -166,7 +166,7 @@ nodes:
       Decider critic. Read your role file with mcp__joppa__read_file and follow it.
       Role file: {{var:decider_artifacts}}/critic.md
       AC: {{var:decider_ac}}
-      Draft: {{var:decider_artifacts}}/draft.json
+      Draft: draft.json in the same folder as the role file
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
       __done__: review_join

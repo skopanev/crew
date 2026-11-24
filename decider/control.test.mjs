@@ -135,7 +135,7 @@ test('the private config, both contracts, frozen prompts and readonly author rou
   // At most 1024 characters: the role file in the run holds the steps and the answer format.
   const read = 'Read your role file with mcp__joppa__read_file and follow it.\n';
   assert.equal(workflow.nodes.author.prompt, 'Decider author. ' + read + 'Role file: {{var:decider_artifacts}}/author.md\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
-  assert.equal(workflow.nodes.critics.prompt, 'Decider critic. ' + read + 'Role file: {{var:decider_artifacts}}/critic.md\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  assert.equal(workflow.nodes.critics.prompt, 'Decider critic. ' + read + 'Role file: {{var:decider_artifacts}}/critic.md\nAC: {{var:decider_ac}}\nDraft: draft.json in the same folder as the role file\n');
   assert.match(workflow.nodes.freeze.shell, /rm -f .*shape-feedback\.json/);
   assert.ok(workflow.nodes.prepare.shell.includes('for role in author critic; do cp "$MEDULLA_WORKFLOW_DIR/prompts/$role.md" "$a/$role.md"; done'));
   for (const role of ['author', 'critic']) {
@@ -246,11 +246,11 @@ test('a retry names the previous draft and the findings to close in the author p
 
 test('every assembled Decider prompt has at most 1024 characters in every round', () => {
   const workflow = Bun.YAML.parse(fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8'));
-  const a = '/Users/finik/Projects/finik/.medulla/decider-runs/2026-11-24_07-27-40-265d14e6/artifacts';
-  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: RETRY};
-  const render = prompt => prompt.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
-  for (const seat of ['author', 'critics']) {
-    const prompt = render(workflow.nodes[seat].prompt);
+  // A 140-character artifacts path and a full UUID AC address are the strict case.
+  for (const [a, ac] of [['/Users/finik/Projects/finik/.medulla/decider-runs/2026-11-24_07-27-40-265d14e6/artifacts', 'ac:x'],
+    ['/' + 'r'.repeat(139), 'ac:a832da43-d740-4ed0-88fd-966b40e65faa']]) for (const seat of ['author', 'critics']) {
+    const values = {decider_ac: ac, decider_artifacts: a, decider_feedback: RETRY};
+    const prompt = workflow.nodes[seat].prompt.replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
     // Medulla appends SIGNAL_PROTOCOL (586 characters, medulla v2 signals.py) to each agent prompt.
     assert.ok(prompt.length + 586 <= 1024, seat + ' prompt has ' + prompt.length + ' characters before the signal protocol');
     assert.doesNotMatch(prompt, /\{\{/);

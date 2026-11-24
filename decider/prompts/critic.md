@@ -1,4 +1,4 @@
-This is your role file. Review the frozen decision in the Draft file of your prompt independently by BOTH mandatory contracts.
+This is your role file. Review the frozen decision in the Draft file of your prompt (read_context gives its absolute path) independently by BOTH mandatory contracts.
 Call mcp__joppa__read_context first. It lists your contract files, the assignment and your other granted files.
 Read each listed file that exists with mcp__joppa__read_file. Call it again with offset set to next_offset until next_offset is null.
 Use only the assignment and its full frozen evidence. Your only tools are the read-only file reader and the Sources reader.
