@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {checkRepair, repairPublication} from './repair-plan.mjs';
+import {checkRepair, repairPublication as publishRepair} from './repair-plan.mjs';
+const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
 import {retirementBinding} from './retirement-proof.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +30,7 @@ test('READY publication checks the captured dependency revision before it can re
     const config=path.join(root,'config.json'),current=path.join(root,'current.json');
     fs.writeFileSync(config,'{}');fs.writeFileSync(current,JSON.stringify(prerequisite));
     const command=[fileURLToPath(new URL('./repair-context.mjs',import.meta.url)),'publication',artifacts];
-    const publish=()=>JSON.parse(execFileSync(process.execPath,command,{encoding:'utf8',env:{...process.env,
+    const publish=()=>JSON.parse(execFileSync(process.execPath,command,{encoding:'utf8',env:{...process.env,...settings,DRY_RUN:"false",
       PLANNING_JOPPA_CONFIG:config,CREW_FLOW_STAGES:path.join(engine,'planning-joppa/flow_stages.py'),DEPENDENCY_FILE:current}}));
     assert.equal(publish().publication.outcome.reason_code,'READY');
     prerequisite.current_revision++;prerequisite.document.present=false;

@@ -8,7 +8,8 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {contractHash, bindingPlan, bindingPublication} from './test-bindings.mjs';
 import {check} from './check.mjs';
-import {checkRepair, repairPublication} from './repair-plan.mjs';
+import {checkRepair, repairPublication as publishRepair} from './repair-plan.mjs';
+const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const settings = JSON.parse(fs.readFileSync(path.join(here, "config.example.json"), "utf8")).vars;
@@ -201,7 +202,7 @@ test('the actual review join publishes Test metadata and Tasks only for the curr
   assert.equal(fs.existsSync(path.join(f.artifacts, 'operations.json')), false);
 });
 
-test('repair cannot publish parent Test metadata and missing bindings require a decision', t => {
+test('repair cannot publish parent Test metadata and missing bindings require a Writer finding', t => {
   const f = fixture(t), criterion = f.input.selected, child = f.input.children[0];
   const selected = {kind: 'task', address: 'task:t1', current_revision: 6, document: {data: {title: f.draft.tasks[0].title, repository: binding.repository}}};
   const input = {...f.input, selected, claim_revision: 7, context: {parent: criterion, children: [child], references: {}, incoming: []}};

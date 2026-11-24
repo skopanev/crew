@@ -321,6 +321,7 @@ nodes:
         --arg finding_criteria "$FINDING_CRITERIA" --arg stuck_tag "$STUCK_TAG" \
         --arg return_stage "$TASKER_RETURN_STAGE" --arg test_return_stage "$TASKER_TEST_RETURN_STAGE" \
         --arg task_review_stage "$TASKER_TASK_REVIEW_STAGE" \
+        --argjson generic_count "$(node "$MEDULLA_WORKFLOW_DIR/repair-context.mjs" rejected-count "$a")" \
         --slurpfile review "$review_file" --argjson return_limit "${TASKER_RETURN_LIMIT:?TASKER_RETURN_LIMIT is required}" \
         --argjson repository "$(node "$MEDULLA_WORKFLOW_DIR/repair-context.mjs" repository "$a")" \
         --slurpfile input "$a/input.json" --rawfile reason "$a/failure.txt" \

@@ -89,6 +89,7 @@ export function check({input, trees, draft, maxFiles, maxLines, forecast}) {
     }
     ids.add(task.id);
     if (!text(task.title) || /[\r\n]/.test(task.title)) problems.push(`${label}: title must be one nonempty line`);
+    else if ([...task.title].length > 128) problems.push(`${label}: title exceeds the native limit of 128 characters`);
     const tree = trees[task.repository];
     if (!tree) {
       problems.push(`${label}: repository must be one of ${Object.keys(trees).join(', ')}`);

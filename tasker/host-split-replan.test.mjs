@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fixture} from './test-support/host-split.fixture.mjs';
-import {checkRepair, repairPublication} from './repair-plan.mjs';
+import {checkRepair, repairPublication as publishRepair} from './repair-plan.mjs';
+const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
 import {verifiedSplitReplan} from './host-split-replan.mjs';
 
 const checked = x => checkRepair({...x.options(), maxFiles: 8, maxLines: 300,
