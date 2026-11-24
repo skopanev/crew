@@ -1,4 +1,5 @@
 """Render each workflow prompt with large bodies through the real Medulla renderer."""
+import ast
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,10 @@ class PromptLimits(unittest.TestCase):
                         is_path = re.search(r"path|file|folder|root|dir|artifacts", key, re.I)
                         is_body = re.search(r"contract|assignment|draft|critique|research|necessity|feedback|commands|test_report|test_command", key, re.I)
                         values[key] = str(fixture) if is_path else huge if is_body else "example"
+                    if workflow.parent.name == "decider":
+                        control = workflow.with_name('control.mjs').read_text()
+                        retry = re.search(r"export const RETRY = ('.*?');", control).group(1)
+                        values['decider_feedback'] = ast.literal_eval(retry)
                     seats = node.get("inputs")
                     seats = seats if isinstance(seats, list) else [{"slug": "example"}]
                     for seat in seats:
