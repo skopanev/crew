@@ -48,11 +48,11 @@ function review(draftValue, reviews, dry = 'false', owner = 'fixture-owner', ext
   try {
     const write = (name, value) => fs.writeFileSync(path.join(dir, name), JSON.stringify(value));
     write('draft.json', draftValue);
-    write('input.json', {selected: {address: ac, kind: 'ac', document: {data: {owner, returns: 2}}}, claim_revision: 31, children: [reporter('packages/a/src/b.itest.ts > existing case')], schema: {types: {ac: {role: "ac", fields: {stage: {values: [config.TASKER_IMPLEMENT_STAGE]}}}, task: {role: "task", fields: {stage: {values: ["to_implement"]}}}, test: {role: "test"}}}, ...extra});
+    write('input.json', {selected: {address: ac, kind: 'ac', document: {data: {owner, returns: 2}}}, claim_revision: 31, children: [reporter('packages/a/src/b.itest.ts > existing case')], schema: {types: {ac: {role: "ac", fields: {stage: {values: [config.TASKER_IMPLEMENT_STAGE, config.TASKER_DONE_STAGE]}}}, task: {role: "task", fields: {stage: {values: ["to_implement"]}}}, test: {role: "test"}}}, ...extra});
     write('codex.json', reviews[0]);
     write('second.json', reviews[1]);
     return JSON.parse(execFileSync('jq', ['-nc', '--arg', 'digest', 'd1', '--arg', 'run', 'run-1', '--arg', 'stage', 'to_implement',
-      '--arg', 'dry', dry, "--arg", "implement_stage", config.TASKER_IMPLEMENT_STAGE, "--argjson", "gap_tags", config.TASKER_GAP_TAGS, '--slurpfile', 'draft', 'draft.json', '--slurpfile', 'input', 'input.json',
+      '--arg', 'dry', dry, '--arg', 'done_stage', config.TASKER_DONE_STAGE, "--arg", "implement_stage", config.TASKER_IMPLEMENT_STAGE, "--argjson", "gap_tags", config.TASKER_GAP_TAGS, '--slurpfile', 'draft', 'draft.json', '--slurpfile', 'input', 'input.json',
       '--slurpfile', 'codex', 'codex.json', '--slurpfile', 'second', 'second.json',
       '-f', path.join(here, 'publication.jq')], {cwd: dir, encoding: 'utf8'}));
   } finally {
@@ -111,10 +111,10 @@ test('publication orders prerequisites before reversed dependents and uses exist
 test('DONE moves the AC with develop and Test evidence, while dry run writes nothing and GAP asks a decision', () => {
   const done = review({verdict: 'DONE', reason: 'r', done_commit: 'abc1234'}, [approve, approve]);
   assert.deepEqual(done.publication.operations[0].command, {op: 'save_object', kind: 'ac', id: 'sample0003', revision: 31,
-    data: {stage: 'to_implement', returns: 0}, reason: 'Develop already has this behavior at abc1234. Tests: test:sample0001. r'});
+    data: {stage: settings.TASKER_DONE_STAGE, returns: 0}, reason: 'Develop already has this behavior at abc1234. Tests: test:sample0001. r'});
   assert.equal(done.publication.operations[1].command.op, 'note');
   assert.equal(done.publication.operations[1].command.text, done.publication.operations[0].command.reason);
-  assert.equal(done.publication.outcome.reason_code, 'ALREADY_IN_DEVELOP');
+  assert.equal(done.publication.outcome.reason_code, 'AC_DONE');
   const gap = review({verdict: 'GAP', reason: 'r', gap: 'A=0: split the AC'}, [approve, approve]);
   assert.equal(gap.approved, false);
   assert.match(gap.critique.host.invalid, /verified owner/);

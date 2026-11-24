@@ -8,6 +8,8 @@ const input = () => ({workspace:'example',selected:ac(),schema:{types:{criterion
 const check = () => ({address:'check:a',kind:'check',historical:false,document:{present:true,parent:'criterion:a'},status:{tone:'green'},result:{status:'pass',commit:'a'.repeat(40)}});
 test('host completion requires current recorded passing Tests and no live Tasks or held lanes',()=>{
   const i=input(),a=ac(),t=check();assert.equal(decision(i,a,[t],false,stages),'DONE');
+  a.document.data.stage=stages.ready;assert.equal(decision(i,a,[t],false,stages),'DONE');
+  a.document.data.stage=stages.implement;
   for(const edit of [t=>{delete t.result;},t=>{t.result.status='fail';},t=>{t.result.commit='';},t=>{t.status.tone='blue';}]){
     const t=check();edit(t);assert.equal(decision(i,a,[t],false,stages),'CONTINUE');
   }

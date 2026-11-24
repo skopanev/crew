@@ -37,6 +37,7 @@ vars:
   TASKER_TEST_RETURN_STAGE: ''
   TASKER_TASK_REVIEW_STAGE: ''
   TASKER_IMPLEMENT_STAGE: ''
+  TASKER_DONE_STAGE: ''
   TASKER_GAP_TAGS: ''
   # true: run the whole flow, publish nothing and release the claim with outcome DRY_RUN.
   DRY_RUN: 'false'
@@ -274,7 +275,7 @@ nodes:
       file="$(printf '%s' "$FLOW_PUBLICATION" | jq -er '.file | select(type == "string" and test("^[A-Za-z0-9._-]+[.]json$"))')"
       if command -v sha256sum >/dev/null; then hash="$(sha256sum "$a/draft.json")"; else hash="$(shasum -a 256 "$a/draft.json")"; fi
       verdict="$(jq -nc --arg digest "${hash%% *}" --arg run "$(basename "$MEDULLA_RUN_DIR")" --arg stage "$TASK_STAGE" --arg dry "$DRY_RUN" \
-        --arg implement_stage "$TASKER_IMPLEMENT_STAGE" --argjson gap_tags "$TASKER_GAP_TAGS" \
+        --arg implement_stage "$TASKER_IMPLEMENT_STAGE" --arg done_stage "$TASKER_DONE_STAGE" --argjson gap_tags "$TASKER_GAP_TAGS" \
         --slurpfile draft "$a/draft.json" --slurpfile input "$a/input.json" \
         --slurpfile codex "$a/critic-codex.json" --slurpfile second "$a/critic-second.json" \
         -f "$MEDULLA_WORKFLOW_DIR/publication.jq")"

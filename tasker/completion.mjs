@@ -6,15 +6,17 @@ const require = (ok, message) => { if (!ok) throw new Error(message); };
 const data = node => node.document?.data || node.data || {};
 const present = node => node.document?.present ?? node.present;
 const tone = node => node.status?.tone || node.status;
+export function passingTests(input, children) {
+  const tests = children.filter(node => input.schema.types[node.kind]?.role === "test" && present(node));
+  return tests.length > 0 && tests.every(node => tone(node) === "green" && node.result?.status === "pass" &&
+    /^[a-f0-9]{40}$/.test(node.result.commit || ""));
+}
 export function decision(input, ac, children, held, stages) {
   if (input.schema.types[ac.kind]?.role !== 'ac') return 'CONTINUE';
   if (held || children.some(node => input.schema.types[node.kind]?.role === 'task' && present(node) && stages.active.includes(data(node).stage))) return 'WAIT';
   if (data(ac).stage === stages.done) return ['blue', 'yellow', 'orange'].includes(tone(ac)) ? 'CONTINUE' : 'WAIT';
   if (![stages.ready, stages.implement].includes(data(ac).stage)) return 'WAIT';
-  if (data(ac).stage !== stages.implement) return 'CONTINUE';
-  const tests = children.filter(node => input.schema.types[node.kind]?.role === 'test' && present(node));
-  return tests.length && tests.every(node => tone(node) === 'green' && node.result?.status === 'pass' &&
-    /^[a-f0-9]{40}$/.test(node.result.commit || '')) ? 'DONE' : 'CONTINUE';
+  return passingTests(input, children) ? "DONE" : "CONTINUE";
 }
 export async function inspect(input, read, runs, stages, holds, tasks, detail = {}) {
   const ac = await read('joppa_objects', {address: input.selected.address});
