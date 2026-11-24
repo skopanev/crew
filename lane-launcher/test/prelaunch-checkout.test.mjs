@@ -32,6 +32,37 @@ test('saves committed, dirty and untracked work before a fresh checkout can star
   assert.deepEqual(fs.readdirSync(checkout), []);
 });
 
+test('recovers a confirmed released repair checkout only with every repair marker', async t => {
+  const f = await reuseFixture(t), {run, prior, dir, checkout} = f;
+  run.config.discardFailedWorktree = true;
+  run.config.delivery = 'branch';
+  run.recoveryBase = fs.readFileSync(path.join(checkout, '.git/lane-base'), 'utf8').trim();
+  const {dev, ino} = fs.statSync(checkout);
+  prior.discardCheckout = {path: checkout, dev, ino};
+  prior.repairDelivery = {branch: 'original-task-branch'};
+  prior.releaseConfirmed = true;
+  prior.result = {status: 'failed', code: 2, repairPending: true, released: true};
+  for (const key of ['repairDelivery', 'releaseConfirmed', 'repairPending', 'released']) {
+    const holder = key in prior ? prior : prior.result, saved = holder[key];
+    delete holder[key]; f.savePrior();
+    assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /still holds|No matching/);
+    assert.equal(fs.existsSync(checkout), true);
+    holder[key] = saved;
+  }
+  prior.result.held = true; f.savePrior();
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /No matching/);
+  delete prior.result.held; f.savePrior();
+  fs.writeFileSync(path.join(checkout, 'a.txt'), 'Unfinished repair\n');
+  fs.writeFileSync(path.join(checkout, 'repair.txt'), 'New repair work\n');
+  const head = git(checkout, 'rev-parse', 'HEAD');
+  clearPreviousCheckout(run, dir, () => {}, () => {});
+  assert.equal(fs.existsSync(checkout), false);
+  assert.equal(git(run.repository.path, 'rev-parse', run.prelaunchRecovery.ref), head);
+  const patch = fs.readFileSync(run.prelaunchRecovery.patch, 'utf8');
+  assert.match(patch, /Unfinished repair/);
+  assert.match(patch, /New repair work/);
+});
+
 test('keeps active, foreign, replaced and unrecoverable checkouts', async t => {
   const f = await reuseFixture(t), {run, prior, dir, checkout} = f;
   run.config.discardFailedWorktree = true;

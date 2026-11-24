@@ -24,7 +24,9 @@ export function clearPreviousCheckout(run, dir, persist, announce) {
     .filter(other => other.executionId === run.executionId);
   need(!others.some(runHoldsTasks), 'Another run still holds the preexisting checkout');
   const prior = others.filter(other => other.result?.status === 'failed' && other.result.code !== 73 &&
-    other.result.blockConfirmed === true && (other.discardCheckout?.path === checkout || other.retained?.checkout === checkout))
+    (other.result.blockConfirmed === true || other.repairDelivery && other.result.repairPending === true &&
+      other.result.released === true && other.releaseConfirmed === true && other.result.held !== true) &&
+    (other.discardCheckout?.path === checkout || other.retained?.checkout === checkout))
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).at(-1);
   need(prior && prior.workspace === run.workspace && prior.task === run.task &&
     prior.config.joppa?.url === run.config.joppa?.url && prior.repository?.path === run.repository.path &&
