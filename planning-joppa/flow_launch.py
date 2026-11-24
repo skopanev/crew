@@ -15,7 +15,7 @@ def configuration(path, raw=None, input_index=None):
     config = json.loads(raw if raw is not None else Path(path).read_bytes())
     if "inputs" in config:
         profiles = config["inputs"]
-        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication"}
+        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication", "wait_for_dependencies"}
         require(isinstance(profiles, list) and profiles and all(isinstance(p, dict) and isinstance(p.get("selection"), dict) and
                 set(p) <= keys for p in profiles), "inputs needs ordered native selection profiles")
         base = {key: value for key, value in config.items() if key != "inputs"}
@@ -33,6 +33,7 @@ def configuration(path, raw=None, input_index=None):
             "config.selection needs a native kind filter")
     require(config.get("mcp_command") or config.get("token_file"), "configure Joppa authentication")
     require(isinstance(config.get("vars", {}), dict), "config.vars must be an object")
+    require(type(config.get("wait_for_dependencies", False)) is bool, "config.wait_for_dependencies must be boolean")
     require(isinstance(config.get("exclude_tags", []), list) and
             all(isinstance(tag, str) and tag.strip() for tag in config.get("exclude_tags", [])),
             "exclude_tags must be a list of nonempty tags")
@@ -79,7 +80,7 @@ def configuration(path, raw=None, input_index=None):
                 incoming["kind"] and isinstance(incoming["relation"], str) and incoming["relation"], "invalid incoming query")
     permission = publication.get("related_updates", {})
     require(isinstance(permission, dict) and set(permission) <= {"parent", "incoming"} and
-            ("parent" not in permission or permission["parent"] == ["stage"]) and
+            ("parent" not in permission or permission["parent"] in (["stage"], ["stage", "returns"], ["stage", "returns", "tags"])) and
             ("incoming" not in permission or permission["incoming"] == "remove_selected_edge") and
             (not permission or related is not None), "invalid related write permissions")
     require(type(config.get("repeat", False)) is bool, "config.repeat must be boolean")

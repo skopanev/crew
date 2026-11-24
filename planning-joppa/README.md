@@ -30,7 +30,8 @@ Writer is the first bundled example in [writer](../writer/README.md).
 
 Optional `inputs` lists ordered profiles. Each profile requires `selection` with native filters.
 The dispatcher selects the first eligible item from the first eligible profile.
-Each profile replaces only its named fields: `selection`, `order`, `exclude_tags`, `exclude_children`, `children`, `references`, `related` and `publication`.
+Each profile replaces only its named fields: `selection`, `order`, `exclude_tags`, `exclude_children`, `children`, `references`, `related`, `publication` and `wait_for_dependencies`.
+`wait_for_dependencies` accepts a boolean. Its default is `false`.
 Other fields come from the root config. Profiles cannot replace authentication, workflow variables or workspace identity.
 Use scalar stage filters in separate profiles. Native `data` arrays mean containment, not alternatives.
 Set `children: {}`, `references: []` and `exclude_children: null` to disable inherited context filters.
@@ -67,6 +68,9 @@ It refuses held parents and consumers. Archived consumers keep their historical 
 Optional `publication.related_updates` adds two narrow permissions: `"parent": ["stage"]` and `"incoming": "remove_selected_edge"`.
 The configured `update_kinds` must also permit these targets.
 The parent save changes only `data.stage` and uses `context.parent.current_revision`.
+Task repair can explicitly permit `["stage", "returns"]` or `["stage", "returns", "tags"]` for the parent AC.
+`flow_publication.operations` permits one increment of the captured parent counter.
+At the configured return limit, a tags update can only add `STUCK_TAG` and preserve every existing tag.
 Each consumer save removes only the edge to the selected object. It requires that selected object's archive in the same publication.
 Send the complete native relation group after removal. Preserve its title, color, facts and all other edges.
 `flow_publication.operations` places the parent save before Task saves and archives. All operations and claim releases share one batch of at most 100 operations.

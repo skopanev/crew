@@ -310,7 +310,7 @@ nodes:
       __failed__: failed
       __default__: failed
   rejected:
-    # Only supported findings return an AC. A Task repair never changes AC returns.
+    # Supported findings increment AC returns. Generic Task refusals do not.
     shell: |
       set -eu
       a="$MEDULLA_RUN_DIR/artifacts"

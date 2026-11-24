@@ -176,6 +176,7 @@
         "assignee": "",
         "depth": 5
       },
+      "wait_for_dependencies": true,
       "exclude_children": null,
       "children": {},
       "references": [],
@@ -212,7 +213,9 @@
         ],
         "related_updates": {
           "parent": [
-            "stage"
+            "stage",
+            "returns",
+            "tags"
           ],
           "incoming": "remove_selected_edge"
         }
