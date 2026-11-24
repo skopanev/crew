@@ -15,6 +15,10 @@ const need = (ok, message) => { if (!ok) throw new Error(message); };
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const count = value => [...value].length;
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+// The agents read their files through read_context and read_file. On a retry the author prompt also names the
+// previous draft and the findings to close. The first prompt has the AC only.
+const feedback = directory => emit('decider_feedback', 'Previous draft and findings to close: ' +
+  ['draft.json', 'critique.json', 'shape-feedback.json'].map(name => path.join(directory, name)).filter(fs.existsSync).join(' '));
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const save = (file, value) => { fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n'); fs.renameSync(file + '.tmp', file); };
 const emit = (key, value) => console.log(`<signal:var key=${key}>${String(value).replaceAll('<', '\\u003c').replaceAll('{{', '\\u007b\\u007b')}</signal:var>`);
@@ -215,7 +219,7 @@ function main() {
     const issues = problems(draft, input, packeted.includes(draft.outcome) ? read(path.join(directory, 'decider-assignment.json')) : undefined);
     if (issues.length) {
       if (Number(env.shape_retries || 0) < 1) {
-        emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); signal('REVISE');
+        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(directory); signal('REVISE');
       } else {
         // A broken output contract is a technical failure: stage and returns stay.
         fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the decision stayed invalid after one correction.\n' + issues.join('\n'));
@@ -231,15 +235,22 @@ function main() {
     const evidence = path.join(directory, 'freeze-issues.json');
     if (fs.existsSync(evidence)) {
       const issues = read(evidence);
-      if (Number(env.shape_retries || 0) < 1) { emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); signal('REVISE'); }
+      if (Number(env.shape_retries || 0) < 1) {
+        save(path.join(directory, 'shape-feedback.json'), issues); emit('shape_feedback', JSON.stringify(issues)); emit('shape_retries', '1'); feedback(directory); signal('REVISE');
+      }
       else { fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID: the evidence quotes stayed wrong after one correction.\n' + issues.join('\n')); signal('FAILED'); }
       return;
     }
     emit('draft_digest', hash(file('draft'))); emit('context_digest', hash(path.join(directory, 'decider-assignment.json')));
+    fs.rmSync(path.join(directory, 'shape-feedback.json'), {force: true});
     emit('shape_feedback', ''); emit('shape_retries', '0'); signal('FROZEN'); return;
   }
   need(command === 'review', 'Use policy, check, digest, review or rejected');
-  const first = read(file('critic-codex')), second = read(file('critic-second'));
+  // The host stamps the digests that freeze gave to this critic step. wellFormed still compares them with the
+  // current draft and assignment. A model does not copy a 64-character hash.
+  const stamp = review => review && typeof review === 'object' && !Array.isArray(review)
+    ? {...review, draft_digest: env.draft_digest, context_digest: env.context_digest} : review;
+  const first = stamp(read(file('critic-codex'))), second = stamp(read(file('critic-second')));
   const digests = [hash(file('draft')), hash(path.join(directory, 'decider-assignment.json'))];
   if (![first, second].every(review => wellFormed(review, ...digests))) {
     fs.writeFileSync(path.join(directory, 'failure.txt'), 'INVALID_REVIEW: a critic output is malformed or names another digest.\n' +
@@ -262,7 +273,8 @@ function main() {
     const value = proposal(input, draft, read(path.join(directory, 'decider-assignment.json')), run, settings(env));
     save(file('would-publish'), value); save(file('operations'), dryOutput(value, env.DRY_RUN === 'true')); signal('APPROVED');
   } else if (Number(env.round || 1) <= Number(env.REWORK_LIMIT)) {
-    emit('critique', JSON.stringify({codex: first, second})); emit('round', String(Number(env.round || 1) + 1)); signal('REVISE');
+    save(path.join(directory, 'critique.json'), {codex: first, second});
+    emit('critique', JSON.stringify({codex: first, second})); emit('round', String(Number(env.round || 1) + 1)); feedback(directory); signal('REVISE');
   } else {
     fs.writeFileSync(path.join(directory, 'failure.txt'), 'Independent critics did not approve the frozen decision.\n' +
       JSON.stringify({codex: first, second}, null, 2) + '\n');

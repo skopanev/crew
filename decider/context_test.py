@@ -104,6 +104,31 @@ class ContextTest(unittest.TestCase):
                 written.clear(); context.main()
                 save.assert_called_once(); self.assertNotIn('freeze-issues.json', written)
 
+    def test_prepare_writes_the_files_for_read_context_and_emits_only_the_ac_address(self):
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); brain = root / 'brain'; manuals = root / 'manuals'; brain.mkdir(); manuals.mkdir()
+            config = {'workspace': 'w', 'vars': {'BRAIN_ROOT': str(brain), 'MANUALS_ROOT': str(manuals), 'BRAIN_EXCLUDE': 'obsolete'}}
+            node = lambda address: {'address': address, 'current_revision': 4, 'document': {'present': True, 'data': {'body': 'x' * 5000}}}
+            base = {'selected': node('ac:sel'), 'requirement': node('requirement:r'), 'sibling_acs': [node('ac:a')]}
+            files = {'input.json': base, 'contracts.json': {'decider': {'content': 'Decider rules.'}, 'audit': {'content': 'Audit rules.'}}}
+            def write(file, value): files[file.name] = value
+            def require(ok, message):
+                if not ok: raise ValueError(message)
+            helpers = (lambda: root, None, lambda: config, None, None, None, lambda file: copy.deepcopy(files[file.name]), write, require, None)
+            out = StringIO()
+            with patch.object(context, 'native', return_value=helpers), patch.object(sys, 'argv', ['context.py', 'prepare']), \
+                    patch.object(context, 'assignment'), patch.dict(os.environ, {'CREW_FLOW_STAGES': '/x', 'PLANNING_JOPPA_CONFIG': '/y'}), \
+                    patch('sys.stdout', out):
+                context.main()
+            self.assertEqual((root / 'contract-decider.md').read_text(), 'Decider rules.')
+            self.assertEqual((root / 'contract-audit.md').read_text(), 'Audit rules.')
+            self.assertEqual(files['decider-settings.json'], {'BRAIN_ROOT': str(brain), 'BRAIN_EXCLUDE': 'obsolete', 'MANUALS_ROOT': str(manuals)})
+            printed = out.getvalue()
+            self.assertIn('<signal:var key=decider_ac>ac:sel</signal:var>', printed)
+            self.assertIn(f'<signal:var key=decider_artifacts>{root}</signal:var>', printed)
+            self.assertNotIn('decider_assignment_path', printed); self.assertNotIn('x' * 100, printed)
+
     def test_full_requirement_all_34_siblings_and_32_notes_reuse_native_pagination(self):
         api = API()
         value = context.collect(api, {'workspace': 'fixture'}, {'address': 'ac:selected', 'document': {'parent': 'requirement:r'}}, pages, object_read)

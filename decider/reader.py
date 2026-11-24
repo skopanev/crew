@@ -15,7 +15,8 @@ class Sources(Reader):
         self.config = config or {}
 
     def tools(self):
-        return [tool for tool in super().tools() if tool['name'] in ('joppa_search', 'joppa_objects')] + [{
+        # read_file and read_context come from the shared Reader: they read and list only this agent's granted files.
+        return [tool for tool in super().tools() if tool['name'] in ('joppa_search', 'joppa_objects', 'read_file', 'read_context')] + [{
             'name': 'read_document', 'description': 'Read full PDF, DOCX or UTF-8 text inside approved roots, with its raw file SHA256.',
             'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False},
             'annotations': {'readOnlyHint': True, 'destructiveHint': False}}]
@@ -38,6 +39,8 @@ class Sources(Reader):
             address = node.get('parent', node.get('document', {}).get('parent'))
 
     def call(self, name, arguments):
+        if name in ('read_file', 'read_context'):
+            return super().call(name, arguments)
         if name == 'read_document':
             if not isinstance(arguments, dict) or set(arguments) != {'path'} or not isinstance(arguments['path'], str):
                 raise MCPError('Use one document path inside the approved roots')

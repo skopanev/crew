@@ -7,6 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {problems, proposal, reviews, policy, rejected, settings} from './control.mjs';
+// The digests that freeze gives to the critic step. The host stamps them on each critic output.
+const frozenDigests = directory => Object.fromEntries([['draft_digest', 'draft'], ['context_digest', 'decider-assignment']].map(([key, name]) =>
+  [key, fs.existsSync(path.join(directory, name + '.json')) ? createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex') : '']));
 
 const here = path.dirname(fileURLToPath(import.meta.url)), keys = ['G', 'A', 'U', 'M', 'V', 'R'];
 const config = JSON.parse(fs.readFileSync(path.join(here, 'config.example.json')));
@@ -126,9 +129,34 @@ test('the private config, both contracts, frozen prompts and readonly author rou
   for (const [seat, signal] of [['review_join', 'REJECTED'], ['rejected', 'RETURN']])
     assert.equal(workflow.nodes[seat].on_signal[signal], signal === 'RETURN' ? 'publish' : 'rejected');
   assert.equal(workflow.nodes.draft_check.on_signal.REJECTED, undefined); assert.equal(workflow.nodes.draft_check.on_signal.FAILED, 'failed');
-  for (const seat of ['author', 'critics']) for (const token of ['{{var:decider_contract}}', '{{var:audit_contract}}', '{{file:{{var:decider_assignment_path}}}}']) assert.ok(workflow.nodes[seat].prompt.includes(token));
+  // The prompt is the role prompt and the AC address. The critic also gets the draft path. On a retry the author gets
+  // one more line with the previous draft and the findings. The agents find all other files through read_context.
+  assert.equal(workflow.nodes.author.prompt, '{{file:prompts/author.md}}\nAC: {{var:decider_ac}}\n{{var:decider_feedback}}\n');
+  assert.equal(workflow.nodes.critics.prompt, '{{file:prompts/critic.md}}\nAC: {{var:decider_ac}}\nDraft: {{var:decider_artifacts}}/draft.json\n');
+  for (const role of ['author', 'critic']) {
+    const prompt = fs.readFileSync(path.join(here, 'prompts', role + '.md'), 'utf8');
+    for (const text of ['mcp__joppa__read_context first', 'mcp__joppa__read_file', 'offset set to next_offset until next_offset is null'])
+      assert.ok(prompt.includes(text), role + ' lacks ' + text);
+    assert.doesNotMatch(prompt, /digest|no tools|named in the prompt/i);
+  }
   assert.ok(workflow.nodes.author.agent.args.includes('--tools=Read,Glob,Grep'));
-  assert.ok(workflow.nodes.critics.inputs.shell.includes('../writer/control.mjs'));
+  assert.ok(workflow.nodes.author.agent.args.includes('{{var:decider_author_reader_config}}'));
+  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_author "\$\(files contract-decider\.md contract-audit\.md decider-settings\.json decider-assignment\.json draft\.json critique\.json shape-feedback\.json\)"/);
+  assert.match(workflow.nodes.prepare.shell, /node "\$reader" prepare decider_critic "\$\(files contract-decider\.md contract-audit\.md decider-assignment\.json draft\.json\)"/);
+  assert.ok(workflow.nodes.critics.agent.args.includes('{{input.a13:-}}'));
+  // Both critic seats come from the shared agent-reader.mjs. A seat without the reader fails the node.
+  const seats = [{slug: 'codex', harness: 'codex', a1: '-c', a2: 'mcp_servers={"joppa"={"command"="python3"}}'},
+    {slug: 'second', harness: 'claude-code', a1: '--mcp-config', a2: '/r/critic.json', a3: '--tools='}];
+  for (const [value, ok] of [[seats, true], [[seats[0], {slug: 'second', harness: 'claude-code', a1: '--mcp-config', a2: '{"mcpServers":{}}'}], false],
+    [[{slug: 'codex', harness: 'codex', a1: '-c', a2: 'features.shell_tool=false'}, seats[1]], false]]) {
+    const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'decider-seats-'));
+    fs.writeFileSync(path.join(runtime, 'agent-reader.mjs'), `console.log(${JSON.stringify(JSON.stringify(value))});\n`);
+    const run = spawnSync('bash', ['-c', workflow.nodes.critics.inputs.shell], {encoding: 'utf8', env: {...process.env,
+      CREW_FLOW_STAGES: path.join(runtime, 'flow_stages.py'), decider_critic_reader_config: '/r/critic.json', decider_critic_reader_home: ''}});
+    fs.rmSync(runtime, {recursive: true, force: true});
+    assert.equal(run.status === 0, ok, JSON.stringify(value));
+    if (ok) assert.deepEqual(JSON.parse(run.stdout), value);
+  }
   assert.match(workflow.nodes.prepare.shell, /FLOW_ASSIGNMENT_INLINE=false/);
   assert.match(workflow.nodes.publish.shell, /context.py.*verify/);
   assert.match(workflow.nodes.publish.shell, /CREW_FLOW_STAGES.*publish/);
@@ -158,7 +186,7 @@ test('CLI publication note IDs are stable per run and distinct between runs for 
     const approved = {...review(), draft_digest: digest('draft'), context_digest: digest('decider-assignment')};
     for (const seat of ['codex', 'second']) fs.writeFileSync(path.join(directory, 'critic-' + seat + '.json'), JSON.stringify(approved));
     const result = spawnSync(process.execPath, [path.join(here, 'control.mjs'), 'review', directory],
-      {encoding: 'utf8', env: {...process.env, ...vars, DRY_RUN: 'false', REWORK_LIMIT: '1'}});
+      {encoding: 'utf8', env: {...process.env, ...vars, ...frozenDigests(directory), DRY_RUN: 'false', REWORK_LIMIT: '1'}});
     assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /<signal:APPROVED>/);
     const operations = JSON.parse(fs.readFileSync(path.join(directory, 'operations.json'))).operations;
     ids.push(operations.find(row => row.command.op === 'note').command.id);
@@ -193,9 +221,33 @@ test('final rejection preserves every finding, quote, reason and correction from
       advice: seat + ' correction ' + i + ': keep the verified condition.'}))}]));
   for (const [seat, value] of Object.entries(critics)) fs.writeFileSync(path.join(root, 'critic-' + seat + '.json'), JSON.stringify(value));
   const result = spawnSync(process.execPath, [path.join(here, 'control.mjs'), 'review', root],
-    {encoding: 'utf8', env: {...process.env, ...vars, DRY_RUN: 'false', round: '2', REWORK_LIMIT: '1'}});
+    {encoding: 'utf8', env: {...process.env, ...vars, ...frozenDigests(root), DRY_RUN: 'false', round: '2', REWORK_LIMIT: '1'}});
   assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /<signal:REJECTED>/);
   const failure = fs.readFileSync(path.join(root, 'failure.txt'), 'utf8');
   assert.ok(failure.length > 4000); assert.deepEqual(JSON.parse(failure.slice(failure.indexOf('\n') + 1)), critics);
   assert.equal(fs.existsSync(path.join(root, 'operations.json')), false);
+});
+
+test('a retry names the previous draft and the findings to close in the author prompt', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'decider-feedback-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.writeFileSync(path.join(root, 'input.json'), JSON.stringify(input()));
+  fs.writeFileSync(path.join(root, 'draft.json'), JSON.stringify({outcome: 'READY'}));
+  const out = spawnSync(process.execPath, [path.join(here, 'control.mjs'), 'check', root], {encoding: 'utf8', env: {...process.env, ...vars, shape_retries: '0'}}).stdout;
+  assert.match(out, /<signal:REVISE>/);
+  assert.ok(out.includes(`<signal:var key=decider_feedback>Previous draft and findings to close: ${root}/draft.json ${root}/shape-feedback.json</signal:var>`), out);
+  assert.ok(Array.isArray(JSON.parse(fs.readFileSync(path.join(root, 'shape-feedback.json'), 'utf8'))));
+});
+
+test('every assembled Decider prompt is short and carries no data', () => {
+  const workflow = Bun.YAML.parse(fs.readFileSync(path.join(here, 'workflow.yaml'), 'utf8'));
+  const a = '/runs/2026-11-24_07-27-40-265d14e6/artifacts';
+  const values = {decider_ac: 'ac:x', decider_artifacts: a, decider_feedback: 'Previous draft and findings to close: ' + a + '/draft.json ' + a + '/critique.json'};
+  const render = prompt => prompt.replace(/\{\{file:prompts\/([a-z]+\.md)\}\}/g, (_, name) => fs.readFileSync(path.join(here, 'prompts', name), 'utf8'))
+    .replace(/\{\{var:([A-Za-z_]+)\}\}/g, (_, name) => values[name] ?? '');
+  for (const seat of ['author', 'critics']) {
+    const prompt = render(workflow.nodes[seat].prompt);
+    assert.ok(prompt.length < 15000, seat + ' prompt has ' + prompt.length + ' characters');
+    assert.doesNotMatch(prompt, /\{\{/);
+  }
 });

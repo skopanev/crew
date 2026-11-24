@@ -83,7 +83,13 @@ def main():
             mcp = {'mcpServers': {'sources': {'command': sys.executable, 'args': [str(reader)],
                    'env': {key: os.environ[key] for key in ('CREW_FLOW_STAGES', 'PLANNING_JOPPA_CONFIG')}}}}
             write(target / 'reader-mcp.json', mcp)
-            print(f'<signal:var key=decider_assignment_path>{target / "decider-assignment.json"}</signal:var>')
+            # The prompt holds the role prompt and the AC address. The agents find these files through read_context.
+            contracts = read(target / 'contracts.json')
+            for role in ('decider', 'audit'):
+                (target / f'contract-{role}.md').write_text(contracts[role]['content'])
+            write(target / 'decider-settings.json', {key: config['vars'].get(key, '') for key in ('BRAIN_ROOT', 'BRAIN_EXCLUDE', 'MANUALS_ROOT')})
+            print(f'<signal:var key=decider_ac>{base["selected"]["address"]}</signal:var>')
+            print(f'<signal:var key=decider_artifacts>{target}</signal:var>')
             print(f'<signal:var key=DECIDER_MCP_CONFIG>{target / "reader-mcp.json"}</signal:var>')
         elif command == 'freeze':
             draft = read(target / 'draft.json')

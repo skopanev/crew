@@ -7,6 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {problems} from './control.mjs';
+// The digests that freeze gives to the critic step. The host stamps them on each critic output.
+const frozenDigests = directory => Object.fromEntries([['draft_digest', 'draft'], ['context_digest', 'decider-assignment']].map(([key, name]) =>
+  [key, fs.existsSync(path.join(directory, name + '.json')) ? createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex') : '']));
 
 const here = path.dirname(fileURLToPath(import.meta.url)), keys = ['G', 'A', 'U', 'M', 'V', 'R'];
 const vars = Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(here, 'config.example.json'))).vars).map(([key, value]) => [key, String(value)]));
@@ -59,7 +62,7 @@ test('an approved DUPLICATE or OBSOLETE keeps a preview, freezes no plan and goe
       fs.writeFileSync(path.join(directory, name + '.json'), JSON.stringify(value));
     }
     const call = mode => spawnSync(process.execPath, [path.join(here, 'control.mjs'), mode, directory],
-      {encoding: 'utf8', env: {...process.env, ...vars, DRY_RUN: dry, round: '1', REWORK_LIMIT: '1'}});
+      {encoding: 'utf8', env: {...process.env, ...vars, ...frozenDigests(directory), DRY_RUN: dry, round: '1', REWORK_LIMIT: '1'}});
     assert.match(call('check').stdout, /<signal:CHECKED>/);
     const digest = name => createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex');
     const critic = {draft_digest: digest('draft'), context_digest: digest('decider-assignment'), verdict: 'APPROVE',

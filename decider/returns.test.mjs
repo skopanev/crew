@@ -7,6 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {problems, proposal, reviews, policy, rejected, settings} from './control.mjs';
+// The digests that freeze gives to the critic step. The host stamps them on each critic output.
+const frozenDigests = directory => Object.fromEntries([['draft_digest', 'draft'], ['context_digest', 'decider-assignment']].map(([key, name]) =>
+  [key, fs.existsSync(path.join(directory, name + '.json')) ? createHash('sha256').update(fs.readFileSync(path.join(directory, name + '.json'))).digest('hex') : '']));
 
 const here = path.dirname(fileURLToPath(import.meta.url)), keys = ['G', 'A', 'U', 'M', 'V', 'R'];
 const config = JSON.parse(fs.readFileSync(path.join(here, 'config.example.json')));
@@ -77,7 +80,7 @@ test('an invalid second draft or critic output is technical, and only a critic r
   fs.writeFileSync(path.join(directory, 'input.json'), JSON.stringify(input()));
   fs.writeFileSync(path.join(directory, 'draft.json'), JSON.stringify({...draft(), outcome: 'MAYBE'}));
   const call = (mode, extra = {}) => spawnSync(process.execPath, [path.join(here, 'control.mjs'), mode, directory],
-    {encoding: 'utf8', env: {...process.env, ...vars, DRY_RUN: 'false', ...extra}});
+    {encoding: 'utf8', env: {...process.env, ...vars, ...frozenDigests(directory), DRY_RUN: 'false', ...extra}});
   const check = call('check', {shape_retries: '1'});
   assert.equal(check.status, 0, check.stderr); assert.match(check.stdout, /<signal:FAILED>/);
   assert.match(fs.readFileSync(path.join(directory, 'failure.txt'), 'utf8'), /^INVALID: [^]*Unknown outcome/);
@@ -89,13 +92,17 @@ test('an invalid second draft or critic output is technical, and only a critic r
   const write = (codex, second) => { for (const [seat, value] of [['codex', codex], ['second', second]])
     fs.writeFileSync(path.join(directory, 'critic-' + seat + '.json'), JSON.stringify(value)); };
   const disagree = Object.fromEntries(keys.map(key => [key, {agree: key !== 'G', evidence: 'Exact evidence.'}]));
-  for (const broken of [{draft_digest: 'old'}, {verdict: 'MAYBE'}, {scores: {}}, {findings: [{problem: ''}]},
+  for (const broken of [{verdict: 'MAYBE'}, {scores: {}}, {findings: [{problem: ''}]},
     {verdict: 'REWORK', findings: [], summary: 'No change is required.'}, {verdict: 'APPROVE', scores: disagree}]) {
     write(critic({verdict: 'REWORK', findings: [{problem: 'Wrong.', advice: 'Fix.'}]}), critic(broken));
     const failed = call('review', {round: '2', REWORK_LIMIT: '1'});
     assert.equal(failed.status, 0, failed.stderr); assert.match(failed.stdout, /<signal:FAILED>/, JSON.stringify(broken));
     assert.match(fs.readFileSync(path.join(directory, 'failure.txt'), 'utf8'), /^INVALID_REVIEW:/);
   }
+  // The host stamps the frozen digests. A draft that changed after the freeze is a malformed review.
+  write(critic(), critic());
+  const moved = call('review', {round: '2', REWORK_LIMIT: '1', draft_digest: 'f'.repeat(64)});
+  assert.match(moved.stdout, /<signal:FAILED>/); assert.match(fs.readFileSync(path.join(directory, 'failure.txt'), 'utf8'), /^INVALID_REVIEW:/);
   write(critic({verdict: 'REWORK', findings: [{problem: 'The clause is wrong.', advice: 'Keep the rule.'}]}),
     critic({findings: [{problem: 'A text fix is needed.', advice: 'Use the Source sentence.'}]}));
   const refused = call('review', {round: '2', REWORK_LIMIT: '1'});

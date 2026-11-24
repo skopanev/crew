@@ -36,7 +36,13 @@ vars:
   round: '1'
   shape_retries: '0'
   shape_feedback: ''
-  decider_assignment_path: ''
+  decider_ac: ''
+  decider_artifacts: ''
+  decider_feedback: ''
+  decider_author_reader_config: ''
+  decider_author_reader_home: ''
+  decider_critic_reader_config: ''
+  decider_critic_reader_home: ''
   DECIDER_MCP_CONFIG: ''
   draft: ''
   draft_digest: ''
@@ -51,6 +57,11 @@ nodes:
       printf '%s\n' "$prepared" | grep -v -e '^<signal:PREPARED>' -e '^<signal:var key=assignment>' || true
       case "$prepared" in *'<signal:PREPARED>'*) ;; *) exit 0 ;; esac
       "$PLANNING_PYTHON" "$MEDULLA_WORKFLOW_DIR/context.py" prepare
+      # The shared reader reads only these files. The author also gets the settings and the retry files.
+      a="$MEDULLA_RUN_DIR/artifacts" reader="$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs"
+      files() { jq -nc --arg a "$a" '$ARGS.positional | map($a + "/" + .)' --args "$@"; }
+      node "$reader" prepare decider_author "$(files contract-decider.md contract-audit.md decider-settings.json decider-assignment.json draft.json critique.json shape-feedback.json)" "$a/reader-mcp.json"
+      node "$reader" prepare decider_critic "$(files contract-decider.md contract-audit.md decider-assignment.json draft.json)" "$a/reader-mcp.json"
       echo '<signal:PREPARED>The decision context and the live contracts are ready.</signal:PREPARED>'
     on_signal:
       PREPARED: author
@@ -74,7 +85,7 @@ nodes:
         - --strict-mcp-config
         - --setting-sources=
         - --mcp-config
-        - '{{var:DECIDER_MCP_CONFIG}}'
+        - '{{var:decider_author_reader_config}}'
         - --tools=Read,Glob,Grep
         - --add-dir
         - '{{var:BRAIN_ROOT}}'
@@ -82,17 +93,8 @@ nodes:
         - '{{var:MANUALS_ROOT}}'
     prompt: |
       {{file:prompts/author.md}}
-      Mandatory Decider contract:
-      {{var:decider_contract}}
-      Mandatory AC audit contract:
-      {{var:audit_contract}}
-      Brain root: {{var:BRAIN_ROOT}}
-      Excluded obsolete Brain folder: {{var:BRAIN_EXCLUDE}}
-      Vendor manuals root: {{var:MANUALS_ROOT}}
-      Assignment: {{file:{{var:decider_assignment_path}}}}
-      Previous draft: {{var:draft}}
-      Critic findings: {{var:critique}}
-      Format problems: {{var:shape_feedback}}
+      AC: {{var:decider_ac}}
+      {{var:decider_feedback}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture draft'
     on_signal:
       CAPTURED: draft_check
@@ -132,7 +134,12 @@ nodes:
     min_success: 2
     inputs:
       shell: |
-        node "$MEDULLA_WORKFLOW_DIR/../writer/control.mjs" seats
+        set -eu
+        seats="$(node "$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs" seats "$decider_critic_reader_config" "$decider_critic_reader_home")"
+        # A seat without the reader would judge the decision blind. Fail the node instead.
+        printf '%s' "$seats" | jq -e --arg c "$decider_critic_reader_config" 'length == 2 and all(.[]; (.env.BROKER_AGY_HOME // "") != "" or
+          ([to_entries[] | select(.key | test("^a[0-9]+$")) | .value] | any((startswith("mcp_servers") and contains("joppa")) or . == $c)))' >/dev/null
+        printf '%s\n' "$seats"
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -150,16 +157,12 @@ nodes:
         - '{{input.a9:-}}'
         - '{{input.a10:-}}'
         - '{{input.a11:-}}'
+        - '{{input.a12:-}}'
+        - '{{input.a13:-}}'
     prompt: |
       {{file:prompts/critic.md}}
-      Mandatory Decider contract:
-      {{var:decider_contract}}
-      Mandatory AC audit contract:
-      {{var:audit_contract}}
-      Assignment and full frozen research evidence: {{file:{{var:decider_assignment_path}}}}
-      Draft digest: {{var:draft_digest}}
-      Context digest: {{var:context_digest}}
-      Frozen decision: {{var:draft}}
+      AC: {{var:decider_ac}}
+      Draft: {{var:decider_artifacts}}/draft.json
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "critic-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
       __done__: review_join
