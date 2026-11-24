@@ -28,4 +28,11 @@ test('lane role files preserve complete handoffs and checks across review seats'
       assert.equal(fs.statSync(file).mode & 0o077, 0);
     }
   }
+  const template = path.join(root, 'custom.md');
+  fs.writeFileSync(template, '{{last.message}}\n{{input.slug}}\n{{var:ticket_id}}');
+  execFileSync('node', [new URL('../bin/prompt-context.mjs', import.meta.url).pathname, 'custom_plan', template], {
+    env: {...process.env, MEDULLA_RUN_DIR: root, MEDULLA_INPUT: '{"slug":"correctness"}',
+      MEDULLA_LAST_MESSAGE: '$&\nComplete handoff', ticket_id: 'task:example'}});
+  const custom = JSON.parse(fs.readFileSync(path.join(root, 'artifacts/custom_plan-correctness-context.json')));
+  assert.equal(fs.readFileSync(custom.instructions_file, 'utf8'), '$&\nComplete handoff\ncorrectness\ntask:example');
 });
