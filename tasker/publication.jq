@@ -62,7 +62,10 @@ elif all($reviews[]; clean) then
         data: {tags: (($in.selected.document.data.tags // []) + [($ARGS.named.gap_tags[$gap.owner] | if text then . else error("Configure the owner gap tag") end)] | unique)},
         reason: "Keep the AC stage and ask the owner to resolve the Source gap."}},
       {command: {op: "note", target: $ac, id: note_id("gap"),
-        text: ("Decision required. " + ($d.gap | tojson) + "\nReason: " + $d.reason)}}],
+        text: ("OPEN QUESTION\nOwner: " + $gap.owner + "\nQuestion: " + $gap.question +
+          "\n" + (if $gap.recommended == "A" then "★ " else "" end) + "A: " + $gap.a +
+          "\n" + (if $gap.recommended == "B" then "★ " else "" end) + "B: " + $gap.b +
+          "\nRecommended: " + $gap.recommended + "\nReason: " + $d.reason)}}],
      outcome: {status: "blocked", reason_code: "DECISION_REQUIRED", reason: ($d.gap | tojson | .[0:1000])}}
 
   end) as $result |

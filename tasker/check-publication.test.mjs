@@ -122,7 +122,8 @@ test('DONE moves the AC with develop and Test evidence, while dry run writes not
     const question = {owner, question: 'Which rule applies?', a: 'Use A.', b: 'Use B.', recommended: 'A'};
     const output = review({verdict: 'GAP', reason: 'r', gap: question}, [approve, approve]);
     assert.deepEqual(output.publication.operations[0].command.data, {tags: ['source-gap-' + owner]});
-    assert.match(output.publication.operations[1].command.text, /Which rule applies/);
+    assert.equal(output.publication.operations[1].command.text,
+      `OPEN QUESTION\nOwner: ${owner}\nQuestion: ${question.question}\n★ A: ${question.a}\nB: ${question.b}\nRecommended: A\nReason: r`);
     const tags = review({verdict: "GAP", reason: "r", gap: question}, [approve, approve], "false", "fixture-owner", {}, {...settings, TASKER_GAP_TAGS: JSON.stringify({cto: "ask-tech", ceo: "ask-policy"})});
     assert.deepEqual(tags.publication.operations[0].command.data, {tags: [owner === "cto" ? "ask-tech" : "ask-policy"]});
   }
