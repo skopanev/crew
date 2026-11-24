@@ -38,11 +38,17 @@ def prepare_context(assignment, projects=None, read_paths=(), mcp_servers=None):
     knowledge, lessons = load_knowledge(assignment["workspace"], assignment.get("knowledge_query") or "\n".join(
         f"{level}: {assignment[level]['text']}" for level in ("domain", "capability", "requirement", "ac")))
     write(target / "knowledge.json", knowledge)
-    emit_var("assignment", assignment)
-    emit_var("source_history", history)
-    emit_var("knowledge", lessons)
-    for role, contract in contracts.items():
-        emit_var(role + "_contract", contract["content"])
+    write(target / "assignment.json", assignment)
+    write(target / "lessons.json", lessons)
+    write(target / "output-contracts.json", {key: os.environ.get(key, "") for key in
+          ("OUTPUT_CONTRACT", "NECESSITY_OUTPUT_CONTRACT")})
+    for role in ("research", "necessity", "design", "critic", "drift"):
+        (target / f"{role}-rules.md").write_text(
+            (Path(__file__).parent / "prompts" / f"{role}.md").read_text())
+    write(target / "planning-base-mcp.json", {"mcpServers": mcp_servers or {}})
+    write(target / "planning-read-paths.json", [str(Path(path).absolute()) for path in read_paths])
+    emit_var("planning_item_address", os.environ.get("PLANNING_JOPPA_REQ") or assignment["ac"]["id"])
+    emit_var("planning_plan_path", str(target / "plan.json"))
     # Values become TOML scalars inside Codex's explicit per-run configuration.
     for name in ("CBM_BIN", "CBM_CACHE_DIR", "CBM_ALLOWED_ROOT"):
         emit_var(name + "_TOML", json.dumps(os.environ[name]))
@@ -103,7 +109,6 @@ def save_necessity(result):
     result.setdefault("input_digest", expected)
     validation.necessity(result, expected, read(target / "input.json"))
     write(target / "necessity.json", result)
-    emit_var("necessity", result)
 
 
 def research_join():
@@ -112,7 +117,7 @@ def research_join():
     for key, report in reports.items():
         validation.research(report, key)
         require(report["status"] != "blocked", f"{key} research blocked: {report['summary']}")
-    emit_var("research", reports)
+    write(target / "research.json", reports)
     emit_var("assessment_digest", assessment_digest())
     signal("RESEARCHED", "All research branches completed")
 
@@ -143,7 +148,6 @@ def bind_necessity(plan):
 def review_input():
     plan = read(artifacts() / "plan.json")
     require(plan["disposition"] != "blocked", "plan blocked: " + "; ".join(plan["blockers"]))
-    emit_var("plan", plan)
     emit_var("plan_digest", digest(plan))
     signal("REVIEW", "Frozen plan sent independently to two critics")
 
@@ -168,7 +172,7 @@ def critique_join():
         return
     done.append({"plan_digest": digest(plan), "rejected": sorted(rejected)})
     write(rounds, done)
-    emit_var("critique", {"previous_plan": plan, "blocking_findings": rejected})
+    write(target / "critique.json", {"previous_plan": plan, "blocking_findings": rejected})
     signal("REVISE", "Rejected by " + ", ".join(sorted(rejected)) + "; design revises once")
 
 
@@ -281,8 +285,6 @@ def request_review(review):
     diff = review.pop("diff")
     (target / "drift.diff").write_text(diff)
     write(target / "drift.json", {**review, "outcome": "review"})
-    emit_var("drift", review)
-    emit_var("drift_diff", diff)
     emit_var("drift_digest", review["digest"])
     raise DriftReview("Base advanced cleanly; critics review the landed diff before publication")
 

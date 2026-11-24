@@ -44,6 +44,8 @@ def prepare_reader():
     return servers
 
 def prepare_critic():
+    if os.environ.get("PLANNING_READER_ROLE"):
+        return shared.prepare_critic()
     codex = os.environ["MEDULLA_HARNESS"] == "codex"
     shared.emit_var("PLANNING_CRITIC_MCP_OPTION", "-c" if codex else "")
     shared.emit_var("PLANNING_CRITIC_MCP_TOML", os.environ["PLANNING_MCP_TOML"] if codex else "")

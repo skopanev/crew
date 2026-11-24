@@ -76,7 +76,7 @@ class DriftReviewTests(unittest.TestCase):
                 stages.verify_freshness(self.assignment)
         record = json.loads((self.target / "drift.json").read_text())
         self.assertEqual(record["outcome"], "review")
-        self.assertEqual({call.args[0] for call in emitted.call_args_list}, {"drift", "drift_diff", "drift_digest"})
+        self.assertEqual({call.args[0] for call in emitted.call_args_list}, {"drift_digest"})
         return record
 
     def assert_code_drift(self, reason):

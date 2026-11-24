@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import validation
 
 from common import fingerprint, read, require, run, write
 
@@ -124,7 +125,8 @@ def prepare_opencode(read_paths, mcp_servers=None):
             require(path != "/" and not any(char in path for char in "*?"), "OpenCode read path is too broad")
             external[path] = "allow"
             external[path.rstrip("/") + "/**"] = "allow"
-    mcp = {name: {"type": "local", "command": [server["command"], *server["args"]], "enabled": True}
+    mcp = {name: {"type": "local", "command": [server["command"], *server["args"]], "enabled": True,
+                  **({"environment": server["env"]} if server.get("env") else {})}
            for name, server in (mcp_servers or {}).items()}
     with os.fdopen(os.open(file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
         json.dump({"snapshot": False, "provider": providers, "permission": {"external_directory": external},
@@ -145,8 +147,69 @@ def prepare_opencode(read_paths, mcp_servers=None):
 
 
 def prepare_critic():
-    if os.environ["MEDULLA_HARNESS"] == "agy":
-        prepare_agy()
+    role = os.environ.get("PLANNING_READER_ROLE")
+    if not role:
+        if os.environ["MEDULLA_HARNESS"] == "agy":
+            prepare_agy()
+        return
+    require(role in ("research", "necessity", "design", "critic", "drift"), "unknown planning reader role")
+    import stages as shared
+    target = shared.artifacts()
+    assignment = read(target / "assignment.json")
+    seat = json.loads(os.environ.get("MEDULLA_INPUT") or "{}") if role in ("research", "critic", "drift") else {}
+    require(isinstance(seat, dict), "planning reader seat must be an object")
+    slug = seat.get("slug", role)
+    require(slug in (*validation.RESEARCH, *validation.DRIFT_CRITICS,
+                     "design"), "unknown planning reader seat")
+    name = f"planning_{role}_{slug}"
+    reference = target / f"{name}-reference.json"
+    write(reference, {"role": role, "perspective": slug, "question": seat.get("question", ""),
+                      "read_instruction": seat.get("read_instruction", ""),
+                      "contract_role": "researcher" if role == "research" else
+                                       "designer" if role == "design" else "critic"})
+    files = [target / file for file in ("assignment.json", "input.json", "contracts.json", "history.json",
+             "knowledge.json", "lessons.json", "snapshots.json", "cbm-projects.json", "output-contracts.json",
+             f"{role}-rules.md")]
+    files.append(reference)
+    if role != "research":
+        files.append(target / "research.json")
+    if role in ("design", "critic", "drift"):
+        files.append(target / "necessity.json")
+    if role in ("critic", "drift"):
+        files.append(target / "plan.json")
+    if role == "design" and (target / "critique.json").is_file():
+        files.append(target / "critique.json")
+    if role == "drift":
+        files.extend([target / "drift.json", target / "drift.diff"])
+    roots = [str(Path(repo["path"]).absolute()) for repo in assignment["repositories"]]
+    for path in read(target / "planning-read-paths.json"):
+        if Path(path).is_dir():
+            roots.append(path)
+        else:
+            files.append(Path(path))
+    manifest = target / f"{name}-files.json"
+    write(manifest, {"files": list(map(str, files)), "roots": roots})
+    helper = os.environ.get("PLANNING_READER_HELPER") or str(
+        Path(__file__).resolve().parent.parent / "planning-joppa/agent-reader.mjs")
+    result = json.loads(run([os.environ.get("NODE_BIN", "node"), "--input-type=module", "-e", '''
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const [manifest, helper, name, base, harness] = process.argv.slice(1);
+const {prepare, prepareAgy, agentArgs} = await import(pathToFileURL(helper));
+const result = prepare(name, JSON.parse(fs.readFileSync(manifest, 'utf8')), base);
+if (harness === 'agy') prepareAgy(result.file, result.home);
+console.log(JSON.stringify({...result, toml: agentArgs('codex', result.file).at(-1)}));
+''', str(manifest), helper, name, str(target / "planning-base-mcp.json"), os.environ["MEDULLA_HARNESS"]], timeout=120))
+    servers = read(result["file"])["mcpServers"]
+    if os.environ["MEDULLA_HARNESS"] == "opencode":
+        prepare_opencode([*roots, *map(str, files)], mcp_servers=servers)
+    codex = os.environ["MEDULLA_HARNESS"] == "codex"
+    for key, value in {"PLANNING_MCP_CONFIG": result["file"], "PLANNING_READER_HOME": result["home"],
+                       "PLANNING_MCP_OPTION": "-c" if codex else "",
+                       "PLANNING_MCP_TOML": result["toml"] if codex else "",
+                       "PLANNING_MCP_TOOLS_OPTION": "--allowedTools",
+                       "PLANNING_MCP_TOOLS": "mcp__joppa__*"}.items():
+        shared.emit_var(key, value)
 
 
 def prepare_agy(mcp_servers=None):
