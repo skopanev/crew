@@ -97,14 +97,16 @@ export function installEnvironment(spec, base = process.cwd()) {
       need(Object.hasOwn(parent, key) && typeof parent[key] === 'string', 'A bound field must already contain a string');
       parent[key] = expand(value); pinned(parent[key]);
     }
-    const originDirectory = path.dirname(path.join(origin.repository, configPath));
+    const originDirectory = path.dirname(path.join(roots[spec.config.source], configPath));
     const check = (value, field = '') => {
       if (typeof value === 'string' && !Object.hasOwn(bindings, field) && !external.includes(field)) {
         const resolved = path.resolve(originDirectory, value);
         const real = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
         const isPath = path.isAbsolute(value) || value.startsWith('./') || value.startsWith('../') || fs.existsSync(resolved);
-        need(!Object.values(sources).some(source => (isPath && inside(source.repository, real)) ||
-          value.includes(source.repository + path.sep)), 'Declare a binding or exact external field for live source path: ' + field);
+        need(!Object.values(sources).some(source => (path.isAbsolute(value) && inside(source.repository, value)) ||
+          value.includes(source.repository + path.sep)) &&
+          !(!path.isAbsolute(value) && isPath && Object.values(roots).some(root => inside(root, resolved) || inside(root, real))),
+          'Declare a binding or exact external field for live source path: ' + field);
       } else if (value && typeof value === 'object') {
         for (const [key, item] of Object.entries(value)) check(item, field ? field + '.' + key : key);
       }
@@ -113,7 +115,13 @@ export function installEnvironment(spec, base = process.cwd()) {
     const bytes = JSON.stringify(config, null, 2) + '\n', file = values.config;
     const command = spec.command.map(expand);
     check(command);
-    for (const value of command) if (Object.values(roots).some(root => inside(root, value))) pinned(value);
+    for (const value of command) for (const root of Object.values(roots)) {
+      const offset = value.indexOf(root);
+      if (offset < 0) continue;
+      need(offset === 0 || /^--?[A-Za-z0-9_-]+=$/.test(value.slice(0, offset)),
+        'A snapshot command path must be an argument or an option value');
+      pinned(value.slice(offset));
+    }
     const manifest = {id, ...identity, folder, config: file, configDigest: digest(bytes), command};
     const ready = path.join(folder, 'environment.json');
     if (fs.existsSync(ready)) {
