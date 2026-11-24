@@ -5,6 +5,7 @@ import {nodeAssignee, nodeFailed, validateFailedTaskStage, nodePendingDelivery, 
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
 import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
 import {retryPolicy} from './retry.mjs';
+import {dependencySelection} from './dependency-selection.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -140,12 +141,14 @@ export async function readyRequirements(config, tokenFile, signal) {
 // A configured flow uses native Joppa filters. Only unassigned items can enter a new claim.
 export function flowSettings(config) {
   if (config.workflow === undefined) return null;
+  if (config.wait_for_dependencies !== undefined && typeof config.wait_for_dependencies !== 'boolean')
+    throw new Error('wait_for_dependencies must be boolean');
   if (typeof config.workflow !== 'string' || !config.workflow.trim()) throw new Error('workflow must name a Medulla workflow.yaml file');
   if (config.ac_ids !== undefined || config.covers_reference !== undefined) {
     throw new Error('ac_ids and covers_reference apply only to the planner flow without workflow');
   }
   if (config.inputs !== undefined) {
-    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication']);
+    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication', 'wait_for_dependencies']);
     if (!Array.isArray(config.inputs) || !config.inputs.length || config.inputs.some(input => !object(input) ||
         !object(input.selection) || Object.keys(input).some(key => !keys.has(key)))) throw new Error('inputs needs ordered native selection profiles');
     for (const input of config.inputs) flowSettings({...config, ...input, inputs: undefined});
@@ -227,6 +230,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   }
   rows.sort(compare(flow.order));
   const eligible = [], parents = new Map();
+  const dependencies = config.wait_for_dependencies ? dependencySelection(read) : null;
   let filtered = 0;
   for (const row of rows) {
     if (await skip(row, config, read)) continue;
@@ -239,6 +243,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
           data?.assignee || guard.exclude_tags?.some(tag => (data?.tags || []).includes(tag))) {filtered++; continue;}
     }
     if (config.exclude_tags?.some(tag => (batchField(row, 'data.tags') || []).includes(tag))) { filtered++; continue; }
+    if (dependencies && !await dependencies(row.address)) { filtered++; continue; }
     let excluded = false;
     for (const childFilter of flow.exclude == null ? [] : [flow.exclude].flat()) {
       for await (const page of nodePages(read, {...childFilter, parent: row.address, depth: 1, fields: ['parent']})) {
