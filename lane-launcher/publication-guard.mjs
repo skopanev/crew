@@ -84,6 +84,10 @@ export async function guardPublications(run, read, ancestor) {
       if (schema[target.kind]?.role === 'task') {
         if (target.document.present === true && !nodeStageDone(target)) pending(`${target.address} is not completed`);
         const commit = target.document.data.commit;
+        if (!commit && target.document.present === false) {
+          throw Object.assign(new Error(`DEPENDENCY_REPLAN: ${target.address} is archived without a delivered commit`),
+            {code: 'DEPENDENCY_REPLAN'});
+        }
         if (!commit) continue;
         const parsed = typeof commit === 'string' && /^(?:(\S+)[ \t]+)?([0-9a-f]{40}(?:[0-9a-f]{24})?)$/.exec(commit);
         if (!parsed) invalid(`Dependency commit is invalid: ${target.address}`);

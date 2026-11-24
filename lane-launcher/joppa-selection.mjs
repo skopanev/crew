@@ -173,7 +173,10 @@ export async function nextTask(config) {
           catch (error) { error.code = 'CANDIDATE_INVALID'; throw error; }
           await publications({config, tasks: [{address: task.address}], requirement: context.requirement,
             repository: config.repositories.find(repo => repo.id === context.repository),
-            requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}});
+            requirementDelivery: {branch: requirementBranch(context.requirement, context.repository)}}).catch(error => {
+            // The host worker returns this Task through FAILED_TASK_STAGE before Docker or a model starts.
+            if (error.code !== 'DEPENDENCY_REPLAN') throw error;
+          });
           eligible.push({...task, ...context});
         } catch (error) {
           if (error.code === 'DEPENDENCY_NOT_LANDED') continue;
