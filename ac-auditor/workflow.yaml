@@ -28,7 +28,15 @@ vars:
   JUDGE_MODEL: claude-opus-5-5
   # true: run the whole flow, publish nothing and release the claim with outcome DRY_RUN.
   DRY_RUN: 'false'
-  audit_assignment_path: ''
+  audit_ac: ''
+  auditor_finder_one_reader_config: ''
+  auditor_finder_one_reader_home: ''
+  auditor_finder_two_reader_config: ''
+  auditor_finder_two_reader_home: ''
+  auditor_finder_three_reader_config: ''
+  auditor_finder_three_reader_home: ''
+  auditor_judge_reader_config: ''
+  auditor_judge_reader_home: ''
   finder_one_path: ''
   finder_two_path: ''
   finder_three_path: ''
@@ -61,7 +69,16 @@ nodes:
         . + {requirement: $requirement[0].requirement, sibling_acs: $requirement[0].siblings} |
         tojson | gsub("\\{\\{"; "\\u007b\\u007b")' "$a/input.json" > "$a/audit-assignment.json.tmp"
       mv "$a/audit-assignment.json.tmp" "$a/audit-assignment.json"
-      printf '<signal:var key=audit_assignment_path>%s</signal:var>\n' "$a/audit-assignment.json"
+      # A prompt holds the role prompt and the AC address. Each model finds its contract, the assignment and for the
+      # judge the finder results through read_context of its own read-only reader.
+      for role in finder judge; do jq -r --arg role "$role" '.[$role].content' "$a/contracts.json" > "$a/contract-$role.md"; done
+      reader="$(dirname "$CREW_FLOW_STAGES")/agent-reader.mjs"
+      files() { jq -nc --arg a "$a" '$ARGS.positional | map($a + "/" + .)' --args "$@"; }
+      node "$reader" prepare auditor_finder_one "$(files contract-finder.md audit-assignment.json)"
+      node "$reader" prepare auditor_finder_two "$(files contract-finder.md audit-assignment.json)"
+      node "$reader" prepare auditor_finder_three "$(files contract-finder.md audit-assignment.json)" --agy
+      node "$reader" prepare auditor_judge "$(files contract-judge.md audit-assignment.json finder-one.json finder-two.json finder-three.json)"
+      printf '<signal:var key=audit_ac>%s</signal:var>\n' "$(jq -er .selected.address "$a/input.json")"
       for n in one two three; do printf '<signal:var key=finder_%s_path>%s</signal:var>\n' "$n" "$a/finder-$n.json"; done
       echo '<signal:READY_TO_AUDIT>The claim and the specification context are ready.</signal:READY_TO_AUDIT>'
     on_signal:
@@ -83,13 +100,7 @@ nodes:
     min_success: 3
     inputs:
       shell: |
-        jq -nc --arg m1 "$FINDER_ONE_MODEL" --arg m2 "$FINDER_TWO_MODEL" --arg m3 "$FINDER_THREE_MODEL" --arg agy "$AGY_PROFILE_HOME" '
-          def codex: {a1: "--ignore-user-config", a2: "-c", a3: "features.shell_tool=false",
-            a4: "-c", a5: "features.view_image=false", a6: "-c", a7: "features.apps=false",
-            a8: "-c", a9: "features.browser_use=false", a10: "-c", a11: "features.multi_agent=false"};
-          [{slug: "one", harness: "codex", model: $m1} + codex,
-           {slug: "two", harness: "codex", model: $m2} + codex,
-           {slug: "three", harness: "agy", model: $m3, env: {BROKER_AGY_HOME: $agy, BROKER_ISOLATE_MCP: "1"}}]'
+        node "$MEDULLA_WORKFLOW_DIR/seats.mjs"
     agent:
       harness: '{{input.harness}}'
       model: '{{input.model}}'
@@ -107,11 +118,11 @@ nodes:
         - '{{input.a9:-}}'
         - '{{input.a10:-}}'
         - '{{input.a11:-}}'
+        - '{{input.a12:-}}'
+        - '{{input.a13:-}}'
     prompt: |
       {{file:prompts/finder.md}}
-      Mandatory role contract (rule ac.check.11111r):
-      {{var:finder_contract}}
-      Assignment: {{file:{{var:audit_assignment_path}}}}
+      AC: {{var:audit_ac}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture "finder-$(printf %s "$MEDULLA_INPUT" | jq -r .slug)"'
     on_signal:
       __done__: finder_check
@@ -153,16 +164,14 @@ nodes:
         - --strict-mcp-config
         - --setting-sources=
         - --mcp-config
-        - '{"mcpServers":{}}'
+        - '{{var:auditor_judge_reader_config}}'
         - --tools=
     prompt: |
       {{file:prompts/judge.md}}
-      Mandatory role contract (rule ac.check.11111r):
-      {{var:judge_contract}}
-      Assignment: {{file:{{var:audit_assignment_path}}}}
-      Finder one: {{file:{{var:finder_one_path}}}}
-      Finder two: {{file:{{var:finder_two_path}}}}
-      Finder three: {{file:{{var:finder_three_path}}}}
+      AC: {{var:audit_ac}}
+      Finder one: {{var:finder_one_path}}
+      Finder two: {{var:finder_two_path}}
+      Finder three: {{var:finder_three_path}}
     post: '"$PLANNING_PYTHON" "$CREW_FLOW_STAGES" capture judge'
     on_signal:
       CAPTURED: judge_check
