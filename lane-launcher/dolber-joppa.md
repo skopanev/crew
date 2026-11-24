@@ -49,6 +49,13 @@ The dashboard shows `PRE_LAUNCH_FAILED`, `PRE_LAUNCH_TIMEOUT` or `PRE_LAUNCH_ABO
 For a new unclaimed run, failure starts no lane and makes no Task mutation.
 The hook applies to Herdr and headless workers. Preview and dry-run do not execute it.
 
+Set `hostMaintenance` to run a periodic host command in the continuous dispatcher:
+`{"hostMaintenance":{"command":["/absolute/bin/cleanup"],"intervalSeconds":30,"timeoutSeconds":120}}`.
+The first command starts after the interval. Commands never overlap in one dispatcher.
+Output appends to `stateDir/host-maintenance.log`. A failed command retries after the next interval.
+Stopping the dispatcher stops the command process group. Preview, monitor and once modes do not run it.
+Config reloads apply to the next command. Omit this option to disable maintenance.
+
 Set `dispatchGate` to check admission before Task selection and each Task claim attempt:
 
 ```json

@@ -15,6 +15,7 @@ import {testResultsInspection} from './test-results-publish.mjs';
 import {reportSelectionIssues} from './selection-notify.mjs';
 import {selectionProgress} from './selection-progress.mjs';
 import {dispatchLane} from './lane-dispatch.mjs';
+import {startHostMaintenance} from './host-maintenance.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -196,12 +197,14 @@ export async function main(argv) {
   // Running lanes keep the config saved in their launch.json; only new selections use a reload.
   const reload = configReloader(file, raw => { const next = configFrom(file, process.env, {bytes: raw}); preflight(next); return next; },
     dolberIdentity, config, bytes);
-  let stopped = false, wake;
-  const stop = () => { stopped = true; admissionAbort.abort(new Error('Dispatcher interrupted')); wake?.(); };
+  let stopped = false, wake, maintenance;
+  const stop = () => { stopped = true; admissionAbort.abort(new Error('Dispatcher interrupted')); maintenance?.stop(); wake?.(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   let dashboard, ticker;
   try {
     dashboard = process.stdout.isTTY && mode === 'loop' ? createDashboard(config, paint) : null;
+    if (mode === 'loop') maintenance = startHostMaintenance(config,
+      message => { if (dashboard) dashboard.state.fail(message); else console.error(message); });
     let deadline = null;
     const draw = () => {
       try { dashboard.draw(deadline == null ? null : Math.max(0, Math.ceil((deadline - performance.now()) / 1000))); }
@@ -214,6 +217,7 @@ export async function main(argv) {
         const loaded = reload();
         if (loaded.error) throw new Error(loaded.error);
         config = loaded.config;
+        if (loaded.reloaded) maintenance?.use(config);
         dashboard?.use(config);
         if (loaded.reloaded && !dashboard) console.log('config reloaded');
         await tick(config, dashboard?.state, {signal: admissionAbort.signal});
@@ -240,6 +244,7 @@ export async function main(argv) {
     } while (!stopped);
   } finally {
     clearInterval(ticker);
+    await maintenance?.stop();
     try { dashboard?.close(); }
     finally {
       process.off('SIGINT', stop); process.off('SIGTERM', stop);
