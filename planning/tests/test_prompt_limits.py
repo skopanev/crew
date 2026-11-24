@@ -24,7 +24,7 @@ class PromptLimits(unittest.TestCase):
         huge = marker * 10000
         count, maximum = 0, 0
         with tempfile.TemporaryDirectory() as directory:
-            folder = Path(directory) / ('r' * (87 - len(directory)))
+            folder = Path(directory) / ('r' * (139 - len(directory)))
             folder.mkdir()
             fixture = folder / "large.json"
             fixture.write_text(json.dumps({"body": huge}))
@@ -44,7 +44,8 @@ class PromptLimits(unittest.TestCase):
                         values[key] = (str(folder) if 'artifacts' in key.lower() else str(fixture)) if is_path else \
                             huge if is_body else 'ac:11111111-2222-3333-4444-555555555555' if is_address else "example"
                     if workflow.parent.name == "decider":
-                        control = workflow.with_name('control.mjs').read_text()
+                        source = workflow.with_name('agent-files.mjs')
+                        control = (source if source.exists() else workflow.with_name('control.mjs')).read_text()
                         retry = re.search(r"export const RETRY = ('.*?');", control).group(1)
                         values['decider_feedback'] = ast.literal_eval(retry)
                     seats = node.get("inputs")
