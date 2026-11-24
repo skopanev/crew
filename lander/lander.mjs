@@ -30,6 +30,12 @@ function settings() {
   require(failedData && typeof failedData === 'object' && !Array.isArray(failedData) && Object.keys(failedData).length &&
     !Object.keys(failedData).some(key => ['assignee', 'commit', 'repository', 'delivery', 'acceptance'].includes(key)),
   'FAILED_DATA must be a nonempty native patch without host-owned fields');
+  require(value.retain_failed_delivery == null || typeof value.retain_failed_delivery === 'boolean',
+    'retain_failed_delivery must be boolean');
+  if (value.retain_failed_delivery) require(!Object.hasOwn(failedData, 'stage') &&
+    Array.isArray(failedData.tags) && failedData.tags.length > 0 && failedData.tags.every(tag =>
+      typeof tag === 'string' && tag && value.exclude_tags?.includes(tag)),
+  'Retained failed delivery needs excluded failure tags and must preserve the Task stage');
   for (const item of items) require(doneTaskStage(value, assignment.schema, item) !== failedData.stage,
     'DONE_TASK_STAGE must differ from FAILED_DATA.stage');
   return {value, assignment, items, repo, failedData};
@@ -50,7 +56,11 @@ function output(state, landed = []) {
     }
     if (state.failed[address] && !['BRANCH_MOVED', 'BRANCH_UNAVAILABLE'].includes(state.failed[address])) operations.push({command: {op: 'save_object', kind: item.kind,
       id: address.slice(address.indexOf(':') + 1), revision: assignment.claim_revisions[address],
-      data: {...failedData, delivery: null}, reason: 'Lander excluded this branch: ' + reason}});
+      data: {...failedData, ...(Array.isArray(failedData.tags) ?
+        {tags: [...new Set([...(item.document.data.tags || []), ...failedData.tags])]} : {}),
+        ...(value.retain_failed_delivery ? {} : {delivery: null})},
+      reason: (reason.startsWith('INTERACTION_') ? 'Lander excluded an incompatible combination member: ' :
+        'Lander excluded this branch: ') + reason}});
     operations.push({command: {op: 'note', target: address,
       id: 'lander-' + process.env.MEDULLA_RUN_ID + '-' + createHash('sha256').update(address).digest('hex').slice(0, 12),
       text: reason + '. Original branch retained. Run: ' + process.env.MEDULLA_RUN_ID +

@@ -78,6 +78,10 @@ After a cached candidate is restored, its configured setup restores ignored depe
 A failed branch receives `vars.FAILED_DATA`, a cleared delivery field, and an evidence note.
 The patch must use the project's native fields. It cannot override the assignee, commit, repository, or delivery metadata.
 Original remote branches remain available for repair.
+Set `retain_failed_delivery: true` to keep a failed branch pending for a separate repair claim.
+In this mode, `vars.FAILED_DATA` must preserve the stage and supply nonempty `tags` included in `exclude_tags`.
+Lander adds these tags to the existing tags. It preserves the delivery branch, checked head, commit and failure evidence.
+The ordinary Dolber still skips pending delivery. Repair must produce a new reviewed and checked head before resubmission.
 A moved target permits one rebuild and a new full check. A second move leaves the remaining work pending.
 A moved or unavailable branch is excluded before the push. Its pending delivery stays unchanged with an evidence note.
 With `repeat: true`, Lander retries that pending head each interval until the producer records a current reviewed head.
