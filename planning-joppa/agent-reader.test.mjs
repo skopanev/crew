@@ -75,7 +75,7 @@ test('AGY uses the broker private profile and refuses an unrelated MCP inventory
   const f = fixture(t), binary = path.join(f.root, 'agy-bin');
   fs.writeFileSync(binary, '#!/usr/bin/env node\n' +
     'const fs=require("node:fs"),path=require("node:path");const p=process.env.BROKER_AGY_HOME+"/.gemini/config/mcp_config.json";\n' +
-    'fs.mkdirSync(path.dirname(p),{recursive:true});console.log(fs.existsSync(p)?"joppa":"No MCP servers configured.");\n', {mode: 0o755});
+    'console.log(fs.existsSync(p)?"joppa":"No MCP servers configured.");\n', {mode: 0o755});
   const profile = prepare('critic', [], undefined, f.env), env = {...f.env, AGY_BIN: binary};
   prepareAgy(profile.file, profile.home, env);
   const target = path.join(profile.home, '.gemini/config/mcp_config.json');

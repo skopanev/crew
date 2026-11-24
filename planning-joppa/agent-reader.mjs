@@ -83,7 +83,7 @@ export function prepareAgy(configFile, home, env = process.env) {
   };
   if (!fs.existsSync(config)) {
     need(query().trim() === 'No MCP servers configured.', 'AGY inherited an unexpected MCP adapter');
-    need(fs.statSync(path.dirname(config)).isDirectory(), 'AGY did not initialize its private profile');
+    fs.mkdirSync(path.dirname(config), {recursive: true, mode: 0o700});
   } else need(JSON.stringify(read(config)) === JSON.stringify(next), 'AGY reader profile changed');
   need(fs.realpathSync(path.dirname(config)).startsWith(fs.realpathSync(home) + path.sep), 'AGY config escaped its profile');
   save(config, next);
