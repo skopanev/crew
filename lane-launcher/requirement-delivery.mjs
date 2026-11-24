@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {remoteDependencyBlocker} from './dependencies.mjs';
 import {require, validAddress, requirementBranch,
   collectRequirementCriteria, taskRepository, taskStatus, taskRecord} from './requirement-state.mjs';
-import {nodeAssignee, taskPages, NODE_TONES} from './joppa-nodes.mjs';
+import {nodeAssignee, taskPages, NODE_TONES, excludedNodeTag} from './joppa-nodes.mjs';
 export {requirementBranch, parsePublication, assertRequirementHead} from './requirement-state.mjs';
 
 export async function requirementPlan(run, read) {
@@ -46,6 +46,8 @@ export async function requirementPlan(run, read) {
     while (value && !relevant.has(value.address)) {
       require(!seen.has(value.address), 'Remote dependency parent cycle');
       seen.add(value.address);
+      require(value.document.present !== true || !excludedNodeTag(value, run.config?.joppa?.excludeTags),
+        `QUESTION_TAG: ${value.address}; Requirement publication refused`);
       const remote = remoteDependencyBlocker(value);
       require(!remote, `Remote dependency is not current and satisfied: ${remote}`);
       relevant.set(value.address, value);
@@ -59,7 +61,12 @@ export async function requirementPlan(run, read) {
   await remember(reqObject);
   const reqAssignee = nodeAssignee(reqObject);
 
-  const criteriaByAddress = await collectRequirementCriteria(requirement, reqObject.kind, types, read, object, present);
+  const criterionObject = async address => {
+    const value = await object(address);
+    require(!excludedNodeTag(value, run.config?.joppa?.excludeTags), `QUESTION_TAG: ${address}; Requirement publication refused`);
+    return value;
+  };
+  const criteriaByAddress = await collectRequirementCriteria(requirement, reqObject.kind, types, read, criterionObject, present);
   const requirementAncestor = async (value, strict = false) => {
     require(types[value.kind]?.role === 'task', `Object is not a Task: ${value.address}`);
     const seen = new Set([value.address]);
