@@ -45,6 +45,9 @@ test('archived prerequisites enter repair while the optional guard preserves oth
   assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
   prerequisite.document.present = false;
   assert.equal((await nextConfiguredItem(config, config.token_file)).next.address, task.address);
+  task.document.data.commit = 'b'.repeat(40);
+  assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
+  delete task.document.data.commit;
   prerequisite.document.data.commit = 'a'.repeat(40);
   assert.equal((await nextConfiguredItem(config, config.token_file)).next.address, task.address);
   task.document.data.assignee = 'other-run';

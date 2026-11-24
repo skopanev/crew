@@ -29,7 +29,7 @@ export function dependencySelection(read) {
     });
     try { return (await check(address)).ready; }
     catch (error) {
-      if (error.code === 'DEPENDENCY_REPLAN') return true;
+      if (error.code === 'DEPENDENCY_REPLAN') return !selected.document.data?.commit;
       throw error;
     }
   };
