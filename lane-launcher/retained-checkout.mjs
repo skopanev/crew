@@ -26,13 +26,15 @@ const workflowUnchanged = run => /^[0-9a-f]{64}$/.test(run.workflow?.digest || '
 
 // Git for an agent-written checkout. Refuse redirecting or executable configuration before any Git command.
 export function laneGit(checkout, options = {}) {
+  const {metadataOnly = false, ...executionOptions} = options;
+  require(typeof metadataOnly === 'boolean', 'metadataOnly must be a boolean');
   const stat = fs.lstatSync(checkout);
   require(stat.isDirectory() && fs.realpathSync(checkout) === checkout, 'checkout is not a plain directory');
   const dotGit = path.join(checkout, '.git');
   require(fs.lstatSync(dotGit).isDirectory(), 'checkout has no private .git directory');
   for (const name of ['objects/info/alternates', 'commondir', 'config.worktree', 'rebase-merge', 'rebase-apply',
     'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'index.lock']) {
-    require(!exists(path.join(dotGit, name)), `checkout has .git/${name}`);
+    require(metadataOnly && name === 'index.lock' || !exists(path.join(dotGit, name)), `checkout has .git/${name}`);
   }
   // Agents can write .git/config. Read it as a plain file first: Git status would run a filter it names.
   const keys = command('git', ['config', '--file', path.join(dotGit, 'config'), '--no-includes', '--list', '--name-only'])
@@ -40,10 +42,13 @@ export function laneGit(checkout, options = {}) {
   require(!keys.length, `checkout .git/config sets ${keys.join(', ')}`);
   // Explicit paths: a local core.worktree or hook setting written by an agent must not steer host Git.
   return (...args) => {
+    require(!metadataOnly || args.length === 3 && (args[0] === 'rev-parse' && args[1] === '--verify' &&
+      ['HEAD^{commit}', 'HEAD^{tree}'].includes(args[2]) ||
+      args[0] === 'symbolic-ref' && args[1] === '-q' && args[2] === 'HEAD'), 'Only read-only HEAD metadata commands are permitted');
     const output = execFileSync('git', ['--no-optional-locks', `--git-dir=${dotGit}`, `--work-tree=${checkout}`,
       '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
     {cwd: checkout, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'], ...options});
+      stdio: ['ignore', 'pipe', 'pipe'], ...executionOptions});
     return typeof output === 'string' ? output.trim() : output;
   };
 }

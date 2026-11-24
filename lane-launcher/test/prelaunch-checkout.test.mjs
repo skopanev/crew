@@ -5,6 +5,7 @@ import path from 'node:path';
 import {save} from '../runtime.mjs';
 import {clearPreviousCheckout} from '../prelaunch-checkout.mjs';
 import {prepareDiscardCheckout} from '../failed-checkout.mjs';
+import {laneGit} from '../retained-checkout.mjs';
 import {reuseFixture, git} from '../test-support/retained-checkout.fixture.mjs';
 
 test('saves committed, dirty and untracked work before a fresh checkout can start', async t => {
@@ -45,6 +46,13 @@ test('keeps active, foreign, replaced and unrecoverable checkouts', async t => {
   prior.discardCheckout = {path: checkout, dev: 0, ino: 0}; f.savePrior();
   assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /identity changed/);
   const {dev, ino} = fs.statSync(checkout); prior.discardCheckout = {path: checkout, dev, ino}; f.savePrior();
+  git(checkout, 'checkout', '-qb', 'foreign');
+  fs.writeFileSync(path.join(checkout, '.git/index.lock'), '');
+  assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /another branch/);
+  assert.equal(fs.existsSync(path.join(checkout, '.git/index.lock')), true);
+  assert.throws(() => laneGit(checkout, {metadataOnly: true})('symbolic-ref', 'HEAD', 'refs/heads/changed'), /metadata commands/);
+  fs.unlinkSync(path.join(checkout, '.git/index.lock'));
+  git(checkout, 'checkout', '-q', `ticket-${run.executionId}`);
   fs.writeFileSync(path.join(checkout, '.git/index.lock'), 'not empty');
   assert.throws(() => clearPreviousCheckout(run, dir, () => {}, () => {}), /lock needs inspection/);
   fs.writeFileSync(path.join(checkout, '.git/index.lock'), '');

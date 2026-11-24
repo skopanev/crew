@@ -35,6 +35,11 @@ export function clearPreviousCheckout(run, dir, persist, announce) {
   const dotGit = path.join(checkout, '.git');
   need(fs.lstatSync(dotGit).isDirectory() && fs.realpathSync(dotGit) === dotGit,
     'The preexisting checkout has no private Git directory');
+  const metadata = laneGit(checkout, {metadataOnly: true}), head = metadata('rev-parse', '--verify', 'HEAD^{commit}');
+  need(metadata('symbolic-ref', '-q', 'HEAD') === `refs/heads/ticket-${run.executionId}`,
+    'The preexisting checkout has another branch');
+  if (!prior.discardCheckout) need(prior.retained.head === head &&
+    prior.retained.tree === metadata('rev-parse', '--verify', 'HEAD^{tree}'), 'The retained checkpoint changed');
   const artifacts = path.join(run.runFolder, 'prelaunch-recovery');
   fs.mkdirSync(artifacts, {recursive: true, mode: 0o700});
   const lock = path.join(checkout, '.git/index.lock');
@@ -49,10 +54,9 @@ export function clearPreviousCheckout(run, dir, persist, announce) {
       before.mtimeMs === after.mtimeMs && !exists(saved), 'The Git index lock changed');
     fs.renameSync(lock, saved);
   }
-  const git = laneGit(checkout), head = git('rev-parse', '--verify', 'HEAD^{commit}');
-  need(git('symbolic-ref', '-q', 'HEAD') === `refs/heads/ticket-${run.executionId}`, 'The preexisting checkout has another branch');
-  if (!prior.discardCheckout) need(prior.retained.head === head &&
-    prior.retained.tree === git('rev-parse', 'HEAD^{tree}'), 'The retained checkpoint changed');
+  const git = laneGit(checkout);
+  need(git('rev-parse', '--verify', 'HEAD^{commit}') === head &&
+    git('symbolic-ref', '-q', 'HEAD') === `refs/heads/ticket-${run.executionId}`, 'The checkout changed during lock inspection');
   const ref = 'refs/crew-recovery/prelaunch-' + randomUUID();
   command('git', ['-C', run.repository.path, 'fetch', '--no-tags', checkout, `${head}:${ref}`]);
   need(command('git', ['-C', run.repository.path, 'rev-parse', ref]) === head, 'Recovery ref verification failed');
