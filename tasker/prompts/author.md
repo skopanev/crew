@@ -181,6 +181,8 @@ For repair, use these steps in order:
    Use exact Repository and Tests lines.
    Use DECISION_REQUIRED if required Test metadata is incomplete and a repair cannot safely proceed.
    Preserve behavior requirements, dependencies and Reporter names.
+   Check repair.dependencies before READY. An archived prerequisite without a delivered commit cannot satisfy READY.
+   Do not remove that dependency in the draft. Ask a real owner decision if its replacement is unresolved.
    Remove code-scope restriction lines.
    Write each repair Do step as an action.
    State only the required change or check in each Do step.

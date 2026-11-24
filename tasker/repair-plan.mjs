@@ -10,6 +10,17 @@ const gapQuestion = gap => gap && typeof gap === 'object' && !Array.isArray(gap)
 export const acText = contractText;
 export const changedText = (current, pinned) => Boolean(pinned && JSON.stringify(acText(current)) !== JSON.stringify(acText(pinned)));
 
+function readyDependencyProblem(input, repair) {
+  for (const link of input.selected.document.links ?? []) {
+    if (link.relation !== 'depends_on' || link.blocking !== true || link.workspace !== undefined) continue;
+    const target = repair.dependencies?.find(node => node.address === link.target);
+    if (!target) return 'READY needs the current dependency snapshot: ' + link.target;
+    if (target.kind === input.selected.kind && target.document.present === false && !target.document.data.commit) {
+      return 'READY cannot retain an archived prerequisite without a delivered commit: ' + link.target;
+    }
+  }
+}
+
 // Keep refusal routing when metadata is absent or conflicts with the captured schema.
 export function repositoryData(input, node) {
   const field = input.schema?.types?.[node.kind]?.fields?.repository;
@@ -35,7 +46,8 @@ export function repairView(input, repair) {
   return {...input, selected: context.parent, children: context.children, references: context.references,
     schema: {...input.schema, types: Object.fromEntries(Object.entries(input.schema.types).filter(([kind]) => kinds.has(kind)))},
     help: undefined, claim_revision: undefined, claim_revisions: undefined, context: undefined,
-    repair: {task, dependents: context.incoming ?? [], ac_text_changed: repair.ac_text_changed, pinned_revision: repair.pinned_revision,
+    repair: {task, dependents: context.incoming ?? [], dependencies: repair.dependencies ?? [],
+      ac_text_changed: repair.ac_text_changed, pinned_revision: repair.pinned_revision,
       ...(repair.baseline_note ? {baseline_note: repair.baseline_note} : {}),
       ...(repair.split_replan ? {split_replan: repair.split_replan} : {})}};
 }
@@ -52,6 +64,8 @@ export function checkRepair({input, repair, draft, trees, maxFiles, maxLines, fo
   const view = repairView(input, repair);
   let checked = {ok: true, problems: [], tasks: []};
   if (draft.verdict === 'READY') {
+    const dependencyProblem = readyDependencyProblem(input, repair);
+    if (dependencyProblem) fail(dependencyProblem);
     const proposed = draft.task;
     if (!proposed || proposed.id !== task.address.split(':')[1]) fail('READY must keep the selected Task id');
     if (proposed?.title !== task.document.data.title) fail('READY keeps the selected Task title');
@@ -76,6 +90,8 @@ export function checkRepair({input, repair, draft, trees, maxFiles, maxLines, fo
 }
 
 export function repairPublication({input, draft, run, dry = false, repair = {}, trees = {}, reviews, digest, gapTags}) {
+  const dependencyProblem = draft.verdict === 'READY' && readyDependencyProblem(input, repair);
+  if (dependencyProblem) return {approved: false, critique: {host: {invalid: dependencyProblem}}};
   if (draft.test_bindings != null && (!Array.isArray(draft.test_bindings) || draft.test_bindings.length)) {
     return {approved: false, critique: {host: {invalid: 'Task repair cannot update parent Test bindings. Correct the draft without inventing an owner question.'}}};
   }

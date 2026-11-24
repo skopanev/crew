@@ -31,14 +31,30 @@ export async function captureRepair(input, read) {
   if (hash != null && (typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))) throw new Error('The Task contract hash is invalid');
   const pinned = pin && hash == null ? await read(parent.address, revision) : null;
   if (pinned && pinned.address !== parent.address) throw new Error('The pinned AC read returned another address');
+  const dependencies = [];
+  for (const link of task.document.links ?? []) {
+    if (link.relation !== 'depends_on' || link.blocking !== true || link.workspace !== undefined) continue;
+    const target = await read(link.target);
+    if (target?.address !== link.target || target.historical === true || typeof target.document?.present !== 'boolean') {
+      throw new Error('The dependency read returned absent or historical context: ' + link.target);
+    }
+    dependencies.push(target);
+  }
   const current = contractHash({selected: parent, children: input.context.children, schema: input.schema});
-  return {pinned_revision:revision, pinned, ac_text_changed: hash == null ? changedText(parent,pinned) : current !== hash,
+  return {pinned_revision:revision, pinned, dependencies, ac_text_changed: hash == null ? changedText(parent,pinned) : current !== hash,
     ...(hash == null ? {baseline_note: 'Legacy Task: ' + (pinned ? 'compared the historical AC title, body and Source references.' : 'no historical AC pin is available.') + ' Historical Test texts are unavailable and were not compared.'} : {})};
 }
 
 async function main() {
   const [mode, dir] = process.argv.slice(2), read = name => JSON.parse(fs.readFileSync(path.join(dir,name),'utf8'));
   const input = read('input.json');
+  const readCurrent = async (address, revision) => {
+    const config = JSON.parse(fs.readFileSync(process.env.PLANNING_JOPPA_CONFIG,'utf8'));
+    const engine = path.dirname(path.dirname(process.env.CREW_FLOW_STAGES));
+    const {readJoppa} = await import(pathToFileURL(path.join(engine,'lane-launcher/joppa-api.mjs')).href);
+    return readJoppa(config.url,config.token_file,'joppa_objects',
+      {workspace:input.workspace,address,...(revision ? {revision} : {})},{mcpCommand:config.mcp_command});
+  };
   if (mode === 'repository') {
     const task = input.schema?.types?.[input.selected.kind]?.role === 'task';
     console.log(JSON.stringify(task && process.env.DRY_RUN !== 'true' ? repositoryData(input, input.selected) : {}));
@@ -46,18 +62,22 @@ async function main() {
   }
   if (mode === 'publication') {
     const draft = read('draft.json'), digest = createHash('sha256').update(fs.readFileSync(path.join(dir,'draft.json'))).digest('hex');
-    console.log(JSON.stringify(repairPublication({input, draft, repair:read('repair.json'), trees:read('trees.json'),
+    const repair = read('repair.json');
+    if (draft.verdict === 'READY') for (const dependency of repair.dependencies ?? []) {
+      const current = await readCurrent(dependency.address);
+      if (current?.address !== dependency.address || current.historical === true || current.current_revision !== dependency.current_revision) {
+        console.log(JSON.stringify({approved:false,critique:{host:{invalid:'The dependency changed during repair: ' + dependency.address}}}));
+        return;
+      }
+    }
+    console.log(JSON.stringify(repairPublication({input, draft, repair, trees:read('trees.json'),
       reviews:[read('critic-codex.json'), read('critic-second.json')], digest,
       gapTags:JSON.parse(process.env.TASKER_GAP_TAGS || '{}'),
       run:path.basename(path.dirname(dir)), dry:process.env.DRY_RUN==='true'})));
     return;
   }
   if (mode !== 'prepare') throw new Error('repair-context needs prepare, publication or repository');
-  const config = JSON.parse(fs.readFileSync(process.env.PLANNING_JOPPA_CONFIG,'utf8'));
-  const engine = path.dirname(path.dirname(process.env.CREW_FLOW_STAGES));
-  const {readJoppa} = await import(pathToFileURL(path.join(engine,'lane-launcher/joppa-api.mjs')).href);
-  const repair = await captureRepair(input,(address,revision)=>readJoppa(config.url,config.token_file,'joppa_objects',
-    {workspace:input.workspace,address,revision},{mcpCommand:config.mcp_command}));
+  const repair = await captureRepair(input,readCurrent);
   const trees = read('trees.json');
   const split = hostSplitReceipt({input, repair, trees});
   if (split) repair.split_replan = split;

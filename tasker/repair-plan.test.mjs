@@ -224,3 +224,36 @@ test('replanning keeps consumer dependencies and preserves any recorded commit a
     assert.deepEqual(assignment,frozen);
   }
 });
+
+test('a consumer cannot return READY with an archived prerequisite without a delivered commit',async()=>{
+  const assignment=input();
+  assignment.selected.document.links=[{relation:'depends_on',blocking:true,target:'task:old'}];
+  const predecessor=node('task:old',{title:'Old prerequisite',stage:'done'});
+  predecessor.document.present=false;
+  const frozen=structuredClone(assignment);
+  const repair=await captureRepair(assignment,async address=>{
+    assert.equal(address,'task:old');return predecessor;
+  });
+  assert.deepEqual(repairView(assignment,repair).repair.dependencies,[predecessor]);
+  const draft={verdict:'READY',reason:'Continue the consumer',task:{id:'t',title:'Existing Task',repository:'repo',
+    tests:[],depends_on:[],body:'Repository: repo'}};
+  const options={input:assignment,repair,draft,trees:{},run:'consumer',maxFiles:8,maxLines:300,
+    forecast:()=>null,checkPlan:()=>({ok:true,problems:[],tasks:[]})};
+  for(let attempt=0;attempt<3;attempt++){
+    assert.equal(checkRepair(options).ok,false);
+    const refused=repairPublication(options);
+    assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
+    assert.match(refused.critique.host.invalid,/archived prerequisite without a delivered commit: task:old/);
+  }
+  assert.equal(repairPublication({...options,repair:{}}).approved,false);
+  const decision=repairPublication({...options,gapTags,draft:{verdict:'DECISION_REQUIRED',reason:'Replacement needs an owner choice',gap}});
+  assert.equal(decision.publication.outcome.reason_code,'DECISION_REQUIRED');
+  assert.deepEqual(decision.publication.operations[0].command.data.tags,[gapTags.cto]);
+  for(const data of [{present:true,commit:undefined},{present:false,commit:'a'.repeat(40)}]){
+    predecessor.document.present=data.present;predecessor.document.data.commit=data.commit;
+    assert.equal(checkRepair(options).ok,true);
+    assert.equal(repairPublication(options).publication.outcome.reason_code,'READY');
+  }
+  assert.deepEqual(assignment,frozen);
+  await assert.rejects(captureRepair(assignment,async()=>({...predecessor,address:'task:other'})),/dependency read/);
+});

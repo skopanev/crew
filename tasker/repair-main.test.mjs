@@ -11,6 +11,34 @@ import {fileURLToPath} from 'node:url';
 
 const settings = JSON.parse(fs.readFileSync(new URL("config.example.json", import.meta.url), "utf8")).vars;
 
+test('READY publication checks the captured dependency revision before it can release a consumer',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tasker-ready-dependency-'));
+  try{
+    const artifacts=path.join(root,'artifacts'),engine=path.join(root,'engine');
+    fs.mkdirSync(artifacts);fs.mkdirSync(path.join(engine,'lane-launcher'),{recursive:true});
+    fs.writeFileSync(path.join(engine,'lane-launcher/joppa-api.mjs'),
+      "import fs from 'node:fs'; export async function readJoppa(){return JSON.parse(fs.readFileSync(process.env.DEPENDENCY_FILE,'utf8'));}\n");
+    const node=(address,data)=>({address,kind:address.split(':')[0],current_revision:4,historical:false,document:{data,present:true}});
+    const prerequisite=node('task:p',{stage:'to_implement'});
+    const input={workspace:'fixture',selected:node('task:d',{title:'Consumer',body:'Work'}),claim_revision:5,
+      context:{parent:node('ac:a',{title:'AC',body:'Outcome'}),incoming:[]}};
+    input.selected.document.links=[{relation:'depends_on',blocking:true,target:'task:p'}];
+    const draft={verdict:'READY',reason:'Keep the dependency',task:{repository:'repo',body:'Work'}};
+    const write=(name,value)=>fs.writeFileSync(path.join(artifacts,name+'.json'),JSON.stringify(value));
+    for(const [name,value] of Object.entries({input,draft,repair:{dependencies:[prerequisite]},trees:{},'critic-codex':{},'critic-second':{}}))write(name,value);
+    const config=path.join(root,'config.json'),current=path.join(root,'current.json');
+    fs.writeFileSync(config,'{}');fs.writeFileSync(current,JSON.stringify(prerequisite));
+    const command=[fileURLToPath(new URL('./repair-context.mjs',import.meta.url)),'publication',artifacts];
+    const publish=()=>JSON.parse(execFileSync(process.execPath,command,{encoding:'utf8',env:{...process.env,
+      PLANNING_JOPPA_CONFIG:config,CREW_FLOW_STAGES:path.join(engine,'planning-joppa/flow_stages.py'),DEPENDENCY_FILE:current}}));
+    assert.equal(publish().publication.outcome.reason_code,'READY');
+    prerequisite.current_revision++;prerequisite.document.present=false;
+    fs.writeFileSync(current,JSON.stringify(prerequisite));
+    const refused=publish();assert.equal(refused.approved,false);assert.equal(refused.publication,undefined);
+    assert.match(refused.critique.host.invalid,/dependency changed during repair: task:p/);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('the machine-check CLI refuses body estimates for new Tasks and READY, and rejects changed AC repairs', () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'tasker-repair-main-'));
   try {
