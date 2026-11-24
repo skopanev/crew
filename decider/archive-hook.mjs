@@ -148,6 +148,11 @@ export async function execute(dir, env = process.env) {
       current.current_revision === input.claim_revision, 'The archive AC claim changed');
     need(!(current.document.data.tags || []).some(tag => (config.exclude_tags || []).includes(tag)), 'The AC has a question tag');
     need(isDeepStrictEqual((await get('joppa_tree')).schema, input.schema), 'The archive schema changed');
+    for (const before of Object.values(input.references || {}).flat()) {
+      const reference = await get('joppa_objects', {address: before.address});
+      need(reference.historical === false && reference.document?.present &&
+        reference.current_revision === before.current_revision, 'Archive input reference changed: ' + before.address);
+    }
     execFileSync(env.PLANNING_PYTHON || 'python3', [path.join(env.MEDULLA_WORKFLOW_DIR, 'context.py'), 'verify'],
       {env, stdio: ['ignore', 'pipe', 'pipe']});
   };
