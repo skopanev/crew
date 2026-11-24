@@ -38,6 +38,7 @@ class StdioRPC:
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.buffer = b""
         self.sequence = 0
+        self.expired = set()
         self.closed = False
         atexit.register(self.close)
 
@@ -65,8 +66,13 @@ class StdioRPC:
                     raise ValueError("Joppa MCP command returned invalid JSON") from None
                 if not isinstance(message, dict):
                     raise ValueError("Joppa MCP command returned an invalid response")
-                if "method" not in message and message.get("id") != self.sequence:
-                    raise ValueError("Joppa returned a different MCP response")
+                response_id = message.get("id")
+                if "method" not in message and type(response_id) is int and response_id in self.expired:
+                    self.expired.remove(response_id)
+                    continue
+                if "method" not in message and response_id != self.sequence:
+                    raise ValueError("Joppa returned a different MCP response "
+                                     f"(expected {self.sequence}, received {response_id!r})")
                 if message.get("id") == self.sequence and "method" not in message:
                     if "error" in message or "result" not in message:
                         raise ValueError("Joppa rejected the MCP operation")
@@ -81,6 +87,7 @@ class StdioRPC:
                     self.process.stdin.flush()
             left = deadline - time.monotonic()
             if left <= 0 or not self.selector.select(left):
+                self.expired.add(self.sequence)
                 raise ValueError("Joppa MCP command timed out")
             part = os.read(self.process.stdout.fileno(), 65536)
             if not part:

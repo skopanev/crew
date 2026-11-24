@@ -10,6 +10,69 @@ from stdio import StdioRPC, group_alive
 from mcp import Joppa
 
 
+class ResponseTests(unittest.TestCase):
+    def test_two_late_responses_preserve_notifications_and_server_ping(self):
+        server = (
+            "import json,sys\n"
+            "requests=[json.loads(sys.stdin.readline()) for _ in range(3)]\n"
+            "messages=[{'jsonrpc':'2.0','method':'notifications/progress','params':{}},\n"
+            " {'jsonrpc':'2.0','id':1,'method':'ping','params':{}},\n"
+            " {'jsonrpc':'2.0','id':1,'error':{'code':-32000,'message':'late error'}},\n"
+            " {'jsonrpc':'2.0','id':2,'result':{}}]\n"
+            "print('\\n'.join(json.dumps(m) for m in messages),flush=True)\n"
+            "pong=json.loads(sys.stdin.readline())\n"
+            "print(json.dumps({'jsonrpc':'2.0','id':3,'result':"
+            "{'pong':pong,'methods':[r['method'] for r in requests]}}),flush=True)\n"
+        )
+        rpc = StdioRPC([sys.executable, "-u", "-c", server])
+        try:
+            with patch.object(rpc.selector, "select", return_value=[]):
+                for _ in range(2):
+                    with self.assertRaisesRegex(ValueError, "timed out"):
+                        rpc.request("tools/call", {"name": "mutation"})
+            result = rpc.request("tools/list", {})
+            self.assertEqual(result["pong"], {"jsonrpc": "2.0", "id": 1, "result": {}})
+            self.assertEqual(result["methods"], ["tools/call", "tools/call", "tools/list"])
+            self.assertEqual(rpc.expired, set())
+        finally:
+            rpc.close()
+
+    def test_late_reply_after_timeout_does_not_poison_later_requests(self):
+        server = (
+            "import json,sys\n"
+            "seen=[]\n"
+            "for line in sys.stdin:\n"
+            " r=json.loads(line)\n"
+            " seen.append(r['method'])\n"
+            " print(json.dumps({'jsonrpc':'2.0','id':r['id'],"
+            "'result':{'seen':seen}}),flush=True)\n"
+        )
+        rpc = StdioRPC([sys.executable, "-u", "-c", server])
+        try:
+            with patch.object(rpc.selector, "select", return_value=[]):
+                with self.assertRaisesRegex(ValueError, "timed out"):
+                    rpc.request("tools/call", {"name": "mutation"})
+            self.assertEqual(rpc.request("tools/list", {}), {"seen": ["tools/call", "tools/list"]})
+            self.assertEqual(rpc.request("ping", {}), {"seen": ["tools/call", "tools/list", "ping"]})
+            self.assertEqual(rpc.sequence, 3)
+            self.assertEqual(rpc.expired, set())
+        finally:
+            rpc.close()
+
+    def test_unknown_and_null_response_ids_still_fail(self):
+        for wrong in ("999", "null"):
+            with self.subTest(wrong=wrong):
+                server = "import sys\nsys.stdin.readline()\nprint('" + (
+                    '{"jsonrpc":"2.0","id":' + wrong + ',"result":{}}'
+                ) + "',flush=True)\n"
+                rpc = StdioRPC([sys.executable, "-u", "-c", server])
+                try:
+                    with self.assertRaisesRegex(ValueError, "different MCP response.*expected 1, received"):
+                        rpc.request("tools/list", {})
+                finally:
+                    rpc.close()
+
+
 class ConnectionTests(unittest.TestCase):
     def test_startup_transport_failure_reconnects_once_before_tools(self):
         for reason in ("timed out", "disconnected"):
