@@ -207,13 +207,18 @@ export async function main(argv) {
     } while (!stopped);
     if (!once && !stopped && (fixed || monitor)) await new Promise(resolve => { wake = resolve; });
   } finally {
-    if (pool.size && !termination) termination = pool.stop('SIGTERM');
-    await termination;
-    clearInterval(ticker);
-    process.off('SIGINT', interrupt);
-    process.off('SIGTERM', terminate);
-    if (lock && fs.readFileSync(lock, 'utf8') === String(process.pid)) fs.unlinkSync(lock);
-    screen?.close();
+    let stoppedCleanly = false;
+    try {
+      if (pool.size && !termination) termination = pool.stop('SIGTERM');
+      await termination;
+      stoppedCleanly = detached || pool.size === 0;
+    } finally {
+      clearInterval(ticker);
+      process.off('SIGINT', interrupt);
+      process.off('SIGTERM', terminate);
+      if (stoppedCleanly && lock && fs.readFileSync(lock, 'utf8') === String(process.pid)) fs.unlinkSync(lock);
+      screen?.close();
+    }
   }
 }
 
