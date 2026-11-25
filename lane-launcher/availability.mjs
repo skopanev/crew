@@ -10,7 +10,8 @@ export async function dolberAvailability(config, signal, read = (tool, args) =>
   try {
     const types = (await read('joppa_tree', {}))?.schema?.types;
     const kinds = Object.keys(types || {}).filter(kind => types[kind].role === 'task');
-    if (!kinds.length || config.joppa.priorities?.length) return {text: '?', ms: performance.now() - started};
+    if (!kinds.length || !config.joppa.filter?.data?.stage || config.joppa.priorities?.length)
+      return {text: '?', ms: performance.now() - started};
     const active = runDirectories(config.stateDir).map(dir => readRun(path.join(dir, 'launch.json'))).filter(run => !run.result);
     const known = active.every(run => run.claim && !run.releaseConfirmed && !run.completionRequest && !run.blockRequest);
     const result = await availableCounts({workspace: config.workspace,

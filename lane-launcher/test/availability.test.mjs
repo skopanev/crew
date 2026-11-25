@@ -29,6 +29,7 @@ test('Dolber counts schema Task kinds with native filters, tag exclusions and no
   assert.equal((await dolberAvailability(config, null, read)).text, '3');
   assert.equal((await dolberAvailability(config, null, async () => { throw Error('Unavailable'); })).text, '?');
   assert.equal((await dolberAvailability({...config, joppa: {...config.joppa, priorities: ['highest']}}, null, read)).text, '?');
+  assert.equal((await dolberAvailability({...config, joppa: {...config.joppa, filter: undefined}}, null, read)).text, '?');
 });
 
 test('the read-only Dolber monitor refreshes available counts and stops without claims', async t => {
