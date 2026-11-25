@@ -143,7 +143,7 @@ def sample(folder, receipt, config, file, attempt):
              "exit_code": code, "started_at": started, "finished_at": time.time(),
              "log": str(log), "sha256": hashed(log), "test_report": entry}
     value["result"] = ("green" if code == 0 and entry and entry.get("results") and not entry.get("error")
-                       and all(row["outcome"] == "pass" for row in entry["results"]) else "red" if code == 1 else "incomplete")
+                       and all(row["outcome"] in ("pass", "skip") for row in entry["results"]) else "red" if code == 1 else "incomplete")
     (folder / "sample.json").write_text(json.dumps(value, indent=2) + "\n")
     return value
 
@@ -163,8 +163,10 @@ def checked_sample(root, value, context, config, file, attempt, expected):
             or value["finished_at"] < value["started_at"]):
         raise ValueError("sample command, scope, result, time or log differs")
     rows = report(folder, value["test_report"], value["started_at"])
-    if (any(row["file"] != file or row["outcome"] != "pass" for row in rows)
-            or not expected.issubset({row["test"] for row in rows})):
+    passed = {row["test"] for row in rows if row["outcome"] == "pass"}
+    if (any(row["file"] != file or (row["outcome"] != "pass"
+            and not (row["outcome"] == "skip" and expected.get(row["test"]) == "skip")) for row in rows)
+            or not {name for name, outcome in expected.items() if outcome != "skip"}.issubset(passed)):
         raise ValueError("sample omits or skips an executed identity, or has a failure")
 
 
@@ -188,7 +190,7 @@ def run(path, receipt):
         proof = {"schema": 1, "status": "not_reproduced", "scope": context, "policy": config,
                  "initial": {"path": str(original), "sha256": hashed(original)}, "filenames": files, "reruns": []}
         for file in files:
-            expected = {row["test"] for row in rows if row["file"] == file and row["outcome"] != "skip"}
+            expected = {row["test"]: row["outcome"] for row in rows if row["file"] == file}
             for attempt in range(1, config["attempts"] + 1):
                 value = sample(path.parent / ("rerun-" + uuid.uuid4().hex), receipt, config, file, attempt)
                 proof["reruns"].append(value)
@@ -224,7 +226,7 @@ def verify(path, receipt):
             raise ValueError("retry samples are incomplete")
         seen = set()
         for index, file in enumerate(files):
-            expected = {row["test"] for row in rows if row["file"] == file and row["outcome"] != "skip"}
+            expected = {row["test"]: row["outcome"] for row in rows if row["file"] == file}
             for attempt in range(1, config["attempts"] + 1):
                 value = samples[index * config["attempts"] + attempt - 1]
                 checked_sample(path.parent, value, context, config, file, attempt, expected)

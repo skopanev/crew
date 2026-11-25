@@ -32,6 +32,8 @@ cases = '<testcase name="bad" file=' + quoteattr(file) + '>'
 cases += '<failure message="persistent"/>' if mode == "red" else '<skipped/>' if mode == "skip" else ''
 cases += '</testcase>'
 if mode != "omit": cases += '<testcase name="good" file=' + quoteattr(file) + '/>'
+if mode in ("old_skip", "new_skip"):
+ cases += '<testcase name=' + quoteattr(mode) + ' file=' + quoteattr(file) + '><skipped/></testcase>'
 if mode != "missing": out.write_text('<testsuite>' + cases + '</testsuite>')
 print("sample", file, mode)
 sys.exit(1 if mode == "red" else 0)
@@ -141,6 +143,20 @@ class RetryTests(unittest.TestCase):
                 (self.folder / "initial.json").unlink(missing_ok=True)
                 os.environ["RETRY_MODE"] = mode
                 self.assertIsNone(test_retry.run(self.path, self.receipt))
+
+    def test_original_skips_can_remain_while_every_executed_case_passes(self):
+        entry = self.receipt["test_report"]
+        file = self.folder / "test-report" / entry["path"]
+        file.write_text(file.read_text().replace("</testsuite>",
+            '<testcase name="old_skip" file="tests/a.py"><skipped/></testcase></testsuite>'))
+        entry["sha256"] = test_retry.hashed(file)
+        entry["results"] = test_report.parse(file.read_bytes(), SETTINGS["identity"])
+        os.environ["RETRY_MODE"] = "old_skip"
+        self.proof()
+
+    def test_new_skipped_identity_refuses_a_green_process(self):
+        os.environ["RETRY_MODE"] = "new_skip"
+        self.assertIsNone(test_retry.run(self.path, self.receipt))
 
     def test_mutated_log_is_refused(self):
         final = self.proof()
