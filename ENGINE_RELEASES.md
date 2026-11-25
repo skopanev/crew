@@ -74,7 +74,7 @@ Old versions remain available for existing panels.
 | engine-v61 | `727d8cd7d81f3dad5dc709c5f4129bb3786d4b67` | Keep Lander assignment data in files and preserve blocked signals |
 | engine-v62 | `eb4dd69a83bdb5eb5d3b47db1c01b51e98e630d1` | Flush small batches when producers are idle and show grouped queues during active work |
 | engine-v63 | `50930d376414c0e5327472f076021b31c8d3eb52` | Read Test execution policy from the injected shared rule in Tasker and Lane review prompts |
-| engine-v64 | `d3ca0393be782ba2b6a3e03cf608c642b9ee3c39` | Run filtered slots in one dashboard and check effective object filters before claims |
+| engine-v64 | `d3f174997f2d28891ea48e4d5c4e857465190293` | Run filtered slots in one dashboard and check effective object filters before claims |
 
 ## Install a version
 
