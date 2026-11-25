@@ -38,6 +38,8 @@ test('two filtered slots run together while the next batch of a busy slot waits'
     assert.equal(f.starts().length, 2);
     assert.match(run.output(), /A 1 running/);
     assert.match(run.output(), /B 1 running/);
+    assert.match(run.output(), /\[A\]\s+ac:a1/);
+    assert.match(run.output(), /\[B\]\s+ac:a2/);
     assert.ok(plannerRows(f.config.runs_folder, null, 30, normalizeSlots(f.config))
       .filter(row => row.active).every(row => row.ticket.startsWith('[' + row.slot + ']')));
     f.release('ac:a1');
@@ -60,6 +62,20 @@ test('a restarted dashboard keeps live slot occupancy after slot reordering', as
     await pause(1100);
     assert.equal(f.starts().length, 2);
   } finally { await second.stop(); }
+});
+
+test('overlapping slot filters do not start the same object twice', async t => {
+  const f = await slotsFixture(t);
+  f.objects.delete('ac:a3');
+  f.write({...f.config, slots: [{label: 'A', data: {repository: 'alpha'}},
+    {label: 'B', data: {repository: 'alpha'}}]});
+  const run = f.start();
+  try {
+    await run.until(() => f.starts().length === 1);
+    await pause(1100);
+    assert.equal(f.starts().length, 1);
+    assert.equal(f.starts()[0].address, 'ac:a1');
+  } finally { await run.stop(); }
 });
 
 test('unknown or renamed live slot state blocks admission and broken journals are refused', t => {
