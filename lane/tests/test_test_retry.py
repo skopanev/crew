@@ -144,6 +144,15 @@ class RetryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             test_retry.verify(self.path, final)
 
+    def test_malformed_report_objects_raise_value_error(self):
+        final = self.proof()
+        for invalid in ([], None, "report"):
+            with self.subTest(invalid=invalid):
+                changed = copy.deepcopy(final)
+                changed["not_reproduced"]["reruns"][0]["test_report"] = invalid
+                with self.assertRaises(ValueError):
+                    test_retry.verify(self.path, changed)
+
     def test_missing_proof_is_false_and_changed_policy_refuses(self):
         self.assertFalse(test_retry.verify(self.path, self.receipt))
         final = self.proof()

@@ -71,7 +71,8 @@ def scope(receipt):
 
 def report(root, entry, started=None):
     settings = test_report.config()
-    if (not settings or any(entry.get(key) != item for key, item in settings.items()) or entry.get("error")):
+    if (not isinstance(entry, dict) or not settings
+            or any(entry.get(key) != item for key, item in settings.items()) or entry.get("error")):
         raise ValueError("retry report settings changed or report is incomplete")
     file = confined(root, root / "test-report" / entry["path"])
     data = file.read_bytes()
