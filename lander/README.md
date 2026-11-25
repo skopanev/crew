@@ -45,6 +45,7 @@ The host queue and flow preparation both check the locks. They do not remove the
 When configured, this condition replaces the age condition for smaller batches.
 The panel shows the pending queue total and each `batch.by` group from the selection reads.
 It counts distinct `batch.unit_field` values when configured. Otherwise, it counts selected objects.
+The queue refreshes at the configured polling interval, including while a batch runs.
 Set `interval_seconds: 60` to check the queue every minute. All Tasks of each selected branch enter the same claim.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
 Set `workflow_timeout_seconds` to configure the workflow deadline in seconds. The default is 3600.

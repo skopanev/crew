@@ -132,7 +132,6 @@ export async function main(argv) {
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
       let selected = requirement, attemptKey = null, inputIndex, scope = '--req-id';
-      if (automatic && !detached && pool.size >= concurrency) { await pause(); continue; }
       if (automatic) {
         if (pool.size && !detached) {
           try {
@@ -147,7 +146,7 @@ export async function main(argv) {
         const loaded = pool.size && !detached ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
         ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
-        if (detached && pool.size >= concurrency) {
+        if (pool.size >= concurrency && !(config.workflow && config.batch?.by)) {
           state.error = loaded.error || null;
           if (once) { draw(); break; }
           await pause(); continue;
@@ -166,7 +165,7 @@ export async function main(argv) {
               [...pool.active.values()].map(run => ({...run, config}));
             const conflicts = contextAdmission(active);
             const {count, next, filtered, queue} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              (row, profile, read) => busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
+              (row, profile, read) => pool.size >= concurrency || busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
             state.queue = config.batch?.by ? queue : undefined;
             selection = null;
             if (next) {
