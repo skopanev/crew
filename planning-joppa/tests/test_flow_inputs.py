@@ -245,3 +245,19 @@ class InputTests(InputFixture):
         config["inputs"][1]["workspace"] = "foreign"
         with self.assertRaisesRegex(ValueError, "native selection profiles"):
             flow_launch.configuration(path, json.dumps(config), 1)
+
+    def test_nonprofile_selection_uses_the_frozen_config_after_the_source_changes(self):
+        config = {**self.config, 'selection': {'kind': 'work', 'data': {'repository': 'alpha'}}}
+        path = self.folder / 'config.json'
+        write(path, config)
+        def execute(command, env, cwd, effective):
+            variables = dict(value.split('=', 1) for index, value in enumerate(command) if command[index - 1] == '--var')
+            write(path, {**config, 'selection': {'kind': 'work', 'data': {'repository': 'beta'}}})
+            self.assertEqual(variables['PLANNING_JOPPA_CONFIG'], variables['PLANNING_JOPPA_CONFIG_SNAPSHOT'])
+            self.assertEqual(flow_launch.configuration(variables['PLANNING_JOPPA_CONFIG']), effective)
+            self.assertEqual(effective['selection']['data'], {'repository': 'alpha'})
+            return 0
+        import flow_runtime
+        with patch.object(flow_launch.shutil, 'which', return_value='medulla'), \
+                patch.object(flow_runtime, 'execute', side_effect=execute):
+            self.assertEqual(flow_launch.launch(path, json.dumps(config), 'work:t', False), 0)

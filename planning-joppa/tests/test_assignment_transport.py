@@ -110,6 +110,44 @@ class AssignmentTransportTests(unittest.TestCase):
             load.assert_not_called()
         self.assertEqual(self.api.batches, [])
 
+    def test_two_data_scopes_never_claim_each_others_objects_or_stale_profile_items(self):
+        for own, foreign in [('alpha', 'beta'), ('beta', 'alpha')]:
+            for profiled in (False, True):
+                with self.subTest(own=own, profiled=profiled), patch.dict(os.environ, {
+                        'MEDULLA_RUN_DIR': str(self.root / f'{own}-{profiled}' / 'run')}):
+                    self.api = Tracker()
+                    self.api.nodes['criterion:a']['document']['data']['repository'] = own
+                    self.api.nodes['criterion:b'] = item('criterion:b', data={'repository': foreign})
+                    config = {**self.config, 'workflow': str(Path(__file__).resolve().parents[2] / 'writer/workflow.yaml'),
+                              'runs_folder': str(self.root / f'{own}-{profiled}'),
+                              'mcp_command': ['connector'], 'selection': {'kind': 'criterion', 'data': {'repository': own}}}
+                    if profiled:
+                        config['inputs'] = [{'selection': config['selection']}]
+                    from flow_launch import configuration
+                    import json
+                    effective = configuration('unused', json.dumps(config), 0 if profiled else None)
+                    with patch.object(flow_stages, 'settings', return_value=effective), \
+                            patch.object(flow_stages, 'client', return_value=self.api), \
+                            patch.dict(os.environ, {'PLANNING_JOPPA_ITEM': 'criterion:b'}):
+                        with self.assertRaisesRegex(ValueError, 'object data differs'):
+                            self.prepare('false')
+                    self.assertEqual(self.api.batches, [])
+                    with patch.object(flow_stages, 'settings', return_value=effective), \
+                            patch.object(flow_stages, 'client', return_value=self.api), \
+                            patch.dict(os.environ, {'PLANNING_JOPPA_ITEM': 'criterion:a'}):
+                        self.prepare('false')
+                    self.assertEqual(len(self.api.batches), 1)
+                    self.assertIsNone(self.api.nodes['criterion:b']['document']['data'].get('assignee'))
+
+    def test_foreign_batch_member_is_refused_before_any_claim(self):
+        self.api.nodes['criterion:a']['document']['data']['repository'] = 'alpha'
+        self.api.nodes['criterion:b'] = item('criterion:b', data={'repository': 'beta'})
+        config = {**self.config, 'selection': {'kind': 'criterion', 'data': {'repository': 'alpha'}},
+                  'batch': {'size': 2}, 'exclude_children': None, 'children': {}}
+        with patch.object(flow_stages, 'settings', return_value=config), self.assertRaisesRegex(ValueError, 'batch object data differs'):
+            self.prepare('false')
+        self.assertEqual(self.api.batches, [])
+
     def test_cli_invalid_mode_does_not_enter_failure_cleanup_or_initialize_the_api(self):
         with patch.dict(os.environ, {"FLOW_ASSIGNMENT_INLINE": "invalid"}), \
                 patch.object(sys, "argv", ["flow_stages.py", "prepare"]), \
