@@ -94,5 +94,3 @@ def existing(root):
         raise ValueError("existing-code verification needs Task test files")
     test_bindings.write(artifacts / "ticket-checks.json", paths)
     print(f"Verify existing code with {len(paths)} recorded Task test file(s).")
-
-
