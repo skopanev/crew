@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
-import xml.etree.ElementTree as ET
 
 import no_new_red
 import test_report
@@ -83,12 +82,7 @@ def report(root, entry, started=None):
     rows = test_report.parse(data, settings["identity"])
     if rows != entry.get("results"):
         raise ValueError("retry report results differ from hashed XML")
-    # Support the parser before and after its shared file-attribute extension.
-    xml = ET.fromstring(data)
-    files = {test_report.mapped_name(settings["identity"], case, suite):
-             case.get("file") or (suite.get("file") if suite is not None else None)
-             for case, suite in test_report.cases(xml, xml if xml.tag == "testsuite" else None)}
-    return [{**row, "file": files[row["test"]]} for row in rows]
+    return rows
 
 
 def initial(path, receipt):
