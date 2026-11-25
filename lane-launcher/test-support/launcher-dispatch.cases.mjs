@@ -66,7 +66,7 @@ test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only
   const result = await execute(path.join(folder, 'dolber-joppa.sh'), ['--once'], f.env, {bin: 'sh', cwd: f.root});
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
-  assert.deepEqual(lines, ['Running lanes 0 of 1 · available 2',
+  assert.deepEqual(lines, ['Running lanes 0 of 1 · available 2 · avg pace: ?',
     'Joppa Tasks [workspace=fixture, repositories=app]: 2 available · 0 held Tasks',
     'checking params:', '  repositories: app', '  filter: {"data":{"stage":"ready"}}',
     'Progress: unavailable · DONE 60m: 0 · 24h: 0',

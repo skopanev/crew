@@ -48,6 +48,7 @@ if (process.listenerCount('SIGINT') || process.listenerCount('SIGTERM')) throw n
     const run = start(config, false, once);
     assert.equal(await run.done, 0, run.output());
     assert.match(run.output(), /available: A 3 · B 3/);
+    assert.match(run.output(), /avg pace: \? · last 30 runs/);
     assert.deepEqual(run.rows(), [{...config.selection, workspace: 'example', assignee: '', group_by: ['tags']}]);
   }
   const active = path.join(runs, '2026-11-25_00-00-00-active', 'artifacts');

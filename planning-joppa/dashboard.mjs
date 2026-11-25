@@ -18,6 +18,7 @@ import {landingQueue} from './queue-display.mjs';
 import {availableCounts, availabilityLabel} from './availability.mjs';
 import {pendingFlush, consumeFlush} from './flush.mjs';
 import {configuredSelection} from './configured-selection.mjs';
+import {avgPace} from '../lane-launcher/avg-pace.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -104,7 +105,7 @@ export async function main(argv) {
       {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency}` +
-        (config.workflow ? ` · ${availabilityLabel(state)}` : '') + ' · last 30 runs',
+        (config.workflow ? ` · ${availabilityLabel(state)}` : '') + ` · ${avgPace(rows)} · last 30 runs`,
       ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied, landingQueue(rows, config, active)).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
       ...(flushes.length ? [('flush requested: ' + [...new Set(flushes.map(request => request.slot))].join(' · ')).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '─'.repeat(width), ...table,

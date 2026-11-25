@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {tail} from './run-files.mjs';
 import {hasSlots} from './slots.mjs';
+import {landingPace} from '../lane-launcher/avg-pace.mjs';
 
 const json = (file, strict = false) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -40,6 +41,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const artifacts = path.join(recordFolder, 'artifacts');
       const input = readJson(path.join(artifacts, 'input.json'));
       const result = readJson(path.join(artifacts, 'result.json'));
+      const landing = landingPace(input, readJson(path.join(artifacts, 'lander.json')), result);
       let vars = '', pid;
       try { vars = fs.readFileSync(path.join(recordFolder, 'vars.yaml'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const subject = input?.joppa?.scope === 'requirement' ? input.requirement : input?.ac;
@@ -129,6 +131,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
           .map(([address, value]) => JSON.stringify([address, value]))} : {}),
         runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, reasonCode,
+        ...(landing || {paceCount: status === 'READY' && !recovery && !negative && publication?.status !== 'uncertain' ? 1 : 0}),
         claimHeld: claim?.status === 'confirmed' && !released && !['pending', 'uncertain', 'confirmed'].includes(publication?.status),
         ...(outcomeTone ? {outcomeTone} : {})}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);

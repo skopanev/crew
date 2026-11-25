@@ -7,6 +7,8 @@ import {testResultsInspection} from './test-results-publish.mjs';
 import {formatSelectionIssue} from './selection-notify.mjs';
 import {branchOutcome} from './branch-outcome.mjs';
 import {availabilityLabel} from './native-availability.mjs';
+import {avgPace} from './avg-pace.mjs';
+import {dolberPaceRows} from './dolber-pace.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -188,7 +190,7 @@ export function createDashboard(config, paint) {
     const {counts} = state;
     const issues = counts?.dependencyIssues || [];
     const header = `DOLBER ${config.id} · Running lanes `;
-    const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`) + ` · ${availabilityLabel(state)}`,
+    const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`) + ` · ${availabilityLabel(state)} · ${avgPace(dolberPaceRows(runs))}`,
       clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
       counts ? clip(`Tasks: ${counts.ready} ready · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tasks: not checked',

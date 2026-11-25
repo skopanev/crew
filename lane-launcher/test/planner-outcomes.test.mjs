@@ -46,6 +46,7 @@ test('published rows show the recorded stage and reason, with configured result 
     assert.equal(row.displayStatus, code);
     assert.equal(row.stage, `→ ${stage} · ${code}`);
     assert.equal(row.outcomeTone, tone);
+    assert.equal(row.paceCount, tone === 'ready' ? 1 : 0);
   }
 });
 
@@ -115,6 +116,7 @@ test('negative verdicts and confirmed decision stages stay red without a color m
       assert.equal(row.displayStatus, code);
       assert.equal(row.outcomeTone, 'red');
       assert.equal(row.status, 'READY');
+      assert.equal(row.paceCount, 0);
     }
   }
 });

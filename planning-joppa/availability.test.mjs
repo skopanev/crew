@@ -80,10 +80,10 @@ test('the dashboard refreshes counts at full capacity and never counts claimed r
     await run.until(output => output.includes('available: A 1 · B 1'));
     const {slots, ...single} = f.config;
     f.write(single);
-    await run.until(output => output.includes('available 2 · last 30 runs'));
+    await run.until(output => output.includes('available 2 · avg pace: ? · last 30 runs'));
     const start = f.calls.filter(call => call.args.count).length;
     f.objects.get('ac:a3').document.data.stage = 'done';
-    await run.until(output => output.includes('available 1 · last 30 runs'));
+    await run.until(output => output.includes('available 1 · avg pace: ? · last 30 runs'));
     assert.ok(f.calls.filter(call => call.args.count).length > start);
     assert.equal(f.starts().length, 1, 'Counting does not bypass the concurrency limit');
     assert.ok(f.calls.filter(call => call.args.count).every(call => call.name === 'joppa_objects' &&

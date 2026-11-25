@@ -8,6 +8,7 @@ import {alive} from '../lane-launcher/runtime.mjs';
 import {tail} from '../planning-joppa/run-files.mjs';
 import {availableCounts, availabilityLabel} from '../planning-joppa/availability.mjs';
 import {normalizeSlots} from '../planning-joppa/slots.mjs';
+import {avgPace, landingPace} from '../lane-launcher/avg-pace.mjs';
 
 const json = file => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -74,7 +75,8 @@ export function landerRows(root, statsFile = null, limit = 30) {
     return {ticket: tasks.length ? `${tasks.length} Tasks: ${tasks.map(address => address.split(':').slice(1).join(':') || address).join(', ')}` : '—',
       branches: branches.length || old?.batch_size || 0,
       runId: outcome?.run_id || name.replace(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-/, ''),
-      start, end, active, claimHeld, status, stage: active ? stage(folder, journal) : code || stage(folder, journal)};
+      start, end, active, claimHeld, status, ...landingPace(input, state, result, old),
+      stage: active ? stage(folder, journal) : code || stage(folder, journal)};
   }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 
@@ -105,9 +107,9 @@ export async function main(argv, {read} = {}) {
   const color = !process.env.NO_COLOR && (process.stdout.isTTY || process.env.FORCE_COLOR === '1');
   const paint = (tone, value) => color ? `\x1b[${tones[tone]}m${value}\x1b[0m` : String(value);
   const render = (_left, closed = false) => {
-    const rows = landerRows(config.runs_folder, stats), width = Math.max(1, process.stdout.columns || 120);
+    const rows = landerRows(config.runs_folder, stats, Infinity), width = Math.max(1, process.stdout.columns || 120);
     const available = rows.some(row => row.active && !row.claimHeld) ? availabilityLabel({}) : availabilityLabel(state);
-    return ['LANDER', `${rows.filter(row => row.active).length} running · ${available} · last 30 runs`, '─'.repeat(width),
+    return ['LANDER', `${rows.filter(row => row.active).length} running · ${available} · ${avgPace(rows)} · last 30 runs`, '─'.repeat(width),
       ...renderRunTable(rows, paint, 5, {identityLabel: 'TASKS', statusWidth: 14}),
       closed ? 'Stopped' : 'Next refresh in 00:05 · Ctrl+C to close'].join('\n');
   };

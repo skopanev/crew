@@ -72,6 +72,12 @@ It checks the code and generated config again before reuse.
 Without `--run`, it installs the environment and prints its manifest.
 Use an immutable engine tag from [Engine releases](ENGINE_RELEASES.md).
 Old panels and workers retain their paths. Remove an old environment only after all its processes finish.
+
+Dashboard headers show `avg pace: N/hr` from successful completions in the last six hours.
+The divisor is the retained history span, up to six hours. Less than one hour shows `avg pace: ?`.
+The rate uses all retained runs, even when the table shows only 30 rows.
+Lander counts unique confirmed landed branches, including accepted branches in partial batches.
+The display reads local run evidence. It makes no additional Joppa requests and creates no metric files.
 Keep run artifacts outside the code worktrees.
 
 The entire source root is read-only. Each Task run has a writable private checkout

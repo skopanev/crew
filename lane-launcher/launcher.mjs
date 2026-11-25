@@ -18,6 +18,7 @@ import {dispatchLane} from './lane-dispatch.mjs';
 import {startHostMaintenance} from './host-maintenance.mjs';
 import {refreshAvailability} from './availability.mjs';
 import {monitorDashboard} from './monitor.mjs';
+import {dolberPace} from './dolber-pace.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -82,7 +83,7 @@ export async function tick(config, display = null, {signal} = {}) {
   if (display) display.containers = containers;
   else divider();
   const availability = await refreshAvailability(config, display, signal);
-  print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)} · ${availability}`);
+  print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)} · ${availability} · ${dolberPace(config)}`);
   const selected = await nextTask(config);
   const selectionIssues = selected.selectionIssues || [];
   const candidate = selected.candidate;

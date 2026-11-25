@@ -43,7 +43,7 @@ import {monitorDashboard} from ${JSON.stringify(new URL('../monitor.mjs', import
 await monitorDashboard(JSON.parse(fs.readFileSync(process.argv[2])), (_, value) => String(value));`);
   const run = watch(t, runner, [file], {...process.env, NO_COLOR: '1'});
   try {
-    await run.until(output => /Running lanes 0 of 1 · available 2/.test(output));
+    await run.until(output => /Running lanes 0 of 1 · available 2 · avg pace: \?/.test(output));
     f.objects.get('task:t2').document.data.stage = 'done';
     await run.until(output => /Running lanes 0 of 1 · available 1/.test(output));
     assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
