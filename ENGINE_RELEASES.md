@@ -79,6 +79,7 @@ Old versions remain available for existing panels.
 | engine-v66 | `aa17a31d616aa687532f1025d3bf02a258007371` | Allow each configured slot to override common batch settings |
 | engine-v67 | `e51c109298c90b75f6a397eeeec2177588bd44f3` | Check configured admission before selecting or claiming flow inputs |
 | engine-v68 | `2a8385a1b42d13bcd823205f0a4b683b58aecf8c` | Keep admission diagnostics in the flow output log |
+| engine-v69 | `691f6f658d9ae037d31edef5b6cffd2dd50a1904` | Allow a parent note after its guarded stage update |
 
 ## Install a version
 
@@ -86,7 +87,7 @@ Fetch the public repository and its tags. Create a detached runtime at the selec
 
 ```sh
 git fetch origin main --tags
-git worktree add --detach /path/to/releases/engine-v68 engine-v68
+git worktree add --detach /path/to/releases/engine-v69 engine-v69
 ```
 
 Set `sources.engine.ref` to that tag in the environment specification.
@@ -94,7 +95,7 @@ Set `sources.role.ref` to the required role version.
 Run the existing installer without `--run` to prepare the environment:
 
 ```sh
-node /path/to/releases/engine-v68/lane-launcher/environment.mjs /path/to/environment.json
+node /path/to/releases/engine-v69/lane-launcher/environment.mjs /path/to/environment.json
 ```
 
 Check the returned `environment.json` before starting the panel.
