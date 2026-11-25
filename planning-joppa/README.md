@@ -50,10 +50,12 @@ export async function admission(row, effectiveProfile, read) {
 ```
 
 Return `true` to admit the row or `false` to skip it. Other return values and errors stop selection.
-The row contains its address, revision, kind, parent and title. Read full objects when needed.
+Only `address`, `revision`, `kind`, `parent` and `title` are guaranteed in every row.
+Other list projections differ between paths. Read full objects through `read` when needed.
 The supplied reader permits only `joppa_objects`, `joppa_tree`, `joppa_search` and `joppa_help` in the configured workspace.
 Automatic selection skips the item before creating a run folder or claim. Explicit item launches also check admission before execution.
 Each batch member passes the check again before the native claim. The check can refuse changed inputs after selection.
+The preclaim module process has 30 seconds for the entire batch. Keep its reads bounded.
 Input profiles inherit the module path. Existing snapshots preserve the path and effective profile.
 Use an immutable module path for each code version. Restart the dashboard after replacing module code.
 The module is trusted operator code. The reader restriction does not sandbox its Node process.
