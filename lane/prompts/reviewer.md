@@ -1,3 +1,4 @@
+For Test execution, follow the injected tests.gate.automatic rule.
 Read {{var:RUN_ARTIFACTS}}/reviewer-contract.txt and execute its steps.
 Return SCOPE_MISMATCH only when a blocking remedy changes an explicit Task/AC restriction or needs a missing prerequisite.
 A missing plan detail or missing test within the Task/AC remains REJECT. Keep optional improvements as advice.
