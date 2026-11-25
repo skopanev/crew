@@ -17,6 +17,7 @@ import {queueLabel} from './flow-batch.mjs';
 import {hasSlots, occupiedSlots} from './slots.mjs';
 import {admissionForItem} from './configured-admission.mjs';
 import {landingQueue} from './queue-display.mjs';
+import {availableCounts, availabilityLabel} from './availability.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -100,7 +101,8 @@ export async function main(argv) {
       ticket: row.batchLabel || (row.slot ? `[${row.slot}] ${row.ac}` : row.ac)})),
       paint, state.queue === undefined ? 7 : 8, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
-      `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
+      `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency}` +
+        (config.workflow ? ` · ${availabilityLabel(state)}` : '') + ' · last 30 runs',
       ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied, landingQueue(rows, config, active)).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
@@ -157,13 +159,22 @@ export async function main(argv) {
         const loaded = pool.size && !detached ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
         ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
-        if (pool.size >= concurrency && !(config.workflow && (config.batch?.by || hasSlots(config)))) {
-          state.error = loaded.error || null;
-          if (once) { draw(); break; }
-          await pause(); continue;
-        }
+        if (config.workflow) state.available = undefined;
         try {
           const rows = plannerRows(root, pool.current, Infinity, {...config, dispatcherId: owner});
+          if (config.workflow) {
+            selection = new AbortController();
+            const active = rows.filter(row => row.active);
+            state.available = (await availableCounts(config, tokenFile, selection.signal,
+              active.every(row => row.claimHeld) && active.length >= pool.size)).text;
+            selection = null;
+            if (loaded.reloaded) state.skipped = undefined;
+          }
+          if (pool.size >= concurrency && !(config.workflow && (config.batch?.by || hasSlots(config)))) {
+            state.error = loaded.error || null;
+            if (once) { draw(); break; }
+            await pause(); continue;
+          }
           const busy = address => !detached && pool.owns(address) || rows.some(row => row.active && row.ac === address);
           if (loaded.error) state.error = loaded.error;
           else if (rows.some(row => row.status === 'HELD')) {
@@ -177,9 +188,11 @@ export async function main(argv) {
             const occupied = occupiedSlots(config, rows, active);
             state.occupied = occupied;
             const conflicts = contextAdmission(active);
+            const stats = {};
             const {count, next, filtered, queue} = await nextConfiguredItem(config, tokenFile, selection.signal,
               (row, profile, read) => pool.size >= concurrency || occupied?.get(profile.slot) > 0 ||
-                busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
+                busy(row.address) || skipRetry(row) || conflicts(row, profile, read), stats);
+            if (stats.checked) state.skipped = stats.skipped || 0;
             state.queue = config.batch?.by || hasSlots(config) ? queue : undefined;
             selection = null;
             if (next) {

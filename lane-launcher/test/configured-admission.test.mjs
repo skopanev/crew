@@ -48,9 +48,10 @@ test('effective profiles apply admission before selection and retain their input
   const config = {...f.config, admission_module: f.module(`export const admission=(row,profile)=>
     profile.selection.kind==='ac' && row.address==='ac:a2';`), inputs: [
     {selection: {kind: 'task'}}, {selection: {kind: 'ac'}}]};
-  const result = await nextConfiguredItem(config, config.token_file);
+  const stats = {}, result = await nextConfiguredItem(config, config.token_file, undefined, undefined, stats);
   assert.equal(result.next.address, 'ac:a2'); assert.equal(result.next.input, 1);
   assert.equal(result.filtered, 3);
+  assert.deepEqual(stats, {checked: 4, skipped: 3});
   assert.equal(f.calls.some(call => call.name === 'joppa_batch'), false);
   assert.equal(await admissionForItem(config, config.token_file, 'ac:a2', 1), true);
   assert.equal(await admissionForItem(config, config.token_file, 'task:t1', 0), false);

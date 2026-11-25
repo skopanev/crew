@@ -146,6 +146,12 @@ After a restart, live passes still occupy concurrency slots. The dashboard reads
 Ctrl+C stops only the detached dashboard. Live passes keep their claims and continue.
 New passes use reloaded configuration, even when older passes remain active.
 Each active pass uses its captured config. Its digest, claim, revision and publication guards remain in force.
+
+Configured dashboards show `available N` from the native selection with `assignee: ""` and excluded tags.
+Each poll uses one aggregate read per distinct profile query. Multiple profiles show separate labeled counts, never a combined total.
+The count does not run admission, dependency or child checks. `skipped M` shows admission rejections from the last selection that checked admission.
+A failed count read shows `?`. An active startup without a confirmed claim also shows `?`, until its claim excludes it.
+Counts refresh on automatic selection polls, including when every lane is occupied. Screen redraws make no count requests.
 An uncertain receipt still holds further work. The dispatcher creates no separate history database.
 `--once` starts one independent pass and waits for its exit status.
 To stop one pass, use the full Run ID or full run folder name:

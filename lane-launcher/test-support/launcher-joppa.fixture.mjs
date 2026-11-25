@@ -103,6 +103,7 @@ async function packageFixture(t, mode = 'success') {
       value = {items: rows.slice(start, end).map(row => Object.fromEntries(Object.entries(row)
         .filter(([key]) => key === 'address' || args.fields?.includes(key)))),
         ...(end < rows.length ? {next_cursor: String(end)} : {})};
+      if (args.count) value = {total: rows.length};
     }
     else if (name === 'joppa_tasks') throw new Error('The removed Task tool was called');
     else if (name === 'joppa_batch') {

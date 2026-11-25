@@ -127,7 +127,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
           .map(([address, value]) => JSON.stringify([address, value]))} : {}),
-        runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, reasonCode, ...(outcomeTone ? {outcomeTone} : {})}];
+        runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, reasonCode,
+        claimHeld: claim?.status === 'confirmed' && !released && !['pending', 'uncertain', 'confirmed'].includes(publication?.status),
+        ...(outcomeTone ? {outcomeTone} : {})}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 

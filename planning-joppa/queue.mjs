@@ -187,13 +187,13 @@ export function flowSettings(config) {
 }
 
 // One pass takes the first ordered item that skip() allows and that has no excluded direct child.
-export async function nextConfiguredItem(config, tokenFile, signal, skip = () => false) {
+export async function nextConfiguredItem(config, tokenFile, signal, skip = () => false, stats = {}) {
   const flow = flowSettings(config);
   if (flow.inputs) {
     let count = 0, filtered = 0, next = null;
     const queue = [];
     for (const [input, profile] of flow.inputs.entries()) {
-      const result = await nextConfiguredItem({...config, ...profile, inputs: undefined}, tokenFile, signal, skip);
+      const result = await nextConfiguredItem({...config, ...profile, inputs: undefined}, tokenFile, signal, skip, stats);
       count += result.count; filtered += result.filtered;
       queue.push(...result.queue);
       if (!next && result.next) next = {...result.next, input, ...(profile.slot ? {slot: profile.slot} : {})};
@@ -224,7 +224,8 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   let filtered = 0;
   for (const row of rows) {
     if (await skip(row, config, read)) continue;
-    if (!await admissionAllowed(row, config, read)) {filtered++; continue;}
+    if (config.admission_module) stats.checked = (stats.checked || 0) + 1;
+    if (!await admissionAllowed(row, config, read)) {stats.skipped = (stats.skipped || 0) + 1; filtered++; continue;}
     const guard = config.related?.parent;
     if (guard) {
       if (!row.parent) {filtered++; continue;}
