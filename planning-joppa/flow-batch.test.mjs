@@ -86,4 +86,3 @@ test('the queue header refreshes while the configured flow occupies its only slo
   assert.equal(f.passes().length, 1, 'The same running pass must still occupy the slot');
   assert.equal(await run.stop(), 130);
 });
-
