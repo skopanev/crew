@@ -79,7 +79,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         recovery ? 'HELD' : result?.reason?.startsWith('Required owner decision:') ? 'HUMAN' :
         result?.status === 'blocked' ? 'BLOCKED' : last?.next === '__exit_fail__' || launch?.result?.code ? 'FAILED' : 'STOPPED';
       // Historical active-work refusals are selection skips, not work results.
-      if (!active && !recovery && ['ACTIVE_TASK', 'HELD_RUN', 'LIVE_TASK', 'AC_STAGE', 'TASK_PREREQUISITE'].includes(result?.reason_code)) return [];
+      if (!active && !recovery && ['ACTIVE_TASK', 'HELD_RUN', 'LIVE_TASK', 'AC_STAGE', 'TASK_PREREQUISITE'].includes(result?.reason_code)
+          && !Object.hasOwn(scope?.retry_by_reason || {}, result?.reason_code)
+          && !Object.hasOwn(scope?.retry_delay_seconds_by_reason || {}, result?.reason_code)) return [];
       let stage = '';
       let reasonCode = result?.reason_code;
       if (active) {
@@ -113,7 +115,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
           .map(([address, value]) => JSON.stringify([address, value]))} : {}),
-        runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, ...(outcomeTone ? {outcomeTone} : {})}];
+        runId: match?.[5] || entry.name, start, end, active, status, displayStatus, stage, reasonCode, ...(outcomeTone ? {outcomeTone} : {})}];
     }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, limit);
 }
 
