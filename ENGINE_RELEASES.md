@@ -84,6 +84,7 @@ Old versions remain available for existing panels.
 | engine-v71 | `7df6cb6b075b4ad7b08354d47ad8d9a11f70918f` | Show native candidate counts per configured profile and admission skips |
 | engine-v72 | `0f1592048d1711b86cb45d34a26b7b2a83d35b2a` | Retry failed target confirmation reads after a successful lane push |
 | engine-v73 | `bcaa0ebb3d2d51e23f66ff4ea2f43d381902134a` | Show native availability in Dolber and Lander dashboards and monitors |
+| engine-v74 | `c3a8c9ea8e5358cfac1ee596763d95a42bf721b4` | Retry branch pushes with PUSH_FAILED and show queued units in the header |
 
 ## Install a version
 
@@ -91,7 +92,7 @@ Fetch the public repository and its tags. Create a detached runtime at the selec
 
 ```sh
 git fetch origin main --tags
-git worktree add --detach /path/to/releases/engine-v73 engine-v73
+git worktree add --detach /path/to/releases/engine-v74 engine-v74
 ```
 
 Set `sources.engine.ref` to that tag in the environment specification.
@@ -99,7 +100,7 @@ Set `sources.role.ref` to the required role version.
 Run the existing installer without `--run` to prepare the environment:
 
 ```sh
-node /path/to/releases/engine-v73/lane-launcher/environment.mjs /path/to/environment.json
+node /path/to/releases/engine-v74/lane-launcher/environment.mjs /path/to/environment.json
 ```
 
 Check the returned `environment.json` before starting the panel.
