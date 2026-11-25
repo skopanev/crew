@@ -34,7 +34,7 @@ test('an available Task launches once; the pending tab consumes the only slot', 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(queueReads(f), 1);
   assert(f.calls.some(call => call.name === 'joppa_objects' && call.args.kind?.includes('task') &&
-    call.args.fields.includes('data.assignee')));
+    call.args.fields?.includes('data.assignee')));
   assert.equal(f.calls.some(call => call.name === 'joppa_tasks'), false);
   const events = herdrEvents(f);
   const create = events.find(args => args[1] === 'create');
@@ -66,9 +66,10 @@ test('dolber-joppa.sh reads adjacent dolber-joppa.json from another cwd and only
   const result = await execute(path.join(folder, 'dolber-joppa.sh'), ['--once'], f.env, {bin: 'sh', cwd: f.root});
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n').filter(line => !/^─+$/.test(line));
-  assert.deepEqual(lines, ['Running lanes 0 of 1',
+  assert.deepEqual(lines, ['Running lanes 0 of 1 · available 2',
     'Joppa Tasks [workspace=fixture, repositories=app]: 2 available · 0 held Tasks',
     'checking params:', '  repositories: app', '  filter: {"data":{"stage":"ready"}}',
+    'Progress: unavailable · DONE 60m: 0 · 24h: 0',
     'Starting new one with ticket: task:t1 (preview: запуск отключён)', '  [01] Task 1']);
   assert.equal(claims(f), 0);
   assert.ok(!fs.existsSync(f.events), 'preview must not call Herdr at all');
@@ -117,12 +118,12 @@ test('terminal dashboard shows its stop control and Ctrl+C releases the lock', a
   fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
   const child = spawn(process.execPath, ['--require', tty, launcher, '--config', f.configFile],
     {env: {...f.env, FORCE_COLOR: '0'}});
-  const {code, output, errors} = await interrupted(t, child, output => /Tasks: 2 available · 0 held Tasks[^]*Ctrl\+C to stop/.test(output), 10000);
+  const {code, output, errors} = await interrupted(t, child, output => /Tasks: 2 ready · 0 held Tasks[^]*Ctrl\+C to stop/.test(output), 10000);
   assert.equal(code, 0, errors);
   assert.match(output, /Ctrl\+C to stop/);
   assert.doesNotMatch(output, /Next check in|Checking tickets|No ready tickets/);
   assert.match(output, /repositories: app/);
-  assert.match(output, /Tasks: 2 available · 0 held Tasks/);
+  assert.match(output, /Tasks: 2 ready · 0 held Tasks/);
   assert.match(output, /Stopped/);
   assert.equal(queueReads(f), 1);
   assert.ok(!fs.existsSync(path.join(f.stateDir, 'dispatcher.lock')));

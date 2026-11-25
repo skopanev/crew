@@ -6,6 +6,7 @@ import {completionEvent, reasonCode} from '../notify.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
 import {formatSelectionIssue} from './selection-notify.mjs';
 import {branchOutcome} from './branch-outcome.mjs';
+import {availabilityLabel} from './native-availability.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -187,9 +188,9 @@ export function createDashboard(config, paint) {
     const {counts} = state;
     const issues = counts?.dependencyIssues || [];
     const header = `DOLBER ${config.id} · Running lanes `;
-    const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`),
+    const output = [header + paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`) + ` · ${availabilityLabel(state)}`,
       clip(`workspace: ${config.workspace} · repositories: ${config.repositories.map(repo => repo.id).join(', ')}`, width),
-      counts ? clip(`Tasks: ${counts.ready} available · ${counts.held} held Tasks` +
+      counts ? clip(`Tasks: ${counts.ready} ready · ${counts.held} held Tasks` +
         (issues.length ? ` · ${issues.length} DEPENDENCY_STALE_PIN` : ''), width) : 'Tasks: not checked',
       ...(state.progress ? [clip(state.progress, width)] : []), '─'.repeat(width)];
     const footer = state.error ? wrap(state.error, width).map(line => paint('red', line)) : [];

@@ -16,6 +16,8 @@ import {reportSelectionIssues} from './selection-notify.mjs';
 import {selectionProgress} from './selection-progress.mjs';
 import {dispatchLane} from './lane-dispatch.mjs';
 import {startHostMaintenance} from './host-maintenance.mjs';
+import {refreshAvailability} from './availability.mjs';
+import {monitorDashboard} from './monitor.mjs';
 export {configFrom} from './launcher-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -79,7 +81,8 @@ export async function tick(config, display = null, {signal} = {}) {
   const active = activeCount(config, containers, panes);
   if (display) display.containers = containers;
   else divider();
-  print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)}`);
+  const availability = await refreshAvailability(config, display, signal);
+  print(`Running lanes ${paint(active >= config.limit ? 'yellow' : 'available', `${active} of ${config.limit}`)} · ${availability}`);
   const selected = await nextTask(config);
   const selectionIssues = selected.selectionIssues || [];
   const candidate = selected.candidate;
@@ -155,26 +158,7 @@ export async function main(argv) {
   let config = configFrom(file, process.env, {dryRun: mode === 'dry-run', bytes});
   if (mode === 'monitor') {
     if (!process.stdout.isTTY) throw new Error('--monitor needs a terminal');
-    const dashboard = createDashboard({...config, monitorOnly: true}, paint);
-    dashboard.state.message = '';
-    const draw = () => { dashboard.refresh(); dashboard.draw(null); };
-    let ticker, stop;
-    try {
-      draw();
-      ticker = setInterval(draw, 5000);
-      await new Promise(resolve => {
-        stop = resolve;
-        process.once('SIGINT', stop);
-        process.once('SIGTERM', stop);
-      });
-    } finally {
-      clearInterval(ticker);
-      if (stop) {
-        process.off('SIGINT', stop);
-        process.off('SIGTERM', stop);
-      }
-      dashboard.close();
-    }
+    await monitorDashboard(config, paint);
     return;
   }
   preflight(config);
