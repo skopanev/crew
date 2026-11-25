@@ -100,6 +100,45 @@ sys.exit(rc)
         self.assertIn("publication outcome is uncertain", result.stderr)
         self.assertEqual(self.git("ls-remote", "origin", "refs/heads/develop").split()[0], self.candidate)
 
+    def test_post_push_read_retries_without_repeating_push(self):
+        for failures in (1, 3, 4):
+            with self.subTest(failures=failures):
+                bins = self.root / f"read-retry-{failures}"
+                bins.mkdir()
+                pushes, reads, sleeps = bins / "pushes", bins / "reads", bins / "sleeps"
+                script = bins / "git"
+                script.write_text(f'''#!{sys.executable}
+import pathlib,subprocess,sys
+args=sys.argv[1:]
+pushes=pathlib.Path({str(pushes)!r})
+reads=pathlib.Path({str(reads)!r})
+if args[0]=='push':
+    pushes.write_text(pushes.read_text()+'push\\n' if pushes.exists() else 'push\\n')
+if args[0]=='ls-remote' and pushes.exists():
+    count=int(reads.read_text())+1 if reads.exists() else 1
+    reads.write_text(str(count))
+    if count<={failures}:sys.exit(128)
+sys.exit(subprocess.call([{self.real_git!r},*args]))
+''')
+                script.chmod(0o755)
+                sleeper = bins / "sleep"
+                sleeper.write_text(f'#!/bin/sh\nprintf "%s\\n" "$1" >> "{sleeps}"\n')
+                sleeper.chmod(0o755)
+                env = dict(self.env, PATH=str(bins) + os.pathsep + self.env["PATH"])
+                result = subprocess.run(["bash", str(fixtures.LANE / "bin/land.sh"), "develop"],
+                                        cwd=self.repo, env=env, text=True, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 4 if failures == 4 else 0, result.stdout + result.stderr)
+                self.assertEqual(pushes.read_text().splitlines(), ["push"])
+                self.assertEqual(int(reads.read_text()), min(failures + 1, 4))
+                self.assertEqual(sleeps.read_text().splitlines(), ["2", "5", "10"][:min(failures, 3)])
+                if failures == 4:
+                    self.assertIn("target read failed after publication", result.stderr)
+                else:
+                    self.assertIn("lane-push: OK", result.stdout)
+                remote = subprocess.check_output([self.real_git, "ls-remote", "origin", "refs/heads/develop"],
+                                                 cwd=self.repo, env=self.env, text=True).split()[0]
+                self.assertEqual(remote, self.candidate)
+
     def test_simultaneous_server_ref_updates_cannot_overwrite_the_winner(self):
         entered, release = self.root / "entered", self.root / "release"
         hook = self.remote / "hooks/pre-receive"

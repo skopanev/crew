@@ -72,8 +72,16 @@ if [ "$rc" -ne 0 ]; then
   echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2
   exit 4
 fi
-after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || {
-  echo 'lane-push: target read failed after publication; inspect target ancestry' >&2; exit 4; }
+# Retry only the confirmation read. The successful push must never repeat here.
+for delay in 0 2 5 10; do
+  if [[ "$delay" -gt 0 ]]; then sleep "$delay"; fi
+  if after="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)"; then
+    break
+  fi
+  if [[ "$delay" -eq 10 ]]; then
+    echo 'lane-push: target read failed after publication; inspect target ancestry' >&2; exit 4
+  fi
+done
 echo "lane-push: after=$after"
 if [[ "$after" != "$sha" ]]; then
   [[ -n "$after" ]] && timeout 60 git fetch --no-write-fetch-head origin "$after" &&
