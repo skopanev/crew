@@ -32,6 +32,8 @@ function settings() {
   require(repo && path.isAbsolute(repo.path) && Array.isArray(repo.gateCommands) && repo.gateCommands.length &&
     repo.gateCommands.every(command => typeof command === 'string' && command.trim()), 'Repository needs path and full gateCommands');
   require(repo.preflight == null || typeof repo.preflight === 'string', 'Repository preflight must be a shell command');
+  require(repo.cleanupCommand == null || typeof repo.cleanupCommand === 'string' && repo.cleanupCommand.trim(),
+    'Repository cleanupCommand must be a nonempty shell command');
   require(repo.gateTimeoutSeconds == null || Number.isSafeInteger(repo.gateTimeoutSeconds) && repo.gateTimeoutSeconds > 0,
     'Repository gateTimeoutSeconds must be positive');
   require(repo.noNewRed == null || repo.noNewRed?.testCommand === repo.gateCommands.at(-1) &&
@@ -167,7 +169,10 @@ function push() {
 function main(command) {
   if (command === 'build') build();
   else if (command === 'push') push();
-  else if (command === 'cleanup') cleanup(fs.existsSync(stateFile) ? read(stateFile) : null, process.env.WORKTREE_ROOT);
+  else if (command === 'cleanup') {
+    const state = fs.existsSync(stateFile) ? read(stateFile) : null;
+    cleanup(state, process.env.WORKTREE_ROOT, state ? repository(state)?.cleanupCommand : undefined);
+  }
   else throw new Error('Unknown Lander stage: ' + command);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

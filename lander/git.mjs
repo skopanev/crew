@@ -183,7 +183,7 @@ export function candidate(state, repo, heads, root) {
   if (accepted.length && !green(checked)) return {accepted: [], failed, pending: 'CANDIDATE_NOT_GREEN', checked};
   return {accepted, failed, checked};
 }
-export function cleanup(state, root) {
+export function cleanup(state, root, cleanupCommand) {
   if (!state?.checkout || !fs.existsSync(state.checkout)) return;
   if (state.checked?.retainCheckout) {
     console.error('Lander checkout retained after incomplete checks: ' + state.checkout);
@@ -192,5 +192,15 @@ export function cleanup(state, root) {
   const stat = fs.lstatSync(state.checkout);
   require(path.dirname(state.checkout) === root && stat.isDirectory() && !stat.isSymbolicLink() &&
     stat.dev === state.dev && stat.ino === state.ino, 'Lander checkout identity changed');
-  fs.rmSync(state.checkout, {recursive: true});
+  try { fs.rmSync(state.checkout, {recursive: true}); }
+  catch (error) {
+    if (!cleanupCommand || !['EACCES', 'EPERM', 'ENOTEMPTY'].includes(error.code)) throw error;
+    const current = fs.lstatSync(state.checkout);
+    require(current.dev === state.dev && current.ino === state.ino && current.isDirectory() && !current.isSymbolicLink(),
+      'Lander checkout identity changed before configured cleanup');
+    const result = spawnSync('bash', ['-c', cleanupCommand], {env: {...process.env, LANDER_CHECKOUT: state.checkout},
+      timeout: 120000, stdio: 'inherit'});
+    require(result.status === 0, 'Configured Lander cleanup failed; checkout retained');
+    if (fs.existsSync(state.checkout)) fs.rmdirSync(state.checkout);
+  }
 }

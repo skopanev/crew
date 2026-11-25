@@ -40,9 +40,17 @@ Use `batch.min_size: 3` and `batch.unit_field: "data.delivery.branch"` to wait f
 Set `batch.max_wait_seconds: 900` and `batch.age_field: "data.delivery.pushed_at"` to flush smaller batches after 15 minutes.
 Set `interval_seconds: 60` to check the queue every minute. All Tasks of each selected branch enter the same claim.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
-The workflow has one deadline of 3600 seconds and sets no node timeouts.
+Set `workflow_timeout_seconds` to configure the workflow deadline in seconds. The default is 3600.
+The launcher preserves the source workflow and applies the deadline to a temporary definition for that run.
+The shared timeout anchor also sets the shell budget. Source helpers keep their original directory.
+Only a workflow with `vars.CONFIGURED_TIMEOUT_PROTOCOL: '1'` accepts this override.
+This protocol requires source helper paths to use `CREW_FLOW_WORKFLOW_DIR` instead of the temporary definition directory.
 Native `on_timeout` runs `failed` once to release claims and clean the integration checkout.
 The configured gate timeout also bounds each command, including repository hooks.
+Set a repository `cleanupCommand` when Docker can create files that the host cannot remove.
+Lander uses it after `EACCES`, `EPERM` or `ENOTEMPTY` and a checkout identity check. The command receives `LANDER_CHECKOUT`.
+Node can report `ENOTEMPTY` after it encounters restricted contents on macOS.
+The command must remove the checkout or its contents. Lander removes an empty checkout after the command succeeds.
 
 ## Failures
 

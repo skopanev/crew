@@ -33,6 +33,9 @@ def configuration(path, raw=None, input_index=None):
             "config.selection needs a native kind filter")
     require(config.get("mcp_command") or config.get("token_file"), "configure Joppa authentication")
     require(isinstance(config.get("vars", {}), dict), "config.vars must be an object")
+    deadline = config.get("workflow_timeout_seconds")
+    require(deadline is None or type(deadline) is int and deadline > 0,
+            "workflow_timeout_seconds must be a positive integer")
     require(type(config.get("wait_for_dependencies", False)) is bool, "config.wait_for_dependencies must be boolean")
     require(isinstance(config.get("exclude_tags", []), list) and
             all(isinstance(tag, str) and tag.strip() for tag in config.get("exclude_tags", [])),
@@ -124,6 +127,7 @@ def launch(path, raw, item, dry_run):
     variables = {**config.get("vars", {}), "PLANNING_JOPPA_CONFIG": str(path),
         "PLANNING_JOPPA_CONFIG_DIGEST": digest(config), "PLANNING_JOPPA_ITEM": item,
         "PLANNING_PYTHON": sys.executable,
+        "CREW_FLOW_WORKFLOW_DIR": str(Path(config["workflow"]).parent),
         "CREW_FLOW_STAGES": str(Path(__file__).with_name("flow_stages.py").resolve()),
         "FLOW_PUBLICATION": config["publication"]}
     command = [executable, "-w", config["workflow"], "--runs-folder", config["runs_folder"], "--print-run-dir"]
@@ -136,6 +140,16 @@ def launch(path, raw, item, dry_run):
     require(shutil.which(executable), "required executable missing: " + executable)
     with tempfile.TemporaryDirectory(prefix="crew-planner-memory-") as memory, \
             tempfile.TemporaryDirectory(prefix="crew-planner-agy-") as agy:
+        if config.get("workflow_timeout_seconds") is not None:
+            source = Path(config["workflow"]).read_text()
+            require(re.search(r"(?m)^  CONFIGURED_TIMEOUT_PROTOCOL: ['\"]?1['\"]?[ \t]*$", source),
+                    "Workflow must declare CONFIGURED_TIMEOUT_PROTOCOL: '1' before configuring its timeout")
+            rendered, count = re.subn(r"(?m)^(timeout:[ \t]*(?:&[\w-]+[ \t]+)?)[0-9]+([ \t]*(?:#.*)?)$",
+                lambda match: match[1] + str(config["workflow_timeout_seconds"]) + match[2], source)
+            require(count == 1, "Configured workflow timeout needs one top-level integer timeout")
+            workflow = Path(memory) / "workflow.yaml"
+            workflow.write_text(rendered)
+            command[2] = str(workflow)
         command.extend(["--var", "AGY_PROFILE_HOME=" + agy])
         snapshot = Path(memory) / "config.json"
         snapshot.write_bytes(raw.encode() if isinstance(raw, str) else raw)

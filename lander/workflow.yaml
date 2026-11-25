@@ -1,5 +1,6 @@
 version: '2'
 start: prepare
+# The launcher overrides this default from config.workflow_timeout_seconds.
 # The workflow deadline invokes failed once to release its claim.
 timeout: &workflow_timeout 3600
 on_timeout: failed
@@ -7,6 +8,7 @@ on_timeout: failed
 defaults:
   timeout: *workflow_timeout
 vars:
+  CONFIGURED_TIMEOUT_PROTOCOL: '1'
   PLANNING_PYTHON: python3
   CREW_FLOW_STAGES: ''
   WORKTREE_ROOT: ''
@@ -22,7 +24,7 @@ nodes:
       __failed__: failed
       __default__: failed
   build:
-    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" build'
+    shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" build'
     on_signal:
       BUILT: verify
       REPORT: publish
@@ -35,7 +37,7 @@ nodes:
       __failed__: failed
       __default__: failed
   push:
-    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" push'
+    shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" push'
     on_signal:
       REPORT: publish
       __failed__: failed
@@ -48,7 +50,7 @@ nodes:
       __failed__: failed
       __default__: failed
   complete_ac:
-    shell: 'node "$MEDULLA_WORKFLOW_DIR/ac-completion.mjs"'
+    shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/ac-completion.mjs"'
     on_signal:
       READY: clean_success
       BLOCKED: clean_failure
@@ -62,17 +64,17 @@ nodes:
       else
         "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
       fi
-      node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup
+      node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" cleanup
     on_signal:
       __default__: __exit_fail__
       __failed__: __exit_fail__
   clean_success:
-    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
+    shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" cleanup'
     on_signal:
       __default__: __exit_ok__
       __failed__: __exit_fail__
   clean_failure:
-    shell: 'node "$MEDULLA_WORKFLOW_DIR/lander.mjs" cleanup'
+    shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" cleanup'
     on_signal:
       __default__: __exit_fail__
       __failed__: __exit_fail__
