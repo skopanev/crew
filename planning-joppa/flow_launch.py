@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -13,11 +14,17 @@ from flow_batch import settings as batch_settings
 
 def configuration(path, raw=None, input_index=None):
     config = json.loads(raw if raw is not None else Path(path).read_bytes())
+    if "slots" in config:
+        normalized = subprocess.run([os.environ.get("NODE_BIN", "node"), str(Path(__file__).with_name("slots.mjs"))],
+                                    input=json.dumps(config), text=True, capture_output=True, timeout=10)
+        require(normalized.returncode == 0, "invalid slot configuration: " + normalized.stderr.strip()[:300])
+        config = json.loads(normalized.stdout)
     if "inputs" in config:
         profiles = config["inputs"]
-        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication", "wait_for_dependencies"}
+        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication", "wait_for_dependencies", "slot"}
         require(isinstance(profiles, list) and profiles and all(isinstance(p, dict) and isinstance(p.get("selection"), dict) and
-                set(p) <= keys for p in profiles), "inputs needs ordered native selection profiles")
+                set(p) <= keys and ("slot" not in p or isinstance(p["slot"], str) and p["slot"].strip())
+                for p in profiles), "inputs needs ordered native selection profiles")
         base = {key: value for key, value in config.items() if key != "inputs"}
         variants = [configuration(path, json.dumps({**base, **profile, "input": index})) for index, profile in enumerate(profiles)]
         if input_index is None:
@@ -118,7 +125,7 @@ def configuration(path, raw=None, input_index=None):
 
 
 def launch(path, raw, item, dry_run):
-    profiled = "inputs" in json.loads(raw)
+    profiled = any(key in json.loads(raw) for key in ("inputs", "slots"))
     config = configuration(path, raw, int(os.environ.get("PLANNING_JOPPA_INPUT", "0")))
     if profiled:
         raw = json.dumps(config)

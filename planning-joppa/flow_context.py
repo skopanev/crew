@@ -130,6 +130,8 @@ def load(api, config, address):
             "children": children(api, config, selected, config["children"]) if config.get("children") else []}
     if "input" in config:
         assignment["input"] = config["input"]
+    if "slot" in config:
+        assignment["slot"] = config["slot"]
     if config.get("related"):
         assignment["context"] = related_context(api, config, selected, schema)
     if batch:
