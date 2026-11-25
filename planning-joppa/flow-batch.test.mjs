@@ -64,9 +64,9 @@ test('queue counts cover all profiles, preserve selection order, and count each 
   const selected = await nextConfiguredItem(config, f.config.token_file);
   assert.equal(selected.next.address, 'ac:a1');
   assert.equal(selected.next.input, 0);
-  assert.equal(queueLabel(selected.queue), 'queue: 2 waiting (service 0 landing / 1 waiting · other 0 landing / 1 waiting)');
+  assert.equal(queueLabel(selected.queue), 'queue: 2 queued (service 0 landing / 1 queued · other 0 landing / 1 queued)');
   const rows = [{address: 'a', group: 'service', unit: 'same', 'data.tags': []},
     {address: 'b', group: 'service', unit: 'same', 'data.tags': []},
     {address: 'c', group: 'service', unit: 'hidden', 'data.tags': ['exclude']}];
-  assert.equal(queueLabel(batchQueue({by: 'group', unit_field: 'unit'}, rows, ['exclude'])), 'queue: 1 waiting (service 0 landing / 1 waiting)');
+  assert.equal(queueLabel(batchQueue({by: 'group', unit_field: 'unit'}, rows, ['exclude'])), 'queue: 1 queued (service 0 landing / 1 queued)');
 });

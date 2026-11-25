@@ -91,8 +91,8 @@ export function queueLabel(queue, occupied, landing = []) {
   const total = [...groups.values()].some(value => value.unknown) ? 'unknown' :
     [...groups.values()].reduce((sum, value) => sum + value.waiting.size, 0);
   const ungrouped = groups.get(null)?.unknown;
-  return `queue: ${total} waiting` + (groups.size ? ` (${[...groups].map(([label, value]) =>
-    `${label ?? '(unknown)'} ${value.unknown || ungrouped ? 'unknown' : value.landing.size} landing / ${value.unknown || ungrouped ? 'unknown' : value.waiting.size} waiting`).join(' · ')})` : '');
+  return `queue: ${total} queued` + (groups.size ? ` (${[...groups].map(([label, value]) =>
+    `${label ?? '(unknown)'} ${value.unknown || ungrouped ? 'unknown' : value.landing.size} landing / ${value.unknown || ungrouped ? 'unknown' : value.waiting.size} queued`).join(' · ')})` : '');
 }
 
 export function batchItems(batch, rows) {

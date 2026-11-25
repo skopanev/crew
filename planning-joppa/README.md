@@ -234,7 +234,7 @@ Automatic selection assigns slots. A fixed object launch cannot bypass their occ
 Rows start with `[label]`. The queue shows running passes and waiting units for every slot, including empty slots.
 The queue header counts distinct `batch.unit_field` values in captured active batches and waiting items.
 Without `unit_field`, it counts object addresses. Captured active units are excluded from waiting.
-For example: `queue: 1 waiting (alpha 2 landing / 1 waiting · beta 1 landing / 0 waiting)`.
+For example: `queue: 1 queued (alpha 2 landing / 1 queued · beta 1 landing / 0 queued)`.
 An uncaptured or unreadable active batch shows `unknown` until its existing input and config establish the units.
 Without `slots`, existing selection and concurrency behavior stays unchanged.
 
