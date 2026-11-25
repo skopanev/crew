@@ -92,4 +92,13 @@ test('unknown or renamed live slot state blocks admission and broken journals ar
   const run = path.join(root, '2026-11-25_12-00-00-unknown'); fs.mkdirSync(run);
   fs.writeFileSync(path.join(run, 'launch.json'), '{');
   assert.throws(() => plannerRows(root, null, 30, config), /Run state unavailable/);
+  fs.writeFileSync(path.join(run, 'launch.json'), JSON.stringify({address: 'work:one', slot: 'A',
+    attemptKey: JSON.stringify(['work:one', 1]), worker: {pid: 0}}));
+  assert.throws(() => occupiedSlots(config, plannerRows(root, null, 30, config), []), /unknown/);
+  const retained = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-retained-slot-'));
+  t.after(() => fs.rmSync(retained, {recursive: true, force: true}));
+  const before = fs.readFileSync(path.join(run, 'launch.json'));
+  fs.renameSync(run, path.join(retained, path.basename(run)));
+  assert.deepEqual(fs.readFileSync(path.join(retained, path.basename(run), 'launch.json')), before);
+  assert.equal(occupiedSlots(config, plannerRows(root, null, 30, config), []).get('A'), 0);
 });

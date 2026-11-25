@@ -170,6 +170,19 @@ Labels must be unique. Use `slots` or `inputs` in a config. The default concurre
 An explicit `concurrency` limits the total active passes. Each slot still permits only one active pass.
 The run records its label before execution. Detached passes keep their slot after a dashboard restart or slot reordering.
 An active run with a missing or removed label blocks new passes until its state is resolved.
+For a finished detached run with a failure result, use the `flow_recovery.py` command above.
+For an unknown run without a result, stop the dashboard first.
+Confirm that its worker, Medulla process, and checks have stopped. Resolve its Joppa holders and uncertain receipts before continuing.
+Preserve its launch and Medulla folders in a directory outside `runs_folder`:
+
+```sh
+mkdir -p /absolute/retained-runs
+mv /absolute/runs/LAUNCH_RUN /absolute/retained-runs/
+mv /absolute/runs/MEDULLA_RUN /absolute/retained-runs/
+```
+
+Move the Medulla folder only when it differs from the launch folder. Keep both folders unchanged.
+Restart the dashboard after this operator recovery. Do not create a success result or an exit journal record to clear the block.
 Automatic selection assigns slots. A fixed object launch cannot bypass their occupancy guard.
 Rows start with `[label]`. The queue shows running passes and waiting units for every slot, including empty slots.
 Without `slots`, existing selection, concurrency, and display behavior stays unchanged.
