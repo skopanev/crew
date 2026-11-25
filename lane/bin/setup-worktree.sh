@@ -18,7 +18,7 @@ pf="${REPOSITORY_PREFLIGHT:-}"
 if [ -n "$pf" ]; then
   case "$pf" in /*) preflight="$pf" ;; *) preflight="$LANE_WORKTREE/$pf" ;; esac
   if [ -x "$preflight" ]; then
-    if (cd "$LANE_WORKTREE" && timeout 600 "$preflight" > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
+    if (cd "$LANE_WORKTREE" && "$preflight" > "$MEDULLA_RUN_DIR/artifacts/preflight.txt" 2>&1); then
       deps=" Repository preflight ($pf) ran."
     else
       cat "$MEDULLA_RUN_DIR/artifacts/preflight.txt" >&2
