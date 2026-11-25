@@ -235,6 +235,13 @@ Rows start with `[label]`. The queue shows running passes and waiting units for 
 The queue header counts distinct `batch.unit_field` values in captured active batches and waiting items.
 Without `unit_field`, it counts object addresses. Captured active units are excluded from waiting.
 For example: `queue: 1 queued (alpha 2 landing / 1 queued · beta 1 landing / 0 queued)`.
+
+Request one batch below its normal minimum with `sh lane-launcher/lander.sh flush CONFIG [slot-label|all]`.
+The default target is `all`. A single unnamed profile uses `default`; unnamed input profiles use `input N`.
+The next poll bypasses the batch waiting threshold. Filters, admission, grouping, size limits and capacity still apply.
+The header shows `flush requested: LABEL` until the request is consumed. An empty queue consumes it and logs `nothing to flush`.
+Repeated requests coalesce while pending. Existing launch records prevent a consumed launch from repeating after a restart.
+The source config stays unchanged. The selected run captures its own batch minimum of one.
 An uncaptured or unreadable active batch shows `unknown` until its existing input and config establish the units.
 Without `slots`, existing selection and concurrency behavior stays unchanged.
 

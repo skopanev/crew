@@ -2,6 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import {save} from '../lane-launcher/runtime.mjs';
+import {inlineFlushSnapshot} from './flush.mjs';
 
 const signalGroup = (run, signal) => {
   if (!run.child?.pid) return false;
@@ -33,6 +35,8 @@ export class PlannerRuns {
       if (ended) return;
       ended = true;
       run.code = code ?? 2;
+      if (run.snapshot?.record) save(run.snapshot.file, {...run.snapshot.record,
+        result: {code: run.code, error: run.error, finishedAt: new Date().toISOString()}});
       if (run.current) Object.assign(run.current, {ended: true, finishedAt: new Date().toISOString()});
       this.active.delete(address);
       this.completed.push(run);
@@ -42,6 +46,22 @@ export class PlannerRuns {
     };
     const output = data => {
       const text = data.toString();
+      if (run.snapshot) {
+        fs.appendFileSync(path.join(run.snapshot.folder, 'output.log'), text);
+        pending += text;
+        const lines = pending.split('\n'); pending = lines.pop();
+        for (const line of lines) {
+          const candidate = line.trim();
+          if (!run.snapshot.record.medullaRun && path.isAbsolute(candidate) && fs.existsSync(candidate)) {
+            const physical = fs.realpathSync(candidate);
+            if (physical !== fs.realpathSync(run.snapshot.folder) && path.dirname(physical) === fs.realpathSync(this.root)) {
+              run.snapshot.record.medullaRun = physical; save(run.snapshot.file, run.snapshot.record);
+            }
+          }
+          if (line.startsWith('planning-joppa:')) run.error = line.trim();
+        }
+        return;
+      }
       if (run.current) fs.appendFileSync(path.join(run.current.folder, 'output.log'), text);
       else {
         buffered = (buffered + text).slice(-65536);
@@ -62,7 +82,16 @@ export class PlannerRuns {
       }
     };
     try {
+      run.snapshot = inlineFlushSnapshot(this.root, args, env, address, attemptKey, metadata);
+      if (run.snapshot?.refused) { finish(75); return run; }
+      if (run.snapshot) {
+        run.current = {folder: run.snapshot.folder, ended: false};
+        args = run.snapshot.args; env = run.snapshot.env;
+      }
       run.child = spawn('sh', args, {stdio: ['ignore', 'pipe', 'pipe'], detached: true, env});
+      if (run.snapshot && run.child.pid) {
+        run.snapshot.record.worker = {pid: run.child.pid}; save(run.snapshot.file, run.snapshot.record);
+      }
       run.child.stdout.on('data', output);
       run.child.stderr.on('data', output);
       run.child.once('error', error => { run.error = error.message; finish(2); });

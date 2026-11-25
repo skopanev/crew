@@ -5,6 +5,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {plannerConfig} from './planner-config.mjs';
 import {normalizeSlots} from './slots.mjs';
+import {save} from '../lane-launcher/runtime.mjs';
 
 const profiles = config => {
   const native = normalizeSlots(config), inputs = native.inputs || [native];
@@ -60,6 +61,43 @@ export function consumeFlush(request) {
     fs.unlinkSync(request.file);
     return true;
   } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
+
+export function forcedConfig(config) {
+  if (!config.batch) throw new Error('Flush needs a configured batch');
+  return {...config, batch: {...config.batch, min_size: 1}};
+}
+
+export function freezeFlush(raw, input, request) {
+  if (!request) return raw;
+  const config = JSON.parse(raw);
+  if (config.slots) {
+    if (!config.slots[input]) throw new Error('Flush slot is missing');
+    const slot = config.slots[input];
+    config.slots[input] = {...slot, batch: {...config.batch, ...slot.batch, min_size: 1}};
+  } else if (config.inputs) {
+    if (!config.inputs[input]) throw new Error('Flush input is missing');
+    config.inputs[input] = {...config.inputs[input], batch: {...(config.inputs[input].batch ?? config.batch), min_size: 1}};
+  } else config.batch = forcedConfig(config).batch;
+  config.flush_request = {id: request.id, slot: request.slot, input};
+  return Buffer.from(JSON.stringify(config));
+}
+
+export function inlineFlushSnapshot(root, args, env, address, attemptKey, metadata) {
+  if (!metadata.flush) return null;
+  const index = args.indexOf('--config') + 1, raw = fs.readFileSync(args[index]);
+  if (createHash('sha256').update(raw).digest('hex') !== env.PLANNING_JOPPA_HANDOFF_DIGEST) return {refused: true};
+  const input = Number(env.PLANNING_JOPPA_INPUT ?? 0), frozen = freezeFlush(raw, input, metadata.flush);
+  const stamp = new Date().toLocaleString('sv-SE').replace(' ', '_').replaceAll(':', '-');
+  const folder = path.join(root, `${stamp}-${randomUUID()}`), file = path.join(folder, 'launch.json');
+  fs.mkdirSync(folder, {recursive: true, mode: 0o700});
+  const command = [...args]; command[index] = path.join(folder, 'config.json');
+  fs.writeFileSync(command[index], frozen, {mode: 0o600});
+  const record = {address, input, attemptKey, dispatcherId: metadata.owner, dispatcherPid: process.pid,
+    slot: metadata.slot, flush_request: metadata.flush, args: command, createdAt: new Date().toISOString()};
+  save(file, record);
+  return {folder, file, record, args: command,
+    env: {...env, PLANNING_JOPPA_HANDOFF_DIGEST: createHash('sha256').update(frozen).digest('hex')}};
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

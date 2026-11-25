@@ -122,7 +122,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const prefix = slot ? `[${slot}] ` : '';
       const slotUncertain = strict && !active && !result && !launch?.result && !['__exit_ok__', '__exit_fail__'].includes(last?.next);
       return [{ticket: prefix + label, acTitle: selected ? prefix + label : input ? title(subject) : '', ac,
-        slot, slotUncertain, runFolder: folder, ...(batchLabel ? {batchLabel: prefix + batchLabel} : {}),
+        slot, slotUncertain, runFolder: folder, flushRequest: launch?.flush_request,
+        ...(batchLabel ? {batchLabel: prefix + batchLabel} : {}),
         ...(selected && Number.isSafeInteger(revision) ? {attemptKey: JSON.stringify([ac, revision])} : {}),
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))

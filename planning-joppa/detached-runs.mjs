@@ -7,6 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {startDetached} from '../lane-launcher/detached-process.mjs';
 import {save, read, alive} from '../lane-launcher/runtime.mjs';
 import {plannerRows} from './run-rows.mjs';
+import {freezeFlush} from './flush.mjs';
 
 const worker = fileURLToPath(new URL('./detached-worker.mjs', import.meta.url));
 export const dispatcherId = ({workspace, url, root}) =>
@@ -49,11 +50,13 @@ export class DetachedPlannerRuns {
       return run;
     }
     const snapshot = path.join(folder, 'config.json');
-    fs.writeFileSync(snapshot, raw, {mode: 0o600});
+    const frozen = freezeFlush(raw, input, metadata.flush);
+    fs.writeFileSync(snapshot, frozen, {mode: 0o600});
+    env = {...env, PLANNING_JOPPA_HANDOFF_DIGEST: createHash('sha256').update(frozen).digest('hex')};
     const command = [...args];
     command[configIndex] = snapshot;
     const run = {dispatcherId: this.owner, dispatcherPid: process.pid, address, input, attemptKey, workerScript: worker, slot: metadata.slot,
-      args: command, createdAt: new Date().toISOString()};
+      args: command, createdAt: new Date().toISOString(), ...(metadata.flush ? {flush_request: metadata.flush} : {})};
     save(file, run);
     const log = fs.openSync(path.join(folder, 'output.log'), 'a', 0o600);
     let pid;

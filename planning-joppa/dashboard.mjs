@@ -6,18 +6,18 @@ import {createHash} from 'node:crypto';
 import {createScreen, renderRunTable} from '../lane-launcher/dashboard.mjs';
 import {lock as dispatcherLock} from './run-files.mjs';
 import {plannerRows, titleCell} from './run-rows.mjs';
-import {readyRequirements, nextConfiguredItem} from './queue.mjs';
+import {readyRequirements} from './queue.mjs';
 import {HANDOFF_CHANGED, plannerConfig, plannerIdentity} from './planner-config.mjs';
 import {configReloader} from '../lane-launcher/config-reload.mjs';
 import {PlannerRuns} from './planner-runs.mjs';
-import {retryFilter} from './retry.mjs';
 import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-runs.mjs';
-import {contextAdmission} from './context-admission.mjs';
 import {queueLabel} from './flow-batch.mjs';
-import {hasSlots, occupiedSlots} from './slots.mjs';
+import {hasSlots} from './slots.mjs';
 import {admissionForItem} from './configured-admission.mjs';
 import {landingQueue} from './queue-display.mjs';
 import {availableCounts, availabilityLabel} from './availability.mjs';
+import {pendingFlush, consumeFlush} from './flush.mjs';
+import {configuredSelection} from './configured-selection.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -97,13 +97,16 @@ export async function main(argv) {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, pool.current, Infinity, {...config, dispatcherId: owner});
     const active = detached ? pool.runs.filter(run => run.active) : [...pool.active.values()];
+    const flushes = config.workflow ? pendingFlush(config, root) : [];
     const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60),
       ticket: row.batchLabel || (row.slot ? `[${row.slot}] ${row.ac}` : row.ac)})),
-      paint, state.queue === undefined ? 7 : 8, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
+      paint, (state.queue === undefined ? 7 : 8) + Number(flushes.length > 0),
+      {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency}` +
         (config.workflow ? ` · ${availabilityLabel(state)}` : '') + ' · last 30 runs',
       ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied, landingQueue(rows, config, active)).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
+      ...(flushes.length ? [('flush requested: ' + [...new Set(flushes.map(request => request.slot))].join(' · ')).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '', closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
@@ -144,7 +147,7 @@ export async function main(argv) {
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = requirement, attemptKey = null, inputIndex, slot, scope = '--req-id';
+      let selected = requirement, attemptKey = null, inputIndex, slot, flush = null, scope = '--req-id';
       if (automatic) {
         if (pool.size && !detached) {
           try {
@@ -170,7 +173,7 @@ export async function main(argv) {
             selection = null;
             if (loaded.reloaded) state.skipped = undefined;
           }
-          if (pool.size >= concurrency && !(config.workflow && (config.batch?.by || hasSlots(config)))) {
+          if (pool.size >= concurrency && !(config.workflow && (config.batch?.by || hasSlots(config) || pendingFlush(config, root).length))) {
             state.error = loaded.error || null;
             if (once) { draw(); break; }
             await pause(); continue;
@@ -182,16 +185,9 @@ export async function main(argv) {
           } else if (config.workflow) {
             // Retry policy affects selection only. Busy and held runs remain excluded.
             selection = new AbortController();
-            const skipRetry = retryFilter(config, rows, attempted, cooldowns);
-            const active = detached ? pool.runs.filter(run => run.active) :
-              [...pool.active.values()].map(run => ({...run, config}));
-            const occupied = occupiedSlots(config, rows, active);
+            const {count, next, filtered, queue, occupied, stats, flush: requested} = await configuredSelection({
+              config, root, tokenFile, signal: selection.signal, rows, pool, detached, concurrency, attempted, cooldowns});
             state.occupied = occupied;
-            const conflicts = contextAdmission(active);
-            const stats = {};
-            const {count, next, filtered, queue} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              (row, profile, read) => pool.size >= concurrency || occupied?.get(profile.slot) > 0 ||
-                busy(row.address) || skipRetry(row) || conflicts(row, profile, read), stats);
             if (stats.checked) state.skipped = stats.skipped || 0;
             state.queue = config.batch?.by || hasSlots(config) ? queue : undefined;
             selection = null;
@@ -199,6 +195,7 @@ export async function main(argv) {
               ({address: selected, attemptKey} = next);
               inputIndex = next.input;
               slot = next.slot;
+              flush = requested;
               scope = '--item-id';
               attempted.add(attemptKey);
               state.message = notice.trim();
@@ -223,7 +220,8 @@ export async function main(argv) {
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
         const env = {...handoff(), ...(inputIndex === undefined ? {} : {PLANNING_JOPPA_INPUT: String(inputIndex)})};
-        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow), {slot});
+        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow), {slot, flush, owner});
+        if (flush && run.code !== HANDOFF_CHANGED) consumeFlush(flush);
         if (once || fixed) {
           const code = await (detached ? Promise.race([run.completion, dashboardStopped]) : run.completion);
           await termination;
