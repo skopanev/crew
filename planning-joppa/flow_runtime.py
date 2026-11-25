@@ -10,6 +10,7 @@ from common import read, write
 from stdio import group_alive
 from mcp import Joppa
 import flow_publication
+from flow_recovery import observe_release
 
 STOP_SECONDS = 10
 RELEASE_SECONDS = 30
@@ -31,7 +32,8 @@ def release(config, folder, reason, stopped):
         try:
             api = Joppa(config["url"], config.get("token_file"), config.get("mcp_command"))
             try:
-                flow_publication.fail(api, config, target, reason)
+                if not observe_release(api, config, target):
+                    flow_publication.fail(api, config, target, reason)
             finally:
                 if api.stdio:
                     api.stdio.close()

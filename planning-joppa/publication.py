@@ -9,6 +9,7 @@ from common import digest, fingerprint, inside, read, require, run, strings, tex
 from mcp import Rejected
 import validation
 import context
+from flow_recovery import resolved_release
 
 from task_contracts import (
     MAX_PUBLICATION_OPERATIONS, MAX_DATA_VALUE, title_limit, unclaimed, editable, retirable, ordered_tasks,
@@ -58,7 +59,8 @@ def ensure_recovered(root, current, server, workspace, ac):
             result = read(target / "result.json") if (target / "result.json").exists() else {}
             confirmed = (target / "publication.json").exists() and read(target / "publication.json").get("status") == "confirmed"
             finished = result.get("status") == "published" or result.get("claim_released") is True and confirmed
-            require(released or finished, f"earlier claim or publication needs recovery: {target}")
+            require(released or finished or resolved_release(result, claim, ac),
+                    f"earlier claim or publication needs recovery: {target}")
 
 
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")

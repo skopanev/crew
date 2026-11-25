@@ -95,7 +95,7 @@ time.sleep(60)
                     self.api.nodes["criterion:a"]["document"]["data"]["assignee"] = "another-run"
                 flow_runtime.release(self.config, self.folder, "Interrupted", True)
                 self.assertFalse((self.target / "release.json").exists())
-                self.assertTrue(read(self.target / "result.json")["needs_recovery"])
+                self.assertEqual(read(self.target / "result.json")["needs_recovery"], mode == "uncertain")
                 self.assertEqual(len(self.api.batches), 1)
 
     def test_unconfirmed_shutdown_keeps_the_claim(self):
