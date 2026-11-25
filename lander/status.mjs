@@ -66,7 +66,8 @@ export function landerRows(root, statsFile = null) {
       modified(path.join(art, 'result.json')) || modified(path.join(folder, 'journal.jsonl'));
     const start = claimTime || old?.started_at || (outcome && Number.isFinite(outcome.duration_s) && end
       ? new Date(Date.parse(end) - outcome.duration_s * 1000).toISOString() : modified(folder));
-    return {ticket: tasks.join(', ') || '—', branches: branches.length || old?.batch_size || 0,
+    return {ticket: tasks.length ? `${tasks.length} Tasks: ${tasks.map(address => address.split(':').slice(1).join(':') || address).join(', ')}` : '—',
+      branches: branches.length || old?.batch_size || 0,
       runId: outcome?.run_id || name.replace(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-/, ''),
       start, end, active, status, stage: active ? stage(folder, journal) : code || stage(folder, journal)};
   }).sort((a, b) => Number(b.active) - Number(a.active) || Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);

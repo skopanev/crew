@@ -24,6 +24,16 @@ function fixture(t, {stage, code = 'PASS', confirmed = true} = {}) {
   return {root, folder, artifacts, write, row: () => plannerRows(root, null, 30, {result_colors: colors})[0]};
 }
 
+test('batch rows show every Task while keeping the selected identity for retries', t => {
+  const f = fixture(t), addresses = ['task:a', 'task:b', 'task:c', 'task:d', 'task:e'];
+  f.write('input.json', {selected: {address: addresses[0], current_revision: 3},
+    items: addresses.map(address => ({address})), schema: {types: {task: {role: 'task'}}}});
+  const row = f.row();
+  assert.equal(row.ac, 'task:a');
+  assert.equal(row.batchLabel, '5 Tasks: a, b, c, d, e');
+  assert.equal(row.attemptKey, JSON.stringify(['task:a', 3]));
+});
+
 test('published rows show the recorded stage and reason, with configured result colors', t => {
   for (const [stage, code, tone] of [['to_prepare', 'PASS', 'ready'], ['to_task', 'PASS', 'ready'],
     ['to_implement', 'ALREADY_IN_DEVELOP', 'ready'], ['to_decide', 'DISPUTED', 'red'],

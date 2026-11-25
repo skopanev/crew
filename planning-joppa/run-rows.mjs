@@ -54,6 +54,9 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       };
       const label = selected ? selected.document?.data?.title || selected.data?.title || selected.title || ac :
         input ? title(subject) : ac;
+      const batch = [...new Set((input?.items || []).map(item => item.address).filter(Boolean))];
+      const batchKind = batch.every(address => input?.schema?.types?.[address.split(':')[0]]?.role === 'task') ? 'Tasks' : 'items';
+      const batchLabel = batch.length ? `${batch.length} ${batchKind}: ${batch.map(address => address.split(':').slice(1).join(':') || address).join(', ')}` : null;
       try { pid = Number(fs.readFileSync(path.join(folder, launch ? '.worker.pid' : '.lock'), 'utf8').trim()); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
       const journal = tail(path.join(recordFolder, 'journal.jsonl')).split('\n').flatMap(line => {
@@ -110,7 +113,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const end = active ? undefined : trackedRun?.finishedAt || launch?.result?.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac,
+      return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac, ...(batchLabel ? {batchLabel} : {}),
         ...(selected && Number.isSafeInteger(revision) ? {attemptKey: JSON.stringify([ac, revision])} : {}),
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))
