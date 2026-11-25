@@ -59,6 +59,8 @@ The preclaim module process has 30 seconds for the entire batch. Keep its reads 
 Input profiles inherit the module path. Existing snapshots preserve the path and effective profile.
 Use an immutable module path for each code version. Restart the dashboard after replacing module code.
 The module is trusted operator code. The reader restriction does not sandbox its Node process.
+Write plain JSON diagnostics to stderr. Keep stdout reserved for the helper response.
+Exclude credentials, personal data and workflow signal tags from diagnostics.
 Without `admission_module`, selection keeps its existing behavior.
 
 Set `failure_notes: false` to release failed flow claims without adding business notes.
