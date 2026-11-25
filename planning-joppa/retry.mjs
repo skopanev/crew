@@ -11,6 +11,11 @@ export function retryPolicy(config) {
       Object.entries(reasons).some(([code, value]) => !code.trim() || code !== code.trim() || !policies.includes(value)))) {
     throw new Error('retry_by_reason must map reason codes to always, on_revision or never');
   }
+  const delays = config.retry_delay_seconds_by_reason;
+  if (delays !== undefined && (!delays || typeof delays !== 'object' || Array.isArray(delays) ||
+      Object.entries(delays).some(([code, value]) => !code.trim() || code !== code.trim() || !Number.isSafeInteger(value) || value < 1))) {
+    throw new Error('retry_delay_seconds_by_reason must map reason codes to positive integer seconds');
+  }
   return policy;
 }
 
@@ -20,7 +25,7 @@ export function retryFilter(config, rows, attempted, cooldowns) {
     const [address, revision] = JSON.parse(key);
     revisions.set(address, Math.max(revisions.get(address) ?? 0, revision));
   }
-  if (config.retry_by_reason) for (const row of rows) {
+  if (config.retry_by_reason || config.retry_delay_seconds_by_reason) for (const row of rows) {
     if (row.active) continue;
     for (const key of row.attemptKeys || [row.attemptKey].filter(Boolean)) {
       const [address, revision] = JSON.parse(key), previous = outcomes.get(address);
@@ -31,9 +36,11 @@ export function retryFilter(config, rows, attempted, cooldowns) {
     }
   }
   return row => {
-    const reason = outcomes.get(row.address)?.reasonCode;
+    const outcome = outcomes.get(row.address), reason = outcome?.reasonCode;
     const selected = Object.hasOwn(config.retry_by_reason || {}, reason) ? config.retry_by_reason[reason] : policy;
-    return selected === 'always' ? (cooldowns.get(row.address) || 0) > Date.now() :
+    const delay = Object.hasOwn(config.retry_delay_seconds_by_reason || {}, reason) ? config.retry_delay_seconds_by_reason[reason] : 0;
+    const until = delay && outcome?.time ? outcome.time + delay * 1000 : 0;
+    return selected === 'always' ? Math.max(cooldowns.get(row.address) || 0, until) > Date.now() :
       selected === 'never' ? revisions.has(row.address) : (revisions.get(row.address) ?? 0) >= row.revision;
   };
 }

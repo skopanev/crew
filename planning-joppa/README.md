@@ -185,6 +185,10 @@ It compares the selected object's revision, not the revisions of its prerequisit
 A prerequisite change alone does not permit an `on_revision` retry.
 Other outcomes retain the default policy. Codes come from the workflow and config, without a built-in refusal list.
 Configured reason codes also remain in run history when the panel normally omits selection skips.
+Set `retry_delay_seconds_by_reason` to add a minimum delay for an `always` outcome.
+For example, `"retry_delay_seconds_by_reason": {"WAITING_INPUT": 900}` retries after at least 15 minutes.
+The delay starts at the recorded completion time and survives dispatcher restarts.
+The dispatcher also respects the normal polling interval. Revision policies retain their existing meaning.
 The publication envelope can add `outcome: { "status": "blocked", "reason_code": "BASELINE_RED", "reason": "..." }`.
 This records a stopped business outcome after a confirmed note or claim release. It does not claim acceptance passed.
 The generic `verify` stage checks the claimed inputs before an external side effect, such as a Git push.

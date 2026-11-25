@@ -85,6 +85,27 @@ test('retry values validate at config load before any selection', async t => {
     assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, retry_by_reason}))),
       /retry_by_reason must map reason codes/);
   }
+  for (const retry_delay_seconds_by_reason of [null, [], {WAIT: 0}, {WAIT: -1}, {WAIT: 1.5}, {WAIT: '900'}, {' WAIT': 900}]) {
+    assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, retry_delay_seconds_by_reason}))),
+      /retry_delay_seconds_by_reason must map reason codes/);
+  }
+});
+
+test('reason delays use recorded completion time and keep transient retries automatic', t => {
+  let now = Date.parse('2026-11-25T03:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const config = {retry: 'always', retry_delay_seconds_by_reason: {WAIT: 900}};
+  const row = {attemptKey: JSON.stringify(['work:a', 3]), reasonCode: 'WAIT', end: new Date(now).toISOString()};
+  const skipped = (rows = [row], cooldowns = new Map()) =>
+    retryFilter(config, rows, new Set(), cooldowns)({address: 'work:a', revision: 3});
+  now += 899999;
+  assert.equal(skipped(), true, 'A fresh dispatcher still reads the delay from history');
+  now++;
+  assert.equal(skipped(), false, 'The same revision resumes when the delay ends');
+  assert.equal(skipped([row], new Map([['work:a', now + 1000]])), true);
+  assert.equal(skipped([{...row, reasonCode: 'FAIL', end: new Date(now).toISOString()}]), false);
+  assert.equal(skipped([{...row, reasonCode: 'FAIL', end: new Date(now + 60000).toISOString()}]), false);
+  assert.equal(skipped([{...row, active: true}]), false);
 });
 
 test('a configured refusal waits for a new selected revision across dispatcher restarts', async t => {
@@ -103,6 +124,24 @@ test('a configured refusal waits for a new selected revision across dispatcher r
     }
     assert.equal(await run.stop(), 130);
   }
+});
+
+test('a delayed selection refusal resumes without a node edit when its recorded delay expires', async t => {
+  const f = await fixture(t, 'always');
+  f.config.retry_delay_seconds_by_reason = {TASK_PREREQUISITE: 900};
+  f.write(f.config);
+  history(f, {reason_code: 'TASK_PREREQUISITE'});
+  const revision = f.objects.get('ac:a1').current_revision;
+  const run = f.start();
+  await run.until(output => /TASK_PREREQUISITE/.test(output));
+  await pause(1200);
+  assert.deepEqual(f.passes(), []);
+  const result = path.join(f.config.runs_folder, '2026-11-14_10-00-00-done', 'artifacts', 'result.json');
+  const expired = new Date(Date.now() - 901000);
+  fs.utimesSync(result, expired, expired);
+  await run.until(() => f.passes().length === 1);
+  assert.equal(f.objects.get('ac:a1').current_revision, revision, 'No node edit is required');
+  assert.equal(await run.stop(), 130);
 });
 
 test('reason policies follow final batch revisions and the latest completed outcome', () => {
