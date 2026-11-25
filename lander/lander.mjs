@@ -39,6 +39,11 @@ function settings() {
   require(repo.noNewRed == null || repo.noNewRed?.testCommand === repo.gateCommands.at(-1) &&
     Object.keys(repo.noNewRed).length === 1 && repo.testReport && typeof repo.testReport === 'object',
   'Repository noNewRed must name the last gate command as testCommand and needs testReport');
+  if (repo.notReproduced != null) require(repo.testReport && typeof repo.notReproduced === 'object' &&
+    !Array.isArray(repo.notReproduced) && Object.keys(repo.notReproduced).every(key => ['command', 'attempts'].includes(key)) &&
+    [1, 2].includes(repo.notReproduced.attempts) && Array.isArray(repo.notReproduced.command) &&
+    repo.notReproduced.command.length && repo.notReproduced.command.every(arg => typeof arg === 'string' && arg && !arg.includes('\0')),
+  'Repository notReproduced needs testReport, command argv and attempts 1 or 2');
   const failedData = JSON.parse(process.env.FAILED_DATA || '{}');
   require(failedData && typeof failedData === 'object' && !Array.isArray(failedData) && Object.keys(failedData).length &&
     !Object.keys(failedData).some(key => ['assignee', 'commit', 'repository', 'delivery', 'acceptance'].includes(key)),

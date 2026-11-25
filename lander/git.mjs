@@ -71,12 +71,14 @@ export function environment(state, repo, attempt) {
     gate_timeout_seconds: String(repo.gateTimeoutSeconds || 900), VERIFY_ONLY: 'false',
     LANE_TEST_BINDINGS_REQUIRED: 'false',
     // An inherited host flag must not enable the comparison for another repository.
-    NO_NEW_RED: '', ...(repo.noNewRed ? {NO_NEW_RED: 'last', test_report: JSON.stringify(repo.testReport)} : {})};
+    NO_NEW_RED: '', test_report: repo.testReport ? JSON.stringify(repo.testReport) : '',
+    NOT_REPRODUCED: repo.notReproduced ? JSON.stringify(repo.notReproduced) : '',
+    ...(repo.noNewRed ? {NO_NEW_RED: 'last'} : {})};
 }
 function runGate(state, repo, attempt, log, commands) {
   fs.mkdirSync(path.join(attempt, 'artifacts'), {recursive: true});
   const env = {...environment(state, repo, attempt), gate_commands: JSON.stringify(commands),
-    ...(commands === repo.gateCommands ? {} : {test_report: '', NO_NEW_RED: ''})};
+    ...(commands === repo.gateCommands ? {} : {test_report: '', NO_NEW_RED: '', NOT_REPRODUCED: ''})};
   const process = spawnSync('python3', [path.join(tooling, 'lane/bin/gates.py'), 'run'],
     {cwd: state.checkout, env, timeout: (repo.gateTimeoutSeconds || 900) * commands.length * 1000 + 30000,
       stdio: ['ignore', log, log]});
