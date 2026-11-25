@@ -11,6 +11,7 @@ vars:
   CONFIGURED_TIMEOUT_PROTOCOL: '1'
   PLANNING_PYTHON: python3
   CREW_FLOW_STAGES: ''
+  FLOW_ASSIGNMENT_INLINE: 'false'
   WORKTREE_ROOT: ''
   FAILED_DATA: ''
 nodes:
@@ -60,12 +61,13 @@ nodes:
     shell: |
       set -eu
       if [ -e "$MEDULLA_RUN_DIR/artifacts/result.json" ]; then
-        echo '<signal:BLOCKED>The shared stage already recorded the result.</signal:BLOCKED>'
+        printf '\n<signal:BLOCKED>The shared stage already recorded the result.</signal:BLOCKED>\n'
       else
         "$PLANNING_PYTHON" "$CREW_FLOW_STAGES" fail
       fi
       node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/lander.mjs" cleanup
     on_signal:
+      BLOCKED: __exit_fail__
       __default__: __exit_fail__
       __failed__: __exit_fail__
   clean_success:
