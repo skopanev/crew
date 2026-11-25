@@ -4,6 +4,7 @@
   "mcp_command": ["node", "/absolute/private/joppa-host.cjs"],
   "runs_folder": "/absolute/private/lander-runs",
   "workflow": "/absolute/path/to/crew/lander/workflow.yaml",
+  "workflow_timeout_seconds": 3600,
   "interval_seconds": 1800,
   "repeat": true,
   "selection": {
