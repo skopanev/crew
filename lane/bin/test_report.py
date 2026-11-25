@@ -128,6 +128,9 @@ def parse(data, identity):
             raise ValueError(f"ambiguous report: two testcases map to {name!r}")
         seen[name] = True
         result = {"test": name, **outcome(case, name)}
+        file = case.get("file") or (suite.get("file") if suite is not None else None)
+        if file:
+            result["file"] = file
         time_text = case.get("time")
         if time_text is not None:
             try:

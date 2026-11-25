@@ -58,8 +58,28 @@ With retained branches, `repair_budget` can name the absolute Dolber config path
 Lander reads its `repairDelivery` policy. Include its exhausted tag in `exclude_tags`.
 A red branch at that budget receives the tag and an owner review note. A passing branch can still land.
 
-A red combined check first requires a target baseline check.
+A red combined check first applies the configured failed-file rerun policy, when present.
+Without a verified recovery, it requires a target baseline check.
 A red baseline leaves all branches pending. It does not identify a faulty Task.
+
+### Failed-file reruns (opt-in)
+
+Configure a repository's native test runner and report:
+
+```json
+"testReport": {"path": "results.xml", "format": "junit", "identity": "{name}"},
+"notReproduced": {"command": ["/absolute/file-test-runner"], "attempts": 2}
+```
+
+The last gate must finish with exit 1 only for test failures. Every non-test check must pass.
+The report must include each test's tracked file in the JUnit `file` attribute.
+Crew appends one literal file argument to `command`. The runner writes a fresh report to `$CREW_TEST_REPORT_DIR`.
+The rerun checks the same Git commit and tree. It must execute every original executed test in that file.
+Missing, skipped, ambiguous or failing cases refuse recovery. A repeated failure keeps the existing red path.
+At most two samples run per failed file. Every sample must pass before Crew accepts `not_reproduced`.
+The receipt preserves the initial red result, file names, rerun results and hashes of their reports and logs.
+`gates.py verify` validates this proof before `land.sh` can push. Assertions, test timeouts and repository hooks stay unchanged.
+Omit `notReproduced` to retain the existing behavior.
 
 ### No new red (opt-in)
 

@@ -67,11 +67,11 @@ class TestReportTests(unittest.TestCase):
         folder = Path((self.root / "run/artifacts/gates").glob("*/receipt.json").__next__()).parent
         raw = folder / "test-report/junit/report.xml"
         self.assertEqual(report["sha256"], hashlib.sha256(raw.read_bytes()).hexdigest())
-        self.assertEqual(report["results"], [
+        self.assertEqual(report["results"], [{"file": "tests/a.test.ts", **row} for row in [
             {"test": "tests/a.test.ts > adds", "outcome": "pass", "time": 0.25},
             {"test": "tests/a.test.ts > breaks", "outcome": "fail", "message": "expected 2\ntrace line", "time": 1.0},
             {"test": "tests/a.test.ts > later", "outcome": "skip"},
-            {"test": "tests/a.test.ts > crashes", "outcome": "fail", "message": "boom"}])
+            {"test": "tests/a.test.ts > crashes", "outcome": "fail", "message": "boom"}]])
 
     def test_suite_attributes_are_explicit_placeholders(self):
         self.env["test_report"] = json.dumps({**CONFIG, "identity": "{suite.file} > {name}"})
