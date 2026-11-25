@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {plannerConfig} from '../../planning-joppa/planner-config.mjs';
+import {retryFilter} from '../../planning-joppa/retry.mjs';
 import {pause, plannerFixture} from '../test-support/config-reload.fixture.mjs';
 
 async function fixture(t, retry) {
@@ -80,4 +81,46 @@ test('retry values validate at config load before any selection', async t => {
     assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, retry}))),
       /retry must be always, on_revision or never/);
   }
+  for (const retry_by_reason of [null, [], 'never', {WAIT: 'later'}, {' WAIT': 'never'}, {'': 'always'}]) {
+    assert.throws(() => plannerConfig(f.configFile, {}, Buffer.from(JSON.stringify({...f.config, retry_by_reason}))),
+      /retry_by_reason must map reason codes/);
+  }
+});
+
+test('a configured refusal waits for a new selected revision across dispatcher restarts', async t => {
+  const f = await fixture(t, 'always');
+  f.config.retry_by_reason = {TASK_PREREQUISITE: 'on_revision'};
+  f.write(f.config);
+  history(f, {reason_code: 'TASK_PREREQUISITE'});
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const run = f.start();
+    await run.until(output => /TASK_PREREQUISITE/.test(output));
+    await pause(1200);
+    assert.deepEqual(f.passes(), []);
+    if (attempt === 1) {
+      f.objects.get('ac:a1').current_revision = 4;
+      await run.until(() => f.passes().length === 1);
+    }
+    assert.equal(await run.stop(), 130);
+  }
+});
+
+test('reason policies follow final batch revisions and the latest completed outcome', () => {
+  const key = revision => JSON.stringify(['work:a', revision]);
+  const config = {retry: 'always', retry_by_reason: {WAIT: 'on_revision', STOP: 'never'}};
+  const row = (revision, reasonCode, end, extra = {}) => ({attemptKeys: [key(revision)], reasonCode, end, ...extra});
+  const wait = row(3, 'WAIT', '2026-11-25T01:00:00Z');
+  const ordinary = row(3, 'FAIL', '2026-11-25T02:00:00Z');
+  const skipped = (rows, revision = 3, attempted = [], cooldowns = new Map()) =>
+    retryFilter(config, rows, new Set(attempted), cooldowns)({address: 'work:a', revision});
+  assert.equal(skipped([wait]), true);
+  assert.equal(skipped([wait], 4), false);
+  assert.equal(skipped([ordinary, wait]), false);
+  assert.equal(skipped([wait, ordinary]), false);
+  assert.equal(skipped([row(2, 'FAIL', '2026-11-25T03:00:00Z'), wait]), true);
+  assert.equal(skipped([wait, {...ordinary, active: true}]), true);
+  assert.equal(skipped([wait], 4, [key(4)]), true);
+  assert.equal(skipped([row(3, 'STOP')], 4), true);
+  assert.equal(skipped([ordinary], 3, [], new Map([['work:a', Date.now() + 60000]])), true);
+  assert.equal(skipped([], 3), false);
 });

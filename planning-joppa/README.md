@@ -178,6 +178,13 @@ Another eligible anchor can still include those items as batch members when they
 The previous `repeat: true` setting means `retry: "always"`. `repeat: false` means `retry: "on_revision"`.
 An explicit `retry` takes precedence. Unknown mutation outcomes always hold the dispatcher, for every retry policy.
 Active addresses remain reserved. Claims, ownership and revision checks stay unchanged.
+Set `retry_by_reason` to override the policy for configured terminal reason codes.
+For example, `"retry": "always", "retry_by_reason": {"WAITING_INPUT": "on_revision"}` waits after that refusal.
+The dispatcher uses the latest completed outcome at the highest recorded revision for each address.
+It compares the selected object's revision, not the revisions of its prerequisites.
+A prerequisite change alone does not permit an `on_revision` retry.
+Other outcomes retain the default policy. Codes come from the workflow and config, without a built-in refusal list.
+Configured reason codes also remain in run history when the panel normally omits selection skips.
 The publication envelope can add `outcome: { "status": "blocked", "reason_code": "BASELINE_RED", "reason": "..." }`.
 This records a stopped business outcome after a confirmed note or claim release. It does not claim acceptance passed.
 The generic `verify` stage checks the claimed inputs before an external side effect, such as a Git push.
