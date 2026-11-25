@@ -1,4 +1,6 @@
 """Configured modules filter every flow input before the native claim."""
+from contextlib import redirect_stderr
+from io import StringIO
 import os
 from pathlib import Path
 import tempfile
@@ -13,14 +15,17 @@ class FlowAdmissionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root, api = Path(folder), AtomicTracker()
             module = root / 'admission.mjs'
-            module.write_text('export const admission=row=>row.address!=="work:t2";')
+            module.write_text('export const admission=row=>{console.error("ADMISSION_SKIP "+JSON.stringify({address:row.address}));return row.address!=="work:t2";};')
             config = {'workspace': 'example', 'url': api.url, 'runs_folder': str(root),
                       'selection': {'kind': 'work'}, 'batch': {'size': 3, 'by': 'data.repository'},
                       'admission_module': str(module), 'publication': {'file': 'operations.json'}}
-            with patch.dict(os.environ, {'MEDULLA_RUN_DIR': str(root / 'run'), 'PLANNING_JOPPA_ITEM': 'work:t1'}), \
+            diagnostics = StringIO()
+            with redirect_stderr(diagnostics), \
+                    patch.dict(os.environ, {'MEDULLA_RUN_DIR': str(root / 'run'), 'PLANNING_JOPPA_ITEM': 'work:t1'}), \
                     patch.object(flow_stages, 'settings', return_value=config), \
                     patch.object(flow_stages, 'client', return_value=api), patch.object(flow_stages, 'emit'):
                 flow_stages.prepare()
+            self.assertIn('ADMISSION_SKIP {"address":"work:t2"}', diagnostics.getvalue())
             assignment = read(root / 'run/artifacts/input.json')
             self.assertEqual([row['address'] for row in assignment['items']], ['work:t1', 'work:t3'])
             self.assertIsNone(api.nodes['work:t2']['document']['data'].get('assignee'))
