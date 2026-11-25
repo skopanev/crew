@@ -72,6 +72,7 @@ Old versions remain available for existing panels.
 | engine-v59 | `69acbf7898f5455d5b96dfff86562e996b30b72a` | Retry failed test files on the verified candidate tree |
 | engine-v60 | `5f2fe6fb39a5818fee8bfac5cd60d80ee0771e4c` | Show confirmed branch handoffs as DONE and display batch Tasks |
 | engine-v61 | `727d8cd7d81f3dad5dc709c5f4129bb3786d4b67` | Keep Lander assignment data in files and preserve blocked signals |
+| engine-v62 | `eb4dd69a83bdb5eb5d3b47db1c01b51e98e630d1` | Flush small batches when producers are idle and show grouped queues during active work |
 
 ## Install a version
 
@@ -79,7 +80,7 @@ Fetch the public repository and its tags. Create a detached runtime at the selec
 
 ```sh
 git fetch origin main --tags
-git worktree add --detach /path/to/releases/engine-v61 engine-v61
+git worktree add --detach /path/to/releases/engine-v62 engine-v62
 ```
 
 Set `sources.engine.ref` to that tag in the environment specification.
@@ -87,7 +88,7 @@ Set `sources.role.ref` to the required role version.
 Run the existing installer without `--run` to prepare the environment:
 
 ```sh
-node /path/to/releases/engine-v61/lane-launcher/environment.mjs /path/to/environment.json
+node /path/to/releases/engine-v62/lane-launcher/environment.mjs /path/to/environment.json
 ```
 
 Check the returned `environment.json` before starting the panel.
