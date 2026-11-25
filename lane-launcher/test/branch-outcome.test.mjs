@@ -60,4 +60,3 @@ test('branch publication releases Tasks for Lander without archiving or selectin
   assert.equal(branchOutcome(f.run, {...result, held: true}), null);
   assert.equal(branchOutcome({...f.run, config: {...f.run.config, branchSuccessStatus: 'DELIVERED'}}, result), 'DELIVERED');
 });
-
