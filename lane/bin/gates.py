@@ -18,6 +18,8 @@ import uuid
 import no_new_red
 import test_bindings
 import test_report
+import test_retry
+from gate_existing import acceptance_check, existing
 
 
 def git(*args):
@@ -26,89 +28,6 @@ def git(*args):
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def acceptance_check(check, root=None):
-    if (not isinstance(check, dict) or set(check) - {"ac", "argv", "stdout"}
-            or not isinstance(check.get("ac"), str) or not check["ac"].strip()):
-        raise ValueError("acceptance check requires ac, argv and optional stdout")
-    argv = check.get("argv")
-    if (not isinstance(argv, list) or not argv
-            or any(not isinstance(arg, str) or "\0" in arg for arg in argv)
-            or ("stdout" in check and not isinstance(check["stdout"], str))):
-        raise ValueError("invalid acceptance check arguments or stdout")
-    paths = []
-    output_required = False
-    if (len(argv) >= 5 and argv[:2] == ["git", "check-attr"]
-            and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", argv[2])
-            and argv[3] == "--"):
-        paths, output_required = argv[4:], True
-    elif len(argv) >= 4 and argv[:3] == ["git", "ls-files", "--"]:
-        paths, output_required = argv[3:], True
-    elif len(argv) >= 5 and argv[:4] == ["git", "ls-files", "--error-unmatch", "--"]:
-        paths = argv[4:]
-    elif (len(argv) == 5 and argv[:3] == ["grep", "-Fq", "--"] and argv[3]
-          and "\n" not in argv[3] and "\r" not in argv[3]):
-        paths = argv[4:]
-    elif len(argv) == 3 and argv[0] == "test" and argv[1] in {"-e", "-f", "-d", "-s"}:
-        paths = argv[2:]
-    if not paths:
-        raise ValueError(f"unsupported acceptance check for {check['ac']!r}: {shlex.join(argv)}")
-    if output_required and "stdout" not in check:
-        raise ValueError(f"missing exact stdout for acceptance check {check['ac']!r}: {shlex.join(argv)}")
-    root = Path(root or Path.cwd()).resolve()
-    for value in paths:
-        path = Path(value)
-        if not value or path.is_absolute() or not (root / path).resolve().is_relative_to(root):
-            raise ValueError(f"check path must stay inside this checkout: {value}")
-    return check
-
-
-def existing(root):
-    """Select recorded Task tests only when their files and titles already exist at HEAD."""
-    artifacts = root.parent
-    ticket = json.loads((artifacts / "ticket.json").read_text())
-    paths = []
-    for task in ticket.get("tasks") or [ticket]:
-        tests = task.get("acceptanceTests")
-        if not isinstance(tests, list) or not tests:
-            raise ValueError("every Task needs recorded acceptanceTests for existing-code verification")
-        for test in tests:
-            if (not isinstance(test, dict) or not isinstance(test.get("command"), str)
-                    or not isinstance(test.get("title"), str) or not test["title"].strip()):
-                raise ValueError("existing-code verification needs a Test command and title")
-            reporters = re.findall(r"Reporter name:[ \t]*([^\r\n]+)", test.get("body", ""))
-            if len(reporters) > 1 or reporters and " > " not in reporters[0]:
-                raise ValueError("existing-code verification needs one unambiguous Reporter name")
-            argv = shlex.split(test["command"])
-            command_root = Path.cwd().resolve()
-            if argv[:1] == ["cd"]:
-                if len(argv) < 4 or argv[2] != "&&" or Path(argv[1]).is_absolute():
-                    raise ValueError("existing-code verification supports only cd <directory> && <command>")
-                command_root = (command_root / argv[1]).resolve()
-                if not command_root.is_dir() or not command_root.is_relative_to(Path.cwd().resolve()):
-                    raise ValueError("the Test command directory must stay inside this checkout")
-                argv = argv[3:]
-            parts = reporters[0].split(" > ") if reporters else []
-            path = Path(parts[0].strip()) if len(parts) > 1 else command_root / argv[-1] if argv else Path()
-            if not parts:
-                path = path.relative_to(Path.cwd().resolve())
-            title = parts[-1].strip() if len(parts) > 1 else test["title"]
-            if (path.is_absolute() or not path.is_file()
-                    or not path.resolve().is_relative_to(Path.cwd().resolve())):
-                raise ValueError("the Test command must end with a file inside this checkout")
-            name = path.as_posix()
-            if parts and not any((command_root / arg).resolve() == path.resolve() for arg in argv):
-                raise ValueError("Reporter file differs from the Test command")
-            git("--literal-pathspecs", "ls-files", "--error-unmatch", "--", name)
-            if not title or title not in git("show", f"HEAD:{name}"):
-                raise ValueError(f"recorded Test name is absent at HEAD: {title}")
-            if name not in paths:
-                paths.append(name)
-    if not paths:
-        raise ValueError("existing-code verification needs Task test files")
-    test_bindings.write(artifacts / "ticket-checks.json", paths)
-    print(f"Verify existing code with {len(paths)} recorded Task test file(s).")
 
 
 def plan():
@@ -161,6 +80,15 @@ def unchanged(tree):
     return (git("write-tree") == tree
             and not git("diff", "--name-only")
             and not git("ls-files", "--others", "--exclude-standard"))
+
+
+def report_green(path, receipt):
+    if os.environ.get("NOT_REPRODUCED", "").strip():
+        try:
+            return "fail" not in no_new_red.load(path, receipt)[1].values()
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+    return no_new_red.green(path, receipt)
 
 
 def stop_group(process):
@@ -219,6 +147,7 @@ def run(root):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         if active is not None:
             stop_group(active)
+        test_retry.stop()
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
@@ -264,9 +193,13 @@ def run(root):
         receipt["test_report"] = report
     # no_new_red reads this flag for a receipt whose last test command failed.
     receipt["unchanged"] = unchanged(tree) and git("rev-parse", "HEAD") == base
+    recovery = test_retry.run(folder / "receipt.json", receipt)
+    if recovery is not None:
+        receipt["not_reproduced"] = recovery
+    recovered = test_retry.verify(folder / "receipt.json", receipt)
     receipt["passed"] = (len(receipt["checks"]) == len(commands) and receipt["unchanged"]
-                         and all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"])
-                         and no_new_red.green(folder / "receipt.json", receipt))
+                         and (recovered or all(c["exit_code"] == 0 and c["stdout_matches"] for c in receipt["checks"]))
+                         and (recovered or report_green(folder / "receipt.json", receipt)))
     path = folder / "receipt.json"
     with path.open("x") as output:
         json.dump(receipt, output, indent=2)
@@ -288,7 +221,8 @@ def verify(root):
     if not path.is_relative_to(root.resolve()) or digest(path) != pointer["sha256"]:
         raise ValueError("gate receipt is outside this run or has changed")
     receipt = json.loads(path.read_text())
-    if not (proof or receipt["passed"] and no_new_red.green(path, receipt)) or receipt["commands"] != plan():
+    recovered = test_retry.verify(path, receipt)
+    if not (proof or receipt["passed"] and (recovered or report_green(path, receipt))) or receipt["commands"] != plan():
         raise ValueError("no passing receipt for the declared gate plan")
     if any(receipt.get(key) != value for key, value in identity().items()):
         raise ValueError("gate receipt belongs to another task, run, or repository scope")
@@ -306,7 +240,7 @@ def verify(root):
         raise ValueError("missing gate results")
     for command, check in zip(receipt["commands"], receipt["checks"]):
         log = Path(check["log"]).resolve()
-        if (check["command"] != command or check["exit_code"] not in ((0, 1) if proof and check is receipt["checks"][-1] else (0,))
+        if (check["command"] != command or check["exit_code"] not in ((0, 1) if (proof or recovered) and check is receipt["checks"][-1] else (0,))
                 or (isinstance(command, dict) and check.get("stdout_matches") is not True)
                 or not log.is_relative_to(path.parent) or digest(log) != check["sha256"]):
             raise ValueError("gate result or log does not match the receipt")
