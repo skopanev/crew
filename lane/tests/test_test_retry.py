@@ -105,6 +105,26 @@ class RetryTests(unittest.TestCase):
         os.environ["NOT_REPRODUCED"] = json.dumps({"command": [sys.executable, "runner.py"], "attempts": 2})
         self.assertEqual(len(self.proof()["not_reproduced"]["reruns"]), 2)
 
+    def test_two_failed_files_need_two_complete_samples_each(self):
+        (self.repo / "tests/b.py").write_text("tracked\n")
+        self.git("add", "tests/b.py")
+        self.git("commit", "-qm", "second file")
+        self.receipt.update(base=self.git("rev-parse", "HEAD"), tree=self.git("rev-parse", "HEAD^{tree}"))
+        entry = self.receipt["test_report"]
+        file = self.folder / "test-report" / entry["path"]
+        data = file.read_text()
+        file.write_text(data.replace("</testsuite>", data.split("<testsuite>")[1]
+                                    .replace('file="tests/a.py"', 'file="tests/b.py"')))
+        entry["sha256"] = test_retry.hashed(file)
+        entry["results"] = test_report.parse(file.read_bytes(), SETTINGS["identity"])
+        os.environ["NOT_REPRODUCED"] = json.dumps({"command": [sys.executable, "runner.py"], "attempts": 2})
+        final = self.proof()
+        self.assertEqual(final["not_reproduced"]["filenames"], ["tests/a.py", "tests/b.py"])
+        self.assertEqual(len(final["not_reproduced"]["reruns"]), 4)
+        final["not_reproduced"]["reruns"].pop()
+        with self.assertRaises(ValueError):
+            test_retry.verify(self.path, final)
+
     def test_persistent_or_second_red_never_becomes_green(self):
         for mode in ("red", "second_red"):
             with self.subTest(mode=mode):
