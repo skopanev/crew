@@ -3,11 +3,13 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import test_flow_shutdown as shutdown
 from common import read, write
 from flow_recovery import observe_release
+import flow_recovery
 import flow_runtime
 import publication
 
@@ -54,6 +56,22 @@ class FlowRecoveryTests(unittest.TestCase):
             self.assertIsNone(observe_release(self.api, self.config, self.target))
             (self.target / name).unlink()
         self.assertFalse((self.target / "result.json").exists())
+
+    def test_cli_refuses_missing_or_invalid_failure_results_before_the_tracker_read(self):
+        outer = self.root / "launch"
+        write(outer / "launch.json", {"result": {"code": 2}, "medullaRun": str(self.folder)})
+        args = ["flow_recovery.py", "--config", str(self.live), "--run", str(outer), "--apply"]
+        for prior in [None, {}, {"status": "published", "reason": "Success"}, {"status": "blocked", "reason": ""}]:
+            file = self.target / "result.json"
+            if prior is None:
+                file.unlink(missing_ok=True)
+            else:
+                write(file, prior)
+            with patch.object(sys, "argv", args), patch.object(flow_recovery, "Joppa") as client:
+                with self.assertRaises((ValueError, FileNotFoundError)):
+                    flow_recovery.main()
+                client.assert_not_called()
+            self.assertEqual(read(file) if file.exists() else None, prior)
 
 
 if __name__ == "__main__":

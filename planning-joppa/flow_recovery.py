@@ -14,12 +14,13 @@ import planning_claims as claims
 
 def resolved_release(result, claim, address):
     proof = result.get("claim_resolution") or {}
+    if result.get("claim_released") is not True or result.get("needs_recovery") or \
+            proof.get("method") != "observed_external_release":
+        return False
     owners = claims.claimed(claim)
     rows = proof.get("items") or {}
     revisions = claims.claimed_revisions(claim)
-    return result.get("claim_released") is True and not result.get("needs_recovery") and \
-        proof.get("method") == "observed_external_release" and \
-        proof.get("request_id") == claim["arguments"]["request_id"] and address in owners and \
+    return proof.get("request_id") == claim["arguments"]["request_id"] and address in owners and \
         set(rows) == set(owners) and all(type(rows[key].get("revision")) is int and
             rows[key]["revision"] >= revisions[key] and rows[key].get("assignee") != owner
             for key, (owner, _) in owners.items())
@@ -89,6 +90,10 @@ def main():
             raise ValueError("The detached worker PID is still alive")
     native = Path(launch["medullaRun"]).resolve()
     require(native.parent == root, "Medulla run is outside runs_folder")
+    prior = read(native / "artifacts" / "result.json")
+    require(isinstance(prior, dict) and prior.get("status") in ("blocked", "failed") and
+            isinstance(prior.get("reason"), str) and prior["reason"].strip(),
+            "Recovery needs an existing failure result")
     api = Joppa(config["url"], config.get("token_file"), config.get("mcp_command"))
     try:
         proof = observe_release(api, config, native / "artifacts", apply=args.apply)
