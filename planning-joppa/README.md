@@ -31,7 +31,7 @@ Writer is the first bundled example in [writer](../writer/README.md).
 
 Optional `inputs` lists ordered profiles. Each profile requires `selection` with native filters.
 The dispatcher selects the first eligible item from the first eligible profile.
-Each profile replaces only its named fields: `selection`, `order`, `exclude_tags`, `exclude_children`, `children`, `references`, `related`, `publication` and `wait_for_dependencies`.
+Each profile replaces only its named fields: `selection`, `order`, `exclude_tags`, `exclude_children`, `children`, `references`, `related`, `publication`, `wait_for_dependencies` and `batch`.
 `wait_for_dependencies` accepts a boolean. Its default is `false`.
 Other fields come from the root config. Profiles cannot replace authentication, workflow variables or workspace identity.
 Use scalar stage filters in separate profiles. Native `data` arrays mean containment, not alternatives.
@@ -169,6 +169,19 @@ Each slot merges its data into the common selection. Nested objects merge, and s
 Labels must be unique. Use `slots` or `inputs` in a config. The default concurrency is the slot count.
 An explicit `concurrency` limits the total active passes. Each slot still permits only one active pass.
 The run records its label before execution. Detached passes keep their slot after a dashboard restart or slot reordering.
+Each slot can override batch fields with its own `batch` object:
+
+```json
+"batch": {"size": 10, "min_size": 3},
+"slots": [
+  {"label": "alpha", "data": {"area": "first"}, "batch": {"min_size": 1}},
+  {"label": "beta", "data": {"area": "second"}}
+]
+```
+
+The slot fields override the common batch fields. Other slots keep the common batch.
+Unknown batch fields and invalid merged values stop configuration loading.
+Each detached pass freezes its batch settings. A dashboard restart preserves that snapshot.
 An active run with a missing or removed label blocks new passes until its state is resolved.
 For a finished detached run with a failure result, use the `flow_recovery.py` command above.
 For an unknown run without a result, stop the dashboard first.

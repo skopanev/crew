@@ -151,7 +151,7 @@ export function flowSettings(config) {
     throw new Error('ac_ids and covers_reference apply only to the planner flow without workflow');
   }
   if (config.inputs !== undefined) {
-    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication', 'wait_for_dependencies', 'slot']);
+    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication', 'wait_for_dependencies', 'slot', 'batch']);
     if (!Array.isArray(config.inputs) || !config.inputs.length || config.inputs.some(input => !object(input) ||
         !object(input.selection) || Object.keys(input).some(key => !keys.has(key)))) throw new Error('inputs needs ordered native selection profiles');
     for (const input of config.inputs) flowSettings({...config, ...input, inputs: undefined});

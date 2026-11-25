@@ -21,7 +21,7 @@ def configuration(path, raw=None, input_index=None):
         config = json.loads(normalized.stdout)
     if "inputs" in config:
         profiles = config["inputs"]
-        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication", "wait_for_dependencies", "slot"}
+        keys = {"selection", "order", "exclude_tags", "exclude_children", "children", "references", "related", "publication", "wait_for_dependencies", "slot", "batch"}
         require(isinstance(profiles, list) and profiles and all(isinstance(p, dict) and isinstance(p.get("selection"), dict) and
                 set(p) <= keys and ("slot" not in p or isinstance(p["slot"], str) and p["slot"].strip())
                 for p in profiles), "inputs needs ordered native selection profiles")

@@ -25,7 +25,8 @@ class FlowSlotTests(unittest.TestCase):
                     config = {'workspace': 'example', 'url': api.url, 'runs_folder': str(root / 'runs'),
                               'workflow': str(ROOT / 'writer/workflow.yaml'), 'mcp_command': ['connector'],
                               'selection': {'kind': 'criterion', 'data': {'delivery': {'state': 'pending'}}},
-                              'slots': [{'label': 'A', 'data': {'repository': 'alpha'}},
+                              'batch': {'size': 3, 'min_size': 1, 'by': 'data.repository'},
+                              'slots': [{'label': 'A', 'data': {'repository': 'alpha'}, 'batch': {'size': 1}},
                                         {'label': 'B', 'data': {'repository': 'beta'}}],
                               'publication': {'file': 'operations.json'}}
                     path = root / 'config.json'
@@ -35,6 +36,8 @@ class FlowSlotTests(unittest.TestCase):
                         variables = dict(value.split('=', 1) for position, value in enumerate(command)
                                          if command[position - 1] == '--var')
                         self.assertEqual(effective['slot'], label)
+                        self.assertEqual(effective['batch'], {'size': 1 if index == 0 else 3,
+                                                             'min_size': 1, 'by': 'data.repository'})
                         self.assertEqual(effective['selection']['data'], {'delivery': {'state': 'pending'}, 'repository': own})
                         self.assertNotIn('inputs', effective)
                         self.assertNotIn('slots', effective)
@@ -67,3 +70,36 @@ class FlowSlotTests(unittest.TestCase):
     def test_slots_and_legacy_inputs_cannot_mix(self):
         with self.assertRaisesRegex(ValueError, 'slots or inputs'):
             flow_launch.configuration('unused', json.dumps({'slots': [], 'inputs': []}))
+
+    def test_slot_batch_minimum_applies_before_the_native_claim(self):
+        from test_flow_batch import AtomicTracker
+        for index in (0, 1):
+            with self.subTest(slot=index), tempfile.TemporaryDirectory() as folder:
+                root, api = Path(folder), AtomicTracker()
+                for node in api.nodes.values():
+                    node['document']['data']['delivery'] = {'branch': 'one'}
+                lock = root / 'producer' / 'one' / 'worker.lock'
+                lock.mkdir(parents=True)
+                write(lock.parent / 'launch.json', {'worker': {'pid': os.getpid()}})
+                config = {'workspace': 'example', 'url': api.url, 'runs_folder': str(root / 'runs'),
+                          'workflow': str(ROOT / 'writer/workflow.yaml'), 'mcp_command': ['connector'],
+                          'selection': {'kind': 'work'},
+                          'batch': {'size': 3, 'min_size': 3, 'by': 'data.repository', 'unit_field': 'data.delivery.branch',
+                                    'flush_when_idle': str(root / 'producer' / '*' / 'worker.lock')},
+                          'slots': [{'label': 'A', 'data': {'repository': 'service'}, 'batch': {'min_size': 1}},
+                                    {'label': 'B', 'data': {'repository': 'other'}}],
+                          'publication': {'file': 'operations.json'}}
+                effective = flow_launch.configuration('unused', json.dumps(config), index)
+                with patch.dict(os.environ, {'MEDULLA_RUN_DIR': str(root / 'run'),
+                                             'PLANNING_JOPPA_ITEM': 'work:t1' if index == 0 else 'work:t4'}), \
+                        patch.object(flow_stages, 'settings', return_value=effective), \
+                        patch.object(flow_stages, 'client', return_value=api), \
+                        patch.object(flow_stages, 'emit'), redirect_stdout(StringIO()):
+                    if index == 0:
+                        flow_stages.prepare()
+                        self.assertEqual(len(api.batches), 1)
+                        self.assertEqual(len(read(root / 'run/artifacts/input.json')['items']), 3)
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'batch waits'):
+                            flow_stages.prepare()
+                        self.assertEqual(api.batches, [])

@@ -1,6 +1,7 @@
 // Configured slots reuse the existing input profiles and run records.
 import fs from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {batchSettings} from './flow-batch.mjs';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const need = (ok, message) => { if (!ok) throw new Error('slots: ' + message); };
@@ -14,14 +15,17 @@ export function normalizeSlots(config) {
   need(!config.inputs, 'use slots or inputs, not both');
   need(config.workflow && object(config.selection), 'configure a workflow and a common selection');
   need(Array.isArray(config.slots) && config.slots.length > 0, 'configure at least one slot');
+  batchSettings(config.batch);
   const labels = new Set();
   const inputs = config.slots.map(slot => {
-    need(object(slot) && Object.keys(slot).every(key => ['label', 'data'].includes(key)), 'a slot needs label and data');
+    need(object(slot) && Object.keys(slot).every(key => ['label', 'data', 'batch'].includes(key)), 'a slot needs label, data and optional batch');
     need(typeof slot.label === 'string' && slot.label.trim() === slot.label && slot.label &&
       !/[\x00-\x1f\x7f]/.test(slot.label) && !labels.has(slot.label), 'labels must be unique nonempty single-line strings');
     need(object(slot.data), 'slot data must be a native filter object');
+    need(slot.batch === undefined || object(slot.batch), 'slot batch must be an object');
+    const batch = slot.batch === undefined ? undefined : batchSettings({...clone(config.batch || {}), ...clone(slot.batch)});
     labels.add(slot.label);
-    return {slot: slot.label, selection: {...clone(config.selection),
+    return {slot: slot.label, ...(batch ? {batch} : {}), selection: {...clone(config.selection),
       data: merge(config.selection.data || {}, slot.data)}};
   });
   const {slots, ...base} = config;
