@@ -49,7 +49,7 @@ The environment specification declares the code sources and path bindings:
 {
   "root": "/path/to/environments",
   "sources": {
-    "engine": {"repository": "/path/to/crew", "ref": "main"},
+    "engine": {"repository": "/path/to/crew", "ref": "engine-v61"},
     "role": {"repository": "/path/to/roles", "ref": "main"}
   },
   "config": {"source": "role", "path": "panel.json"},
@@ -70,6 +70,7 @@ The native filesystem resolver checks the complete symbolic link chain before a 
 Use absolute paths for external resources and run artifacts.
 It checks the code and generated config again before reuse.
 Without `--run`, it installs the environment and prints its manifest.
+Use an immutable engine tag from [Engine releases](ENGINE_RELEASES.md).
 Old panels and workers retain their paths. Remove an old environment only after all its processes finish.
 Keep run artifacts outside the code worktrees.
 
