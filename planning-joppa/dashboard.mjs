@@ -211,7 +211,7 @@ export async function main(argv) {
     try {
       if (pool.size && !termination) termination = pool.stop('SIGTERM');
       await termination;
-      stoppedCleanly = pool.size === 0;
+      stoppedCleanly = detached || pool.size === 0;
     } finally {
       clearInterval(ticker);
       process.off('SIGINT', interrupt);
