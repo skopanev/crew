@@ -49,10 +49,26 @@ if [[ "${DELIVERY:-}" != requirement && -n "${JOPPA_READER_COMMAND_JSON:-}${REQU
   case "$rc" in 0) ;; 75|124) exit 75 ;; *) exit 1 ;; esac
 fi
 budget_check
-rc=0
-push_output="$(LC_ALL=C timeout --kill-after=5s 60s git push --porcelain origin "$sha:refs/heads/$target" 2>&1)" || rc=$?
-printf '%s\n' "$push_output"
-if [ "$rc" -ne 0 ]; then
+delays=(0)
+if [[ "${DELIVERY:-}" == branch ]]; then
+  delays=(0 5 15 30)
+  push_errors="$(mktemp)" || { echo 'lane-push: PUSH_FAILED: cannot capture Git stderr' >&2; exit 5; }
+  trap 'rm -f -- "$push_errors" || true' EXIT
+fi
+for delay in "${delays[@]}"; do
+  if [[ "$delay" -gt 0 ]]; then sleep "$delay"; fi
+  rc=0
+  if [[ "${DELIVERY:-}" == branch ]]; then
+    push_output="$(LC_ALL=C timeout --kill-after=5s 60s git push --porcelain origin "$sha:refs/heads/$target" 2>"$push_errors")" || rc=$?
+    cat "$push_errors" >&2
+  else
+    push_output="$(LC_ALL=C timeout --kill-after=5s 60s git push --porcelain origin "$sha:refs/heads/$target" 2>&1)" || rc=$?
+  fi
+  printf '%s\n' "$push_output"
+  if [[ "$rc" -eq 0 ]]; then
+    if [[ "${DELIVERY:-}" == branch ]]; then echo "lane-push: OK $target -> $sha"; exit 0; fi
+    break
+  fi
   # Only an explicit rejection proves this push did not update the target. A transport error does not.
   if printf '%s\n' "$push_output" | awk -F '\t' -v ref="$sha:refs/heads/$target" '
     $1 == "!" && $2 == ref && $3 ~ /^\[rejected\] \((fetch first|non-fast-forward)\)$/ { found=1 }
@@ -63,15 +79,23 @@ if [ "$rc" -ne 0 ]; then
   if printf '%s\n' "$push_output" | awk -F '\t' -v ref="$sha:refs/heads/$target" '
     $1 == "!" && $2 == ref && $3 ~ /^\[remote rejected\] \((incorrect old value provided|failed to update ref)\)$/ { found=1 }
     END { exit !found }'; then
+    if [[ "${DELIVERY:-}" == branch ]]; then
+      echo 'lane-push: TARGET_MOVED; the server rejected a stale target update' >&2; exit 3
+    fi
     moved="$(timeout 15 git ls-remote origin "refs/heads/$target" 2>/dev/null | awk '{print $1}' | head -1)" || moved="$before"
     if [[ "$moved" != "$before" ]]; then
       echo 'lane-push: TARGET_MOVED; the server rejected a stale target update' >&2
       exit 3
     fi
   fi
-  echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2
-  exit 4
-fi
+  if [[ "${DELIVERY:-}" == branch ]]; then
+    if [[ "$delay" -eq 30 ]]; then
+      printf 'lane-push: PUSH_FAILED: %s\n' "$(tail -n 1 "$push_errors")" >&2; exit 5
+    fi
+  else
+    echo 'lane-push: publication outcome is uncertain; inspect target ancestry' >&2; exit 4
+  fi
+done
 # Retry only the confirmation read. The successful push must never repeat here.
 for delay in 0 2 5 10; do
   if [[ "$delay" -gt 0 ]]; then sleep "$delay"; fi

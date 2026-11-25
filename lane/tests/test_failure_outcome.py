@@ -120,7 +120,7 @@ class FailureOutcomeTests(unittest.TestCase):
     def test_failed_or_unknown_outcome_never_reopens_work(self):
         for signal in (
             "BRANCH_HAS_WORK", "DUPLICATE", "PREMISE_BROKEN", "OUT_OF_MODULE",
-            "LAND_FAILED", "TOO_MANY_ROUNDS", "GATE_FAIL", "FETCH_FAILED",
+            "LAND_FAILED", "PUSH_FAILED", "TARGET_MOVED", "TOO_MANY_ROUNDS", "GATE_FAIL", "FETCH_FAILED",
             "NO_GIT_KEY", "NOTHING_DONE", "UNRECOGNIZED_SIGNAL", "", None,
         ):
             with self.subTest(signal=signal):

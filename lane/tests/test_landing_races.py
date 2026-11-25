@@ -1,5 +1,6 @@
 """Exercise competing Git publishers without a shared filesystem lock."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -138,6 +139,69 @@ sys.exit(subprocess.call([{self.real_git!r},*args]))
                 remote = subprocess.check_output([self.real_git, "ls-remote", "origin", "refs/heads/develop"],
                                                  cwd=self.repo, env=self.env, text=True).split()[0]
                 self.assertEqual(remote, self.candidate)
+
+    def test_branch_push_retries_keep_the_refspec_and_report_a_distinct_failure(self):
+        cases = [('success', 0), ('transient', 1), ('transient', 3), ('exhausted', 4),
+                 ('lost-reply', 1), ('fetch first', 1), ('non-fast-forward', 1),
+                 ('incorrect old value provided', 1), ('failed to update ref', 1)]
+        artifacts = self.root / 'run/artifacts'
+        (artifacts / 'reviewed-tree.txt').write_text(self.git('write-tree') + '\n' + self.candidate + '\n')
+        for index, (mode, failures) in enumerate(cases):
+            with self.subTest(mode=mode, failures=failures):
+                bins = self.root / f'branch-retry-{index}'
+                bins.mkdir()
+                pushes, reads, sleeps = bins / 'pushes', bins / 'reads', bins / 'sleeps'
+                script = bins / 'git'
+                script.write_text(f'''#!{sys.executable}
+import json,pathlib,subprocess,sys
+args=sys.argv[1:]
+pushes=pathlib.Path({str(pushes)!r})
+if args[0]=='ls-remote':
+    with open({str(reads)!r},'a') as output:output.write('read\\n')
+    if pushes.exists():sys.exit(128)
+if args[0]=='push':
+    with pushes.open('a') as output:output.write(json.dumps(args)+'\\n')
+    attempt=len(pushes.read_text().splitlines())
+    mode={mode!r}
+    if mode in ('fetch first','non-fast-forward','incorrect old value provided','failed to update ref'):
+        rejection='rejected' if mode in ('fetch first','non-fast-forward') else 'remote rejected'
+        print('!\\t'+args[-1]+'\\t['+rejection+'] ('+mode+')')
+        sys.exit(1)
+    if attempt<={failures}:
+        if mode=='lost-reply':subprocess.run([{self.real_git!r},*args],check=True)
+        print('fatal: transient transport failure '+str(attempt),file=sys.stderr)
+        print('stdout is not the Git stderr line')
+        sys.exit(128)
+sys.exit(subprocess.call([{self.real_git!r},*args]))
+''')
+                script.chmod(0o755)
+                sleeper = bins / 'sleep'
+                sleeper.write_text(f'#!/bin/sh\nprintf "%s\\n" "$1" >> "{sleeps}"\n')
+                sleeper.chmod(0o755)
+                branch = f'ticket-{index}'
+                env = dict(self.env, PATH=str(bins) + os.pathsep + self.env['PATH'], DELIVERY='branch',
+                           DELIVERY_BRANCH=branch, TOOLING_ROOT=str(fixtures.LANE.parent), LANE_WORKTREE=str(self.repo))
+                result = subprocess.run(['bash', '-c', fixtures.shell_body('git_landing')], cwd=self.repo,
+                                        env=env, text=True, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                attempts = [json.loads(line) for line in pushes.read_text().splitlines()]
+                rejected = mode not in ('success', 'transient', 'exhausted', 'lost-reply')
+                count = 1 if rejected else min(failures + 1, 4)
+                self.assertEqual(attempts, [['push', '--porcelain', 'origin',
+                                            self.candidate + ':refs/heads/' + branch]] * count)
+                waits = sleeps.read_text().splitlines() if sleeps.exists() else []
+                self.assertEqual(waits, ['5', '15', '30'][:count - 1])
+                self.assertEqual(reads.read_text().splitlines(), ['read'], 'No confirmation read follows a branch push')
+                self.assertNotIn('PUBLICATION_UNCERTAIN', result.stdout + result.stderr)
+                if mode == 'exhausted':
+                    self.assertIn('<signal:PUSH_FAILED>lane-push: PUSH_FAILED: fatal: transient transport failure 4</signal:PUSH_FAILED>', result.stdout)
+                elif rejected:
+                    self.assertIn('<signal:TARGET_MOVED>', result.stdout)
+                else:
+                    self.assertIn('lane-push: OK', result.stdout)
+                    actual = subprocess.check_output([self.real_git, 'ls-remote', 'origin', 'refs/heads/' + branch],
+                                                     cwd=self.repo, env=self.env, text=True).split()[0]
+                    self.assertEqual(actual, self.candidate)
 
     def test_simultaneous_server_ref_updates_cannot_overwrite_the_winner(self):
         entered, release = self.root / "entered", self.root / "release"

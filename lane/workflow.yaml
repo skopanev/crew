@@ -766,6 +766,8 @@ nodes:
       JOPPA_UNAVAILABLE: notify_failure
       PUBLISH_BUDGET_LOW: notify_failure
       PUBLICATION_UNCERTAIN: notify_failure
+      PUSH_FAILED: notify_failure
+      TARGET_MOVED: notify_failure
       VERIFIED: cleanup
       ALREADY_LANDED: cleanup
       LAND_FAILED: notify_failure
@@ -887,7 +889,8 @@ nodes:
         [ "$rc" -ne 76 ] || { echo '<signal:PUBLISH_BUDGET_LOW>No publication started; candidate preserved.</signal:PUBLISH_BUDGET_LOW>'; exit 0; }
         case "$rc" in
           75) echo '<signal:JOPPA_UNAVAILABLE>Task read failed after transport retries.</signal:JOPPA_UNAVAILABLE>'; exit 0 ;;
-          4) echo '<signal:PUBLICATION_UNCERTAIN>Inspect target ancestry before retry.</signal:PUBLICATION_UNCERTAIN>'; exit 0 ;;
+          5) printf '<signal:PUSH_FAILED>%s</signal:PUSH_FAILED>\n' "$(tail -n 1 "$MEDULLA_RUN_DIR/artifacts/landing-log.txt")"; exit 0 ;;
+          3) echo '<signal:TARGET_MOVED>Git rejected the candidate branch update. Refresh and check the candidate.</signal:TARGET_MOVED>'; exit 0 ;;
         esac
         [ "$rc" -eq 0 ] || echo "<signal:LAND_FAILED>Candidate branch publication exited ${rc}; see artifacts/landing-log.txt</signal:LAND_FAILED>"
         exit 0
