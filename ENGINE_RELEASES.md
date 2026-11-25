@@ -76,6 +76,7 @@ Old versions remain available for existing panels.
 | engine-v63 | `50930d376414c0e5327472f076021b31c8d3eb52` | Read Test execution policy from the injected shared rule in Tasker and Lane review prompts |
 | engine-v64 | `d3f174997f2d28891ea48e4d5c4e857465190293` | Run filtered slots in one dashboard and check effective object filters before claims |
 | engine-v65 | `a2c9d5017f342b0a4cb7df2a78601359dd4e2a17` | Show the slot and count in batch rows and preserve stored Task identities |
+| engine-v66 | `aa17a31d616aa687532f1025d3bf02a258007371` | Allow each configured slot to override common batch settings |
 
 ## Install a version
 
@@ -83,7 +84,7 @@ Fetch the public repository and its tags. Create a detached runtime at the selec
 
 ```sh
 git fetch origin main --tags
-git worktree add --detach /path/to/releases/engine-v65 engine-v65
+git worktree add --detach /path/to/releases/engine-v66 engine-v66
 ```
 
 Set `sources.engine.ref` to that tag in the environment specification.
@@ -91,7 +92,7 @@ Set `sources.role.ref` to the required role version.
 Run the existing installer without `--run` to prepare the environment:
 
 ```sh
-node /path/to/releases/engine-v65/lane-launcher/environment.mjs /path/to/environment.json
+node /path/to/releases/engine-v66/lane-launcher/environment.mjs /path/to/environment.json
 ```
 
 Check the returned `environment.json` before starting the panel.

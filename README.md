@@ -49,7 +49,7 @@ The environment specification declares the code sources and path bindings:
 {
   "root": "/path/to/environments",
   "sources": {
-    "engine": {"repository": "/path/to/crew", "ref": "engine-v65"},
+    "engine": {"repository": "/path/to/crew", "ref": "engine-v66"},
     "role": {"repository": "/path/to/roles", "ref": "main"}
   },
   "config": {"source": "role", "path": "panel.json"},
