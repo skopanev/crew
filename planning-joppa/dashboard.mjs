@@ -16,6 +16,7 @@ import {contextAdmission} from './context-admission.mjs';
 import {queueLabel} from './flow-batch.mjs';
 import {hasSlots, occupiedSlots} from './slots.mjs';
 import {admissionForItem} from './configured-admission.mjs';
+import {landingQueue} from './queue-display.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -93,13 +94,14 @@ export async function main(argv) {
   const pool = detached ? new Runs(root, owner, finished, config) : new Runs(root, finished);
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
-    const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
+    const rows = plannerRows(root, pool.current, Infinity, {...config, dispatcherId: owner});
+    const active = detached ? pool.runs.filter(run => run.active) : [...pool.active.values()];
     const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60),
       ticket: row.batchLabel || (row.slot ? `[${row.slot}] ${row.ac}` : row.ac)})),
       paint, state.queue === undefined ? 7 : 8, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
-      ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
+      ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied, landingQueue(rows, config, active)).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '', closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');

@@ -36,8 +36,8 @@ test('two filtered slots run together while the next batch of a busy slot waits'
     assert.equal(new Set(f.starts().map(row => row.pid)).size, 2);
     await pause(1100);
     assert.equal(f.starts().length, 2);
-    assert.match(run.output(), /A 1 running/);
-    assert.match(run.output(), /B 1 running/);
+    assert.match(run.output(), /A 1 landing/);
+    assert.match(run.output(), /B 1 landing/);
     assert.match(run.output(), /\[A\]\s+ac:a1/);
     assert.match(run.output(), /\[B\]\s+ac:a2/);
     assert.ok(plannerRows(f.config.runs_folder, null, 30, normalizeSlots(f.config))

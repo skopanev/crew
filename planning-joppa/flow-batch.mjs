@@ -73,16 +73,26 @@ export function batchQueue(batch, rows, excludeTags = [], slot) {
     String(batch?.unit_field ? batchField(row, batch.unit_field) : row.address)]);
 }
 
-export function queueLabel(queue, occupied) {
+export function queueLabel(queue, occupied, landing = []) {
   const groups = new Map();
-  for (const [group, unit] of queue) {
-    if (!groups.has(group)) groups.set(group, new Set());
-    groups.get(group).add(unit);
+  const group = label => {
+    if (!groups.has(label)) groups.set(label, {waiting: new Set(), landing: new Set(), unknown: false});
+    return groups.get(label);
+  };
+  for (const [label, unit] of queue) group(label).waiting.add(unit);
+  if (occupied) for (const label of occupied.keys()) group(label);
+  for (const [label, unit] of landing) {
+    if (unit === null) group(label).unknown = true;
+    else { group(label).landing.add(unit); group(label).waiting.delete(unit); }
   }
-  const count = [...groups.values()].reduce((sum, units) => sum + units.size, 0);
-  if (occupied) for (const label of occupied.keys()) if (!groups.has(label)) groups.set(label, new Set());
-  return `queue: ${count}` + (groups.size ? ` (${[...groups].map(([group, units]) => occupied ?
-    `${group} ${occupied.get(group) || 0} running / ${units.size} waiting` : `${group} ${units.size}`).join(' · ')})` : '');
+  if (occupied) for (const [label, count] of occupied) {
+    if (count > 0 && !landing.some(([name]) => name === label)) group(label).unknown = true;
+  }
+  const total = [...groups.values()].some(value => value.unknown) ? 'unknown' :
+    [...groups.values()].reduce((sum, value) => sum + value.waiting.size, 0);
+  const ungrouped = groups.get(null)?.unknown;
+  return `queue: ${total} waiting` + (groups.size ? ` (${[...groups].map(([label, value]) =>
+    `${label ?? '(unknown)'} ${value.unknown || ungrouped ? 'unknown' : value.landing.size} landing / ${value.unknown || ungrouped ? 'unknown' : value.waiting.size} waiting`).join(' · ')})` : '');
 }
 
 export function batchItems(batch, rows) {

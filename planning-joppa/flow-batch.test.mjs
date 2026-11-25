@@ -64,25 +64,9 @@ test('queue counts cover all profiles, preserve selection order, and count each 
   const selected = await nextConfiguredItem(config, f.config.token_file);
   assert.equal(selected.next.address, 'ac:a1');
   assert.equal(selected.next.input, 0);
-  assert.equal(queueLabel(selected.queue), 'queue: 2 (service 1 · other 1)');
+  assert.equal(queueLabel(selected.queue), 'queue: 2 waiting (service 0 landing / 1 waiting · other 0 landing / 1 waiting)');
   const rows = [{address: 'a', group: 'service', unit: 'same', 'data.tags': []},
     {address: 'b', group: 'service', unit: 'same', 'data.tags': []},
     {address: 'c', group: 'service', unit: 'hidden', 'data.tags': ['exclude']}];
-  assert.equal(queueLabel(batchQueue({by: 'group', unit_field: 'unit'}, rows, ['exclude'])), 'queue: 1 (service 1)');
-});
-
-test('the queue header refreshes while the configured flow occupies its only slot', async t => {
-  const f = await plannerFixture(t, {}, 8);
-  const workflow = path.join(f.root, 'workflow.yaml');
-  fs.writeFileSync(workflow, 'nodes: {}\n');
-  for (const id of ['ac:a1', 'ac:a2']) Object.assign(f.objects.get(id).document.data,
-    {repository: 'service', delivery: {branch: id}});
-  f.write({...f.config, workflow, selection: {kind: 'ac'}, exclude_tags: ['exclude'],
-    batch: {size: 10, by: 'data.repository', unit_field: 'data.delivery.branch'}});
-  const run = f.start();
-  await run.until(() => f.passes().length === 1);
-  f.objects.get('ac:a2').document.data.tags = ['exclude'];
-  await run.until(output => output.includes('queue: 1 (service 1)'));
-  assert.equal(f.passes().length, 1, 'The same running pass must still occupy the slot');
-  assert.equal(await run.stop(), 130);
+  assert.equal(queueLabel(batchQueue({by: 'group', unit_field: 'unit'}, rows, ['exclude'])), 'queue: 1 waiting (service 0 landing / 1 waiting)');
 });

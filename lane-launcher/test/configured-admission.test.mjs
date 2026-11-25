@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {plannerFixture, planner, watch} from '../test-support/config-reload.fixture.mjs';
 import {admissionAllowed, admissionForItem} from '../../planning-joppa/configured-admission.mjs';
 import {nextConfiguredItem, flowSettings} from '../../planning-joppa/queue.mjs';
@@ -62,6 +62,27 @@ test('batch readiness counts only admitted rows', async t => {
     admission_module: f.module('export const admission=row=>row.address==="ac:a2";')};
   assert.equal((await nextConfiguredItem(config, config.token_file)).next, null);
   assert.equal((await nextConfiguredItem({...config, batch: {size: 2, min_size: 1}}, config.token_file)).next.address, 'ac:a2');
+});
+
+test('the reader identity is stable within a pass and fresh across passes or workspaces', async t => {
+  const f = await fixture(t);
+  const module = f.module('export const seen=[]; export const admission=(row,profile,read)=>{seen.push(read);return row.address==="ac:a2";};');
+  const config = {...f.config, admission_module: module};
+  const {seen} = await import(pathToFileURL(module).href);
+  await nextConfiguredItem(config, config.token_file);
+  await nextConfiguredItem(config, config.token_file);
+  assert.equal(seen[0], seen[1]);
+  assert.equal(seen[2], seen[3]);
+  assert.notEqual(seen[0], seen[2]);
+  const read = async () => ({}), row = {address: 'ac:a2'};
+  await admissionAllowed(row, config, read);
+  await admissionAllowed(row, config, read);
+  await admissionAllowed(row, {...config, workspace: 'other'}, read);
+  assert.equal(seen[4], seen[5]);
+  assert.notEqual(seen[4], seen[6]);
+  await admissionForItem(config, config.token_file, 'ac:a2');
+  await admissionForItem(config, config.token_file, 'ac:a2');
+  assert.notEqual(seen[7], seen[8], 'Separate direct checks do not share a pass');
 });
 
 test('automatic and explicit dashboard skips create no pass, claim or run row', async t => {

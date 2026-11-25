@@ -7,6 +7,16 @@ import {normalizeSlots} from './slots.mjs';
 
 const need = (ok, message) => { if (!ok) throw new Error('Configured admission: ' + message); };
 const tools = new Set(['joppa_objects', 'joppa_tree', 'joppa_search', 'joppa_help']);
+const readers = new WeakMap();
+function scopedReader(read, workspace) {
+  if (!readers.has(read)) readers.set(read, new Map());
+  const scopes = readers.get(read);
+  if (!scopes.has(workspace)) scopes.set(workspace, (tool, args = {}) => {
+    need(tools.has(tool), 'reader does not permit ' + tool);
+    return read(tool, {...args, workspace});
+  });
+  return scopes.get(workspace);
+}
 
 export function admissionSettings(config) {
   const file = config.admission_module;
@@ -21,10 +31,7 @@ export async function admissionAllowed(row, profile, read) {
   if (!file) return true;
   const {admission} = await import(pathToFileURL(file).href);
   need(typeof admission === 'function', 'module must export admission');
-  const readonly = (tool, args = {}) => {
-    need(tools.has(tool), 'reader does not permit ' + tool);
-    return read(tool, {...args, workspace: profile.workspace});
-  };
+  const readonly = scopedReader(read, profile.workspace);
   const allowed = await admission(structuredClone(row), structuredClone(profile), readonly);
   need(typeof allowed === 'boolean', 'admission must return a boolean');
   return allowed;

@@ -53,6 +53,8 @@ Return `true` to admit the row or `false` to skip it. Other return values and er
 Only `address`, `revision`, `kind`, `parent` and `title` are guaranteed in every row.
 Other list projections differ between paths. Read full objects through `read` when needed.
 The supplied reader permits only `joppa_objects`, `joppa_tree`, `joppa_search` and `joppa_help` in the configured workspace.
+Reader identity stays stable within one profile selection pass. New passes and direct checks receive a fresh reader.
+Modules can cache evidence by reader identity for that pass. The engine does not cache API responses.
 Automatic selection skips the item before creating a run folder or claim. Explicit item launches also check admission before execution.
 Each batch member passes the check again before the native claim. The check can refuse changed inputs after selection.
 The preclaim module process has 30 seconds for the entire batch. Keep its reads bounded.
@@ -224,7 +226,11 @@ Move the Medulla folder only when it differs from the launch folder. Keep both f
 Restart the dashboard after this operator recovery. Do not create a success result or an exit journal record to clear the block.
 Automatic selection assigns slots. A fixed object launch cannot bypass their occupancy guard.
 Rows start with `[label]`. The queue shows running passes and waiting units for every slot, including empty slots.
-Without `slots`, existing selection, concurrency, and display behavior stays unchanged.
+The queue header counts distinct `batch.unit_field` values in captured active batches and waiting items.
+Without `unit_field`, it counts object addresses. Captured active units are excluded from waiting.
+For example: `queue: 1 waiting (alpha 2 landing / 1 waiting · beta 1 landing / 0 waiting)`.
+An uncaptured or unreadable active batch shows `unknown` until its existing input and config establish the units.
+Without `slots`, existing selection and concurrency behavior stays unchanged.
 
 Set `min_size` to wait for a minimum batch. Polling still uses `interval_seconds`.
 Set `max_wait_seconds` and `age_field` together to release a smaller batch after its oldest timestamp reaches that age.
