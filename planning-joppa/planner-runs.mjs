@@ -20,11 +20,11 @@ export class PlannerRuns {
   get current() { return [...this.completed, ...this.active.values()].map(run => run.current).filter(Boolean); }
   owns(address) { return this.active.has(address); }
 
-  start(address, args, env, attemptKey = null, configured = false) {
+  start(address, args, env, attemptKey = null, configured = false, metadata = {}) {
     if (this.stopping || this.owns(address)) throw new Error(`Planner already reserves ${address} or is stopping`);
     const input = Number(env.PLANNING_JOPPA_INPUT ?? 0);
     if (!Number.isSafeInteger(input) || input < 0) throw new Error('Invalid worker input index');
-    const run = {address, input, attemptKey, configured, current: null, child: null, error: null};
+    const run = {address, input, attemptKey, configured, current: null, child: null, error: null, slot: metadata.slot};
     // Reserve the address before spawn. The claim can change its revision while the child runs.
     this.active.set(address, run);
     let pending = '', buffered = '', ended = false, resolve;

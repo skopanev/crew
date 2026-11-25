@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {nodePages} from '../lane-launcher/joppa-nodes.mjs';
+import {normalizeSlots} from './slots.mjs';
 
 const require = (condition, message) => { if (!condition) throw new Error('Context admission: ' + message); };
 const json = file => {
@@ -30,7 +31,8 @@ function worker(run) {
   const input = folder ? json(path.join(folder, 'artifacts/input.json')) : null;
   const index = run.input ?? input?.input;
   const configFile = run.args?.[run.args.indexOf('--config') + 1];
-  const config = run.config || (configFile && json(configFile));
+  const raw = run.config || (configFile && json(configFile));
+  const config = raw && normalizeSlots(raw);
   require(config, 'active worker snapshot is unavailable');
   require(!input || input.selected?.address === run.address, 'active worker input identity differs');
   let profile = config;

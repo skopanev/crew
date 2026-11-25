@@ -66,21 +66,23 @@ export function batchField(item, name) {
 
 export const batchProjection = name => name.startsWith('data.') ? name.split('.').slice(0, 2).join('.') : name;
 
-export function batchQueue(batch, rows, excludeTags = []) {
-  if (!batch?.by) return [];
+export function batchQueue(batch, rows, excludeTags = [], slot) {
+  if (!batch?.by && !slot) return [];
   return rows.filter(row => !excludeTags.some(tag => (batchField(row, 'data.tags') || []).includes(tag)))
-    .map(row => [String(batchField(row, batch.by) ?? '(unknown)'),
-    String(batch.unit_field ? batchField(row, batch.unit_field) : row.address)]);
+    .map(row => [slot || String(batchField(row, batch.by) ?? '(unknown)'),
+    String(batch?.unit_field ? batchField(row, batch.unit_field) : row.address)]);
 }
 
-export function queueLabel(queue) {
+export function queueLabel(queue, occupied) {
   const groups = new Map();
   for (const [group, unit] of queue) {
     if (!groups.has(group)) groups.set(group, new Set());
     groups.get(group).add(unit);
   }
   const count = [...groups.values()].reduce((sum, units) => sum + units.size, 0);
-  return `queue: ${count}` + (count ? ` (${[...groups].map(([group, units]) => `${group} ${units.size}`).join(' · ')})` : '');
+  if (occupied) for (const label of occupied.keys()) if (!groups.has(label)) groups.set(label, new Set());
+  return `queue: ${count}` + (groups.size ? ` (${[...groups].map(([group, units]) => occupied ?
+    `${group} ${occupied.get(group) || 0} running / ${units.size} waiting` : `${group} ${units.size}`).join(' · ')})` : '');
 }
 
 export function batchItems(batch, rows) {

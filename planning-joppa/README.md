@@ -155,6 +155,25 @@ Reference reads precede the batch. A reference edit inside this interval is not 
 An uncertain write retains its receipt and requires recovery. A workflow result never proves acceptance.
 A finished run records the revision it left. The retry policy uses that final revision, including the claim release.
 Set `batch` to `{ "size": 5, "by": "data.repository" }` to claim up to five matching items of one configured group.
+Use `slots` for one dashboard with one active pass per configured filter:
+
+```json
+"selection": {"kind": "work", "assignee": "", "data": {"stage": "pending"}},
+"slots": [
+  {"label": "alpha", "data": {"area": "first"}},
+  {"label": "beta", "data": {"area": "second"}}
+]
+```
+
+Each slot merges its data into the common selection. Nested objects merge, and slot values replace conflicting common values.
+Labels must be unique. Use `slots` or `inputs` in a config. The default concurrency is the slot count.
+An explicit `concurrency` limits the total active passes. Each slot still permits only one active pass.
+The run records its label before execution. Detached passes keep their slot after a dashboard restart or slot reordering.
+An active run with a missing or removed label blocks new passes until its state is resolved.
+Automatic selection assigns slots. A fixed object launch cannot bypass their occupancy guard.
+Rows start with `[label]`. The queue shows running passes and waiting units for every slot, including empty slots.
+Without `slots`, existing selection, concurrency, and display behavior stays unchanged.
+
 Set `min_size` to wait for a minimum batch. Polling still uses `interval_seconds`.
 Set `max_wait_seconds` and `age_field` together to release a smaller batch after its oldest timestamp reaches that age.
 Alternatively, set `flush_when_idle` to an absolute producer lock glob, such as `/path/to/producer/runs/*/worker.lock`.

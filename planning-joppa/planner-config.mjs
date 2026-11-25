@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {criterionIds, flowSettings} from './queue.mjs';
+import {normalizeSlots} from './slots.mjs';
 
 const expand = value => value.startsWith('~/') ? path.join(process.env.HOME, value.slice(2)) : value;
 const real = folder => fs.existsSync(folder) ? fs.realpathSync(folder) : folder;
@@ -13,7 +14,7 @@ export const HANDOFF_CHANGED = 75;
 
 // The pass receives the digest of these exact bytes and refuses a file that differs.
 export function plannerConfig(configFile, {ac = null, automatic = false} = {}, bytes = fs.readFileSync(configFile)) {
-  const config = JSON.parse(bytes.toString('utf8'));
+  const config = normalizeSlots(JSON.parse(bytes.toString('utf8')));
   if (config.result_colors !== undefined && (!config.result_colors || typeof config.result_colors !== 'object' ||
       Array.isArray(config.result_colors) || Object.entries(config.result_colors).some(([key, value]) => !key.trim() ||
         !['ready', 'red', 'yellow', 'blue', 'gray', 'orange', 'finished'].includes(value)))) {

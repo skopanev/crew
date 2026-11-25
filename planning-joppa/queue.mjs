@@ -142,6 +142,8 @@ export async function readyRequirements(config, tokenFile, signal) {
 // A configured flow uses native Joppa filters. Only unassigned items can enter a new claim.
 export function flowSettings(config) {
   if (config.workflow === undefined) return null;
+  if (config.slot !== undefined && (typeof config.slot !== 'string' || !config.slot.trim()))
+    throw new Error('slot must be a nonempty label');
   if (config.wait_for_dependencies !== undefined && typeof config.wait_for_dependencies !== 'boolean')
     throw new Error('wait_for_dependencies must be boolean');
   if (typeof config.workflow !== 'string' || !config.workflow.trim()) throw new Error('workflow must name a Medulla workflow.yaml file');
@@ -149,7 +151,7 @@ export function flowSettings(config) {
     throw new Error('ac_ids and covers_reference apply only to the planner flow without workflow');
   }
   if (config.inputs !== undefined) {
-    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication', 'wait_for_dependencies']);
+    const keys = new Set(['selection', 'order', 'exclude_tags', 'exclude_children', 'children', 'references', 'related', 'publication', 'wait_for_dependencies', 'slot']);
     if (!Array.isArray(config.inputs) || !config.inputs.length || config.inputs.some(input => !object(input) ||
         !object(input.selection) || Object.keys(input).some(key => !keys.has(key)))) throw new Error('inputs needs ordered native selection profiles');
     for (const input of config.inputs) flowSettings({...config, ...input, inputs: undefined});
@@ -192,8 +194,8 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
       const result = await nextConfiguredItem({...config, ...profile, inputs: undefined}, tokenFile, signal, skip);
       count += result.count; filtered += result.filtered;
       queue.push(...result.queue);
-      if (!next && result.next) next = {...result.next, input};
-      if (next && !config.batch?.by) return {count, filtered, next, queue};
+      if (!next && result.next) next = {...result.next, input, ...(profile.slot ? {slot: profile.slot} : {})};
+      if (next && !config.batch?.by && !profile.slot) return {count, filtered, next, queue};
     }
     return {count, filtered, next, queue};
   }
@@ -214,7 +216,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
     }
   }
   rows.sort(batchCompare(flow.order));
-  const queue = batchQueue(batch, rows, config.exclude_tags);
+  const queue = batchQueue(batch, rows, config.exclude_tags, config.slot);
   const eligible = [], parents = new Map();
   const dependencies = config.wait_for_dependencies ? dependencySelection(read) : null;
   let filtered = 0;

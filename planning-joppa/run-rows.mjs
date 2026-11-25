@@ -2,10 +2,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {tail} from './run-files.mjs';
+import {hasSlots} from './slots.mjs';
 
-const json = file => {
+const json = (file, strict = false) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
+  catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError && !strict) return null;
+    throw new Error('Run state unavailable: ' + file);
+  }
 };
 const alive = pid => {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -18,12 +22,13 @@ const modified = file => {
 };
 
 export function plannerRows(root, current = null, limit = 30, scope = null) {
+  const strict = hasSlots(scope), readJson = file => json(file, strict);
   const tracked = new Map((Array.isArray(current) ? current : [current]).filter(Boolean).map(run => [run.folder, run]));
   let folders;
   try { folders = fs.readdirSync(root, {withFileTypes: true}); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   const launches = new Map(folders.filter(entry => entry.isDirectory())
-    .map(entry => [entry.name, json(path.join(root, entry.name, 'launch.json'))]));
+    .map(entry => [entry.name, readJson(path.join(root, entry.name, 'launch.json'))]));
   const nested = new Set([...launches.values()].map(run => run?.medullaRun).filter(Boolean).map(folder => path.resolve(folder)));
   return folders.filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}_/.test(entry.name))
     .filter(entry => !nested.has(path.resolve(root, entry.name)))
@@ -33,8 +38,8 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       if (scope?.dispatcherId && launch?.dispatcherId && scope.dispatcherId !== launch.dispatcherId) return [];
       const recordFolder = launch?.medullaRun || folder;
       const artifacts = path.join(recordFolder, 'artifacts');
-      const input = json(path.join(artifacts, 'input.json'));
-      const result = json(path.join(artifacts, 'result.json'));
+      const input = readJson(path.join(artifacts, 'input.json'));
+      const result = readJson(path.join(artifacts, 'result.json'));
       let vars = '', pid;
       try { vars = fs.readFileSync(path.join(recordFolder, 'vars.yaml'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       const subject = input?.joppa?.scope === 'requirement' ? input.requirement : input?.ac;
@@ -43,7 +48,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const selected = input?.selected && typeof input.selected === 'object' ? input.selected :
         launch?.address ? {address: launch.address, revision: JSON.parse(launch.attemptKey)[1]} : null;
       const ac = selected?.address || subject?.id || /^PLANNING_JOPPA_(?:REQ|AC|ITEM):\s*["']?([^\n"']+)/m.exec(vars)?.[1]?.trim();
-      if (!ac) return [];
+      if (!ac) { if (strict) throw new Error('Slot admission: run identity unavailable: ' + folder); return []; }
       const revision = Number.isSafeInteger(result?.selected_revision) ? result.selected_revision :
         selected?.current_revision ?? selected?.revision;
       const title = item => {
@@ -66,11 +71,11 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const trackedRun = tracked.get(folder);
       const active = launch ? !launch.result && alive(pid || launch.worker?.pid || launch.dispatcherPid) :
         !result && (trackedRun ? !trackedRun.ended : alive(pid));
-      const released = json(path.join(artifacts, 'release.json'));
-      const claim = json(path.join(artifacts, 'claim.json'));
+      const released = readJson(path.join(artifacts, 'release.json'));
+      const claim = readJson(path.join(artifacts, 'claim.json'));
       if (scope && (input?.workspace && input.workspace !== scope.workspace ||
           claim?.server && claim.server !== scope.url)) return [];
-      const publication = json(path.join(artifacts, 'publication.json'));
+      const publication = readJson(path.join(artifacts, 'publication.json'));
       const writtenStage = publication?.status === 'confirmed' ? publication.arguments?.operations?.flatMap(({command}) =>
         command?.op === 'save_object' && `${command.kind}:${command.id}` === ac &&
         typeof command.data?.stage === 'string' ? [command.data.stage] : []).at(-1) : undefined;
@@ -113,7 +118,11 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
       const end = active ? undefined : trackedRun?.finishedAt || launch?.result?.finishedAt ||
         modified(path.join(artifacts, 'result.json')) || modified(path.join(artifacts, 'release.json')) ||
         modified(path.join(folder, 'journal.jsonl')) || start;
-      return [{ticket: label, acTitle: selected ? label : input ? title(subject) : '', ac, ...(batchLabel ? {batchLabel} : {}),
+      const slot = launch?.slot || input?.slot;
+      const prefix = slot ? `[${slot}] ` : '';
+      const slotUncertain = strict && !active && !result && !launch?.result && !['__exit_ok__', '__exit_fail__'].includes(last?.next);
+      return [{ticket: prefix + label, acTitle: selected ? prefix + label : input ? title(subject) : '', ac,
+        slot, slotUncertain, runFolder: folder, ...(batchLabel ? {batchLabel: prefix + batchLabel} : {}),
         ...(selected && Number.isSafeInteger(revision) ? {attemptKey: JSON.stringify([ac, revision])} : {}),
         ...(result?.item_revisions ? {attemptKeys: Object.entries(result.item_revisions)
           .filter(([address, value]) => address.includes(':') && Number.isSafeInteger(value))

@@ -34,7 +34,7 @@ export class DetachedPlannerRuns {
     finishedAt: run.result?.finishedAt})); }
   owns(address) { return this.runs.some(run => run.active && run.address === address); }
 
-  async start(address, args, env, attemptKey) {
+  async start(address, args, env, attemptKey, configured, metadata = {}) {
     const input = Number(env.PLANNING_JOPPA_INPUT ?? 0);
     if (!Number.isSafeInteger(input) || input < 0) throw new Error('Invalid worker input index');
     const stamp = new Date().toLocaleString('sv-SE').replace(' ', '_').replaceAll(':', '-');
@@ -52,7 +52,7 @@ export class DetachedPlannerRuns {
     fs.writeFileSync(snapshot, raw, {mode: 0o600});
     const command = [...args];
     command[configIndex] = snapshot;
-    const run = {dispatcherId: this.owner, dispatcherPid: process.pid, address, input, attemptKey, workerScript: worker,
+    const run = {dispatcherId: this.owner, dispatcherPid: process.pid, address, input, attemptKey, workerScript: worker, slot: metadata.slot,
       args: command, createdAt: new Date().toISOString()};
     save(file, run);
     const log = fs.openSync(path.join(folder, 'output.log'), 'a', 0o600);

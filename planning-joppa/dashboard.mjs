@@ -14,6 +14,7 @@ import {retryFilter} from './retry.mjs';
 import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-runs.mjs';
 import {contextAdmission} from './context-admission.mjs';
 import {queueLabel} from './flow-batch.mjs';
+import {hasSlots, occupiedSlots} from './slots.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -52,6 +53,7 @@ export async function main(argv) {
   let {config, root, interval, concurrency, tokenFile, digest} = plannerConfig(configFile, {ac, automatic}, bytes);
   const detached = config.execution === 'detached';
   const owner = dispatcherId(plannerIdentity({config, root}));
+  if (fixed && hasSlots(config) && !dryRun) throw new Error('Configured slots require automatic selection');
   if (stopRun) {
     if (!detached || fixed || monitor || dryRun) throw new Error('--stop-run requires a detached configured flow');
     console.log(`Stopping ${stopDetachedRun(root, owner, stopRun)}`);
@@ -90,7 +92,7 @@ export async function main(argv) {
       paint, state.queue === undefined ? 7 : 8, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
-      ...(state.queue === undefined ? [] : [queueLabel(state.queue).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
+      ...(state.queue === undefined ? [] : [queueLabel(state.queue, state.occupied).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '', closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
@@ -131,7 +133,7 @@ export async function main(argv) {
     draw();
     ticker = setInterval(() => { if (screen) draw(); }, 5000);
     do {
-      let selected = requirement, attemptKey = null, inputIndex, scope = '--req-id';
+      let selected = requirement, attemptKey = null, inputIndex, slot, scope = '--req-id';
       if (automatic) {
         if (pool.size && !detached) {
           try {
@@ -146,7 +148,7 @@ export async function main(argv) {
         const loaded = pool.size && !detached ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
         ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
-        if (pool.size >= concurrency && !(config.workflow && config.batch?.by)) {
+        if (pool.size >= concurrency && !(config.workflow && (config.batch?.by || hasSlots(config)))) {
           state.error = loaded.error || null;
           if (once) { draw(); break; }
           await pause(); continue;
@@ -163,14 +165,18 @@ export async function main(argv) {
             const skipRetry = retryFilter(config, rows, attempted, cooldowns);
             const active = detached ? pool.runs.filter(run => run.active) :
               [...pool.active.values()].map(run => ({...run, config}));
+            const occupied = occupiedSlots(config, rows, active);
+            state.occupied = occupied;
             const conflicts = contextAdmission(active);
             const {count, next, filtered, queue} = await nextConfiguredItem(config, tokenFile, selection.signal,
-              (row, profile, read) => pool.size >= concurrency || busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
-            state.queue = config.batch?.by ? queue : undefined;
+              (row, profile, read) => pool.size >= concurrency || occupied?.get(profile.slot) > 0 ||
+                busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
+            state.queue = config.batch?.by || hasSlots(config) ? queue : undefined;
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);
               inputIndex = next.input;
+              slot = next.slot;
               scope = '--item-id';
               attempted.add(attemptKey);
               state.message = notice.trim();
@@ -195,7 +201,7 @@ export async function main(argv) {
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
         const env = {...handoff(), ...(inputIndex === undefined ? {} : {PLANNING_JOPPA_INPUT: String(inputIndex)})};
-        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow));
+        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow), {slot});
         if (once || fixed) {
           const code = await (detached ? Promise.race([run.completion, dashboardStopped]) : run.completion);
           await termination;
