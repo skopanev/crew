@@ -8,6 +8,7 @@ import {parsePublication, requirementPlan, assertRequirementHead} from './requir
 import {repositoryGit} from './publication-guard.mjs';
 import {removeEmptyDiscardCheckout} from './failed-checkout.mjs';
 import {stopRunContainers} from './container-cleanup.mjs';
+import {branchOutcome} from './branch-outcome.mjs';
 
 export function cleanupWorkerResources({run, result, child, secrets, folders, announce}) {
   if (child) {
@@ -157,7 +158,7 @@ export async function recordTaskOutcome({run, stateFile, result, artifacts, anno
     await finishTask(run, stateFile, result, artifacts);
     const tasks = (run.tasks || [{address: run.task}]).map(task => task.address).join(', ');
     if (result.completed) announce(`[lane] DONE ${tasks} · Joppa confirmed`);
-    if (result.pendingDelivery) announce(`[lane] QUEUED ${tasks} · checked branch awaits target integration; Joppa confirmed`);
+    if (branchOutcome(run, result)) announce(`[lane] ${branchOutcome(run, result)} ${tasks} · checked branch handed to Lander; Joppa confirmed`);
     for (const gap of result.testBindings?.gaps || []) announce(`[lane] ${gap}`);
     if (result.released) {
       announce(result.checkpointed

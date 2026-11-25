@@ -5,6 +5,7 @@ import {readRun, alive, runDirectories} from './runtime.mjs';
 import {completionEvent, reasonCode} from '../notify.mjs';
 import {testResultsInspection} from './test-results-publish.mjs';
 import {formatSelectionIssue} from './selection-notify.mjs';
+import {branchOutcome} from './branch-outcome.mjs';
 
 export function duration(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((new Date(end) - new Date(start)) / 1000)) || 0;
@@ -60,11 +61,12 @@ function stageFor(run) {
   }
 }
 
-function statusFor({result, worker}) {
-  return result ? result.pendingDelivery ? 'QUEUED' : result.code === 0 && result.status === 'exited' ? 'READY' :
+function statusFor(run) {
+  const {result, worker} = run;
+  return result ? branchOutcome(run) || (result.code === 0 && result.status === 'exited' ? 'READY' :
     result.blocked ? 'BLOCKED' : result.status === 'interrupted' ? 'INTERRUPTED' :
     result.error?.startsWith('CLAIM_REFUSED:') ? 'CLAIM_REFUSED' :
-    result.error?.startsWith('CLAIM_UNCERTAIN:') ? 'CLAIM_UNCERTAIN' : 'FAILED' :
+    result.error?.startsWith('CLAIM_UNCERTAIN:') ? 'CLAIM_UNCERTAIN' : 'FAILED') :
     worker ? alive(worker.pid) ? 'RUNNING' : 'LOST' : 'STARTING';
 }
 
@@ -81,6 +83,7 @@ function reasonFor(run) {
 }
 
 export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICKET', identityWidth, titleLabel = 'TITLE', finished = false, statusWidth: statusLimit = 8} = {}) {
+  rows = rows.map(row => row.status === 'PENDING_LANDING' ? {...row, status: 'DONE', stage: ''} : row);
   const width = Math.max(1, process.stdout.columns || Number(process.env.COLUMNS) || 80);
   const recent = [...rows].sort((a, b) => Number(b.active) - Number(a.active) ||
     Date.parse(b.start) - Date.parse(a.start)).slice(0, 30);
@@ -125,7 +128,7 @@ export function renderRunTable(rows, paint, reserved = 7, {identityLabel = 'TICK
   const cell = (value, column) => clip(value, column.width).padEnd(column.width);
   const output = [columns.map(column => cell(column.label, column)).join('  ')];
   for (const row of visible) {
-    const success = ['READY', 'DECOMPOSED', 'LANDED'].includes(row.status);
+    const success = ['DONE', 'READY', 'DECOMPOSED', 'LANDED'].includes(row.status);
     const codes = [row.status, row.stage].map(value => String(value || '').toUpperCase());
     const tone = codes.some(code => ['OWNER_STOPPED', 'HOLD', 'HELD'].includes(code)) ? 'gray' :
       codes.some(code => ['GATE_FAIL', 'OVER_TIME', 'TIMEOUT', 'LAND_FAILED', 'BASELINE_RED'].includes(code)) ? 'red' :
@@ -199,8 +202,8 @@ export function createDashboard(config, paint) {
       const status = statusFor(run);
       // A worker lost during test publication leaves an uncertain request after its saved result.
       const uncertain = result && testResultsInspection(run) ? 'TEST_RESULTS_UNCERTAIN' : '';
-      const stage = result ? uncertain || (status === 'READY' && !result.postLandWarning ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
-      return {ticket: run.ticket, status, stage, runId: path.basename(run.dir),
+      const stage = result ? uncertain || ((branchOutcome(run) || status === 'READY') && !result.postLandWarning ? '' : (run.reason ||= reasonFor(run))) : stageFor(run);
+      return {ticket: run.ticket, status, stage, ...(branchOutcome(run) ? {outcomeTone: 'ready'} : {}), runId: path.basename(run.dir),
         start: worker?.startedAt || run.createdAt, end: result?.finishedAt || result?.recoveredAt, active: !result && status !== 'LOST'};
     });
     output.push(...renderRunTable(rows, paint, 7 + footer.length + Number(Boolean(state.progress)), {finished: true}));

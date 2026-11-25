@@ -186,6 +186,10 @@ The existing lane runs discovery, implementation or verification, configured che
 `delivery: "branch"` publishes the checked candidate to `ticket-<execution-id>-<run-id>`. It does not merge or deploy.
 Branch publication keeps each Task present and unassigned. It does not complete or archive the Task.
 Set `pendingDeliveryData` to the native data patch for this handoff, such as a configured waiting stage.
+After Joppa confirms the handoff, the run records `DONE` and the dashboard shows it in green.
+Set `branchSuccessStatus` to change this run status. It defaults to `DONE`.
+The Task keeps `data.delivery.state: "pending"` until Lander integrates the branch.
+Readers treat the old run status `PENDING_LANDING` as `DONE`.
 Crew records `data.repository`, the checked `data.commit`, and `data.delivery` with the branch, head, target and run.
 The delivery state is `pending`. Dolber and the bundled planner leave this execution handoff to Lander.
 Change a Task's pending delivery only through an explicit recovery or a new implementation handoff.

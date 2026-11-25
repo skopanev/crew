@@ -72,8 +72,8 @@ test('completion distinguishes terminal timeouts from recovered ones', t => {
   assert.equal(event.model, 'reviewer');
   assert.equal(completionEvent(run, {code: 0}, artifacts).event, 'READY');
   const queued = completionEvent(run, {code: 0, pendingDelivery: true}, artifacts);
-  assert.equal(queued.event, 'QUEUED');
-  assert.equal(queued.signal, 'PENDING_LANDING');
+  assert.equal(queued.event, 'READY');
+  assert.equal(queued.signal, 'DONE');
 });
 test('timeout is bold red in the tab and plain in uncolored logs', () => {
   const line = '[lane] claude-code: TIMEOUT (reviewer, rc=124)';

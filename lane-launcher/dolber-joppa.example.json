@@ -26,6 +26,7 @@
   "discardFailedWorktree": false,
   "delivery": "branch",
   "pendingDeliveryData": {"stage": "awaiting_target"},
+  "branchSuccessStatus": "DONE",
   "sourceRoot": "/absolute/source-workspace",
   "worktreeRoot": "/absolute/source-workspace/.worktrees",
   "stateDir": "/absolute/project-runs/lane-launcher",

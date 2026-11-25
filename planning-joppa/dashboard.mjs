@@ -85,7 +85,7 @@ export async function main(argv) {
   const render = (_left, closed = false) => {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
-    const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60), ticket: row.ac})),
+    const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60), ticket: row.batchLabel || row.ac})),
       paint, 7, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,

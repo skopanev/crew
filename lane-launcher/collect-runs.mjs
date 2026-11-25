@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {completionEvent, reasonCode} from '../notify.mjs';
 import {scopeDirectory} from './scope.mjs';
+import {branchOutcome} from './branch-outcome.mjs';
 
 const json = file => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
 const dirs = root => fs.existsSync(root) ? fs.readdirSync(root, {withFileTypes: true})
@@ -46,9 +47,9 @@ function lane(folder) {
   const outcome = native && json(path.join(native, 'outcome.json'));
   const event = completionEvent(run, result, artifacts);
   const code = reasonCode(event);
-  const status = result.pendingDelivery ? 'PENDING_LANDING' : result.completed ? 'DONE' :
+  const status = branchOutcome(run) || (result.completed ? 'DONE' :
     outcome?.error?.code === 'E_DEADLINE' || event.event === 'TIMEOUT' || code === 'OVER_TIME' ? 'OVER_TIME' :
-    result.held ? 'OUTCOME_UNCONFIRMED' : code || 'FAILED';
+    result.held ? 'OUTCOME_UNCONFIRMED' : code || 'FAILED');
   const members = run.claim?.tasks || run.tasks || [];
   const acs = unique([run.claim?.parent?.criterion && run.claim.parent.address,
     ...members.map(item => item.parent?.criterion && item.parent.address),
