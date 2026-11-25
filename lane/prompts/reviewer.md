@@ -1,4 +1,7 @@
 Read {{var:RUN_ARTIFACTS}}/reviewer-contract.txt and execute its steps.
+One file run satisfies "run each Test" when its report records pass for every exact bound Reporter case in Tests:.
+Use the actual file-run receipt, command, tree and case results. Separate Test-command receipts are not required.
+Do not claim that an unexecuted per-Test command ran. A skipped, missing, failing or UNKNOWN bound case stays a finding.
 Return SCOPE_MISMATCH only when a blocking remedy changes an explicit Task/AC restriction or needs a missing prerequisite.
 A missing plan detail or missing test within the Task/AC remains REJECT. Keep optional improvements as advice.
 For SCOPE_MISMATCH, include an open HIGH finding and exactly one JSON line in the report:

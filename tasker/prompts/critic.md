@@ -37,6 +37,11 @@ For body:
 5. Keep other facts in reason or existing notes.
    Accept a Do value only when its logic depends on that value.
 
+One file run satisfies "run each Test" when its report records pass for every exact bound Reporter case in Tests:.
+Keep each Test command as focused rerun metadata. Reject an added obligation for separate Test-command receipts or unchanged command text.
+Use the actual file-run receipt, command, tree and case results. Do not claim that an unexecuted per-Test command ran.
+A skipped, missing, failing or UNKNOWN bound case stays a finding.
+
 For an AC draft:
 1. Check already_in_develop first.
    For OK, require missing product behavior or a Test without a recorded passing result.

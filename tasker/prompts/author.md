@@ -41,6 +41,11 @@ For body:
 5. Keep other facts in reason or existing notes.
    Put a value in a Do step only when its logic depends on that value.
 
+One file run satisfies "run each Test" when its report records pass for every exact bound Reporter case in Tests:.
+Keep each Test command as focused rerun metadata. Do not add an obligation for separate Test-command receipts or unchanged command text.
+Use the actual file-run receipt, command, tree and case results. Do not claim that an unexecuted per-Test command ran.
+A skipped, missing, failing or UNKNOWN bound case does not satisfy the Task.
+
 For an AC input without assignment.repair, use these steps in order:
 1. Check whether develop already has the AC behavior and its exact Test cases.
    Return DONE only when the behavior exists and every AC Test is green with a recorded result.
