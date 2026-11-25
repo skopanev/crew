@@ -94,6 +94,9 @@ It refuses held parents and consumers. Archived consumers keep their historical 
 Optional `publication.related_updates` adds two narrow permissions: `"parent": ["stage"]` and `"incoming": "remove_selected_edge"`.
 The configured `update_kinds` must also permit these targets.
 The parent save changes only `data.stage` and uses `context.parent.current_revision`.
+A note on that parent requires its preceding guarded stage save in the same output batch.
+Permit `note` in `allowed_operations` and the parent kind in `update_kinds`.
+This permission does not allow notes on incoming consumers or unrelated nodes.
 Task repair can explicitly permit `["stage", "returns"]` or `["stage", "returns", "tags"]` for the parent AC.
 `flow_publication.operations` permits one increment of the captured parent counter.
 At the configured return limit, a tags update can only add `STUCK_TAG` and preserve every existing tag.

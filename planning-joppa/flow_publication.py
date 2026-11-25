@@ -113,8 +113,8 @@ def operations(config, assignment, claim, value):
         else:
             address = cmd.get("target") if op == "note" else cmd.get("ac") or cmd.get("target")
             address = address or str(cmd.get("kind")) + ":" + str(cmd.get("id"))
-            if address in related:
-                permission = policy.get("related_updates", {})
+            permission = policy.get("related_updates", {})
+            if address in related and not (op == "note" and address == parent and address in modified and "stage" in permission.get("parent", [])):
                 require(op == "save_object" and set(cmd) <= {"op", "kind", "id", "revision", "data", "relations", "reason"},
                         "related update must be a scoped save")
                 if address == parent:
