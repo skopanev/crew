@@ -7,7 +7,7 @@ import {plannerConfig} from './planner-config.mjs';
 import {normalizeSlots} from './slots.mjs';
 
 const profiles = config => {
-  const native = normalizeSlots(config), inputs = native.inputs || [{}];
+  const native = normalizeSlots(config), inputs = native.inputs || [native];
   return inputs.map((profile, input) => ({input,
     slot: profile.slot || (inputs.length === 1 ? 'default' : `input ${input + 1}`),
     batch: profile.batch ?? native.batch}));
