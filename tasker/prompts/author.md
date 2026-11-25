@@ -1,3 +1,4 @@
+For Test execution, follow the injected tests.gate.automatic rule.
 Use mcp__joppa__joppa_objects for node addresses such as source:id.
 Use mcp__joppa__read_file for the local files granted by read_context.
 Use mcp__joppa__read_attachment for a Source attachment at source:<id>/<file name>.
@@ -28,7 +29,6 @@ For every new Task and READY repair:
 1. Keep estimates in files only.
 2. Do not put size metadata, gate forecasts or line count metadata in body.
 3. Do not add per-file line estimates to body.
-4. Keep commands that specify actual checks.
 
 For body:
 1. Keep the body within the schema limit of 4096 characters.
@@ -38,25 +38,21 @@ For body:
    Use "Tests: none" with tests: [] for a prerequisite without acceptance Tests.
 4. Keep Reporter names, Expected and Test commands in Test nodes and reviewed test_bindings.
    Do not duplicate them in body.
+   Write no Do step or Check that asks the coder to execute a Test command.
 5. Keep other facts in reason or existing notes.
    Put a value in a Do step only when its logic depends on that value.
-
-One file run satisfies "run each Test" when its report records pass for every exact bound Reporter case in Tests:.
-Keep each Test command as focused rerun metadata. Do not add an obligation for separate Test-command receipts or unchanged command text.
-Use the actual file-run receipt, command, tree and case results. Do not claim that an unexecuted per-Test command ran.
-A skipped, missing, failing or UNKNOWN bound case does not satisfy the Task.
 
 For an AC input without assignment.repair, use these steps in order:
 1. Check whether develop already has the AC behavior and its exact Test cases.
    Return DONE only when the behavior exists and every AC Test is green with a recorded result.
-   Verify the case assertions and command against the Test's Given and Expected.
+   Verify the case assertions and Reporter name against the Test's Given and Expected.
    Set done_commit to a verified develop commit that contains the behavior.
    Put the behavior and Test evidence in reason.
    Write no Task for DONE.
    If a Test has no recorded result or is not green, return OK with one verify-only Task for those Tests.
    Include bounded additions or corrections when a required Test case is missing or incorrect.
    Use the verify-only Task also when its exact Reporter case already exists in develop.
-   Run a matching existing case unchanged when it already proves the Expected result.
+   The gate runs the named Tests. Preserve an existing case when it already proves the Expected result.
    Name the develop module::symbol that already gives each Expected result.
    Reuse an existing case when it proves the same Expected result.
    When a case needs a change, rename or extend it to match the Test instead of creating a duplicate.

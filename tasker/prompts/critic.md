@@ -1,3 +1,4 @@
+For Test execution, follow the injected tests.gate.automatic rule.
 Use mcp__joppa__joppa_objects for node addresses such as source:id.
 Use mcp__joppa__read_file for the local files granted by read_context.
 Use mcp__joppa__read_attachment for a Source attachment at source:<id>/<file name>.
@@ -24,7 +25,6 @@ For every new Task and READY repair:
 1. Reject size metadata, gate forecasts or line count metadata in body.
 2. Reject per-file line estimates in body.
 3. Require estimates in files only.
-4. Accept commands that specify actual checks.
 
 For body:
 1. Check the body against the schema limit of 4096 characters.
@@ -34,27 +34,24 @@ For body:
    Accept "Tests: none" with tests: [] for a prerequisite without acceptance Tests.
 4. Require Reporter names, Expected and Test commands in Test nodes or reviewed test_bindings.
    Reject their duplication in body.
+   Reject a Do step or Check that asks the coder to execute a Test command.
+   Cite the exact line in the finding.
 5. Keep other facts in reason or existing notes.
    Accept a Do value only when its logic depends on that value.
-
-One file run satisfies "run each Test" when its report records pass for every exact bound Reporter case in Tests:.
-Keep each Test command as focused rerun metadata. Reject an added obligation for separate Test-command receipts or unchanged command text.
-Use the actual file-run receipt, command, tree and case results. Do not claim that an unexecuted per-Test command ran.
-A skipped, missing, failing or UNKNOWN bound case stays a finding.
 
 For an AC draft:
 1. Check already_in_develop first.
    For OK, require missing product behavior or a Test without a recorded passing result.
    Reject an OK plan that implements existing product behavior again.
    Accept a bounded Task that adds or corrects the missing Test cases.
-   Accept a verify-only Task that runs existing cases and leaves result publication to the develop monitor.
+   Accept a verify-only Task whose named Tests the gate runs. Leave result publication to the develop monitor.
    For a Task that only changes Tests, verify its develop module::symbol already gives each Expected result.
    Require reuse of an existing case when it proves the same Expected result.
    When a case needs a change, require its rename or extension instead of a duplicate case.
    Preserve the Test's acceptance text and complete binding.
    For DONE, verify done_commit is in develop and the fixed tree has the behavior.
    For each AC Test, require a green result with a recorded pass.
-   Verify the case assertions and command against the Test's Given and Expected.
+   Verify the case assertions and Reporter name against the Test's Given and Expected.
    Reject DONE when a recorded passing result, case, assertion or complete binding is missing.
    Require a verify-only Task when the behavior exists but a Test has no recorded pass.
    Apply this rule also when the exact Reporter case already exists in develop.
