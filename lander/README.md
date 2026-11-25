@@ -48,7 +48,8 @@ This protocol requires source helper paths to use `CREW_FLOW_WORKFLOW_DIR` inste
 Native `on_timeout` runs `failed` once to release claims and clean the integration checkout.
 The configured gate timeout also bounds each command, including repository hooks.
 Set a repository `cleanupCommand` when Docker can create files that the host cannot remove.
-Lander uses it only after a permission error and a checkout identity check. The command receives `LANDER_CHECKOUT`.
+Lander uses it after `EACCES`, `EPERM` or `ENOTEMPTY` and a checkout identity check. The command receives `LANDER_CHECKOUT`.
+Node can report `ENOTEMPTY` after it encounters restricted contents on macOS.
 The command must remove the checkout or its contents. Lander removes an empty checkout after the command succeeds.
 
 ## Failures

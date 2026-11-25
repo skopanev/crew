@@ -5,13 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {cleanup} from '../git.mjs';
 
-test('permission failure uses the configured cleanup with the validated checkout path', () => {
+for (const code of ['EACCES', 'EPERM', 'ENOTEMPTY']) test(`${code} uses the configured cleanup with the validated checkout path`, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lander-cleanup-'));
   const checkout = fs.mkdtempSync(path.join(root, 'lander-fixture-'));
   const {dev, ino} = fs.lstatSync(checkout), remove = fs.rmSync;
   fs.writeFileSync(path.join(checkout, 'file'), 'fixture');
   try {
-    fs.rmSync = () => { throw Object.assign(new Error('Docker-owned files'), {code: 'EACCES'}); };
+    fs.rmSync = () => { throw Object.assign(new Error('Docker-owned files'), {code}); };
     cleanup({checkout, dev, ino}, root,
       'node -e \'require("fs").rmSync(process.env.LANDER_CHECKOUT,{recursive:true})\'');
     assert.equal(fs.existsSync(checkout), false);

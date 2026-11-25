@@ -194,7 +194,7 @@ export function cleanup(state, root, cleanupCommand) {
     stat.dev === state.dev && stat.ino === state.ino, 'Lander checkout identity changed');
   try { fs.rmSync(state.checkout, {recursive: true}); }
   catch (error) {
-    if (!cleanupCommand || !['EACCES', 'EPERM'].includes(error.code)) throw error;
+    if (!cleanupCommand || !['EACCES', 'EPERM', 'ENOTEMPTY'].includes(error.code)) throw error;
     const current = fs.lstatSync(state.checkout);
     require(current.dev === state.dev && current.ino === state.ino && current.isDirectory() && !current.isSymbolicLink(),
       'Lander checkout identity changed before configured cleanup');
