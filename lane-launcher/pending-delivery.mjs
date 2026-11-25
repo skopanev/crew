@@ -3,11 +3,15 @@ import {isDeepStrictEqual} from 'node:util';
 import {api, batchRequest, mutateTasks} from './joppa-common.mjs';
 import {saveNode} from './joppa-nodes.mjs';
 import {clearRepairMarkers} from './repair-delivery.mjs';
+import {branchSuccessStatus} from './branch-outcome.mjs';
 const require = (ok, message) => { if (!ok) throw new Error(message); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export function validatePendingDelivery(config) {
   if (config.delivery !== 'branch') return;
+  require(/^[A-Z][A-Z0-9_]{0,31}$/.test(branchSuccessStatus(config)) &&
+    !['PENDING_LANDING', 'FAILED', 'BLOCKED', 'RUNNING'].includes(branchSuccessStatus(config)),
+  'branchSuccessStatus must be an uppercase success code, such as DONE');
   const data = config.pendingDeliveryData;
   require(object(data) && Object.keys(data).length &&
     !Object.keys(data).some(key => ['assignee', 'commit', 'repository', 'delivery', 'acceptance'].includes(key)),
@@ -45,5 +49,6 @@ export async function recordPendingDelivery({run, objects, sha, branch, runId, p
   run.pendingDeliveryConfirmed = true;
   persist();
   result.pendingDelivery = true;
+  result.status = branchSuccessStatus(run.config);
   result.tasks = tasks;
 }

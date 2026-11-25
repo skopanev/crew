@@ -12,6 +12,7 @@ import {requirementPlan, assertRequirementHead} from './requirement-delivery.mjs
 import {publicationReader, repositoryGit} from './publication-guard.mjs';
 import {formatLaneLine} from './lane-log.mjs';
 import {notifyCompletion} from '../notify.mjs';
+import {branchOutcome} from './branch-outcome.mjs';
 import {failureDetails, finishFinalization, recordTaskOutcome, checkRequirementHead, startupFailure, postLandWarning, cleanupWorkerResources} from './worker-outcome.mjs';
 import {publishLandedResults} from './test-results-publish.mjs';
 import {prepareContext} from './context-config.mjs';
@@ -224,7 +225,7 @@ try {
   }
   // Record completion first: closing this pane can terminate this process immediately.
   run.result = {...result, finishedAt: new Date().toISOString()};
-  process.exitCode = result.code || (result.status === 'exited' ? 0 : 2);
+  process.exitCode = result.code || (result.status === 'exited' || branchOutcome(run, result) ? 0 : 2);
   save(stateFile, run);
   // Opt-in test evidence after the completed result is durable. It never changes that result.
   discardFailedCheckout(run, stateFile, announce, artifacts);

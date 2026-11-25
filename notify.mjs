@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import {branchOutcome} from './lane-launcher/branch-outcome.mjs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {reportSelectionIssues} from './lane-launcher/selection-notify.mjs';
@@ -75,7 +76,7 @@ export function completionEvent(run, result, artifacts) {
     summary: result.code === 0 ? '' : result.error || '',
     exit: result.code ?? '?', log: path.join(path.dirname(run.runFolder), 'output.log')};
   if (result.code === 0 && result.postLandWarning) event.warning = 'POST_LAND_FAILED';
-  if (result.pendingDelivery) return {...event, event: 'QUEUED', signal: 'PENDING_LANDING'};
+  if (branchOutcome(run, result)) return {...event, event: 'READY', signal: branchOutcome(run, result)};
   if (result.blocked && result.code === 73) return {...event, signal: 'WORKTREE_PREEXISTED', summary: result.error};
   if (result.code === 0) return event;
   if (!artifacts) {
