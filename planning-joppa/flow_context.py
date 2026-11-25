@@ -2,6 +2,7 @@
 from common import require
 from context_reads import object_read
 import flow_batch
+from flow_admission import admitted_rows
 
 
 def contains(actual, expected):
@@ -108,12 +109,17 @@ def load(api, config, address):
     batch = flow_batch.settings(config)
     fields = ["revision", *(["data.tags"] if config.get("exclude_tags") else []), *([flow_batch.projection(batch[key]) for key in ("by", "unit_field", "age_field") if batch.get(key)] if batch else []),
               *[item["field"] for item in config.get("order", [])]]
-    rows = pages(api, workspace, {**config["selection"], "fields": list(dict.fromkeys(fields)) if batch else ["revision"]})
+    if config.get("admission_module"):
+        fields.extend(["title", "kind", "parent"])
+    rows = pages(api, workspace, {**config["selection"], "fields": list(dict.fromkeys(fields)) if batch or config.get("admission_module") else ["revision"]})
     rows = (item for item in rows if not any(tag in (flow_batch.field(item, "data.tags") or []) for tag in config.get("exclude_tags", [])))
     candidates = list(rows) if batch else None
+    if batch:
+        candidates = admitted_rows(config, candidates)
     row = next((item for item in candidates if item.get("address") == address), None) if batch else \
           next((item for item in rows if item.get("address") == address), None)
     require(row and row.get("revision") == selected["current_revision"], "selected object no longer matches the configured filter")
+    require(batch or admitted_rows(config, [row]), "configured admission rejected the selected object")
     if config.get("exclude_children") is not None:
         require(not children(api, config, selected, config["exclude_children"], excluding=True), "selected object has excluded children")
     refs = {}

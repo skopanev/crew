@@ -15,6 +15,7 @@ import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-run
 import {contextAdmission} from './context-admission.mjs';
 import {queueLabel} from './flow-batch.mjs';
 import {hasSlots, occupiedSlots} from './slots.mjs';
+import {admissionForItem} from './configured-admission.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -66,6 +67,11 @@ export async function main(argv) {
   if (dryRun) {
     const child = spawn('sh', args, {stdio: 'inherit', env: handoff()});
     process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+    return;
+  }
+  if (fixed && config.workflow && !await admissionForItem(config, tokenFile, ac || item,
+      Number(process.env.PLANNING_JOPPA_INPUT ?? 0))) {
+    console.log('Skipped by configured admission: ' + (ac || item));
     return;
   }
   const state = {message: fixed ? `Planning ${fixed}` :

@@ -40,6 +40,25 @@ The launcher freezes the effective profile. It leaves the dispatcher config unch
 The assignment contains its zero-based `input` index. A manual launch selects index zero unless `PLANNING_JOPPA_INPUT` supplies another index.
 Single-input configs retain their existing behavior.
 
+Set `admission_module` to an absolute ESM file path for an operator-defined eligibility check:
+
+```js
+export async function admission(row, effectiveProfile, read) {
+  const item = await read('joppa_objects', {address: row.address});
+  return item.document.data.stage === effectiveProfile.selection.data.stage;
+}
+```
+
+Return `true` to admit the row or `false` to skip it. Other return values and errors stop selection.
+The row contains its address, revision, kind, parent and title. Read full objects when needed.
+The supplied reader permits only `joppa_objects`, `joppa_tree`, `joppa_search` and `joppa_help` in the configured workspace.
+Automatic selection skips the item before creating a run folder or claim. Explicit item launches also check admission before execution.
+Each batch member passes the check again before the native claim. The check can refuse changed inputs after selection.
+Input profiles inherit the module path. Existing snapshots preserve the path and effective profile.
+Use an immutable module path for each code version. Restart the dashboard after replacing module code.
+The module is trusted operator code. The reader restriction does not sandbox its Node process.
+Without `admission_module`, selection keeps its existing behavior.
+
 Set `failure_notes: false` to release failed flow claims without adding business notes.
 Optionally set `failure_escalation: {"after": 3, "data": {"phase": "owner_decision"}}` to limit repeated technical failures.
 Or set `failure_escalation: {"after": 2, "tag": "<vars.STUCK_TAG>"}`: the release save then adds that tag and keeps the other tags.

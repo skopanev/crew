@@ -7,6 +7,7 @@ import {batchSettings, batchField, batchReady, batchProjection, batchItems, batc
 import {retryPolicy} from './retry.mjs';
 import {dependencySelection} from './dependency-selection.mjs';
 import {nativeChildFilter, excludesChild} from './child-filter.mjs';
+import {admissionSettings, admissionAllowed} from './configured-admission.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const kindList = value => value === undefined || [value].flat().every(item => typeof item === 'string' && item.trim());
 
@@ -158,6 +159,7 @@ export function flowSettings(config) {
     return {inputs: config.inputs};
   }
   const {kind, ...selection} = object(config.selection) ? config.selection : {};
+  admissionSettings(config);
   if (!object(config.selection) || kind === undefined || !kindList(kind) || ![kind].flat().length) {
     throw new Error('selection needs a native kind and optional native filters');
   }
@@ -222,6 +224,7 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
   let filtered = 0;
   for (const row of rows) {
     if (await skip(row, config, read)) continue;
+    if (!await admissionAllowed(row, config, read)) {filtered++; continue;}
     const guard = config.related?.parent;
     if (guard) {
       if (!row.parent) {filtered++; continue;}

@@ -130,6 +130,11 @@ def launch(path, raw, item, dry_run):
     if profiled:
         raw = json.dumps(config)
     require(isinstance(item, str) and ":" in item, "configured workflows need a full object address")
+    if not dry_run and os.environ.get("PLANNING_JOPPA_HANDOFF_DIGEST") is None:
+        from flow_admission import admitted_rows
+        if not admitted_rows(config, [{"address": item}], full=True):
+            print("Skipped by configured admission: " + item)
+            return 0
     executable = os.environ.get("MEDULLA_BIN", "medulla")
     variables = {**config.get("vars", {}), "PLANNING_JOPPA_CONFIG": str(path),
         "PLANNING_JOPPA_CONFIG_DIGEST": digest(config), "PLANNING_JOPPA_ITEM": item,
