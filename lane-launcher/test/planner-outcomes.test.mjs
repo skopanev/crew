@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {plannerRows} from '../../planning-joppa/run-rows.mjs';
+import {plannerRows, titleCell} from '../../planning-joppa/run-rows.mjs';
 import {plannerConfig} from '../../planning-joppa/planner-config.mjs';
 import {renderRunTable} from '../dashboard.mjs';
 import {planner, watch} from '../test-support/config-reload.fixture.mjs';
@@ -24,14 +24,17 @@ function fixture(t, {stage, code = 'PASS', confirmed = true} = {}) {
   return {root, folder, artifacts, write, row: () => plannerRows(root, null, 30, {result_colors: colors})[0]};
 }
 
-test('batch rows show every Task while keeping the selected identity for retries', t => {
+test('batch rows show the slot and count while preserving stored Task identities', t => {
   const f = fixture(t), addresses = ['task:a', 'task:b', 'task:c', 'task:d', 'task:e'];
-  f.write('input.json', {selected: {address: addresses[0], current_revision: 3},
+  f.write('input.json', {slot: 'back', selected: {address: addresses[0], current_revision: 3},
     items: addresses.map(address => ({address})), schema: {types: {task: {role: 'task'}}}});
   const row = f.row();
   assert.equal(row.ac, 'task:a');
-  assert.equal(row.batchLabel, '5 Tasks: a, b, c, d, e');
+  assert.equal(row.batchLabel, '[back] 5 Tasks');
+  assert.equal(titleCell(row, 60), '');
   assert.equal(row.attemptKey, JSON.stringify(['task:a', 3]));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.artifacts, 'input.json'), 'utf8')).items,
+    addresses.map(address => ({address})));
 });
 
 test('published rows show the recorded stage and reason, with configured result colors', t => {

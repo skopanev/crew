@@ -61,7 +61,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
         input ? title(subject) : ac;
       const batch = [...new Set((input?.items || []).map(item => item.address).filter(Boolean))];
       const batchKind = batch.every(address => input?.schema?.types?.[address.split(':')[0]]?.role === 'task') ? 'Tasks' : 'items';
-      const batchLabel = batch.length ? `${batch.length} ${batchKind}: ${batch.map(address => address.split(':').slice(1).join(':') || address).join(', ')}` : null;
+      const batchLabel = batch.length ? `${batch.length} ${batchKind}` : null;
       try { pid = Number(fs.readFileSync(path.join(folder, launch ? '.worker.pid' : '.lock'), 'utf8').trim()); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
       const journal = tail(path.join(recordFolder, 'journal.jsonl')).split('\n').flatMap(line => {
@@ -132,6 +132,7 @@ export function plannerRows(root, current = null, limit = 30, scope = null) {
 }
 
 export function titleCell(row, width) {
+  if (row.batchLabel) return '';
   const clip = (text, size) => {
     const chars = Array.from(text.replace(/[\x00-\x1f\x7f]/g, ' '));
     return chars.length > size ? chars.slice(0, size - 1).join('') + '…' : chars.join('');
