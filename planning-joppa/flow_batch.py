@@ -2,6 +2,9 @@
 from functools import cmp_to_key
 from datetime import datetime, timezone
 import re
+import os
+from pathlib import Path
+import subprocess
 
 from common import require
 
@@ -10,7 +13,7 @@ def settings(config):
     batch = config.get("batch")
     if batch is None:
         return None
-    require(isinstance(batch, dict) and set(batch) <= {"size", "by", "unit_field", "min_size", "max_wait_seconds", "age_field"},
+    require(isinstance(batch, dict) and set(batch) <= {"size", "by", "unit_field", "min_size", "max_wait_seconds", "age_field", "flush_when_idle"},
             "batch has unsupported fields")
     require(type(batch.get("size")) is int and 1 <= batch["size"] <= 50, "batch.size must be 1..50")
     require(batch.get("by") is None or isinstance(batch["by"], str) and
@@ -24,6 +27,11 @@ def settings(config):
         require(type(batch["max_wait_seconds"]) is int and batch["max_wait_seconds"] > 0 and
                 isinstance(batch["age_field"], str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}", batch["age_field"]),
                 "batch wait needs positive seconds and a timestamp field")
+    if "flush_when_idle" in batch:
+        pattern = batch["flush_when_idle"]
+        require(isinstance(pattern, str) and os.path.isabs(pattern) and not pattern.endswith(os.sep) and
+                all(part not in (".", "..") and (part == "*" or not re.search(r"[*?\[\]{}\x00]", part))
+                    for part in pattern.split(os.sep)), "batch.flush_when_idle needs an absolute glob with whole * segments")
     return batch
 
 
@@ -97,7 +105,15 @@ def ready(batch, rows):
     size = len({field(row, batch["unit_field"]) for row in rows}) if batch.get("unit_field") else len(rows)
     if size >= batch.get("min_size", 1):
         return True
-    if not rows or "max_wait_seconds" not in batch:
+    if not rows:
+        return False
+    if "flush_when_idle" in batch:
+        try:
+            return subprocess.run([os.environ.get("NODE_BIN", "node"), str(Path(__file__).with_name("flow-batch.mjs")),
+                                   batch["flush_when_idle"]], timeout=5, check=False).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    if "max_wait_seconds" not in batch:
         return False
     for row in rows:
         try:

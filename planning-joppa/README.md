@@ -157,6 +157,11 @@ A finished run records the revision it left. The retry policy uses that final re
 Set `batch` to `{ "size": 5, "by": "data.repository" }` to claim up to five matching items of one configured group.
 Set `min_size` to wait for a minimum batch. Polling still uses `interval_seconds`.
 Set `max_wait_seconds` and `age_field` together to release a smaller batch after its oldest timestamp reaches that age.
+Alternatively, set `flush_when_idle` to an absolute producer lock glob, such as `/path/to/producer/runs/*/worker.lock`.
+Use whole `*` directory segments. Each matching directory uses its sibling `launch.json` to identify the worker PID.
+A live PID or unknown run state blocks smaller batches. A missing producer root also blocks them.
+Selection and flow preparation check the same locks without changing them.
+This option replaces the age condition for smaller batches when both options are present.
 Set `unit_field` to count distinct units, such as `data.delivery.branch`, instead of Tasks.
 All matching Tasks of each selected unit enter the same atomic claim, up to 50 Tasks.
 For example, use `size: 3`, `min_size: 3`, `max_wait_seconds: 900`, and `age_field: "data.delivery.pushed_at"`.

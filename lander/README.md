@@ -38,6 +38,13 @@ No credentials belong in the public configuration example.
 The canonical source repository stays unchanged. Repository hooks remain enabled.
 Use `batch.min_size: 3` and `batch.unit_field: "data.delivery.branch"` to wait for three distinct branches.
 Set `batch.max_wait_seconds: 900` and `batch.age_field: "data.delivery.pushed_at"` to flush smaller batches after 15 minutes.
+Alternatively, set `batch.flush_when_idle` to an absolute producer lock glob, such as `/path/to/producer/runs/*/worker.lock`.
+Each `*` matches one directory segment. Below `min_size`, Lander waits until no matching worker PID is alive.
+Missing or unreadable run state blocks this flush. A missing producer root also blocks it.
+The host queue and flow preparation both check the locks. They do not remove them.
+When configured, this condition replaces the age condition for smaller batches.
+The panel shows the pending queue total and each `batch.by` group from the selection reads.
+It counts distinct `batch.unit_field` values when configured. Otherwise, it counts selected objects.
 Set `interval_seconds: 60` to check the queue every minute. All Tasks of each selected branch enter the same claim.
 Existing gate receipts and `lane/bin/land.sh` protect the push.
 Set `workflow_timeout_seconds` to configure the workflow deadline in seconds. The default is 3600.

@@ -3,7 +3,7 @@ import {api} from '../lane-launcher/joppa.mjs';
 import {dependencyCheck} from '../lane-launcher/dependencies.mjs';
 import {nodeAssignee, nodeFailed, validateFailedTaskStage, nodePendingDelivery, nodePages, NODE_TONES} from '../lane-launcher/joppa-nodes.mjs';
 import {validateNodeFilter} from '../lane-launcher/task-filter.mjs';
-import {batchSettings, batchField, batchReady, batchProjection, batchItems} from './flow-batch.mjs';
+import {batchSettings, batchField, batchReady, batchProjection, batchItems, batchQueue, batchCompare} from './flow-batch.mjs';
 import {retryPolicy} from './retry.mjs';
 import {dependencySelection} from './dependency-selection.mjs';
 import {nativeChildFilter, excludesChild} from './child-filter.mjs';
@@ -182,32 +182,20 @@ export function flowSettings(config) {
   return {selection: config.selection, exclude: exclude ?? null, order};
 }
 
-const compare = order => (a, b) => {
-  for (const {field, direction, values} of order) {
-    let left = batchField(a, field) ?? null, right = batchField(b, field) ?? null;
-    if (left === right) continue;
-    if (left === null || right === null) return left === null ? 1 : -1;
-    if (values) {
-      const rank = value => { const index = values.indexOf(value); return index < 0 ? values.length : index; };
-      left = rank(left); right = rank(right);
-    }
-    const result = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right));
-    if (result) return direction === 'desc' ? -result : result;
-  }
-  return a.address.localeCompare(b.address);
-};
-
 // One pass takes the first ordered item that skip() allows and that has no excluded direct child.
 export async function nextConfiguredItem(config, tokenFile, signal, skip = () => false) {
   const flow = flowSettings(config);
   if (flow.inputs) {
-    let count = 0, filtered = 0;
+    let count = 0, filtered = 0, next = null;
+    const queue = [];
     for (const [input, profile] of flow.inputs.entries()) {
       const result = await nextConfiguredItem({...config, ...profile, inputs: undefined}, tokenFile, signal, skip);
       count += result.count; filtered += result.filtered;
-      if (result.next) return {count, filtered, next: {...result.next, input}};
+      queue.push(...result.queue);
+      if (!next && result.next) next = {...result.next, input};
+      if (next && !config.batch?.by) return {count, filtered, next, queue};
     }
-    return {count, filtered, next: null};
+    return {count, filtered, next, queue};
   }
   const service = {joppa: {url: config.url, mcpCommand: config.mcp_command}};
   const read = (tool, args) => api(service, {tokenFile}, tool, {workspace: config.workspace, ...args}, {signal});
@@ -225,7 +213,8 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
       rows.push({...row, title: row.title || row.address, attemptKey: JSON.stringify([row.address, row.revision])});
     }
   }
-  rows.sort(compare(flow.order));
+  rows.sort(batchCompare(flow.order));
+  const queue = batchQueue(batch, rows, config.exclude_tags);
   const eligible = [], parents = new Map();
   const dependencies = config.wait_for_dependencies ? dependencySelection(read) : null;
   let filtered = 0;
@@ -250,14 +239,14 @@ export async function nextConfiguredItem(config, tokenFile, signal, skip = () =>
       if (excluded) break;
     }
     if (!excluded) {
-      if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row, filtered};
+      if (!batch || (batch.min_size ?? 1) === 1) return {count: rows.length, next: row, filtered, queue};
       eligible.push(row);
     } else filtered++;
   }
   for (const row of eligible) {
     const group = batch.by ? eligible.filter(item => batchField(item, batch.by) === batchField(row, batch.by)) : eligible;
     const items = batchItems(batch, [row, ...group.filter(item => item !== row)]);
-    if (batchReady(batch, items)) return {count: rows.length, next: items[0], filtered};
+    if (batchReady(batch, items)) return {count: rows.length, next: items[0], filtered, queue};
   }
-  return {count: rows.length, next: null, filtered};
+  return {count: rows.length, next: null, filtered, queue};
 }

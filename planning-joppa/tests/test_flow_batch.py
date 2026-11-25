@@ -1,6 +1,7 @@
 """Atomic multi-object claims and native completion against a transactional tracker fixture."""
 from copy import deepcopy
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -154,6 +155,32 @@ class FlowBatchTests(unittest.TestCase):
         rows = read(self.target / "input.json")["items"]
         self.assertEqual(len(rows), 50)
         self.assertEqual({row["document"]["data"]["delivery"]["branch"] for row in rows}, {"one", "three"})
+
+    def test_small_batch_checks_producer_locks_before_claim(self):
+        producer = self.folder / "producer"
+        lock = producer / "run" / "worker.lock"
+        lock.mkdir(parents=True)
+        self.config["batch"].update(min_size=3, unit_field="data.delivery.branch",
+                                    flush_when_idle=str(producer / "*" / "worker.lock"))
+        for node in self.api.nodes.values():
+            node["document"]["data"]["delivery"] = {"branch": "one"}
+        write(lock.parent / "launch.json", {"worker": {"pid": os.getpid()}})
+        with self.assertRaisesRegex(ValueError, "batch waits"):
+            flow_stages.prepare()
+        self.assertEqual(self.api.batches, [])
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait(timeout=5)
+        write(lock.parent / "launch.json", {"worker": {"pid": child.pid}})
+        def became_live(*args):
+            write(lock.parent / "launch.json", {"worker": {"pid": os.getpid()}})
+        with patch("publication.ensure_recovered", side_effect=became_live), self.assertRaisesRegex(ValueError, "batch waits"):
+            flow_stages.prepare()
+        self.assertEqual(self.api.batches, [])
+        write(lock.parent / "launch.json", {"worker": {"pid": child.pid}})
+        flow_stages.prepare()
+        self.assertEqual(len(read(self.target / "input.json")["items"]), 3)
+        self.assertEqual(len(self.api.batches), 1)
+        self.assertTrue(lock.is_dir())
 
     def test_batch_load_uses_configured_computed_status_order(self):
         from flow_context import load

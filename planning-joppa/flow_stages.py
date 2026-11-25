@@ -13,6 +13,7 @@ from mcp import Joppa
 from flow_launch import configuration
 import flow_context
 from flow_batch import members
+import flow_batch
 import flow_publication
 import planning_claims as claims
 import publication
@@ -68,6 +69,8 @@ def prepare():
     items = members(assignment)
     operations = claims.claim_operations({"joppa": {"objects": {item["address"]: item for item in items}}},
         [{"id": item["address"], "revision": item["current_revision"]} for item in items], claims.marker(target))
+    batch = flow_batch.settings(config)
+    require(not batch or flow_batch.ready(batch, items), "batch waits for its configured minimum, age or idle producer")
     publication.mutate(api, target / "claim.json", "joppa_batch",
                        {"workspace": config["workspace"], "operations": operations})
     claim = read(target / "claim.json")

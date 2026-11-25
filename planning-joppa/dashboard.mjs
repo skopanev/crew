@@ -13,6 +13,7 @@ import {PlannerRuns} from './planner-runs.mjs';
 import {retryFilter} from './retry.mjs';
 import {DetachedPlannerRuns, dispatcherId, stopDetachedRun} from './detached-runs.mjs';
 import {contextAdmission} from './context-admission.mjs';
+import {queueLabel} from './flow-batch.mjs';
 export {plannerRows, titleCell} from './run-rows.mjs';
 export {readyCriteria, groupRequirements, readyRequirements, nextConfiguredItem} from './queue.mjs';
 
@@ -86,9 +87,10 @@ export async function main(argv) {
     const width = Math.max(30, process.stdout.columns || 80);
     const rows = plannerRows(root, pool.current, 30, {...config, dispatcherId: owner});
     const table = renderRunTable(rows.map(row => ({...row, status: row.displayStatus, title: titleCell(row, 60), ticket: row.batchLabel || row.ac})),
-      paint, 7, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
+      paint, state.queue === undefined ? 7 : 8, {identityLabel: config.workflow ? 'ITEM' : 'REQ / AC', titleLabel: 'TEXT', statusWidth: Infinity});
     return [config.workflow ? path.basename(path.dirname(config.workflow)).toUpperCase() : 'PLANNING JOPPA',
       `workspace: ${config.workspace} · ${Math.max(pool.size, rows.filter(row => row.active).length)} running · concurrency ${concurrency} · last 30 runs`,
+      ...(state.queue === undefined ? [] : [queueLabel(state.queue).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)]),
       '─'.repeat(width), ...table,
       ...(state.error ? [String(state.error).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, width)] : []),
       '', closed ? (stopped ? 'Stopped' : 'Completed') : 'Ctrl+C to stop'].join('\n');
@@ -163,8 +165,9 @@ export async function main(argv) {
             const active = detached ? pool.runs.filter(run => run.active) :
               [...pool.active.values()].map(run => ({...run, config}));
             const conflicts = contextAdmission(active);
-            const {count, next, filtered} = await nextConfiguredItem(config, tokenFile, selection.signal,
+            const {count, next, filtered, queue} = await nextConfiguredItem(config, tokenFile, selection.signal,
               (row, profile, read) => busy(row.address) || skipRetry(row) || conflicts(row, profile, read));
+            state.queue = config.batch?.by ? queue : undefined;
             selection = null;
             if (next) {
               ({address: selected, attemptKey} = next);
