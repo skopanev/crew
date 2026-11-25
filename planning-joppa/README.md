@@ -92,6 +92,20 @@ Configured flows release their own claim with the private launch snapshot, even 
 Ctrl+C stops Medulla first, then runs the guarded failure release and records `release.json`.
 Shutdown allows 10 seconds for Medulla and 30 seconds for the release.
 Unconfirmed shutdown, changed ownership or uncertain mutations retain the claim for recovery.
+After confirmed shutdown, the launcher reads the current claim holders again.
+It can record an observed external release without a tracker write. Uncertain mutation receipts still require recovery.
+Failure cleanup can clear this run's assignee at a newer revision. It preserves the newer contract and stage.
+It does not apply failure escalation to a node changed since the claim.
+
+To resolve a finished detached run after an operator cleared its assignee, check it first:
+
+```sh
+python3 planning-joppa/flow_recovery.py --config /absolute/config.json --run /absolute/launch-folder
+```
+
+Add `--apply` to update only its existing local `result.json`. This command sends no tracker writes.
+It refuses a live worker, a claim still owned by the run, or an uncertain mutation receipt.
+The failure evidence and mutation receipts remain unchanged. The result records the observed revisions and holders.
 The legacy Requirement planner keeps its existing shutdown behavior.
 
 Set `"execution": "detached"` for independent configured flow passes.

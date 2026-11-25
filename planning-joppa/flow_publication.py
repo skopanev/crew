@@ -218,16 +218,16 @@ def fail(api, config, target, reason, refused=None):
         if receipt.exists() and read(receipt).get("status") in ("pending", "uncertain", "confirmed"):
             require(False, "publication needs receipt recovery; claim retained")
         claim = read(claim_path)
-        owners = claims.owned(api, config["workspace"], claim)
+        owners = {address: owner for address, (owner, _) in claims.claimed(claim).items()}
         owned_revisions = {**claims.claimed_revisions(claim), **claim.get("revisions", {})}
         batch, addresses = [], list(claims.claimed(claim))
         counts = failure_counts(config, target, addresses) if policy else {}
         for address in addresses:
             selected = object_read(api, config["workspace"], address)
-            require(selected["current_revision"] == owned_revisions[address] and
+            require(selected["current_revision"] >= owned_revisions[address] and
                     claims.assignee_of(selected) == owners[address], "flow claim changed before failed release: " + address)
             command = claims.save_command(selected, None, "Release the failed configured workflow claim.")
-            if policy and counts[address] >= policy["after"]:
+            if policy and selected["current_revision"] == owned_revisions[address] and counts[address] >= policy["after"]:
                 require(selected["kind"] in config["publication"]["update_kinds"], "failure escalation kind is outside the publication policy")
                 command["data"].update(policy.get("data", {}))
                 if "tag" in policy:
