@@ -142,6 +142,8 @@ def launch(path, raw, item, dry_run):
             tempfile.TemporaryDirectory(prefix="crew-planner-agy-") as agy:
         if config.get("workflow_timeout_seconds") is not None:
             source = Path(config["workflow"]).read_text()
+            require(re.search(r"(?m)^  CONFIGURED_TIMEOUT_PROTOCOL: ['\"]?1['\"]?[ \t]*$", source),
+                    "Workflow must declare CONFIGURED_TIMEOUT_PROTOCOL: '1' before configuring its timeout")
             rendered, count = re.subn(r"(?m)^(timeout:[ \t]*(?:&[\w-]+[ \t]+)?)[0-9]+([ \t]*(?:#.*)?)$",
                 lambda match: match[1] + str(config["workflow_timeout_seconds"]) + match[2], source)
             require(count == 1, "Configured workflow timeout needs one top-level integer timeout")

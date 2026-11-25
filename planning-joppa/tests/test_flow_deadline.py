@@ -33,6 +33,9 @@ class FlowDeadlineTests(unittest.TestCase):
             for invalid in [True, 0, -1, "7200"]:
                 with self.assertRaisesRegex(ValueError, "workflow_timeout_seconds"):
                     flow_launch.configuration("unused", json.dumps({**config, "workflow_timeout_seconds": invalid}))
+            with patch("shutil.which", return_value="medulla"), self.assertRaisesRegex(ValueError, "CONFIGURED_TIMEOUT_PROTOCOL"):
+                flow_launch.launch(Path(folder) / "config.json", json.dumps({**config,
+                    "workflow": str(ROOT / "writer/workflow.yaml")}), "work:a", False)
 
 
 if __name__ == "__main__":

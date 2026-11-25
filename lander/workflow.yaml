@@ -8,6 +8,7 @@ on_timeout: failed
 defaults:
   timeout: *workflow_timeout
 vars:
+  CONFIGURED_TIMEOUT_PROTOCOL: '1'
   PLANNING_PYTHON: python3
   CREW_FLOW_STAGES: ''
   WORKTREE_ROOT: ''

@@ -43,6 +43,8 @@ Existing gate receipts and `lane/bin/land.sh` protect the push.
 Set `workflow_timeout_seconds` to configure the workflow deadline in seconds. The default is 3600.
 The launcher preserves the source workflow and applies the deadline to a temporary definition for that run.
 The shared timeout anchor also sets the shell budget. Source helpers keep their original directory.
+Only a workflow with `vars.CONFIGURED_TIMEOUT_PROTOCOL: '1'` accepts this override.
+This protocol requires source helper paths to use `CREW_FLOW_WORKFLOW_DIR` instead of the temporary definition directory.
 Native `on_timeout` runs `failed` once to release claims and clean the integration checkout.
 The configured gate timeout also bounds each command, including repository hooks.
 Set a repository `cleanupCommand` when Docker can create files that the host cannot remove.
