@@ -7,19 +7,23 @@ const count = value => {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid aggregate count');
   return value;
 };
+const nativeKeys = new Set(['kind', 'parent', 'depth', 'status', 'owner', 'assignee', 'data',
+  'in_relation', 'related_to', 'not_data', 'has_tests', 'comment_prefix']);
 
 export async function availableCounts(config, tokenFile, signal, claimsKnown = true, read = (args) =>
   api({joppa: {url: config.url, mcpCommand: config.mcp_command}}, {tokenFile}, 'joppa_objects', args, {signal})) {
   const started = performance.now(), calls = new Map();
   const profiles = config.inputs?.map(profile => ({...config, ...profile})) || [config];
   const values = await Promise.all(profiles.map(async (profile, index) => {
-    const excluded = profile.exclude_tags || [];
-    const args = {...profile.selection, workspace: config.workspace, assignee: '',
-      ...(excluded.length ? {group_by: ['tags']} : {count: true})};
-    const key = JSON.stringify(canonical(args));
-    if (!calls.has(key)) calls.set(key, Promise.resolve().then(() => read(args)));
     let value = '?';
     try {
+      const excluded = profile.exclude_tags || [];
+      if (!profile.selection?.kind || Object.keys(profile.selection).some(key => !nativeKeys.has(key)) ||
+          !Array.isArray(excluded) || excluded.some(tag => typeof tag !== 'string')) throw new Error('Unsupported count profile');
+      const args = {...profile.selection, workspace: config.workspace, assignee: '',
+        ...(excluded.length ? {group_by: ['tags']} : {count: true})};
+      const key = JSON.stringify(canonical(args));
+      if (!calls.has(key)) calls.set(key, Promise.resolve().then(() => read(args)));
       const result = await calls.get(key);
       let total = count(result.total);
       if (excluded.length) {
@@ -36,7 +40,7 @@ export async function availableCounts(config, tokenFile, signal, claimsKnown = t
       }
       if (claimsKnown) value = total;
     } catch { /* A display read never changes selection or stops the dispatcher. */ }
-    const label = profile.slot || (typeof profile.selection.data?.stage === 'string' && profile.selection.data.stage) || `input ${index + 1}`;
+    const label = profile.slot || (typeof profile.selection?.data?.stage === 'string' && profile.selection.data.stage) || `input ${index + 1}`;
     return {label, value};
   }));
   return {text: values.length === 1 ? String(values[0].value) : ': ' + values.map(({label, value}) =>

@@ -42,6 +42,15 @@ test('tag groups exclude any configured tag and duplicate native queries share o
 });
 
 test('failed or incomplete counts remain unknown and independent profiles still show their counts', async () => {
+  const partial = await availableCounts({workspace: 'fixture', inputs: [
+    {selection: {kind: 'work', data: {stage: 'repair'}, unsupported: true}},
+    {selection: {kind: 'work', data: {stage: 'plan'}}},
+  ]}, null, null, true, async args => {
+    assert.equal(args.unsupported, undefined);
+    return {total: 17};
+  });
+  assert.equal(partial.text, ': repair ? · plan 17');
+  assert.equal(partial.reads, 1);
   for (const reply of [{}, {total: -1}, {total: 1.5}, {total: 2, groups: [{tags: [], count: 1}]},
     {total: 1, groups: [{count: 1}]}, {total: 1, groups: [{tags: ['ok', 3], count: 1}]}]) {
     const result = await availableCounts({workspace: 'fixture', selection: {kind: 'work'}, exclude_tags: ['human']},

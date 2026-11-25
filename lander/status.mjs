@@ -63,7 +63,9 @@ export function landerRows(root, statsFile = null, limit = 30) {
     const status = active ? 'RUNNING' : code === 'LANDED' && published && pushed ? 'LANDED' :
       pushed && published ? 'PARTIAL' : result?.needs_recovery ? 'HELD' : pushed ? 'PUSHED' :
       code === 'LANDED' ? 'UNCONFIRMED' : code || (outcome ? 'FAILED' : 'STOPPED');
-    const claimHeld = json(path.join(art, 'claim.json'))?.status === 'confirmed';
+    const claimHeld = active && json(path.join(art, 'claim.json'))?.status === 'confirmed' &&
+      !result?.claim_released && !json(path.join(art, 'release.json')) &&
+      !['pending', 'uncertain', 'confirmed'].includes(json(path.join(art, 'publication.json'))?.status);
     const claimTime = modified(path.join(art, 'claim.json'));
     const end = active ? undefined : old?.ended_at || modified(path.join(folder, 'outcome.json')) ||
       modified(path.join(art, 'result.json')) || modified(path.join(folder, 'journal.jsonl'));
@@ -93,10 +95,6 @@ export async function main(argv, {read} = {}) {
       state.available = undefined;
       try {
         const native = normalizeSlots(config);
-        const profiles = native.inputs?.map(profile => ({...native, ...profile})) || [native];
-        const keys = ['kind', 'parent', 'depth', 'status', 'owner', 'assignee', 'data', 'in_relation', 'related_to'];
-        if (!profiles.length || profiles.some(profile => !profile.selection?.kind ||
-            Object.keys(profile.selection).some(key => !keys.includes(key)))) return;
         const claimsKnown = landerRows(config.runs_folder, stats, Infinity).every(row => !row.active || row.claimHeld);
         state.available = (await availableCounts(native, config.token_file, selection.signal, claimsKnown, read)).text;
       } catch { /* Missing or complex configuration and failed reads remain unknown. */ }

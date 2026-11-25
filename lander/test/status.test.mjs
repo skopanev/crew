@@ -62,7 +62,7 @@ if (process.listenerCount('SIGINT') || process.listenerCount('SIGTERM')) throw n
   assert.match(run.output(), /available: A 3 · B 3/);
   run = start({...config, selection: {...config.selection, predicate: 'complex'}});
   assert.equal(await run.done, 0, run.output());
-  assert.match(run.output(), /available \?/);
+  assert.match(run.output(), /available: A \? · B \?/);
   assert.equal(run.rows().length, 0);
   run = start(config, true);
   for (let i = 0; i < 100 && run.rows().length < 3; i++) await pause(20);
