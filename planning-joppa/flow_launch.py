@@ -155,8 +155,7 @@ def launch(path, raw, item, dry_run):
         snapshot.write_bytes(raw.encode() if isinstance(raw, str) else raw)
         snapshot.chmod(0o600)
         variables["PLANNING_JOPPA_CONFIG_SNAPSHOT"] = str(snapshot)
-        if profiled:
-            variables["PLANNING_JOPPA_CONFIG"] = str(snapshot)
+        variables["PLANNING_JOPPA_CONFIG"] = str(snapshot)
         for name, value in variables.items():
             command.extend(["--var", name + "=" + (value if isinstance(value, str) else json.dumps(value))])
         working = Path(memory) / "work"

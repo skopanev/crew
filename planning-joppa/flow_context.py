@@ -4,6 +4,17 @@ from context_reads import object_read
 import flow_batch
 
 
+def contains(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(key in actual and contains(actual[key], value)
+                                               for key, value in expected.items())
+    if isinstance(expected, list):
+        return isinstance(actual, list) and all(any(contains(item, value) for item in actual) for value in expected)
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return type(actual) is type(expected) and actual == expected
+    return actual == expected
+
+
 def pages(api, workspace, query):
     cursor, seen = None, set()
     while True:
@@ -90,6 +101,8 @@ def load(api, config, address):
     schema = api.call("joppa_tree", {"workspace": workspace})["schema"]
     help = api.call("joppa_help", {"workspace": workspace, "op": "save_object"})
     selected = object_read(api, workspace, address)
+    require(contains(selected["document"]["data"], config["selection"].get("data", {})),
+            "selected object data differs from the configured filter")
     require(not any(tag in (selected["document"]["data"].get("tags") or []) for tag in config.get("exclude_tags", [])),
             "selected object has an excluded tag")
     batch = flow_batch.settings(config)
@@ -139,6 +152,8 @@ def load(api, config, address):
         items = []
         for candidate in packed:
             item = selected if candidate["address"] == address else object_read(api, workspace, candidate["address"])
+            require(contains(item["document"]["data"], config["selection"].get("data", {})),
+                    "batch object data differs from the configured filter")
             require(item["current_revision"] == candidate["revision"], "batch item changed during selection")
             require(not batch.get("by") or flow_batch.field(item, batch["by"]) == group,
                     "batch grouping changed during selection")
