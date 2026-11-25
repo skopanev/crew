@@ -82,6 +82,7 @@ Old versions remain available for existing panels.
 | engine-v69 | `691f6f658d9ae037d31edef5b6cffd2dd50a1904` | Allow a parent note after its guarded stage update |
 | engine-v70 | `28c2c64f10488c3b4bcde395ccd9bf8db341935e` | Count active and waiting units and keep admission readers stable per pass |
 | engine-v71 | `7df6cb6b075b4ad7b08354d47ad8d9a11f70918f` | Show native candidate counts per configured profile and admission skips |
+| engine-v72 | `0f1592048d1711b86cb45d34a26b7b2a83d35b2a` | Retry failed target confirmation reads after a successful lane push |
 
 ## Install a version
 
@@ -89,7 +90,7 @@ Fetch the public repository and its tags. Create a detached runtime at the selec
 
 ```sh
 git fetch origin main --tags
-git worktree add --detach /path/to/releases/engine-v71 engine-v71
+git worktree add --detach /path/to/releases/engine-v72 engine-v72
 ```
 
 Set `sources.engine.ref` to that tag in the environment specification.
@@ -97,7 +98,7 @@ Set `sources.role.ref` to the required role version.
 Run the existing installer without `--run` to prepare the environment:
 
 ```sh
-node /path/to/releases/engine-v71/lane-launcher/environment.mjs /path/to/environment.json
+node /path/to/releases/engine-v72/lane-launcher/environment.mjs /path/to/environment.json
 ```
 
 Check the returned `environment.json` before starting the panel.
