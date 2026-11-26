@@ -47,23 +47,26 @@ test('claim shows the coder the live tests of its criterion and accepts a struct
     current_revision: 2, status: {tone: 'green'}, document: {present, parent, data, links: []}, process: {}, annotations: {comments: {}}});
   // More than one page, so the read follows the cursor.
   for (let index = 1; index <= 26; index++) node(`check:c${index}`, 'ac:a1', {title: `suite > case ${index}`});
-  node('check:c1', 'ac:a1', {title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite'});
+  node('check:c1', 'ac:a1', {title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite',
+    repository: 'app', reporter_name: 'apps/api/suite.test.ts > suite > case 1'});
   node('check:gone', 'ac:a1', {title: 'suite > archived'}, false);
   node('check:other', 'ac:a2', {title: 'other > case'});
   // A structured Task with steps and no checks, and no acceptance rows: no Crew bindings.
   // Its unmapped repository and module fields do not appear in the rendered contract.
-  f.objects.get('task:t2').document.data = {title: '[02] Task 2', body: 'Goal: scoped change 2\nModule: m2',
+  f.objects.get('task:t2').document.data = {stage: f.objects.get('task:t2').document.data.stage,
+    title: '[02] Task 2', body: `Goal: scoped change 2\nRepository: ${f.run.config.repositories[0].id}\nModule: m2`,
     repository: 'other', module: 'm1', steps: ['Make the change.']};
   await claimTask(f.run, f.persist, f.runId);
   const [one, two] = f.run.claim.tasks.map(task => task.ticket);
   assert.equal(one.acceptanceTests.length, 26);
   assert.deepEqual(one.acceptanceTests.find(test => test.address === 'check:c1'), {address: 'check:c1', revision: 2,
-    title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite'});
+    title: 'suite > case 1', body: 'Proves the output.', command: 'bun test suite',
+    repository: 'app', reporter_name: 'apps/api/suite.test.ts > suite > case 1'});
   assert.deepEqual(one.acceptanceTests.find(test => test.address === 'check:c2'),
     {address: 'check:c2', revision: 2, title: 'suite > case 2'});
   assert(!one.acceptanceTests.some(test => test.address === 'check:gone'));
   assert.deepEqual(two.acceptanceTests, [{address: 'check:other', revision: 2, title: 'other > case'}]);
-  assert.equal(two.body, 'Goal: scoped change 2\nModule: m2\n\nHow:\n1. Make the change.');
+  assert.equal(two.body, `Goal: scoped change 2\nRepository: ${f.run.config.repositories[0].id}\nModule: m2\n\nHow:\n1. Make the change.`);
   assert.deepEqual(two.paths, f.run.config.repositories[0].paths);
   assert.equal(two.testAcceptance, undefined);
   // Reading tests writes nothing: the claim is the only batch.

@@ -8,7 +8,7 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {checkRepair} from './repair-plan.mjs';
 import {bodyProblems} from './repair-context.mjs';
-import {restrictionLine, reporterNames} from './reporter-names.mjs';
+import {restrictionLine, testBindings} from './reporter-names.mjs';
 import {bindingPlan} from './test-bindings.mjs';
 import {passingTests} from './completion.mjs';
 
@@ -167,7 +167,7 @@ export function check({input, trees, draft, maxFiles, maxLines, forecast}) {
   // Check the Tests that planned Tasks own. The critics verify existing coverage for the other AC Tests.
   const plannedTests = new Set(tasks.flatMap(task => Array.isArray(task.tests) ? task.tests : []));
   for (const test of tests.filter(test => plannedTests.has(test.address))) {
-    for (const {repo: repository, name} of reporterNames(test.document?.data?.body)) {
+    for (const {repo: repository, name} of testBindings(test.document?.data)) {
       if (!repositories.has(repository)) continue;
       const file = name.split(' > ')[0];
       if (owners.has(`${repository}:${file}`) || !inTree(trees[repository].path, file)) continue;

@@ -29,6 +29,17 @@ export function reporterNames(body) {
     .map(([, repo, name]) => ({repo, name}));
 }
 
+export function testBindings(test) {
+  const repo = test?.repository, name = test?.reporter_name, lines = reporterNames(test?.body);
+  if (repo == null && name == null) return lines;
+  if (typeof repo !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo) ||
+      typeof name !== 'string' || !name || name.length > 400 || /[\r\n]/.test(name))
+    throw new Error('Invalid Test repository or reporter_name fields');
+  if (lines.length && (lines.length !== 1 || lines[0].repo !== repo || lines[0].name !== name))
+    throw new Error('Test Reporter fields conflict with its body');
+  return [{repo, name}];
+}
+
 export function reporterFile(name) {
   if (typeof name !== 'string' || !name.includes(' > ') || /[\r\n\0]/.test(name)) return null;
   const [file, ...parts] = name.split(' > ');

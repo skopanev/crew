@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {reporterNames, reporterFile, namedTests} from './reporter-names.mjs';
+import {reporterNames, reporterFile, namedTests, testBindings} from './reporter-names.mjs';
 
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const role = (input, kind) => input.schema?.types?.[kind]?.role ?? kind;
@@ -31,7 +31,7 @@ export function metadataFindings(input) {
     role(input, node.kind) === 'test' && node.historical !== true && node.document?.present !== false);
   const named = namedTests(input.selected.document?.data?.body);
   return tests.filter(node => !named || named.has(node.address)).flatMap(node => {
-    const data = node.document?.data ?? {}, bindings = reporterNames(data.body);
+    const data = node.document?.data ?? {}, bindings = testBindings(data);
     if (bindings.length && bindings.every(binding => reporterFile(binding.name)) && text(data.command)) return [];
     return [{target: node.address, quote: data.body || data.title || '', reason_code: 'INCOMPLETE_TEST_METADATA',
       problem: 'The Test needs an existing Reporter binding and a nonempty command.'}];
@@ -49,7 +49,7 @@ export function bindingPlan({input, draft, trees = {}}) {
       const tests = new Map((input.context?.children ?? input.children ?? []).map(item => [item.address, item]));
       for (const address of draft.task?.tests ?? []) {
         const data = tests.get(address)?.document?.data ?? {};
-        const existing = reporterNames(data.body);
+        const existing = testBindings(data);
         if (!existing.length || !existing.every(binding => matchesOwners(binding, [draft.task], trees)) || !text(data.command)) {
           problems.push(`${address}: READY needs an existing complete binding; return a supported Test finding to Writer without changing parent Tests`);
         }
@@ -73,11 +73,14 @@ export function bindingPlan({input, draft, trees = {}}) {
     }
     seen.add(address);
     const {repository, reporter_name: name, command} = binding;
+    if (typeof name !== 'string' || name.length > 400) {
+      problems.push(`${address}: reporter_name must be at most 400 characters`); continue;
+    }
     if (!text(repository) || !matchesOwners({repo: repository, name}, owners, trees)) {
       problems.push(`${address}: Reporter name must identify a test file in each Task repository and files`); continue;
     }
     if (!text(command)) { problems.push(`${address}: binding command must be nonempty`); continue; }
-    const data = node.document.data, existing = reporterNames(data.body);
+    const data = node.document.data, existing = testBindings(data);
     if (data.assignee) { problems.push(`${address}: a held Test cannot receive binding updates`); continue; }
     if (!text(data.body)) { problems.push(`${address}: preserve a nonempty Test acceptance body`); continue; }
     if (existing.length && (existing.length !== 1 || existing[0].repo !== repository || existing[0].name !== name)) {
@@ -112,7 +115,7 @@ export function bindingPlan({input, draft, trees = {}}) {
     if (!node) continue;
     const data = node.document.data;
     if (seen.has(address)) continue;
-    const existing = reporterNames(data.body);
+    const existing = testBindings(data);
     if (existing.length && !existing.every(binding => matchesOwners(binding, owners, trees))) {
       problems.push(`${address}: the existing Reporter binding does not match each Task repository and files`);
     } else if (!existing.length || !text(data.command)) {

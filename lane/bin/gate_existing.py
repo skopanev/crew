@@ -63,6 +63,19 @@ def existing(root):
                     or not isinstance(test.get("title"), str) or not test["title"].strip()):
                 raise ValueError("existing-code verification needs a Test command and title")
             reporters = re.findall(r"Reporter name:[ \t]*([^\r\n]+)", test.get("body", ""))
+            repository, reporter = test.get("repository"), test.get("reporter_name")
+            if repository is not None or reporter is not None:
+                if (not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", repository)
+                        or not isinstance(reporter, str) or not reporter or len(reporter) > 400
+                        or re.search(r"[\r\n]", reporter)):
+                    raise ValueError("invalid Test repository or reporter_name fields")
+                body_repositories = re.findall(r"^Repository: ([A-Za-z0-9][A-Za-z0-9._-]*)\. Reporter name:",
+                                               test.get("body", ""), re.MULTILINE)
+                if ((reporters and reporters != [reporter])
+                        or body_repositories and body_repositories != [repository]
+                        or task.get("repository") and task["repository"] != repository):
+                    raise ValueError("Test Reporter fields conflict with its body or repository")
+                reporters = [reporter]
             if len(reporters) > 1 or reporters and " > " not in reporters[0]:
                 raise ValueError("existing-code verification needs one unambiguous Reporter name")
             argv = shlex.split(test["command"])

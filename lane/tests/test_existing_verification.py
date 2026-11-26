@@ -52,6 +52,18 @@ class ExistingVerificationTests(unittest.TestCase):
         self.test["command"] = f"bun run test '{self.file}'"
         self.existing([self.test])
 
+    def test_reporter_fields_work_without_a_body_line(self):
+        self.test.update(body="Given: a quote.", repository="finik-app",
+                         reporter_name=f"{self.file} > suite > {self.title}")
+        self.existing([self.test])
+
+    def test_invalid_or_conflicting_reporter_fields_refuse_verification(self):
+        for fields in [{"repository": "finik-app"}, {"reporter_name": "missing > case"},
+                       {"repository": "finik-app", "reporter_name": "x" * 401},
+                       {"repository": "finik-app", "reporter_name": f"{self.file} > other"}]:
+            with self.subTest(fields=fields):
+                self.existing([{**self.test, **fields}], False)
+
     def test_package_command_without_reporter_resolves_its_final_file(self):
         self.test.update(title=self.title, body="", command="cd apps/app && bun run test 'src/app/[locale]/(app)/wallet/swap.test.tsx'")
         self.existing([self.test])

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {contractHash, bindingPlan, bindingPublication} from './test-bindings.mjs';
 import {check} from './check.mjs';
 import {checkRepair, repairPublication as publishRepair} from './repair-plan.mjs';
@@ -250,8 +250,14 @@ test('the actual prepare admits AC Test updates before author and preserves the 
   fs.writeFileSync(path.join(f.root, 'agent-reader.mjs'), 'process.exit(0);');
   fs.writeFileSync(path.join(f.root, 'trees.sh'), 'exit 0\n');
   fs.writeFileSync(path.join(f.root, "completion.mjs"), "console.log(\"<signal:CONTINUE>Context fixture.</signal:CONTINUE>\");");
+  fs.writeFileSync(path.join(f.root, 'test-bindings.mjs'), `import fs from 'node:fs';
+import {bindingFacts} from ${JSON.stringify(pathToFileURL(path.join(here, 'test-bindings.mjs')).href)};
+const input=JSON.parse(fs.readFileSync(0,'utf8'));
+console.log(JSON.stringify({...input,reporter_bindings:bindingFacts(input)}));`);
+  const config = path.join(f.root, 'fixture-config.json');
+  fs.writeFileSync(config, '{}');
   const run = update_kinds => spawnSync('bash', ['-c', shell], {encoding: 'utf8', env: {...f.env,
-    PLANNING_PYTHON: process.execPath, TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: f.root,
+    PLANNING_PYTHON: process.execPath, PLANNING_JOPPA_CONFIG: config, TASKER_BUN: process.execPath, CREW_FLOW_STAGES: stages, MEDULLA_RUN_DIR: f.root, MEDULLA_WORKFLOW_DIR: f.root,
     FLOW_PUBLICATION: JSON.stringify({file: 'operations.json', allowed_operations: ['save_object', 'note'], create_kinds: ['task'], update_kinds}),
     TASKER_REPOS: '{}', TASKER_TREE_ROOT: f.root, CREW_WORKFLOW_DIR: path.join(here, '../workflow'), CBM_BIN: 'unused',
     CBM_CACHE_DIR: f.root, CBM_ALLOWED_ROOT: f.root, REWORK_LIMIT: '3', PLAN_MAX_FILES: '8', PLAN_MAX_LINES: '300',

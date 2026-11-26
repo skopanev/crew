@@ -28,12 +28,14 @@ export async function criterionTests(read, types, ac) {
   if (!kinds.length) return [];
   const tests = [];
   for await (const page of nodePages(read, {kind: kinds, parent: ac,
-    fields: ['title', 'revision', 'parent', 'data.body', 'data.command']})) {
+    fields: ['title', 'revision', 'parent', 'data.body', 'data.command', 'data.repository', 'data.reporter_name']})) {
     for (const item of page.items) {
       if (item.parent !== ac) continue;
       tests.push({address: item.address, revision: item.revision, title: item.title,
         ...(typeof item['data.body'] === 'string' && item['data.body'] ? {body: item['data.body']} : {}),
-        ...(typeof item['data.command'] === 'string' && item['data.command'] ? {command: item['data.command']} : {})});
+        ...(typeof item['data.command'] === 'string' && item['data.command'] ? {command: item['data.command']} : {}),
+        ...(item['data.repository'] != null ? {repository: item['data.repository']} : {}),
+        ...(item['data.reporter_name'] != null ? {reporter_name: item['data.reporter_name']} : {})});
     }
   }
   return tests;
