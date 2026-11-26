@@ -87,6 +87,10 @@ Old versions remain available for existing panels.
 | engine-v74 | `c3a8c9ea8e5358cfac1ee596763d95a42bf721b4` | Retry branch pushes with PUSH_FAILED and show queued units in the header |
 | engine-v75 | `c106ba7ce7da2c21290f0fb5013cc1624e8eb9b5` | Request one eligible Lander batch below its minimum with a durable one-time flush |
 | engine-v76 | `d2253f6684b84b88241e1bc3f840503166319dd3` | Show six-hour successful completion rates in every dashboard header |
+| engine-v77 | `f81a91161c908d3166c6720e8756152b76233b5f` | Read typed Test Reporter fields and refuse invalid bindings |
+
+The `engine-v77` runtime is `/Users/finik/Projects/crew/releases/engine-v77`.
+No panel uses this runtime at publication. The operator must select it for new claims.
 
 ## Install a version
 
