@@ -71,6 +71,8 @@ Without a verified recovery, Lander reads failed paths from `native.log` and the
 It includes failed test paths and paths in their assertion messages.
 It compares these paths with each Task's changes from its merge base to its declared head.
 If exactly one Task matches, Lander rejects the batch immediately without baseline or separate branch checks.
+A batch with more than one Task can use this fast path when `noNewRed` is absent.
+A single Task or a `noNewRed` run first checks the baseline.
 Otherwise, it uses the existing baseline and branch checks.
 A red baseline leaves all branches pending. It does not identify a faulty Task.
 

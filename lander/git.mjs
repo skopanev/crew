@@ -10,7 +10,7 @@ export const require = (ok, message) => { if (!ok) throw new Error(message); };
 export const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 export const write = (file, value) => fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
 export const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args],
-  {encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe']}).trim();
+  {encoding: 'utf8', timeout: 120000, maxBuffer:32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe']}).trim();
 export function ancestor(checkout, head, target) {
   const value = spawnSync('git', ['-C', checkout, 'merge-base', '--is-ancestor', head, target], {timeout: 120000});
   require([0, 1].includes(value.status), 'Git ancestry check failed');
@@ -160,7 +160,7 @@ export function candidate(state, repo, heads, root) {
   const interrupted = result => ({accepted: [], failed, pending: result.infrastructure, checked: result});
   if (checked.infrastructure) return interrupted(checked);
   if (checked.passed) return {accepted, failed, checked};
-  if (checked.receipt) {
+  if (checked.receipt && !repo.noNewRed && heads.length > 1) {
     const folder = path.join(path.dirname(checked.receipt), 'test-report');
     const changes = heads.map(item => ({...item, files:git(state.checkout, 'diff', '--name-only', '-z',
       git(state.checkout, 'merge-base', state.base, item.head), item.head).split('\0').filter(Boolean)}));

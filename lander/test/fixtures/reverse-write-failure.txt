@@ -4,13 +4,13 @@ test at apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:111:1
 ✖ nothing else has learned to write ledger.transactions (222.288568ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
-  
+
     [
       'packages/ledger/src/core/post-internal.ts',
   +   'packages/ledger/src/core/reverse-write.ts'
   -   'packages/ledger/src/core/reverse.ts'
     ]
-  
+
       at Test.fn (file:///tmp/finik-test-tree/candidate-e7d41ec1fbe0/apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:122:10)
       at node:internal/test_runner/test:1377:18
       at Channel.runStores (node:diagnostics_channel:235:14)

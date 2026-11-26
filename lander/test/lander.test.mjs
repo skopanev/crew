@@ -211,7 +211,7 @@ test('a moved branch is not replaced with an unchecked head', t => {
 
 // The designated test command: legacy fails on the target; core fails with bad.txt and is skipped with one.txt.
 const JUNIT = `r="$CREW_TEST_REPORT_DIR/r.xml"; { echo '<testsuite name="s">';
-  echo '<testcase classname="c" name="legacy"><failure message="old"/></testcase>';
+  echo '<testcase classname="c" name="legacy" file="two.txt"><failure message="old"/></testcase>';
   if [ -e bad.txt ]; then echo '<testcase classname="c" name="core"><failure message="new"/></testcase>';
   elif [ -e one.txt ]; then echo '<testcase classname="c" name="core"><skipped/></testcase>';
   else echo '<testcase classname="c" name="core"/>'; fi; echo '</testsuite>'; } > "$r"; grep -q '<failure' "$r" && exit 1; exit 0`;
@@ -221,6 +221,24 @@ function redTarget(t, gate = JUNIT) {
     testReport: {path: 'r.xml', format: 'junit', identity: '{classname}.{name}'}});
   return f;
 }
+
+test('a tolerated baseline failure does not blame the Task that changed its file', t => {
+  const f = redTarget(t);
+  const result = candidate(f.state,f.repo,f.pins(['two','one']),f.root);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.deepEqual(result.accepted,[]);
+  assert.deepEqual(result.failed,{'task:one':'BRANCH_GATE_FAIL'});
+});
+
+test('a one-Task red baseline stays unassigned even when its failed file matches the Task', t => {
+  const f = fixture(t,`printf '<testsuite><testcase name="old" file="one.txt"><failure>one.txt</failure></testcase></testsuite>' > "$CREW_TEST_REPORT_DIR/results.xml"; exit 1`);
+  f.repo.testReport = {path:'results.xml',format:'junit',identity:'{name}'};
+  const result = candidate(f.state,f.repo,f.pins(['one']),f.root);
+  assert.equal(result.pending,'BASELINE_RED');
+  assert.deepEqual(result.failed,{});
+  assert.deepEqual(result.accepted,[]);
+  assert.equal(f.calls(),2);
+});
 const verifyPush = (f, checked) => {
   const sha = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   fs.writeFileSync(path.join(checked.attempt, 'artifacts/gates/no-new-red.json'), JSON.stringify({candidate: checked.receipt,

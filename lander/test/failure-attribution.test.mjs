@@ -30,3 +30,10 @@ test('only failed JUnit cases and native failure blocks contribute paths', () =>
   assert.deepEqual(failurePaths(log,xml,known),['src/assertion.ts','src/fail.test.ts']);
   assert.deepEqual(failurePaths('✔ src/other.test.ts passed','',known),[]);
 });
+
+test('Bun failure symbols work and dependency paths cannot match repository root files', () => {
+  const known = new Set(['package.json','tsconfig.json','src/fail.test.ts','src/pass.test.ts']);
+  const log = '✗ src/fail.test.ts\n Error at /workspace/node_modules/pkg/package.json:1\n' +
+    ' Error at /workspace/node_modules/pkg/tsconfig.json:2\n✓ src/pass.test.ts\n package.json\n';
+  assert.deepEqual(failurePaths(log,'',known),['src/fail.test.ts']);
+});
