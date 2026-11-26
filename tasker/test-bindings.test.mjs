@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {fileURLToPath, pathToFileURL} from 'node:url';
-import {contractHash, bindingPlan, bindingPublication} from './test-bindings.mjs';
+import {fileURLToPath} from 'node:url';
+import {contractHash, bindingPlan, bindingPublication, metadataFindings} from './test-bindings.mjs';
 import {check} from './check.mjs';
 import {checkRepair, repairPublication as publishRepair} from './repair-plan.mjs';
 const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
@@ -50,6 +50,16 @@ function fixture(t) {
   };
   return {root, artifacts, repo, env, input, draft, trees, options, write, read, runReview};
 }
+
+test('Tasker reads captured Reporter fields without rewriting a complete binding', t => {
+  const f = fixture(t), data = f.input.children[0].document.data;
+  Object.assign(data, {repository: binding.repository, reporter_name: binding.reporter_name, command: binding.command});
+  delete f.draft.test_bindings;
+  assert.deepEqual(metadataFindings(f.input), []);
+  assert.deepEqual(bindingPlan(f.options()), {problems: [], operations: []});
+  delete data.repository;
+  assert.throws(() => metadataFindings(f.input), /Invalid Test/);
+});
 
 test('the pure checker accepts a planned new Reporter file and preserves all acceptance bytes', t => {
   const f = fixture(t), before = structuredClone(f.input);
@@ -250,10 +260,6 @@ test('the actual prepare admits AC Test updates before author and preserves the 
   fs.writeFileSync(path.join(f.root, 'agent-reader.mjs'), 'process.exit(0);');
   fs.writeFileSync(path.join(f.root, 'trees.sh'), 'exit 0\n');
   fs.writeFileSync(path.join(f.root, "completion.mjs"), "console.log(\"<signal:CONTINUE>Context fixture.</signal:CONTINUE>\");");
-  fs.writeFileSync(path.join(f.root, 'test-bindings.mjs'), `import fs from 'node:fs';
-import {bindingFacts} from ${JSON.stringify(pathToFileURL(path.join(here, 'test-bindings.mjs')).href)};
-const input=JSON.parse(fs.readFileSync(0,'utf8'));
-console.log(JSON.stringify({...input,reporter_bindings:bindingFacts(input)}));`);
   const config = path.join(f.root, 'fixture-config.json');
   fs.writeFileSync(config, '{}');
   const run = update_kinds => spawnSync('bash', ['-c', shell], {encoding: 'utf8', env: {...f.env,
