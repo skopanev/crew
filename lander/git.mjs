@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {failurePaths} from './failure-attribution.mjs';
 
 export const tooling = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const require = (ok, message) => { if (!ok) throw new Error(message); };
@@ -152,13 +153,27 @@ export function candidate(state, repo, heads, root) {
   let accepted = [], failed = {};
   for (const item of heads) {
     const merged = merge(state, [...accepted, item]);
-    if (merged.conflict) failed[item.address] = 'MERGE_CONFLICT';
+    if (merged.conflict) return {accepted:[], failed:{[item.address]:'MERGE_CONFLICT'}, pending:'TASK_REJECTED'};
     else accepted.push(item);
   }
   let checked = check(state, repo, accepted, root);
   const interrupted = result => ({accepted: [], failed, pending: result.infrastructure, checked: result});
   if (checked.infrastructure) return interrupted(checked);
   if (checked.passed) return {accepted, failed, checked};
+  if (checked.receipt) {
+    const folder = path.join(path.dirname(checked.receipt), 'test-report');
+    const changes = heads.map(item => ({...item, files:git(state.checkout, 'diff', '--name-only', '-z',
+      git(state.checkout, 'merge-base', state.base, item.head), item.head).split('\0').filter(Boolean)}));
+    const known = new Set([...git(state.checkout, 'ls-files', '-z').split('\0').filter(Boolean), ...changes.flatMap(item => item.files)]);
+    const evidence = name => fs.existsSync(path.join(folder,name)) ? fs.readFileSync(path.join(folder,name),'utf8') : '';
+    const files = failurePaths(evidence('native.log'), evidence(repo.testReport?.path || 'results.xml'), known);
+    const matches = changes.filter(item => item.files.some(file => files.includes(file)));
+    const attribution = {files, matches:matches.map(item => ({address:item.address, head:item.head,
+      files:item.files.filter(file => files.includes(file))}))};
+    write(path.join(checked.attempt,'artifacts/failure-attribution.json'),attribution);
+    if (matches.length === 1) return {accepted:[], failed:{[matches[0].address]:'BRANCH_GATE_FAIL'},
+      pending:'TASK_REJECTED', checked, attribution};
+  }
   const baseline = check(state, repo, [], root);
   if (baseline.infrastructure) return interrupted(baseline);
   const red = !baseline.passed && Boolean(repo.noNewRed) && tolerates(state, baseline, baseline);
@@ -169,7 +184,7 @@ export function candidate(state, repo, heads, root) {
   for (const item of accepted) {
     const result = check(state, repo, [item], root);
     if (result.infrastructure) return interrupted(result);
-    if (!green(result)) failed[item.address] = 'BRANCH_GATE_FAIL';
+    if (!green(result)) return {accepted:[], failed:{[item.address]:'BRANCH_GATE_FAIL'}, pending:'TASK_REJECTED', checked:result};
     else alone.push(item);
   }
   accepted = [];
@@ -177,7 +192,8 @@ export function candidate(state, repo, heads, root) {
     const result = check(state, repo, [...accepted, item], root);
     if (result.infrastructure) return interrupted(result);
     if (green(result)) accepted.push(item);
-    else failed[item.address] = result.conflict ? 'INTERACTION_CONFLICT' : 'INTERACTION_FAIL';
+    else return {accepted:[], failed:{[item.address]:result.conflict ? 'INTERACTION_CONFLICT' : 'INTERACTION_FAIL'},
+      pending:'TASK_REJECTED', checked:result};
   }
   checked = check(state, repo, accepted, root);
   if (checked.infrastructure) return interrupted(checked);

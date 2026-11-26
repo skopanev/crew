@@ -97,7 +97,7 @@ function output(state, landed = []) {
   const reason = complete ? 'All claimed heads are in the checked target ancestry.' :
     String(done.size) + ' of ' + items.length + ' heads landed. ' + (state.pending || 'Excluded branches require review.');
   write(path.join(root, value.publication.file), {operations, outcome: {status: complete ? 'published' : 'blocked',
-    reason_code: complete ? 'LANDED' : state.pending || 'PARTIAL_LANDING', reason}});
+    reason_code: complete ? 'LANDED' : state.pending || 'NOT_LANDED', reason}});
 }
 function build() {
   const {repo, items} = settings();
@@ -111,6 +111,10 @@ function build() {
       if (!/^(BRANCH_MOVED|BRANCH_UNAVAILABLE):/.test(error.message)) throw error;
       state.failed[item.address] = error.message.split(':')[0];
     }
+  }
+  if (Object.keys(state.failed).length) {
+    state.pending = Object.values(state.failed)[0];
+    write(stateFile,state); output(state); signal('REPORT','A claimed branch changed. No branch landed.'); return;
   }
   const selected = candidate(state, repo, state.pins, root);
   Object.assign(state, selected, {failed: {...state.failed, ...selected.failed}});
@@ -134,13 +138,16 @@ function push() {
     const now = targetHead(state), moved = state.pins.filter(item =>
       !ancestor(state.checkout, item.head, now) && remoteHead(state.checkout, item.branch) !== item.head);
     const rebuild = now !== state.base || moved.length || pass;
+    if (moved.length) {
+      for (const item of moved) state.failed[item.address] = 'BRANCH_MOVED';
+      state.pending = 'BRANCH_MOVED';
+      write(stateFile,state); output(state); signal('REPORT','A claimed branch changed. No branch landed.'); return;
+    }
     if (rebuild) {
       if (state.rebuilds >= 1) {
         state.pending = 'TARGET_MOVED_AGAIN'; write(stateFile, state); output(state); signal('REPORT', state.pending); return;
       }
       state.rebuilds++;
-      for (const item of moved) state.failed[item.address] = 'BRANCH_MOVED';
-      state.pins = state.pins.filter(item => !state.failed[item.address]);
       state.base = now;
       const selected = candidate(state, repo, state.pins, root);
       Object.assign(state, selected, {failed: {...state.failed, ...selected.failed}});

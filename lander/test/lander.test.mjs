@@ -116,6 +116,63 @@ for (const count of [0, 2]) test(`a red branch preserves its pending evidence an
   assert.equal(value.operations.some(row => row.command.text?.includes('Owner review required')), count >= 2);
   assert.equal(item.document.data.delivery.head, f.heads.bad);
   assert.match(save.reason, /BRANCH_GATE_FAIL/);
+  assert.equal(value.outcome.reason_code,'TASK_REJECTED');
+  assert.equal(value.operations.some(row => row.command.op === 'archive_object'),false);
+  assert.equal(git(f.seed,'ls-remote','origin','refs/heads/main').split(/\s/)[0],f.state.base);
+});
+
+test('a unique failed file rejects the batch before the baseline or branch checks', t => {
+  const gate = `if [ -e bad.txt ]; then
+    printf '<testsuite><testcase name="proof" file="bad.txt"><failure>bad.txt</failure></testcase></testsuite>' > "$CREW_TEST_REPORT_DIR/results.xml"
+    exit 1
+  fi
+  printf '<testsuite><testcase name="proof" file="base.txt"/></testsuite>' > "$CREW_TEST_REPORT_DIR/results.xml"`;
+  const f = fixture(t,gate);
+  f.repo.testReport = {path:'results.xml',format:'junit',identity:'{name}'};
+  const result = candidate(f.state,f.repo,f.pins(['one','bad']),f.root);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.deepEqual(result.accepted,[]);
+  assert.deepEqual(result.failed,{'task:bad':'BRANCH_GATE_FAIL'});
+  assert.deepEqual(result.attribution.matches.map(item => item.address),['task:bad']);
+  assert.equal(f.calls(),1);
+});
+
+test('two matching Tasks use ordinary branch checks and stop at the first culprit', t => {
+  const gate = `if [ -e bad.txt ]; then
+    printf '<testsuite><testcase name="proof"><failure>one.txt bad.txt</failure></testcase></testsuite>' > "$CREW_TEST_REPORT_DIR/results.xml"
+    exit 1
+  fi
+  printf '<testsuite><testcase name="proof"/></testsuite>' > "$CREW_TEST_REPORT_DIR/results.xml"`;
+  const f = fixture(t,gate);
+  f.repo.testReport = {path:'results.xml',format:'junit',identity:'{name}'};
+  const result = candidate(f.state,f.repo,f.pins(['one','bad','two']),f.root);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.deepEqual(result.accepted,[]);
+  assert.deepEqual(result.failed,{'task:bad':'BRANCH_GATE_FAIL'});
+  assert.equal(f.calls(),4);
+});
+
+test('a culprit found by branch checks stops the entire batch immediately', t => {
+  const f = fixture(t), result = candidate(f.state,f.repo,f.pins(['bad','one','two']),f.root);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.deepEqual(result.accepted,[]);
+  assert.deepEqual(result.failed,{'task:bad':'BRANCH_GATE_FAIL'});
+  assert.equal(f.calls(),3);
+});
+
+test('a merge conflict rejects the batch before any gate', t => {
+  const f = fixture(t);
+  for (const name of ['one','two']) {
+    git(f.seed,'checkout','task-'+name);
+    fs.writeFileSync(path.join(f.seed,'base.txt'),name+'\n');
+    git(f.seed,'commit','-am','Conflicting change'); git(f.seed,'push','origin','HEAD');
+    f.heads[name] = git(f.seed,'rev-parse','HEAD');
+  }
+  const result = candidate(f.state,f.repo,f.pins(['one','two']),f.root);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.deepEqual(result.accepted,[]);
+  assert.deepEqual(result.failed,{'task:two':'MERGE_CONFLICT'});
+  assert.equal(f.calls(),0);
 });
 test('a green batch runs the full gates once and reuses the exact receipt', t => {
   const f = fixture(t), heads = f.pins(['one', 'two']);
@@ -139,9 +196,10 @@ test('a red target baseline leaves every branch pending without assigning blame'
 test('two branches that pass alone report an interaction when they fail together', t => {
   const f = fixture(t, 'if [ -e one.txt ] && [ -e two.txt ]; then exit 1; fi');
   const result = candidate(f.state, f.repo, f.pins(['one', 'two']), f.root);
-  assert.deepEqual(result.accepted.map(item => item.address), ['task:one']);
+  assert.deepEqual(result.accepted, []);
   assert.deepEqual(result.failed, {'task:two': 'INTERACTION_FAIL'});
-  assert.equal(result.checked.passed, true); assert.equal(f.calls(), 4);
+  assert.equal(result.pending,'TASK_REJECTED');
+  assert.equal(result.checked.passed, false); assert.equal(f.calls(), 4);
 });
 test('a moved branch is not replaced with an unchecked head', t => {
   const f = fixture(t);
@@ -173,9 +231,13 @@ const verifyPush = (f, checked) => {
 };
 test('no-new-red lands a red-target candidate that adds no failure and rejects a new failure or skip', t => {
   const f = redTarget(t);
-  const result = candidate(f.state, f.repo, f.pins(['two', 'bad']), f.root);
-  assert.deepEqual(result.accepted.map(item => item.address), ['task:two']);
-  assert.deepEqual(result.failed, {'task:bad': 'BRANCH_GATE_FAIL'});
+  const rejected = candidate(f.state, f.repo, f.pins(['two', 'bad']), f.root);
+  assert.deepEqual(rejected.accepted, []);
+  assert.equal(rejected.pending,'TASK_REJECTED');
+  assert.deepEqual(rejected.failed, {'task:bad': 'BRANCH_GATE_FAIL'});
+  assert.equal(git(f.seed,'ls-remote','origin','refs/heads/main').split(/\s/)[0],f.state.base);
+  const result = candidate(f.state,f.repo,f.pins(['two']),f.root);
+  assert.deepEqual(result.accepted.map(item => item.address),['task:two']);
   assert.equal(result.checked.passed, false); assert.deepEqual(result.checked.tolerated, ['c.legacy']);
   let verified = verifyPush(f, result.checked);
   assert.equal(verified.status, 0, verified.stderr);

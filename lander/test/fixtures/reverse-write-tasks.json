@@ -1,0 +1,57 @@
+{
+  "run": "2026-11-26_18-59-46-409be83e",
+  "base": "24a0a9d53fe965c8b83ff52e981f96e8e6b6ae50",
+  "culprit": "task:77r2jk6p",
+  "tasks": [
+    {
+      "address": "task:htvbg1ft",
+      "head": "f2fd7266aa600d00fd557ae85974d63a4d2f3589",
+      "mergeBase": "0b00f092c2c650ecdf4cebdd1ce008990a0bef7c",
+      "files": [
+        "apps/admin-api/src/routes/withdrawals/review-case-approve-kyt-count.itest.ts"
+      ]
+    },
+    {
+      "address": "task:rcx1e31l",
+      "head": "c7cd599ba1be44fb39cbdafe8ceb06af8e3b8379",
+      "mergeBase": "0b00f092c2c650ecdf4cebdd1ce008990a0bef7c",
+      "files": [
+        "packages/crypto/src/ops/recon/late-funding-recovery-selection.itest.ts",
+        "packages/crypto/src/ops/recon/late-funding-selection.itest-support.ts"
+      ]
+    },
+    {
+      "address": "task:t6qfk19e",
+      "head": "08d2961d98f897fc3ce5b38e057fc9fae3f1594b",
+      "mergeBase": "0b00f092c2c650ecdf4cebdd1ce008990a0bef7c",
+      "files": [
+        "apps/admin-api/src/routes/withdrawals/admin-recipient-repair-forbidden-country.itest.ts"
+      ]
+    },
+    {
+      "address": "task:mwkxs03x",
+      "head": "eda911d5871984031423090c83c0d5411fd982c5",
+      "mergeBase": "0b00f092c2c650ecdf4cebdd1ce008990a0bef7c",
+      "files": [
+        "packages/crypto/src/ops/swap/swap-financial-outcome.itest.ts",
+        "packages/crypto/src/ops/swap/swap-financial-outcome.ts",
+        "packages/crypto/src/ops/swap/swap-resolution-effect-legs.ts",
+        "packages/crypto/src/ops/swap/swap-resolution-effect-model.test.ts",
+        "packages/crypto/src/ops/swap/swap-resolution-effect-ordinary.itest.ts",
+        "packages/crypto/src/ops/swap/swap-resolution-effect-read.ts",
+        "packages/crypto/src/ops/swap/swap-resolution-effect.itest-support.ts"
+      ]
+    },
+    {
+      "address": "task:77r2jk6p",
+      "head": "94d1b3f1f7cc3f9117e30b296b28c6e3b66f6e95",
+      "mergeBase": "0b00f092c2c650ecdf4cebdd1ce008990a0bef7c",
+      "files": [
+        "packages/ledger/src/core/fx-bid-ask.itest.ts",
+        "packages/ledger/src/core/outbox-emit.itest.ts",
+        "packages/ledger/src/core/reverse-write.ts",
+        "packages/ledger/src/core/reverse.ts"
+      ]
+    }
+  ]
+}

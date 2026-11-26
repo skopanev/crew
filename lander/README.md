@@ -64,10 +64,14 @@ The command must remove the checkout or its contents. Lander removes an empty ch
 
 With retained branches, `repair_budget` can name the absolute Dolber config path.
 Lander reads its `repairDelivery` policy. Include its exhausted tag in `exclude_tags`.
-A red branch at that budget receives the tag and an owner review note. A passing branch can still land.
+A red branch at that budget receives the tag and an owner review note.
 
 A red combined check first applies the configured failed-file rerun policy, when present.
-Without a verified recovery, it requires a target baseline check.
+Without a verified recovery, Lander reads failed paths from `native.log` and the configured JUnit report.
+It includes failed test paths and paths in their assertion messages.
+It compares these paths with each Task's changes from its merge base to its declared head.
+If exactly one Task matches, Lander rejects the batch immediately without baseline or separate branch checks.
+Otherwise, it uses the existing baseline and branch checks.
 A red baseline leaves all branches pending. It does not identify a faulty Task.
 
 ### Failed-file reruns (opt-in)
@@ -110,8 +114,9 @@ The batch, the separate branch checks, the combinations and a target rebuild use
 Before the push, `gates.py verify` compares both receipts again from a digest-bound proof,
 and `land.sh` refuses unless the target still equals the baseline target. Tests do not run again for the proof.
 Lander records nothing as an accepted test result. Without `noNewRed`, a red baseline stays `BASELINE_RED`.
-For a green baseline, Lander checks branches separately and then builds a passing combination.
-An interaction failure names an incompatible combination. It does not accuse a branch that passed alone.
+For a green baseline, Lander checks branches separately and then checks their combinations.
+The first failed branch or interaction stops the run with `TASK_REJECTED`. No branch lands in that run.
+An interaction failure identifies the last added member of the failed combination.
 Previously checked exact candidates reuse their receipts.
 After a cached candidate is restored, its configured setup restores ignored dependencies before the push. Full checks do not repeat.
 
@@ -123,10 +128,12 @@ In this mode, `vars.FAILED_DATA` must preserve the stage and supply nonempty `ta
 Lander adds these tags to the existing tags. It preserves the delivery branch, checked head, commit and failure evidence.
 The ordinary Dolber still skips pending delivery. Repair must produce a new reviewed and checked head before resubmission.
 A moved target permits one rebuild and a new full check. A second move leaves the remaining work pending.
-A moved or unavailable branch is excluded before the push. Its pending delivery stays unchanged with an evidence note.
+A moved or unavailable branch stops the whole batch before the push.
+Its pending delivery stays unchanged with an evidence note.
 With `repeat: true`, Lander retries that pending head each interval until the producer records a current reviewed head.
 
-A partial landing reports `PARTIAL_LANDING`. Landed Tasks are archived, and excluded Tasks retain the repair evidence.
+The next run selects a fresh batch through the configured queue order and reads the current target again.
+The rejected Task retains its configured failure fields and repair evidence. Other Tasks remain pending.
 An uncertain native write requires receipt recovery before another claim.
 A landed Task does not prove criterion acceptance. The workflow never writes a passing acceptance result.
 
