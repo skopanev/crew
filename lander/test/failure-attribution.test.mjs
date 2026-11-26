@@ -5,7 +5,7 @@ import {failurePaths} from '../failure-attribution.mjs';
 
 test('the recorded reversal failure identifies only Task 77r2jk6p from its five-Task batch', () => {
   const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/reverse-write-tasks.json',import.meta.url)));
-  const log = fs.readFileSync(new URL('./fixtures/reverse-write-failure.log',import.meta.url),'utf8');
+  const log = fs.readFileSync(new URL('./fixtures/reverse-write-failure.txt',import.meta.url),'utf8');
   const known = new Set([...fixture.tasks.flatMap(item => item.files),
     'apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts', 'packages/ledger/src/core/post-internal.ts']);
   const files = failurePaths(log,'',known);

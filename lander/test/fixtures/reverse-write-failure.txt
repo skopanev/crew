@@ -1,0 +1,51 @@
+✖ failing tests:
+
+test at apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:111:1
+✖ nothing else has learned to write ledger.transactions (222.288568ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'packages/ledger/src/core/post-internal.ts',
+  +   'packages/ledger/src/core/reverse-write.ts'
+  -   'packages/ledger/src/core/reverse.ts'
+    ]
+  
+      at Test.fn (file:///tmp/finik-test-tree/candidate-e7d41ec1fbe0/apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:122:10)
+      at node:internal/test_runner/test:1377:18
+      at Channel.runStores (node:diagnostics_channel:235:14)
+      at TestContext.testFn (node:internal/test_runner/test:1374:51)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:125:1
+✖ every INSERT in every writer inserts the literal posted status (1.770208ms)
+  AssertionError [ERR_ASSERTION]: packages/ledger/src/core/reverse.ts no longer writes ledger.transactions
+      at Test.fn (file:///tmp/finik-test-tree/candidate-e7d41ec1fbe0/apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts:129:12)
+      at node:internal/test_runner/test:1377:18
+      at Channel.runStores (node:diagnostics_channel:235:14)
+      at TestContext.testFn (node:internal/test_runner/test:1374:51)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+[test] file apps/api/src/flows/withdraw-on-us-settlement-posted-only.test.ts: rc=1 in 1s
