@@ -127,7 +127,7 @@ function main() {
   if (unnamed) console.log(`ac-reporter-names: ${unnamed} criterion Test(s) that the Task does not name in its Tests: line, not checked`);
   const expected = [];
   for (const test of tests.values()) {
-    for (const binding of reporterNames(test.body)) {
+    for (const binding of testBindings(test)) {
       if (binding.repo === repo) expected.push({address: test.address, name: binding.name});
     }
   }

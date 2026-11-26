@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {contractHash} from './test-bindings.mjs';
 import {changedText, repairView, checkRepair, repairPublication as publishRepair, repositoryData} from './repair-plan.mjs';
 const repairPublication = options => publishRepair({stages:{task:'to_implement',ready:'to_task',review:'to_review'},...options});
@@ -112,6 +116,35 @@ test('body checks reuse the lane Tests-line and restriction-line checks', () => 
   assert.deepEqual(bodyProblems('Repository: repo\nTests: none. Helper-only change.',checker),[]);
   assert.match(bodyProblems('Repository: repo',checker).join(),/no "Tests:" line/);
   assert.match(bodyProblems('Tests: test:a\nRead only: other.ts',checker).join(),/restriction line/);
+});
+
+test('the Reporter CLI checks typed bindings and refuses missing results or invalid fields', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reporter-cli-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.mkdirSync(path.join(root, 'src'));
+  fs.writeFileSync(path.join(root, 'src/case.test.ts'), 'export {};\n');
+  execFileSync('git', ['init', '-q', root]);
+  execFileSync('git', ['-C', root, 'add', 'src/case.test.ts']);
+  const ticketFile = path.join(root, 'ticket.json'), resultsFile = path.join(root, 'results.jsonl');
+  const checker = fileURLToPath(new URL('./reporter-names.mjs', import.meta.url));
+  const captured = {address: 'test:a', body: 'Keep the decision.', repository: 'repo', reporter_name: 'src/case.test.ts > exact case'};
+  const run = (data, name = captured.reporter_name) => {
+    fs.writeFileSync(ticketFile, JSON.stringify({body: 'Tests: test:a', acceptanceTests: [data]}));
+    fs.writeFileSync(resultsFile, JSON.stringify({test: name, status: 'pass'}) + '\n');
+    return spawnSync(process.execPath, [checker, 'check', ticketFile, 'repo', resultsFile], {cwd: root, encoding: 'utf8'});
+  };
+  const accepted = run(captured);
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.match(accepted.stdout, /1 Reporter name\(s\) of repo checked/);
+  const missing = run(captured, 'src/case.test.ts > other case');
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /has no such name/);
+  for (const data of [{...captured, repository: null}, {...captured, reporter_name: 'x'.repeat(401)},
+    {...captured, body: 'Repository: repo. Reporter name: other case'}]) {
+    const refused = run(data);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /Invalid Test|conflict/);
+  }
 });
 test('the pinned AC read compares title and body rather than metadata revision', async () => {
   const selected=input();selected.selected.document.data.body='Criterion: ac:a@2. Old work';
