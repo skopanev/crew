@@ -90,6 +90,7 @@ Old versions remain available for existing panels.
 | engine-v77 | `f81a91161c908d3166c6720e8756152b76233b5f` | Read typed Test Reporter fields and refuse invalid bindings |
 | engine-v78 | `f1fce53cb50980cc7c2936060d1456194515a26e` | Reject a whole failed Lander batch and attribute unique native failure paths |
 | engine-v79 | `80c49432727a7c6b8e0c444d05b2a73631c47888` | Finish confirmed Task rejection through normal Lander cleanup |
+| engine-v80 | `66637e253f9fbad128f43886ff8afc60ffdb82e7` | Reload configured Lander selection while inline passes run |
 
 The `engine-v77` runtime is `/Users/finik/Projects/crew/releases/engine-v77`.
 No panel uses this runtime at publication. The operator must select it for new claims.
@@ -103,6 +104,11 @@ The `engine-v79` runtime is `/Users/finik/Projects/crew/releases/engine-v79`.
 No panel uses this runtime at publication. The operator must select it for new claims.
 The Lander workflow is `releases/engine-v79/lander/workflow.yaml` under the crew root.
 The release preserves all changes from `engine-v78`. The Lander pin remains unchanged.
+
+The `engine-v80` runtime is `/Users/finik/Projects/crew/releases/engine-v80`.
+No panel uses this runtime at publication. The operator must select it for new claims.
+The Lander workflow is `releases/engine-v80/lander/workflow.yaml` under the crew root.
+The release preserves all changes from `engine-v79`. The Lander pin remains unchanged.
 
 ## Install a version
 
