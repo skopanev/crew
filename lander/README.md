@@ -136,6 +136,9 @@ With `repeat: true`, Lander retries that pending head each interval until the pr
 
 The next run selects a fresh batch through the configured queue order and reads the current target again.
 The rejected Task retains its configured failure fields and repair evidence. Other Tasks remain pending.
+After confirmed rejection publication and claim release, `ac-completion.mjs` emits `TASK_REJECTED` and routes to normal cleanup.
+Successful cleanup ends the run successfully. The result stays blocked, and no Task receives a landing or acceptance result.
+An unresolved publication, another blocked reason, or a cleanup error still fails the run.
 An uncertain native write requires receipt recovery before another claim.
 A landed Task does not prove criterion acceptance. The workflow never writes a passing acceptance result.
 
@@ -166,7 +169,8 @@ An atomic batch checks live child revisions with empty saves before the criterio
 Lander reads the children again after publication. A new unfinished Task or changed result restores the prior stage.
 A concurrent owner edit prevents that restoration. The existing `lander.json` retains requests and unresolved outcomes.
 After a lost response, Lander repeats the saved request ID before it checks completion or restores the prior stage.
-The completion step preserves the original Task publication signal, including when its files or service are unavailable.
+The completion step preserves the original Task publication signal when its files or service are unavailable.
+It emits `TASK_REJECTED` only for a confirmed rejection with released claims, no accepted heads, and no landing.
 The native 100-operation batch limit applies. An oversized completion remains deferred without a partial write.
 
 ## Hourly report

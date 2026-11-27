@@ -54,6 +54,7 @@ nodes:
     shell: 'node "${CREW_FLOW_WORKFLOW_DIR:-$MEDULLA_WORKFLOW_DIR}/ac-completion.mjs"'
     on_signal:
       READY: clean_success
+      TASK_REJECTED: clean_success
       BLOCKED: clean_failure
       __failed__: failed
       __default__: failed

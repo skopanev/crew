@@ -144,7 +144,7 @@ export async function completeACs(config, input, state, result, {read, many, wri
 }
 
 async function main() {
-  const code = process.env.MEDULLA_LAST_SIGNAL;
+  let code = process.env.MEDULLA_LAST_SIGNAL;
   need(['READY', 'BLOCKED'].includes(code), 'AC completion requires the original publication signal');
   let persist = () => {};
   try {
@@ -176,6 +176,9 @@ async function main() {
     const outcomes = await completeACs(config, load('input'), state, result, {read, many,
       write: request => mutateTasks({config: service, joppaWorker: worker}, request), persist});
     for (const outcome of outcomes) console.log('AC completion: ' + outcome.address + ' ' + outcome.status + (outcome.reason ? ': ' + outcome.reason : ''));
+    if (code === 'BLOCKED' && result.status === 'blocked' && result.reason_code === 'TASK_REJECTED' &&
+      result.claim_released === true && !result.needs_recovery && state.pending === 'TASK_REJECTED' &&
+      Array.isArray(state.accepted) && state.accepted.length === 0 && !state.landed) code = 'TASK_REJECTED';
   } catch (error) {
     console.error('AC completion deferred: ' + error.message);
     try { persist([{status: 'deferred', reason: error.message}]); }
