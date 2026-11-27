@@ -2,8 +2,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import {createHash, randomUUID} from 'node:crypto';
 import {save} from '../lane-launcher/runtime.mjs';
 import {inlineFlushSnapshot} from './flush.mjs';
+
+// A configured inline pass reads a private copy of the config bytes that the dispatcher selected with. The dispatcher
+// can then reload the config for later selections while this pass runs (crew m_de7f065d). A changed file refuses the
+// spawn (75), as the launch digest check does.
+function inlineConfigSnapshot(root, args, env) {
+  const index = args.indexOf('--config') + 1, raw = fs.readFileSync(args[index]);
+  if (createHash('sha256').update(raw).digest('hex') !== env.PLANNING_JOPPA_HANDOFF_DIGEST) return {refused: true};
+  const folder = path.join(root, '.config-snapshots'), file = path.join(folder, `${randomUUID()}.json`);
+  fs.mkdirSync(folder, {recursive: true, mode: 0o700});
+  fs.writeFileSync(file, raw, {flag: 'wx', mode: 0o600});
+  const command = [...args]; command[index] = file;
+  return {file, args: command};
+}
 
 const signalGroup = (run, signal) => {
   if (!run.child?.pid) return false;
@@ -26,7 +40,7 @@ export class PlannerRuns {
     if (this.stopping || this.owns(address)) throw new Error(`Planner already reserves ${address} or is stopping`);
     const input = Number(env.PLANNING_JOPPA_INPUT ?? 0);
     if (!Number.isSafeInteger(input) || input < 0) throw new Error('Invalid worker input index');
-    const run = {address, input, attemptKey, configured, current: null, child: null, error: null, slot: metadata.slot};
+    const run = {address, input, attemptKey, configured, current: null, child: null, error: null, slot: metadata.slot, config: metadata.config};
     // Reserve the address before spawn. The claim can change its revision while the child runs.
     this.active.set(address, run);
     let pending = '', buffered = '', ended = false, resolve;
@@ -38,6 +52,7 @@ export class PlannerRuns {
       if (run.snapshot?.record) save(run.snapshot.file, {...run.snapshot.record,
         result: {code: run.code, error: run.error, finishedAt: new Date().toISOString()}});
       if (run.current) Object.assign(run.current, {ended: true, finishedAt: new Date().toISOString()});
+      if (run.configSnapshot) fs.rmSync(run.configSnapshot, {force: true});
       this.active.delete(address);
       this.completed.push(run);
       this.completed = this.completed.slice(-30);
@@ -87,6 +102,10 @@ export class PlannerRuns {
       if (run.snapshot) {
         run.current = {folder: run.snapshot.folder, ended: false};
         args = run.snapshot.args; env = run.snapshot.env;
+      } else if (configured && args.includes('--config')) {
+        const copy = inlineConfigSnapshot(this.root, args, env);
+        if (copy.refused) { finish(75); return run; }
+        run.configSnapshot = copy.file; args = copy.args;
       }
       run.child = spawn('sh', args, {stdio: ['ignore', 'pipe', 'pipe'], detached: true, env});
       if (run.snapshot && run.child.pid) {

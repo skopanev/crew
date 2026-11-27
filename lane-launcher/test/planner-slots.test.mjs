@@ -144,3 +144,20 @@ test('unknown or renamed live slot state blocks admission and broken journals ar
   assert.deepEqual(fs.readFileSync(path.join(retained, path.basename(run), 'launch.json')), before);
   assert.equal(occupiedSlots(config, plannerRows(root, null, 30, config), []).get('A'), 0);
 });
+
+// crew m_de7f065d: the Lander (inline, slots) applies a slot selection edit to the next selection at once.
+test('an inline slot selection edit starts the other slot while the first slot pass still runs', async t => {
+  const f = await slotsFixture(t, {execution: 'inline'});
+  f.write({...f.config, slots: [{label: 'A', data: {repository: 'alpha'}}, {label: 'B', data: {repository: 'gamma'}}]});
+  const run = f.start();
+  try {
+    await run.until(() => f.starts().length === 1);
+    assert.equal(f.starts()[0].slot, 'A');
+    await pause(1200);
+    assert.equal(f.starts().length, 1, 'Slot B selects nothing before the edit');
+    f.write({...f.config, slots: [{label: 'A', data: {repository: 'alpha'}}, {label: 'B', data: {repository: 'beta'}}]});
+    await run.until(() => f.starts().length === 2);
+    assert.deepEqual(f.starts().map(start => [start.slot, start.address]), [['A', 'ac:a1'], ['B', 'ac:a2']]);
+    assert.doesNotMatch(run.output(), /waiting for active passes/);
+  } finally { await run.stop(); }
+});

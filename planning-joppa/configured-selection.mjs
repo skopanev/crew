@@ -11,7 +11,7 @@ export async function configuredSelection({config, root, tokenFile, signal, rows
     if (!used.has(request.id)) return true;
     consumeFlush(request); return false;
   });
-  const active = detached ? pool.runs.filter(run => run.active) : [...pool.active.values()].map(run => ({...run, config}));
+  const active = detached ? pool.runs.filter(run => run.active) : [...pool.active.values()].map(run => ({...run, config: run.config ?? config}));
   const occupied = occupiedSlots(config, rows, active), conflicts = contextAdmission(active);
   const skipRetry = retryFilter(config, rows, attempted, cooldowns), stats = {};
   const busy = address => !detached && pool.owns(address) || rows.some(row => row.active && row.ac === address);

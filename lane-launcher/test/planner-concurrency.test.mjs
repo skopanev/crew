@@ -119,30 +119,48 @@ test('repeat flows keep their polling interval after a slot becomes free', async
   assert.equal(await run.stop(), 130);
 });
 
-test('a changed config waits for all active passes and SIGTERM stops the next pass', async t => {
+// crew m_de7f065d: a config edit must not stop new passes until all active passes end. Each configured inline pass
+// runs on its own copy of the config bytes, so the next selection uses the new config at once.
+test('a changed config applies to the next pass while active passes keep their copy, and SIGTERM stops all', async t => {
+  const f = await fixture(t, {interval_seconds: 1});
+  const snapshots = () => {
+    const folder = path.join(f.config.runs_folder, '.config-snapshots');
+    return fs.existsSync(folder) ? fs.readdirSync(folder).map(name => JSON.parse(fs.readFileSync(path.join(folder, name), 'utf8')).concurrency).sort() : [];
+  };
+  const run = f.start();
+  try {
+    await run.until(() => f.starts().length === 2);
+    assert.deepEqual(snapshots(), [3, 3]);
+    f.objects.set('ac:a3', {...structuredClone(f.objects.get('ac:a1')), address: 'ac:a3'});
+    f.write({...f.config, concurrency: 4});
+    await run.until(() => f.starts().length === 3);
+    assert.equal(f.starts()[2].address, 'ac:a3', 'The new config selects while the old passes run');
+    assert.deepEqual(snapshots(), [3, 3, 4], 'The old passes keep their config, the new pass has the edited one');
+    assert.match(run.output(), /concurrency 4/);
+    assert.doesNotMatch(run.output(), /waiting for active passes/);
+    f.release('ac:a1');
+    await run.until(() => snapshots().length === 2);
+    assert.deepEqual(snapshots(), [3, 4], 'A finished pass removes its config copy');
+    const closed = new Promise(resolve => run.child.once('close', resolve));
+    run.child.kill('SIGTERM');
+    assert.equal(await closed, 143);
+    for (const start of f.starts().slice(1)) assert.throws(() => process.kill(start.pid, 0), {code: 'ESRCH'});
+    assert.deepEqual(snapshots(), []);
+    assert.equal(fs.existsSync(path.join(f.config.runs_folder, 'dispatch.lock')), false);
+  } finally { if (run.child.exitCode === null && run.child.signalCode === null) await run.stop(); }
+});
+
+test('a changed workspace still needs a restart while configured passes run', async t => {
   const f = await fixture(t, {interval_seconds: 1});
   const run = f.start();
   try {
     await run.until(() => f.starts().length === 2);
     f.objects.set('ac:a3', {...structuredClone(f.objects.get('ac:a1')), address: 'ac:a3'});
-    const checked = f.calls.length;
-    f.write({...f.config, concurrency: 4});
+    f.write({...f.config, workspace: 'other', concurrency: 4});
+    await run.until(output => /CONFIG_RESTART_REQUIRED/.test(output));
     await pause(1200);
-    assert.equal(f.calls.length, checked, 'A changed config does not select work while old passes remain');
-    assert.equal(f.starts().length, 2);
-    f.release('ac:a1');
-    await pause(200);
-    assert.equal(f.starts().length, 2, 'No pass starts with an old digest while another pass remains active');
-    f.release('ac:a2');
-    await run.until(() => f.starts().length === 3);
-    assert.equal(f.starts()[2].address, 'ac:a3');
-    assert.match(run.output(), /concurrency 4/);
-    const closed = new Promise(resolve => run.child.once('close', resolve));
-    run.child.kill('SIGTERM');
-    assert.equal(await closed, 143);
-    assert.throws(() => process.kill(f.starts()[2].pid, 0), {code: 'ESRCH'});
-    assert.equal(fs.existsSync(path.join(f.config.runs_folder, 'dispatch.lock')), false);
-  } finally { if (run.child.exitCode === null && run.child.signalCode === null) await run.stop(); }
+    assert.equal(f.starts().length, 2, 'No pass starts with a changed identity');
+  } finally { await run.stop(); }
 });
 
 test('shutdown kills a process group that ignores the graceful signal', async t => {
