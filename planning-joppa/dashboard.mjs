@@ -150,7 +150,9 @@ export async function main(argv) {
     do {
       let selected = requirement, attemptKey = null, inputIndex, slot, flush = null, scope = '--req-id';
       if (automatic) {
-        if (pool.size && !detached) {
+        // A configured inline pass runs on its own config copy (planner-runs.mjs), so only the planner flow waits.
+        const frozen = pool.size && !detached && !config.workflow;
+        if (frozen) {
           try {
             if (createHash('sha256').update(fs.readFileSync(configFile)).digest('hex') !== digest) {
               state.error = 'Config changed; waiting for active passes to end';
@@ -159,8 +161,8 @@ export async function main(argv) {
           } catch (error) { state.error = `Config read failed: ${error.message}`; await pause(); continue; }
         }
         state.error = null;
-        // Detached passes keep their snapshots. Inline passes finish before config reload.
-        const loaded = pool.size && !detached ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
+        // Detached and configured inline passes keep their snapshots. Planner passes finish before config reload.
+        const loaded = frozen ? {config: {config, interval, concurrency, tokenFile, digest}} : reload();
         ({config, interval, concurrency, tokenFile, digest} = loaded.config);
         const notice = loaded.reloaded ? 'config reloaded · ' : '';
         if (config.workflow) state.available = undefined;
@@ -221,7 +223,7 @@ export async function main(argv) {
       if (ac || item || selected) {
         const runArgs = fixed ? args : [...args, scope, selected];
         const env = {...handoff(), ...(inputIndex === undefined ? {} : {PLANNING_JOPPA_INPUT: String(inputIndex)})};
-        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow), {slot, flush, owner});
+        const run = await pool.start(ac || item || selected, runArgs, env, attemptKey || JSON.stringify([ac || item || selected, 0]), Boolean(config.workflow), {slot, flush, owner, config});
         if (flush && run.code !== HANDOFF_CHANGED) consumeFlush(flush);
         if (once || fixed) {
           const code = await (detached ? Promise.race([run.completion, dashboardStopped]) : run.completion);
